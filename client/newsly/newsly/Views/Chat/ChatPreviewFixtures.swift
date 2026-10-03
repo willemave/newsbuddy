@@ -56,43 +56,6 @@ enum ChatPreviewFixtures {
         feedOptions: [feedOption]
     )
 
-    static let councilCandidates: [CouncilCandidate] = [
-        CouncilCandidate(
-            personaId: "optimist",
-            personaName: "Optimist",
-            childSessionId: 101,
-            content: "The upside case is that the author identified an early shift before it appears in lagging indicators.",
-            status: "completed",
-            order: 0
-        ),
-        CouncilCandidate(
-            personaId: "skeptic",
-            personaName: "Skeptic",
-            childSessionId: 102,
-            content: "The weak point is the lack of a base rate. Similar signals have faded quickly in prior cycles.",
-            status: "completed",
-            order: 1
-        ),
-        CouncilCandidate(
-            personaId: "operator",
-            personaName: "Operator",
-            childSessionId: 103,
-            content: "",
-            status: "processing",
-            order: 2
-        )
-    ]
-
-    static let councilMessage = ChatMessage(
-        id: 5,
-        role: .assistant,
-        timestamp: timestamp,
-        content: "",
-        status: .completed,
-        councilCandidates: councilCandidates,
-        activeCouncilChildSessionId: 101
-    )
-
     static let failedUserItem = ChatTimelineItem(
         id: .local(UUID(uuidString: "11111111-1111-1111-1111-111111111111")!),
         message: ChatMessage(
@@ -148,9 +111,7 @@ enum ChatPreviewFixtures {
         isSavedToKnowledge: true,
         hasMessages: true,
         lastMessagePreview: "The strongest objection is...",
-        lastMessageRole: "assistant",
-        councilMode: true,
-        activeChildSessionId: 101
+        lastMessageRole: "assistant"
     )
 }
 

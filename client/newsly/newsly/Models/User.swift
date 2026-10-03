@@ -7,61 +7,6 @@
 
 import Foundation
 
-struct CouncilPersona: Codable, Equatable, Identifiable {
-    let id: String
-    let displayName: String
-    let instructionPrompt: String
-    let sortOrder: Int
-
-    static let maxExperts = 3
-    static let minExperts = 2
-    static let defaults: [CouncilPersona] = []
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case displayName = "display_name"
-        case instructionPrompt = "instruction_prompt"
-        case sortOrder = "sort_order"
-    }
-
-    /// Create an expert from just a name. The backend generates the impersonation prompt.
-    init(name: String, sortOrder: Int) {
-        self.id = name.lowercased()
-            .components(separatedBy: .whitespaces)
-            .joined(separator: "_")
-            .prefix(50)
-            .description
-        self.displayName = name
-        self.instructionPrompt = ""
-        self.sortOrder = sortOrder
-    }
-
-    init(id: String, displayName: String, instructionPrompt: String = "", sortOrder: Int) {
-        self.id = id
-        self.displayName = displayName
-        self.instructionPrompt = instructionPrompt
-        self.sortOrder = sortOrder
-    }
-
-    init(api response: APICouncilPersonaConfig) {
-        self.init(
-            id: response.id,
-            displayName: response.displayName,
-            instructionPrompt: response.instructionPrompt,
-            sortOrder: response.sortOrder
-        )
-    }
-
-    var apiInput: APICouncilPersonaInput {
-        APICouncilPersonaInput(
-            id: id,
-            displayName: displayName,
-            instructionPrompt: instructionPrompt,
-            sortOrder: sortOrder
-        )
-    }
-}
-
 /// User account model matching backend UserResponse schema
 struct User: Codable, Identifiable, Equatable {
     let id: Int
@@ -69,7 +14,6 @@ struct User: Codable, Identifiable, Equatable {
     let email: String
     let fullName: String?
     let twitterUsername: String?
-    let councilPersonas: [CouncilPersona]
     let hasXBookmarkSync: Bool
     let isAdmin: Bool
     let isActive: Bool
@@ -87,7 +31,6 @@ struct User: Codable, Identifiable, Equatable {
         case email
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
-        case councilPersonas = "council_personas"
         case hasXBookmarkSync = "has_x_bookmark_sync"
         case isAdmin = "is_admin"
         case isActive = "is_active"
@@ -106,7 +49,6 @@ struct User: Codable, Identifiable, Equatable {
         email: String,
         fullName: String?,
         twitterUsername: String?,
-        councilPersonas: [CouncilPersona] = [],
         hasXBookmarkSync: Bool,
         isAdmin: Bool,
         isActive: Bool,
@@ -123,7 +65,6 @@ struct User: Codable, Identifiable, Equatable {
         self.email = email
         self.fullName = fullName
         self.twitterUsername = twitterUsername
-        self.councilPersonas = councilPersonas
         self.hasXBookmarkSync = hasXBookmarkSync
         self.isAdmin = isAdmin
         self.isActive = isActive
@@ -143,7 +84,6 @@ struct User: Codable, Identifiable, Equatable {
             email: response.email,
             fullName: response.fullName,
             twitterUsername: response.twitterUsername,
-            councilPersonas: response.councilPersonas.map(CouncilPersona.init(api:)),
             hasXBookmarkSync: response.hasXBookmarkSync,
             isAdmin: response.isAdmin,
             isActive: response.isActive,
@@ -164,8 +104,6 @@ struct User: Codable, Identifiable, Equatable {
         email = try container.decode(String.self, forKey: .email)
         fullName = try container.decodeIfPresent(String.self, forKey: .fullName)
         twitterUsername = try container.decodeIfPresent(String.self, forKey: .twitterUsername)
-        councilPersonas =
-            try container.decodeIfPresent([CouncilPersona].self, forKey: .councilPersonas) ?? []
         hasXBookmarkSync = try container.decodeIfPresent(Bool.self, forKey: .hasXBookmarkSync) ?? false
         isAdmin = try container.decode(Bool.self, forKey: .isAdmin)
         isActive = try container.decode(Bool.self, forKey: .isActive)

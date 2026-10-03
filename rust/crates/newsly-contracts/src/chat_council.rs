@@ -2,6 +2,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+// Compatibility owner: the public Newsly API. These request shapes remain only while supported
+// installed clients can call the HTTP 410 retirement routes; remove them with those routes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct CouncilStartRequest {
     #[schemars(length(min = 1, max = 10_000))]

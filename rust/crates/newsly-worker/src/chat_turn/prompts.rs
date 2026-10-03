@@ -20,7 +20,7 @@ pub(super) fn system_prompt(
 ) -> Result<String, ChatPromptError> {
     let mut parts = Vec::new();
     match snapshot.context.kind {
-        ChatTurnKind::Article | ChatTurnKind::Council => {
+        ChatTurnKind::Article => {
             parts.push(section(ARTICLE_PROMPT, "system")?.to_owned());
             parts.push(SANDBOX_INSTRUCTIONS.to_owned());
             let context = article_context(snapshot, content_body);
@@ -80,10 +80,8 @@ fn article_context(snapshot: &ChatTaskSnapshot, content_body: Option<&str>) -> S
         lines.push(format!("Topic: {topic}"));
     }
     let context_snapshot = clean(snapshot.context.session.context_snapshot.as_deref());
-    let council_turn = snapshot.context.kind == ChatTurnKind::Council;
     let use_live_content = snapshot.content.is_some()
-        && (council_turn
-            || snapshot.context.session.session_type.as_deref() == Some("knowledge_chat")
+        && (snapshot.context.session.session_type.as_deref() == Some("knowledge_chat")
             || context_snapshot.is_none());
     if use_live_content && let Some(content) = &snapshot.content {
         lines.extend(content_header(content));
@@ -95,14 +93,8 @@ fn article_context(snapshot: &ChatTaskSnapshot, content_body: Option<&str>) -> S
         {
             lines.push(format!("Full Content:\n{}", truncate(body, 80_000)));
         }
-    } else if !council_turn && let Some(context) = context_snapshot {
+    } else if let Some(context) = context_snapshot {
         lines.push(format!("Session Context:\n{}", truncate(context, 80_000)));
-    }
-    if council_turn && let Some(context) = context_snapshot {
-        lines.push(format!(
-            "Council Persona Context:\n{}",
-            truncate(context, 20_000)
-        ));
     }
     lines.join("\n")
 }

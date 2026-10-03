@@ -28,9 +28,6 @@ enum ChatServiceError: LocalizedError {
 protocol ChatSessionServicing: MessageStatusFetching {
     func getSession(id: Int) async throws -> ChatSessionDetail
     func sendMessageAsync(sessionId: Int, message: String) async throws -> SendChatMessageResponse
-    func startCouncil(sessionId: Int, message: String) async throws -> ChatSessionDetail
-    func selectCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
-    func retryCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
     func updateSessionProvider(sessionId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary
 }
 
@@ -148,8 +145,7 @@ class ChatService {
         let sessions = try await listSessions(contentId: contentId, limit: 20)
         return sessions.first(where: {
             $0.contentId == contentId &&
-            $0.isKnowledgeSession &&
-            !($0.councilMode ?? false)
+            $0.isKnowledgeSession
         })
     }
 
@@ -157,8 +153,7 @@ class ChatService {
         let sessions = try await listSessions(newsItemId: newsItemId, limit: 20)
         return sessions.first(where: {
             $0.newsItemId == newsItemId &&
-            $0.isKnowledgeSession &&
-            !($0.councilMode ?? false)
+            $0.isKnowledgeSession
         })
     }
 
@@ -237,51 +232,6 @@ class ChatService {
             APIEndpoints.chatMessageStatus(messageId: messageId)
         )
         return MessageStatusResponse(api: response)
-    }
-
-    /// Start council mode for an existing session and return the merged parent transcript.
-    func startCouncil(
-        sessionId: Int,
-        message: String
-    ) async throws -> ChatSessionDetail {
-        let request = APICouncilStartRequest(message: message)
-        let body = try JSONEncoder().encode(request)
-        let response: APIChatSessionDetail = try await client.request(
-            APIEndpoints.chatCouncilStart(sessionId: sessionId),
-            method: .post,
-            body: body
-        )
-        return ChatSessionDetail(api: response)
-    }
-
-    /// Select the active council branch and return the merged parent transcript.
-    func selectCouncilBranch(
-        sessionId: Int,
-        childSessionId: Int
-    ) async throws -> ChatSessionDetail {
-        let request = APICouncilSelectRequest(childSessionId: childSessionId)
-        let body = try JSONEncoder().encode(request)
-        let response: APIChatSessionDetail = try await client.request(
-            APIEndpoints.chatCouncilSelect(sessionId: sessionId),
-            method: .post,
-            body: body
-        )
-        return ChatSessionDetail(api: response)
-    }
-
-    /// Retry one council branch and return the merged parent transcript.
-    func retryCouncilBranch(
-        sessionId: Int,
-        childSessionId: Int
-    ) async throws -> ChatSessionDetail {
-        let request = APICouncilRetryRequest(childSessionId: childSessionId)
-        let body = try JSONEncoder().encode(request)
-        let response: APIChatSessionDetail = try await client.request(
-            APIEndpoints.chatCouncilRetry(sessionId: sessionId),
-            method: .post,
-            body: body
-        )
-        return ChatSessionDetail(api: response)
     }
 
     // MARK: - Convenience Methods

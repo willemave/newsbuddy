@@ -371,7 +371,7 @@ fn failure(message: impl Into<String>, retryable: bool) -> HandlerExecution {
 
 fn usage_source(snapshot: &ChatTaskSnapshot) -> String {
     match snapshot.context.kind {
-        newsly_db::ChatTurnKind::Article | newsly_db::ChatTurnKind::Council => "async".to_owned(),
+        newsly_db::ChatTurnKind::Article => "async".to_owned(),
         newsly_db::ChatTurnKind::Assistant => snapshot.context.source.clone(),
         newsly_db::ChatTurnKind::DeepResearch => "deep_research".to_owned(),
     }

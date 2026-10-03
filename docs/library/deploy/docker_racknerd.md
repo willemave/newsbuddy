@@ -84,6 +84,36 @@ The production services are defined in `docker-compose.production.yml`.
 recorded in `/opt/newsly/state/active-api-slot`; Nginx reads
 `/etc/nginx/newsly-active-upstream.conf`.
 
+The command selects online deployment, baseline adoption, or council retirement once before
+migration preparation. Each mode owns its drain and rollback rules; backup creation and
+verification are shared. The existing image argument, maintenance flag, and adoption environment
+variable select the mode.
+
+### Council retirement maintenance cutover
+
+Migration `20261002010000` requires an explicit maintenance barrier on a populated database.
+Normal blue-green deployment refuses this pending migration while old writers remain online.
+Before scheduling the cutover, run the exact target image's read-only `newsly-db
+verify-council-retirement` command. It reports processing message IDs and malformed session IDs
+without transcript content. Drain council work with the old worker before proceeding; stuck or
+orphaned rows require separately authorized operator investigation and repair. The migration
+never silently fails accepted work. Stop council-producing API traffic while draining if needed.
+
+For the authorized release, invoke `scripts/deploy_blue_green.sh <exact-image>
+--maintenance-cutover`. This explicit mode rechecks readiness, stops both API slots, workers and
+scheduler, then checks again. It creates a fresh custom-format database backup under
+`/opt/newsly/state/maintenance-backups/`, verifies its archive inventory and checksum, and runs
+the exact-image migration with the barrier attestation. It starts only the new runtime and
+disables automatic rollback/restoration of old containers, including after ambiguous migration
+failure. A failure after entering the barrier leaves old writers stopped for manual recovery.
+This mode is separate from baseline adoption and cannot be combined with it.
+
+Conversion keeps parent IDs and selected follow-up message IDs; initial/retry council rows and
+alternate follow-ups remain in archived children. New database constraints reject attempts by an
+old binary to recreate active council state. Retained columns do not authorize restarting an old
+runtime after this cutover. Local databases synced from production also require stopped local
+writers and `newsly-db migrate --maintenance-barrier-confirmed` for this pending migration.
+
 ### SQLx baseline-adoption recovery
 
 Normal deploys leave `NEWSLY_SQLX_BASELINE_ADOPTION` unset or set to `false`.

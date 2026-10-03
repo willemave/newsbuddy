@@ -14,15 +14,11 @@ private let chatPerfSignposter = OSSignposter(subsystem: "com.newsly.chat", cate
 
 private enum ChatSessionTaskKey: Hashable {
     case send
-    case startCouncil
-    case retryCouncil
     case digDeeper
     case voiceAction
-    case selectCouncil
-    case selectCouncilDeadline
 }
 
-/// Owns the visible chat transcript, local pending sends, polling, and council selection.
+/// Owns the visible chat transcript, local pending sends, and polling.
 ///
 /// Streaming readiness: the timeline reconciler is intentionally isolated so a future SSE
 /// implementation can add an `apply(streamChunk:)` path that updates the active assistant row
@@ -38,10 +34,6 @@ final class ChatSessionViewModel {
     var errorMessage: String?
     var inputText: String = ""
     var thinkingStartedAt: Date?
-    var isStartingCouncil = false
-    var selectingCouncilChildSessionId: Int?
-    var retryingCouncilChildSessionId: Int?
-    private(set) var councilSelectionTimedOut = false
 
     var isRecording: Bool { voiceInput.isRecording }
     var isTranscribing: Bool { voiceInput.isTranscribing }
@@ -57,17 +49,11 @@ final class ChatSessionViewModel {
     let sessionId: Int
     private let initialPendingMessageId: Int?
     @ObservationIgnored
-    private var pendingCouncilPrompt: String?
-    @ObservationIgnored
-    private var hasTriggeredPendingCouncilStart = false
-    @ObservationIgnored
     private var pendingSends: [UUID: PendingSend] = [:]
     @ObservationIgnored
     private var sendQueue = PendingSendQueue()
     @ObservationIgnored
     private var localIdentityAliases: [ChatTimelineID: UUID] = [:]
-    @ObservationIgnored
-    private var selectCouncilRequestId: UUID?
     @ObservationIgnored
     private let tasks = TaskBag<ChatSessionTaskKey>()
     @ObservationIgnored
@@ -99,7 +85,6 @@ final class ChatSessionViewModel {
         self.sessionId = route.sessionId
         self.session = route.session
         self.initialPendingMessageId = route.pendingMessageId
-        self.pendingCouncilPrompt = route.pendingCouncilPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         configureInitialPendingMessage(initialPendingUserMessage, localId: initialPendingLocalId)
         voiceInput.configure(
             onTranscriptReady: { [weak self] transcript in
@@ -134,20 +119,6 @@ final class ChatSessionViewModel {
             guard let self else { return }
             await self.processPendingSend(pending)
             await self.drainQueuedSends()
-        }
-    }
-
-    func performStartCouncil(message: String) {
-        tasks.runReplacing(.startCouncil) { [weak self] in
-            guard let self else { return }
-            await self.startCouncil(message: message)
-        }
-    }
-
-    func performRetryCouncilCandidate(childSessionId: Int) {
-        tasks.runReplacing(.retryCouncil) { [weak self] in
-            guard let self else { return }
-            await self.retryCouncilCandidate(childSessionId: childSessionId)
         }
     }
 
@@ -192,14 +163,6 @@ final class ChatSessionViewModel {
             else if let pendingMessageId = initialPendingMessageId, detail.session.isProcessing {
                 await pollForMessageCompletion(messageId: pendingMessageId)
             }
-            else if shouldAutoStartCouncil(detail: detail) {
-                hasTriggeredPendingCouncilStart = true
-                let prompt = pendingCouncilPrompt ?? ""
-                pendingCouncilPrompt = nil
-                isLoading = false
-                await startCouncil(message: prompt)
-                return
-            }
             // If this is a topic-focused session (like "Dig deeper") with no messages, auto-send the topic
             else if let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
                 await sendMessage(text: topic)
@@ -217,31 +180,10 @@ final class ChatSessionViewModel {
         }
     }
 
-    private func shouldAutoStartCouncil(detail: ChatSessionDetail) -> Bool {
-        guard !hasTriggeredPendingCouncilStart else { return false }
-        guard let prompt = pendingCouncilPrompt, !prompt.isEmpty else { return false }
-        return !detail.session.isCouncilMode
-    }
-
     /// Cached derived state. Updated in `publishTimeline` so body-path reads are O(1)
     /// instead of re-scanning and re-sorting the timeline on every observation tick.
     private(set) var latestProcessSummary: String?
-    private(set) var councilCandidates: [CouncilCandidate] = []
     private(set) var hasVisiblePartialResponse = false
-    private var timelineCouncilActiveChildSessionId: Int?
-
-    var activeCouncilChildSessionId: Int? {
-        session?.activeChildSessionId ?? timelineCouncilActiveChildSessionId
-    }
-
-    var activeCouncilCandidate: CouncilCandidate? {
-        guard !councilCandidates.isEmpty else { return nil }
-        if let activeCouncilChildSessionId,
-           let candidate = councilCandidates.first(where: { $0.childSessionId == activeCouncilChildSessionId }) {
-            return candidate
-        }
-        return councilCandidates.first
-    }
 
     /// Poll for a processing message to complete
     private func pollForMessageCompletion(messageId: Int) async {
@@ -404,18 +346,9 @@ final class ChatSessionViewModel {
     func handleDisappear() {
         isRouteVisible = false
         prepareForInactiveView()
-        tasks.cancel(.startCouncil)
-        tasks.cancel(.retryCouncil)
         tasks.cancel(.digDeeper)
         tasks.cancel(.voiceAction)
-        tasks.cancel(.selectCouncil)
-        tasks.cancel(.selectCouncilDeadline)
-        selectCouncilRequestId = nil
-        selectingCouncilChildSessionId = nil
-        retryingCouncilChildSessionId = nil
-        councilSelectionTimedOut = false
         isLoading = false
-        isStartingCouncil = false
         if !tasks.isRunning(.send) {
             isSending = false
             stopThinkingTimer()
@@ -533,10 +466,6 @@ final class ChatSessionViewModel {
         self.session = updatedSession
     }
 
-    var canStartCouncil: Bool {
-        session?.canStartCouncil ?? false
-    }
-
     var canStartDeepResearch: Bool {
         session?.canStartDeepResearch ?? false
     }
@@ -592,21 +521,15 @@ final class ChatSessionViewModel {
 
     private func refreshDerivedTimelineState() {
         var latestProcessSummaryValue: String?
-        var latestCouncilMessage: ChatMessage?
         for item in timeline.reversed() {
             if latestProcessSummaryValue == nil, item.message.isProcessSummary {
                 latestProcessSummaryValue = item.message.processSummaryText
             }
-            if latestCouncilMessage == nil, item.message.hasCouncilCandidates {
-                latestCouncilMessage = item.message
-            }
-            if latestProcessSummaryValue != nil, latestCouncilMessage != nil {
+            if latestProcessSummaryValue != nil {
                 break
             }
         }
         latestProcessSummary = latestProcessSummaryValue
-        councilCandidates = latestCouncilMessage?.councilCandidates.sorted { $0.order < $1.order } ?? []
-        timelineCouncilActiveChildSessionId = latestCouncilMessage?.activeCouncilChildSessionId
         hasVisiblePartialResponse = timeline.contains { $0.message.isVisiblePartialResponse }
     }
 
@@ -706,9 +629,7 @@ final class ChatSessionViewModel {
                     processLabel: existing.message.processLabel,
                     status: .failed,
                     error: error,
-                    feedOptions: existing.message.feedOptions,
-                    councilCandidates: existing.message.councilCandidates,
-                    activeCouncilChildSessionId: existing.message.activeCouncilChildSessionId
+                    feedOptions: existing.message.feedOptions
                 ),
                 pendingMessageId: existing.pendingMessageId,
                 retryText: existing.retryText ?? existing.message.content
@@ -731,125 +652,6 @@ final class ChatSessionViewModel {
         guard !timeline.isEmpty else {
             logger.error("[ViewModel] refreshTranscriptAfterPolling failed | no transcript messages returned")
             throw ChatServiceError.missingAssistantMessage
-        }
-    }
-
-    func startCouncil(message: String) async {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isStartingCouncil else { return }
-
-        let signpostState = chatPerfSignposter.beginInterval("start-council")
-        defer { chatPerfSignposter.endInterval("start-council", signpostState) }
-
-        isStartingCouncil = true
-        isSending = true
-        errorMessage = nil
-        startThinkingTimer()
-        defer {
-            isStartingCouncil = false
-            isSending = false
-            stopThinkingTimer()
-        }
-
-        do {
-            let detail = try await chatService.startCouncil(
-                sessionId: sessionId,
-                message: trimmed
-            )
-            applyDetail(detail)
-        } catch where isCancelledOperation(error) {
-            logger.debug("[ViewModel] startCouncil cancelled | sessionId=\(self.sessionId)")
-        } catch {
-            errorMessage = error.localizedDescription
-            logger.error("[ViewModel] startCouncil failed | error=\(error.localizedDescription)")
-        }
-    }
-
-    func selectCouncilBranch(childSessionId: Int) async {
-        guard session?.activeChildSessionId != childSessionId else { return }
-        tasks.cancel(.selectCouncil)
-        tasks.cancel(.selectCouncilDeadline)
-        let requestId = UUID()
-        selectCouncilRequestId = requestId
-        let task = tasks.runReplacing(.selectCouncil) { [weak self] in
-            guard let self else { return }
-            let signpostState = chatPerfSignposter.beginInterval("select-council-branch")
-            defer { chatPerfSignposter.endInterval("select-council-branch", signpostState) }
-
-            self.selectingCouncilChildSessionId = childSessionId
-            self.councilSelectionTimedOut = false
-            self.errorMessage = nil
-            self.startCouncilSelectionDeadline(requestId: requestId)
-            defer {
-                if self.selectCouncilRequestId == requestId {
-                    self.selectingCouncilChildSessionId = nil
-                    self.tasks.cancel(.selectCouncilDeadline)
-                    self.selectCouncilRequestId = nil
-                    self.councilSelectionTimedOut = false
-                }
-            }
-
-            do {
-                let detail = try await self.chatService.selectCouncilBranch(
-                    sessionId: self.sessionId,
-                    childSessionId: childSessionId
-                )
-                try Task.checkCancellation()
-                self.applyDetail(detail)
-                self.errorMessage = nil
-            } catch where self.isCancelledOperation(error) {
-                logger.debug("[ViewModel] selectCouncilBranch cancelled")
-            } catch {
-                self.errorMessage = error.localizedDescription
-                logger.error("[ViewModel] selectCouncilBranch failed | error=\(error.localizedDescription)")
-            }
-        }
-        await task.value
-    }
-
-    func cancelCouncilSelection() {
-        tasks.cancel(.selectCouncil)
-        tasks.cancel(.selectCouncilDeadline)
-        selectCouncilRequestId = nil
-        selectingCouncilChildSessionId = nil
-        councilSelectionTimedOut = false
-        errorMessage = nil
-    }
-
-    func retryCouncilCandidate(childSessionId: Int) async {
-        guard retryingCouncilChildSessionId == nil else { return }
-
-        retryingCouncilChildSessionId = childSessionId
-        errorMessage = nil
-        defer {
-            retryingCouncilChildSessionId = nil
-        }
-
-        do {
-            let detail = try await chatService.retryCouncilBranch(
-                sessionId: sessionId,
-                childSessionId: childSessionId
-            )
-            applyDetail(detail)
-        } catch where isCancelledOperation(error) {
-            logger.debug("[ViewModel] retryCouncilCandidate cancelled | sessionId=\(self.sessionId)")
-        } catch {
-            errorMessage = error.localizedDescription
-            logger.error("[ViewModel] retryCouncilCandidate failed | error=\(error.localizedDescription)")
-        }
-    }
-
-    private func startCouncilSelectionDeadline(requestId: UUID) {
-        tasks.runReplacing(.selectCouncilDeadline) { [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: 10_000_000_000)
-            } catch {
-                return
-            }
-
-            guard let self, self.selectCouncilRequestId == requestId else { return }
-            self.councilSelectionTimedOut = true
-            self.errorMessage = "Switching perspectives is taking longer than expected."
         }
     }
 

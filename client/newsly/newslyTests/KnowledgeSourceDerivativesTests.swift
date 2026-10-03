@@ -7,7 +7,7 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
         let index = KnowledgeSourceDerivatives.index(
             chats: [
                 makeChat(id: 1, contentId: 7),
-                makeChat(id: 2, contentId: 7, councilMode: true),
+                makeChat(id: 2, contentId: 7),
                 makeChat(id: 3, newsItemId: 7)
             ],
             decks: [
@@ -19,7 +19,7 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(index[KnowledgeSourceKey(id: 7, isNews: false)], [.chat, .council, .deck])
+        XCTAssertEqual(index[KnowledgeSourceKey(id: 7, isNews: false)], [.chat, .deck])
         XCTAssertEqual(index[KnowledgeSourceKey(id: 7, isNews: true)], [.chat, .narration])
         XCTAssertEqual(index[KnowledgeSourceKey(id: 8, isNews: false)], [.narration])
         XCTAssertEqual(index[KnowledgeSourceKey(id: 9, isNews: false)], [.narration])
@@ -39,8 +39,7 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
     private func makeChat(
         id: Int,
         contentId: Int? = nil,
-        newsItemId: Int? = nil,
-        councilMode: Bool? = nil
+        newsItemId: Int? = nil
     ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: id,
@@ -62,8 +61,7 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
             isSavedToKnowledge: false,
             hasMessages: true,
             lastMessagePreview: nil,
-            lastMessageRole: nil,
-            councilMode: councilMode
+            lastMessageRole: nil
         )
     }
 

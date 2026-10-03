@@ -2,8 +2,7 @@
 
 use super::{
     ChatTaskRejection, ChatTaskRepositoryError, ChatTerminalMutationOutcome, ChatTurnPublication,
-    CouncilCandidateCompletion, Postgres, Transaction, Utc, finalize_council_candidate,
-    finalize_failed_council_candidate,
+    Postgres, Transaction, Utc,
     ledger::{complete_chat_llm_task, fail_chat_llm_task, record_chat_usage_best_effort},
 };
 
@@ -98,33 +97,8 @@ pub async fn publish_chat_turn(
     .bind(now)
     .execute(&mut **transaction)
     .await?;
-    if snapshot.visible_session_id != snapshot.session_id {
-        sqlx::query(
-            r#"
-            UPDATE chat_sessions
-            SET last_message_at = $2, updated_at = $2
-            WHERE id::bigint = $1 AND user_id::bigint = $3
-            "#,
-        )
-        .bind(snapshot.visible_session_id)
-        .bind(now)
-        .bind(snapshot.user_id)
-        .execute(&mut **transaction)
-        .await?;
-    }
     if let Some(llm_task_id) = snapshot.llm_task_id {
         complete_chat_llm_task(transaction, llm_task_id, publication).await?;
-    }
-    if let Some(council_run) = snapshot.context.council_run.as_ref() {
-        finalize_council_candidate(
-            transaction,
-            council_run,
-            snapshot.user_id,
-            snapshot.session_id,
-            snapshot.message_id,
-            CouncilCandidateCompletion::Completed(publication.output_text),
-        )
-        .await?;
     }
     if snapshot.context.kind == super::ChatTurnKind::DeepResearch {
         // Background Responses do not run through the Rig per-response event ledger.
@@ -212,12 +186,5 @@ pub async fn fail_chat_turn(
         )
         .await?;
     }
-    finalize_failed_council_candidate(
-        transaction,
-        message_id,
-        rejection.user_id,
-        &rejection.public_message,
-    )
-    .await?;
     Ok(ChatTerminalMutationOutcome::Applied)
 }

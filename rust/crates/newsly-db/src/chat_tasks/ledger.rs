@@ -55,7 +55,7 @@ pub(super) async fn create_chat_llm_task(
 ) -> Result<i64, ChatTaskRepositoryError> {
     let (task_kind, mode, workflow_key, prompt_pack, allowed_actions, tool_policy, note) =
         match context.kind {
-            ChatTurnKind::Article | ChatTurnKind::Council => (
+            ChatTurnKind::Article => (
                 "article_chat",
                 "article_chat",
                 "chat.article.v1",

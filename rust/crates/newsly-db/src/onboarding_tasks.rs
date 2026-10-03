@@ -1260,8 +1260,6 @@ fn weekly_render_metadata(seed: &WeeklySeed) -> Option<Value> {
     (!seed.feed_options.is_empty()).then(|| {
         json!({
             "feed_options": seed.feed_options,
-            "council_candidates": [],
-            "active_council_child_session_id": null,
         })
     })
 }

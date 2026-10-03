@@ -286,31 +286,17 @@ async fn upsert_fixture_user(
     email: &str,
     namespace: &str,
 ) -> Result<i64, sqlx::Error> {
-    let council_personas = json!([
-        {
-            "id": "paul_graham",
-            "display_name": "Paul Graham",
-            "instruction_prompt": "",
-            "sort_order": 0
-        },
-        {
-            "id": "ben_thompson",
-            "display_name": "Ben Thompson",
-            "instruction_prompt": "",
-            "sort_order": 1
-        }
-    ]);
     sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO users (
             apple_id, email, full_name, is_admin, is_active,
             has_completed_new_user_tutorial, has_completed_live_voice_onboarding,
-            has_completed_onboarding, council_personas, reading_experience,
+            has_completed_onboarding, reading_experience,
             created_at, updated_at
         )
         VALUES (
             $1, $2, $3, FALSE, TRUE,
-            TRUE, TRUE, TRUE, $4, 'briefing',
+            TRUE, TRUE, TRUE, 'briefing',
             timezone('UTC', now()), timezone('UTC', now())
         )
         ON CONFLICT (apple_id) DO UPDATE SET
@@ -320,7 +306,6 @@ async fn upsert_fixture_user(
             has_completed_new_user_tutorial = TRUE,
             has_completed_live_voice_onboarding = TRUE,
             has_completed_onboarding = TRUE,
-            council_personas = EXCLUDED.council_personas,
             reading_experience = 'briefing',
             updated_at = timezone('UTC', now())
         RETURNING id::bigint
@@ -329,7 +314,6 @@ async fn upsert_fixture_user(
     .bind(apple_id)
     .bind(email)
     .bind(format!("iOS E2E {namespace}"))
-    .bind(council_personas)
     .fetch_one(&mut **transaction)
     .await
 }

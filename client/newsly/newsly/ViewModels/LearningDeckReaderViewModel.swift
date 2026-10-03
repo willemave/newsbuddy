@@ -667,9 +667,7 @@ final class LearningDeckReaderViewModel {
                     processLabel: item.message.processLabel,
                     status: .failed,
                     error: error,
-                    feedOptions: item.message.feedOptions,
-                    councilCandidates: item.message.councilCandidates,
-                    activeCouncilChildSessionId: item.message.activeCouncilChildSessionId
+                    feedOptions: item.message.feedOptions
                 ),
                 pendingMessageId: nil,
                 retryText: item.retryText ?? item.message.content

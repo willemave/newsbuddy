@@ -10,7 +10,6 @@
   "rust/crates/newsly-api/src/scraper_configs.rs": 1122,
   "rust/crates/newsly-db/src/briefing.rs": 1510,
   "rust/crates/newsly-db/src/chat.rs": 1818,
-  "rust/crates/newsly-db/src/chat_council.rs": 1147,
   "rust/crates/newsly-db/src/learning_deck_tasks.rs": 1156,
   "rust/crates/newsly-db/src/onboarding_flow.rs": 1213,
   "rust/crates/newsly-db/src/onboarding_tasks.rs": 1380,

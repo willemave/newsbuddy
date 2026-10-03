@@ -13,10 +13,6 @@ use serde_json::{Map, Value, json};
 use sqlx::{Acquire, FromRow, Postgres, Transaction};
 use thiserror::Error;
 
-use crate::chat_council::{
-    CouncilCandidateCompletion, CouncilRunContext, finalize_council_candidate,
-    finalize_failed_council_candidate,
-};
 use crate::chat_transcripts::{ChatTranscriptError, decode_transcript, processing_transcript};
 
 use crate::chat::DEFAULT_CHAT_MODEL as DEFAULT_MODEL;
@@ -86,7 +82,6 @@ pub struct ChatTaskSnapshot {
     pub queue_task_id: i64,
     pub user_id: i64,
     pub session_id: i64,
-    pub visible_session_id: i64,
     pub message_id: i64,
     pub stream_generation: i32,
     pub context: ChatTurnProcessingContext,
@@ -115,7 +110,6 @@ pub struct ChatContentMaterial {
 pub enum ChatTurnKind {
     Article,
     Assistant,
-    Council,
     DeepResearch,
 }
 
@@ -129,11 +123,31 @@ pub struct ChatTurnProcessingContext {
     pub session: ChatTurnSessionSnapshot,
     #[serde(default)]
     pub screen_context: Option<AssistantScreenContext>,
-    #[serde(default)]
-    pub council_run: Option<CouncilRunContext>,
+    // Decode-only compatibility for messages written before council retirement.
+    // newsly-db removes these named fields once no pre-cutover queued rows remain.
+    #[serde(default, skip_serializing)]
+    pub council_run: Option<Value>,
 }
 
 impl ChatTurnProcessingContext {
+    pub(crate) fn new(
+        kind: ChatTurnKind,
+        user_prompt: &str,
+        source: &str,
+        session: ChatTurnSessionSnapshot,
+        screen_context: Option<AssistantScreenContext>,
+    ) -> Self {
+        Self {
+            version: 1,
+            kind,
+            user_prompt: user_prompt.to_owned(),
+            source: source.to_owned(),
+            session,
+            screen_context,
+            council_run: None,
+        }
+    }
+
     fn validate(&self) -> Result<(), ChatTaskRepositoryError> {
         if self.version != 1 {
             return Err(ChatTaskRepositoryError::InvalidProcessingContext(
@@ -143,26 +157,21 @@ impl ChatTurnProcessingContext {
         validate_bounded_text(&self.user_prompt, 1, 10_000, "user_prompt")?;
         validate_bounded_text(&self.source, 1, 50, "source")?;
         self.session.validate()?;
-        match (self.kind, &self.screen_context, &self.council_run) {
-            (ChatTurnKind::Assistant, Some(context), None) => context.validate(),
-            (ChatTurnKind::Assistant, None, None) => {
+        if self.council_run.is_some() {
+            return Err(ChatTaskRepositoryError::InvalidProcessingContext(
+                "retired branch context cannot execute".to_owned(),
+            ));
+        }
+        match (self.kind, &self.screen_context) {
+            (ChatTurnKind::Assistant, Some(context)) => context.validate(),
+            (ChatTurnKind::Assistant, None) => {
                 Err(ChatTaskRepositoryError::InvalidProcessingContext(
                     "assistant chat turns require screen_context".to_owned(),
                 ))
             }
-            (ChatTurnKind::Council, None, Some(context)) => context
-                .validate()
-                .map_err(ChatTaskRepositoryError::InvalidProcessingContext),
-            (
-                ChatTurnKind::Council | ChatTurnKind::Article | ChatTurnKind::DeepResearch,
-                None,
-                None,
-            ) => Ok(()),
-            (_, Some(_), _) => Err(ChatTaskRepositoryError::InvalidProcessingContext(
+            (ChatTurnKind::Article | ChatTurnKind::DeepResearch, None) => Ok(()),
+            (_, Some(_)) => Err(ChatTaskRepositoryError::InvalidProcessingContext(
                 "only assistant chat turns accept screen_context".to_owned(),
-            )),
-            (_, None, Some(_)) => Err(ChatTaskRepositoryError::InvalidProcessingContext(
-                "only council chat turns accept council_run".to_owned(),
             )),
         }
     }
@@ -184,23 +193,46 @@ pub struct ChatTurnSessionSnapshot {
     pub content_id: Option<i64>,
     #[serde(default)]
     pub news_item_id: Option<i64>,
-    #[serde(default)]
+    // Decode-only fields written on ordinary turns by older binaries. Keep this bounded
+    // vocabulary until those queued rows have settled; never publish it on new turns.
+    #[serde(default, skip_serializing)]
     pub parent_session_id: Option<i64>,
     #[serde(default)]
     pub topic: Option<String>,
     #[serde(default)]
     pub context_snapshot: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub is_hidden_from_history: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub council_persona_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub council_persona_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub council_persona_prompt: Option<String>,
 }
 
 impl ChatTurnSessionSnapshot {
+    pub(crate) fn new(user_id: i64, session_id: i64, model: String, provider: String) -> Self {
+        Self {
+            user_id,
+            effective_session_id: session_id,
+            visible_session_id: session_id,
+            model,
+            provider,
+            title: None,
+            session_type: None,
+            content_id: None,
+            news_item_id: None,
+            topic: None,
+            context_snapshot: None,
+            parent_session_id: None,
+            is_hidden_from_history: false,
+            council_persona_id: None,
+            council_persona_name: None,
+            council_persona_prompt: None,
+        }
+    }
+
     fn validate(&self) -> Result<(), ChatTaskRepositoryError> {
         for (value, name) in [
             (self.user_id, "session.user_id"),
@@ -223,16 +255,7 @@ impl ChatTurnSessionSnapshot {
         validate_optional_text(self.title.as_deref(), 500, "session.title")?;
         validate_optional_text(self.session_type.as_deref(), 50, "session.session_type")?;
         validate_optional_text(self.topic.as_deref(), 500, "session.topic")?;
-        validate_optional_text(
-            self.council_persona_id.as_deref(),
-            64,
-            "session.council_persona_id",
-        )?;
-        validate_optional_text(
-            self.council_persona_name.as_deref(),
-            120,
-            "session.council_persona_name",
-        )
+        Ok(())
     }
 }
 
@@ -362,14 +385,10 @@ struct SessionRow {
     user_id: i64,
     content_id: Option<i64>,
     news_item_id: Option<i64>,
-    parent_session_id: Option<i64>,
     title: Option<String>,
     session_type: Option<String>,
     topic: Option<String>,
     context_snapshot: Option<String>,
-    council_persona_id: Option<String>,
-    council_persona_name: Option<String>,
-    council_persona_prompt: Option<String>,
     is_hidden_from_history: bool,
     llm_model: String,
     llm_provider: String,
@@ -413,8 +432,6 @@ pub enum ChatTaskRepositoryError {
     Transcript(#[from] ChatTranscriptError),
     #[error("queued chat durable transcript is invalid")]
     RuntimeTranscript(#[from] newsly_agent_runtime::TranscriptError),
-    #[error(transparent)]
-    Council(#[from] crate::chat_council::CouncilRepositoryError),
     #[error("queued chat task was not found")]
     QueueTaskNotFound,
     #[error("queued chat ownership validation failed")]
@@ -447,3 +464,58 @@ pub use advisory::{
 pub use ledger::cancel_chat_llm_task_attempt;
 pub use preparation::prepare_chat_task;
 pub use publication::{fail_chat_turn, publish_chat_turn};
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::ChatTurnProcessingContext;
+    use serde_json::json;
+
+    fn legacy_context() -> serde_json::Value {
+        json!({
+            "version": 1, "kind": "article", "user_prompt": "Explain this source",
+            "source": "realtime", "screen_context": null, "council_run": null,
+            "session": {
+                "user_id": 1, "effective_session_id": 2, "visible_session_id": 2,
+                "model": "openai:gpt-5.6-sol", "provider": "openai",
+                "parent_session_id": null, "is_hidden_from_history": false,
+                "council_persona_id": null, "council_persona_name": null,
+                "council_persona_prompt": null
+            }
+        })
+    }
+
+    #[test]
+    fn older_ordinary_turns_still_decode_and_do_not_reemit_retired_fields() {
+        let context: ChatTurnProcessingContext = serde_json::from_value(legacy_context()).unwrap();
+        context.validate().unwrap();
+        let encoded = serde_json::to_value(context).unwrap();
+        assert!(encoded.get("council_run").is_none());
+        for key in [
+            "parent_session_id",
+            "is_hidden_from_history",
+            "council_persona_id",
+            "council_persona_name",
+            "council_persona_prompt",
+        ] {
+            assert!(encoded["session"].get(key).is_none(), "{key}");
+        }
+    }
+
+    #[test]
+    fn retired_turns_cannot_reach_execution() {
+        let mut value = legacy_context();
+        value["kind"] = json!("council");
+        assert!(serde_json::from_value::<ChatTurnProcessingContext>(value).is_err());
+        let mut value = legacy_context();
+        value["council_run"] = json!({"parent_message_id": 3});
+        let context: ChatTurnProcessingContext = serde_json::from_value(value).unwrap();
+        assert!(context.validate().is_err());
+    }
+
+    #[test]
+    fn decoder_tolerance_is_limited_to_named_retired_fields() {
+        let mut value = legacy_context();
+        value["session"]["unrecognized_field"] = json!(true);
+        assert!(serde_json::from_value::<ChatTurnProcessingContext>(value).is_err());
+    }
+}

@@ -178,7 +178,7 @@ final class ChatMessageDisplayTests: XCTestCase {
         XCTAssertFalse(message.feedOptions[0].isSubscribed)
     }
 
-    func testChatMessageDecodesCouncilCandidates() throws {
+    func testChatMessageIgnoresRetiredBranchMetadata() throws {
         let data = Data(
             """
             {
@@ -218,12 +218,11 @@ final class ChatMessageDisplayTests: XCTestCase {
 
         let message = try JSONDecoder().decode(ChatMessage.self, from: data)
 
-        XCTAssertTrue(message.hasCouncilCandidates)
-        XCTAssertEqual(message.activeCouncilChildSessionId, 201)
-        XCTAssertEqual(message.councilCandidates.map(\.personaName), ["Analyst", "Skeptic"])
+        XCTAssertEqual(message.content, "Analyst branch")
+        XCTAssertTrue(message.isAssistant)
     }
 
-    func testChatSessionDetailDecodesCouncilModeSummaryAndMessages() throws {
+    func testChatSessionDetailIgnoresRetiredBranchMetadata() throws {
         let data = Data(
             """
             {
@@ -231,7 +230,7 @@ final class ChatMessageDisplayTests: XCTestCase {
                 "id": 42,
                 "content_id": null,
                 "news_item_id": null,
-                "title": "Council Chat",
+                "title": "Legacy Chat",
                 "session_type": "knowledge_chat",
                 "topic": null,
                 "llm_provider": "openai",
@@ -295,9 +294,8 @@ final class ChatMessageDisplayTests: XCTestCase {
 
         let detail = try JSONDecoder().decode(ChatSessionDetail.self, from: data)
 
-        XCTAssertTrue(detail.session.isCouncilMode)
-        XCTAssertEqual(detail.session.activeChildSessionId, 201)
-        XCTAssertEqual(detail.messages.first?.councilCandidates.count, 2)
+        XCTAssertEqual(detail.session.displayTitle, "Legacy Chat")
+        XCTAssertEqual(detail.messages.first?.content, "Analyst branch")
     }
 
     @MainActor

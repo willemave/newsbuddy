@@ -12,18 +12,11 @@ struct SettingsSectionStack: View {
     let isFeedbackVisible: Bool
     let xConnection: XConnectionResponse?
     let settings: AppSettings
-    let councilPersonas: [CouncilPersona]
-    @Binding var newExpertName: String
-    let isSavingCouncilPersonas: Bool
-    let hasUnsavedCouncilPersonaEdits: Bool
     let isProcessingMarkAll: Bool
     let onLinkCLI: () -> Void
     let onSignOut: () -> Void
     let onDeleteAccount: () -> Void
     let onGiveFeedback: () -> Void
-    let onAddExpert: () -> Void
-    let onRemoveExpert: (Int) -> Void
-    let onSaveCouncilPersonas: () -> Void
     let onMarkAll: () -> Void
     let onOpenDebugMenu: () -> Void
 
@@ -50,15 +43,6 @@ struct SettingsSectionStack: View {
             )
             SettingsTwitterSection(authState: authState, xConnection: xConnection)
             SettingsDisplaySection(settings: settings)
-            SettingsCouncilSection(
-                personas: councilPersonas,
-                newExpertName: $newExpertName,
-                isSaving: isSavingCouncilPersonas,
-                hasUnsavedChanges: hasUnsavedCouncilPersonaEdits,
-                onAddExpert: onAddExpert,
-                onRemoveExpert: onRemoveExpert,
-                onSave: onSaveCouncilPersonas
-            )
             SettingsSourcesSection()
             SettingsReadStatusSection(
                 isProcessing: isProcessingMarkAll,

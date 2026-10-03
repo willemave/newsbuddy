@@ -175,21 +175,6 @@ final class KnowledgeChatViewModel {
         return ChatSessionRoute(session: session, focusComposerOnAppear: true)
     }
 
-    /// Asks a council about a saved source, reusing its latest Knowledge chat.
-    func startSourceCouncil(for content: ContentSummary) async -> ChatSessionRoute? {
-        let session: ChatSessionSummary
-        if let existing = existingSourceChat(for: content) {
-            session = existing
-        } else {
-            guard let started = await startSourceSession(for: content) else { return nil }
-            session = started
-        }
-        return ChatSessionRoute(
-            session: session,
-            pendingCouncilPrompt: DetailChatCoordinator.councilPrompt(sourceTitle: content.displayTitle)
-        )
-    }
-
     func deleteSession(_ session: ChatSessionSummary) async {
         guard sessions.contains(where: { $0.id == session.id }),
               deletingSessionIDs.insert(session.id).inserted else {
@@ -279,7 +264,6 @@ final class KnowledgeChatViewModel {
             let sessionSourceID = source.isNews ? session.newsItemId : session.contentId
             return sessionSourceID == source.id
                 && session.isKnowledgeSession
-                && !session.isCouncilMode
         }
     }
 

@@ -22,25 +22,19 @@ struct SettingsNavigationStack: View {
     @Environment(ReadStateCache.self) private var readStateCache
     @Environment(RootDependencyFactory.self) private var dependencyFactory
 
-    let scrollToCouncilOnAppear: Bool
     let showsDismissButton: Bool
 
     @State private var path = NavigationPath()
 
     init(
-        scrollToCouncilOnAppear: Bool = false,
         showsDismissButton: Bool = false
     ) {
-        self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
         self.showsDismissButton = showsDismissButton
     }
 
     var body: some View {
         NavigationStack(path: $path) {
-            SettingsView(
-                scrollToCouncilOnAppear: scrollToCouncilOnAppear,
-                showsDismissButton: showsDismissButton
-            )
+            SettingsView(showsDismissButton: showsDismissButton)
             .withContentRoutes(
                 path: $path,
                 readingStateStore: readingStateStore,
@@ -60,7 +54,6 @@ struct SettingsView: View {
     @Environment(BadgeStatsStore.self) private var badgeStatsStore
     @Environment(XConnectionStore.self) private var xConnectionStore
     @Environment(RootDependencyFactory.self) private var dependencyFactory
-    private let scrollToCouncilOnAppear: Bool
     private let showsDismissButton: Bool
     @State private var showingAlert = false
     @State private var alertMessage = ""
@@ -70,17 +63,10 @@ struct SettingsView: View {
     @State private var isApprovingCLILink = false
     @State private var isDeletingAccount = false
     @State private var showingDeleteAccountConfirmation = false
-    @State private var councilPersonasDraft: [CouncilPersona] = []
-    @State private var serverCouncilPersonas: [CouncilPersona] = []
-    @State private var newExpertName = ""
-    @State private var hasUnsavedCouncilPersonaEdits = false
-    @State private var isSavingCouncilPersonas = false
 
     init(
-        scrollToCouncilOnAppear: Bool = false,
         showsDismissButton: Bool = false
     ) {
-        self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
         self.showsDismissButton = showsDismissButton
     }
 
@@ -89,40 +75,22 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                SettingsSectionStack(
-                    authState: authViewModel.authState,
-                    isApprovingCLILink: isApprovingCLILink,
-                    isDeletingAccount: isDeletingAccount,
-                    isFeedbackVisible: authViewModel.authState.authenticatedUser != nil,
-                    xConnection: xConnectionStore.connection,
-                    settings: settings,
-                    councilPersonas: councilPersonasDraft,
-                    newExpertName: $newExpertName,
-                    isSavingCouncilPersonas: isSavingCouncilPersonas,
-                    hasUnsavedCouncilPersonaEdits: hasUnsavedCouncilPersonaEdits,
-                    isProcessingMarkAll: isProcessingMarkAll,
-                    onLinkCLI: { activeSheet = .cliLinkScanner },
-                    onSignOut: authViewModel.logout,
-                    onDeleteAccount: { showingDeleteAccountConfirmation = true },
-                    onGiveFeedback: { activeSheet = .feedback },
-                    onAddExpert: addExpert,
-                    onRemoveExpert: removeExpert,
-                    onSaveCouncilPersonas: saveCouncilPersonasIncludingPending,
-                    onMarkAll: { showMarkAllDialog = true },
-                    onOpenDebugMenu: openDebugMenu
-                )
-            }
-            .onAppear {
-                guard scrollToCouncilOnAppear else { return }
-                Task { @MainActor in
-                    await Task.yield()
-                    withAnimation(AppMotion.subtle) {
-                        proxy.scrollTo("settings.council", anchor: .top)
-                    }
-                }
-            }
+        ScrollView {
+            SettingsSectionStack(
+                authState: authViewModel.authState,
+                isApprovingCLILink: isApprovingCLILink,
+                isDeletingAccount: isDeletingAccount,
+                isFeedbackVisible: authViewModel.authState.authenticatedUser != nil,
+                xConnection: xConnectionStore.connection,
+                settings: settings,
+                isProcessingMarkAll: isProcessingMarkAll,
+                onLinkCLI: { activeSheet = .cliLinkScanner },
+                onSignOut: authViewModel.logout,
+                onDeleteAccount: { showingDeleteAccountConfirmation = true },
+                onGiveFeedback: { activeSheet = .feedback },
+                onMarkAll: { showMarkAllDialog = true },
+                onOpenDebugMenu: openDebugMenu
+            )
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
@@ -194,11 +162,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .onChange(of: authViewModel.authState) { _, _ in
-            syncCouncilPersonasWithAuthenticatedUser(force: true)
-        }
         .task {
-            syncCouncilPersonasWithAuthenticatedUser(force: true)
             await xConnectionStore.refresh()
         }
     }
@@ -209,20 +173,6 @@ struct SettingsView: View {
         #else
         return { }
         #endif
-    }
-
-    private func addExpert() {
-        let name = newExpertName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, councilPersonasDraft.count < CouncilPersona.maxExperts else { return }
-        let persona = CouncilPersona(name: name, sortOrder: councilPersonasDraft.count)
-        guard !councilPersonasDraft.contains(where: { $0.id == persona.id }) else {
-            alertMessage = "\(name) is already in your council."
-            showingAlert = true
-            return
-        }
-        councilPersonasDraft.append(persona)
-        newExpertName = ""
-        hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
     }
 
     @MainActor
@@ -242,22 +192,6 @@ struct SettingsView: View {
         }
     }
 
-    private func removeExpert(at index: Int) {
-        councilPersonasDraft.remove(at: index)
-        councilPersonasDraft = councilPersonasDraft.enumerated().map { i, persona in
-            CouncilPersona(id: persona.id, displayName: persona.displayName, sortOrder: i)
-        }
-        hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
-    }
-
-    private func saveCouncilPersonasIncludingPending() {
-        if !newExpertName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            addExpert()
-            guard newExpertName.isEmpty else { return }
-        }
-        Task { await saveCouncilPersonas() }
-    }
-
     @MainActor
     private func approveCLILink(scannedCode: String) async {
         guard !isApprovingCLILink else { return }
@@ -275,49 +209,6 @@ struct SettingsView: View {
             showingAlert = true
         } catch {
             alertMessage = error.localizedDescription
-            showingAlert = true
-        }
-    }
-
-    @MainActor
-    private func syncCouncilPersonasWithAuthenticatedUser(force: Bool) {
-        guard !isSavingCouncilPersonas else { return }
-        let resolved = authViewModel.authState.authenticatedUser?.councilPersonas ?? []
-        serverCouncilPersonas = resolved
-        if force || !hasUnsavedCouncilPersonaEdits {
-            councilPersonasDraft = resolved
-        }
-        hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
-    }
-
-    @MainActor
-    private func saveCouncilPersonas() async {
-        guard !isSavingCouncilPersonas, authViewModel.authState.authenticatedUser != nil else { return }
-
-        let normalized = councilPersonasDraft.normalizedForSettings()
-        guard normalized.count >= CouncilPersona.minExperts,
-              normalized.count <= CouncilPersona.maxExperts,
-              normalized.allSatisfy({ !$0.displayName.isEmpty }) else {
-            alertMessage = "Add \(CouncilPersona.minExperts)-\(CouncilPersona.maxExperts) experts with names to save."
-            showingAlert = true
-            return
-        }
-
-        isSavingCouncilPersonas = true
-        defer { isSavingCouncilPersonas = false }
-
-        do {
-            let user = try await dependencyFactory.authenticationService.updateCurrentUserProfile(
-                councilPersonas: normalized
-            )
-            authViewModel.updateUser(user)
-            serverCouncilPersonas = user.councilPersonas
-            councilPersonasDraft = user.councilPersonas
-            hasUnsavedCouncilPersonaEdits = false
-            alertMessage = "Experts saved."
-            showingAlert = true
-        } catch {
-            alertMessage = "Failed to save experts: \(error.localizedDescription)"
             showingAlert = true
         }
     }

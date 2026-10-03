@@ -106,44 +106,6 @@ final class DetailChatCoordinator {
         }
     }
 
-    func startCouncil(
-        content: ContentDetail,
-        provider: ChatModelProvider = .openai
-    ) async -> ChatSessionRoute? {
-        let prompt = Self.councilPrompt(sourceTitle: content.displayTitle)
-        return await performChatStart {
-            let session: ChatSessionSummary
-            if content.contentType == .news {
-                if let existingSession = try await chatService.getSessionForNewsItem(
-                    newsItemId: content.id
-                ) {
-                    session = existingSession
-                } else {
-                    session = try await chatService.startNewsChat(
-                        newsItemId: content.id,
-                        provider: provider
-                    )
-                }
-            } else {
-                if let existingSession = try await chatService.getSessionForContent(
-                    contentId: content.id
-                ) {
-                    session = existingSession
-                } else {
-                    session = try await chatService.startArticleChat(
-                        contentId: content.id,
-                        provider: provider
-                    )
-                }
-            }
-            return chatRoute(
-                sessionId: session.id,
-                content: content,
-                pendingCouncilPrompt: session.isCouncilMode ? nil : prompt
-            )
-        }
-    }
-
     func startReaderDigDeeper(
         selectedText: String,
         content: ContentDetail,
@@ -183,7 +145,6 @@ final class DetailChatCoordinator {
         content: ContentDetail,
         initialUserMessage: ChatMessage? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
     ) -> ChatSessionRoute {
         let isNews = content.contentType == .news
@@ -194,7 +155,6 @@ final class DetailChatCoordinator {
             initialUserMessageText: initialUserMessage?.content,
             initialUserMessageTimestamp: initialUserMessage?.timestamp,
             pendingMessageId: pendingMessageId,
-            pendingCouncilPrompt: pendingCouncilPrompt,
             focusComposerOnAppear: focusComposerOnAppear
         )
     }
@@ -221,9 +181,5 @@ final class DetailChatCoordinator {
             chatError = error.localizedDescription
             return nil
         }
-    }
-
-    static func councilPrompt(sourceTitle: String) -> String {
-        "Give me your perspective on \(sourceTitle). Keep it short: 2-4 concise bullets on what matters most, what is weak or missing, and what actions or implications follow."
     }
 }

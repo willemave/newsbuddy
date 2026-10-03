@@ -418,7 +418,7 @@ pub(super) async fn delete_session(
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = SendMessageResponse),
-        (status = 400, description = "Invalid council branch", body = newsly_contracts::ErrorEnvelope),
+        (status = 400, description = "Invalid chat message", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 403, description = "Not authorized", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Session not found", body = newsly_contracts::ErrorEnvelope),
@@ -466,7 +466,7 @@ pub(super) async fn send_message(
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     Ok(Json(SendMessageResponse {
-        session_id: staged.visible_session_id,
+        session_id: staged.session_id,
         user_message: presentation::processing_user(&staged),
         message_id: staged.message_id,
         status: MessageProcessingStatus::Processing,
@@ -530,13 +530,8 @@ pub(super) async fn create_assistant_turn(
         .commit()
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    let session = require_session_summary(
-        &state,
-        current_user.id,
-        staged.visible_session_id,
-        &request_id,
-    )
-    .await?;
+    let session =
+        require_session_summary(&state, current_user.id, staged.session_id, &request_id).await?;
     Ok(Json(AssistantTurnResponse {
         session,
         user_message: presentation::processing_user(&staged),
@@ -802,10 +797,7 @@ async fn enqueue_chat_turn(
     let mut request = EnqueueRequest::new(TaskType::ChatTurn);
     request.payload = Some(Map::from_iter([
         ("user_id".to_owned(), Value::from(user_id)),
-        (
-            "session_id".to_owned(),
-            Value::from(staged.effective_session_id),
-        ),
+        ("session_id".to_owned(), Value::from(staged.session_id)),
         ("message_id".to_owned(), Value::from(staged.message_id)),
     ]));
     request.dedupe_key = Some(format!("chat-turn:message:{}", staged.message_id));
@@ -833,9 +825,6 @@ fn staged_result(
             "Archived sessions cannot accept messages",
             request_id.to_owned(),
         )),
-        StageChatTurnOutcome::NoActiveCouncilBranch => {
-            Err(bad_request("No active council branch selected", request_id))
-        }
         StageChatTurnOutcome::NewsItemNotFound => Err(not_found("News item not found", request_id)),
         StageChatTurnOutcome::UserInactive => Err(inactive_user(request_id)),
     }

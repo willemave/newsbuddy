@@ -275,7 +275,6 @@ enum KnowledgeSourceAction: Hashable {
     case chat
     case deck
     case listen
-    case council
 
     static let leading: [Self] = [.chat, .deck, .listen]
 
@@ -284,7 +283,6 @@ enum KnowledgeSourceAction: Hashable {
         case .chat: "Chat"
         case .deck: "Deck"
         case .listen: "Listen"
-        case .council: "Council"
         }
     }
 
@@ -293,7 +291,6 @@ enum KnowledgeSourceAction: Hashable {
         case .chat: "message"
         case .deck: "rectangle.on.rectangle"
         case .listen: "headphones"
-        case .council: "person.3.sequence.fill"
         }
     }
 
@@ -301,7 +298,7 @@ enum KnowledgeSourceAction: Hashable {
         switch self {
         case .chat: Color.brandPrimary
         case .deck: Color.onSurfaceSecondary
-        case .listen, .council: Color.onSurfaceTertiary
+        case .listen: Color.onSurfaceTertiary
         }
     }
 }
@@ -387,7 +384,6 @@ struct KnowledgeSavedRow: View {
     private static let derivativeMarkerOrder: [(KnowledgeSourceDerivatives, KnowledgeSourceAction)] = [
         (.deck, .deck),
         (.chat, .chat),
-        (.council, .council),
         (.narration, .listen)
     ]
 

@@ -10,7 +10,6 @@ struct DetailKnowledgeActionsSheet: View {
     private let isStartingAction: Bool
     private let onClose: () -> Void
     private let onStartChat: () -> Void
-    private let onAskCouncil: () -> Void
     private let onCreateLearningDeck: () -> Void
 
     init(
@@ -18,14 +17,12 @@ struct DetailKnowledgeActionsSheet: View {
         isStartingAction: Bool,
         onClose: @escaping () -> Void,
         onStartChat: @escaping () -> Void,
-        onAskCouncil: @escaping () -> Void,
         onCreateLearningDeck: @escaping () -> Void
     ) {
         self.actionError = actionError
         self.isStartingAction = isStartingAction
         self.onClose = onClose
         self.onStartChat = onStartChat
-        self.onAskCouncil = onAskCouncil
         self.onCreateLearningDeck = onCreateLearningDeck
     }
 
@@ -43,23 +40,13 @@ struct DetailKnowledgeActionsSheet: View {
                         errorBanner(actionError)
                     }
 
-                    LazyVGrid(columns: actionTileColumns, spacing: 10) {
-                        DetailKnowledgeActionTile(
-                            icon: "message",
-                            title: "Start Chat",
-                            disabled: isStartingAction,
-                            accessibilityIdentifier: "content.knowledge_actions.start_chat",
-                            action: onStartChat
-                        )
-
-                        DetailKnowledgeActionTile(
-                            icon: "person.3.sequence.fill",
-                            title: "Ask a Council",
-                            disabled: isStartingAction,
-                            accessibilityIdentifier: "content.knowledge_actions.council",
-                            action: onAskCouncil
-                        )
-                    }
+                    DetailKnowledgeActionTile(
+                        icon: "message",
+                        title: "Start Chat",
+                        disabled: isStartingAction,
+                        accessibilityIdentifier: "content.knowledge_actions.start_chat",
+                        action: onStartChat
+                    )
 
                     DetailKnowledgeWideAction(
                         icon: "rectangle.on.rectangle",
@@ -76,13 +63,6 @@ struct DetailKnowledgeActionsSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
-    }
-
-    private var actionTileColumns: [GridItem] {
-        [
-            GridItem(.flexible(), spacing: 10),
-            GridItem(.flexible(), spacing: 10)
-        ]
     }
 
     private func errorBanner(_ message: String) -> some View {

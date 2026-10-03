@@ -7,10 +7,8 @@ import SwiftUI
 
 struct MessageRow: View {
     let item: ChatTimelineItem
-    let retryingCouncilChildSessionId: Int?
     let feedOptionActionModel: AssistantFeedOptionActionModel
     let onRetrySend: (String) -> Void
-    let onRetryCouncilCandidate: (CouncilCandidate) -> Void
     let onDigDeeper: (String) -> Void
     let onShare: (String) -> Void
 
@@ -18,10 +16,8 @@ struct MessageRow: View {
         VStack(alignment: item.message.isUser ? .trailing : .leading, spacing: 8) {
             MessageBubble(
                 message: item.message,
-                retryingCouncilChildSessionId: retryingCouncilChildSessionId,
                 onDigDeeper: onDigDeeper,
                 onShare: onShare,
-                onRetryCouncilCandidate: onRetryCouncilCandidate,
                 feedOptionActionModel: feedOptionActionModel
             )
 
@@ -84,10 +80,8 @@ struct MessageRow: View {
 #Preview("Message Row") {
     MessageRow(
         item: ChatPreviewFixtures.timeline[0],
-        retryingCouncilChildSessionId: nil,
         feedOptionActionModel: ChatPreviewActionModels.feedOptions(),
         onRetrySend: { _ in },
-        onRetryCouncilCandidate: { _ in },
         onDigDeeper: { _ in },
         onShare: { _ in }
     )

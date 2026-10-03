@@ -21,7 +21,34 @@ cat > "${harness_root}/bin/docker" <<'EOF'
 set -euo pipefail
 printf 'docker %s\n' "$*" >> "${HARNESS_LOG}"
 
-if [[ "$*" == *" stop workers scheduler" && "${HARNESS_STOP_FAIL}" == "true" ]]; then
+if [[ "$*" == *"verify-council-retirement" && "${HARNESS_PREFLIGHT_FAIL:-false}" == true ]]; then
+  exit 1
+fi
+if [[ "$*" == *"verify-council-retirement" && "${HARNESS_POST_STOP_PREFLIGHT_FAIL:-false}" == true ]]; then
+  preflight_count="$(grep -Fc "verify-council-retirement" "${HARNESS_LOG}")"
+  if [[ "${preflight_count}" -ge 2 ]]; then
+    exit 1
+  fi
+fi
+if [[ "$*" == *"verify-baseline" && "${HARNESS_BASELINE_PREFLIGHT_FAIL:-false}" == true ]]; then
+  exit 1
+fi
+if [[ "$*" == *"NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" && "${HARNESS_MIGRATE_FAIL:-false}" == true ]]; then
+  exit 1
+fi
+if [[ "$*" == *"exec pg_dump"* ]]; then
+  if [[ "${HARNESS_BACKUP_FAIL:-false}" == true ]]; then
+    exit 1
+  fi
+  printf 'fixture database backup\n'
+  exit 0
+fi
+if [[ "$*" == *"pg_restore --list"* ]]; then
+  cat >/dev/null
+  exit 0
+fi
+
+if [[ "$*" == *" stop "*"workers scheduler" && "${HARNESS_STOP_FAIL}" == "true" ]]; then
   exit 1
 fi
 
@@ -32,7 +59,7 @@ if [[ "${1:-}" == "inspect" ]]; then
   container="${@: -1}"
   case "${container}" in
     newsly-postgres | newsly-document-extractor) printf 'healthy\n' ;;
-    newsly-workers | newsly-scheduler) printf 'true\n' ;;
+    newsly-workers | newsly-scheduler) printf '%s\n' "${HARNESS_WRITERS_RUNNING:-true}" ;;
     *) printf 'false\n' ;;
   esac
   exit 0
@@ -84,6 +111,9 @@ assert_contains() {
   local file="$2"
   if ! grep -Fq -- "${pattern}" "${file}"; then
     echo "missing expected command: ${pattern}" >&2
+    if [[ -f "${file%.log}.out" ]]; then
+      cat "${file%.log}.out" >&2
+    fi
     sed -n '1,240p' "${file}" >&2
     exit 1
   fi
@@ -129,6 +159,18 @@ run_deploy() {
   local stop_failure="${5:-false}"
   local active_slot="${6:-blue}"
   local target_switch_failure="${7:-false}"
+  local cutover="${HARNESS_MAINTENANCE_CUTOVER:-false}"
+  local migration_failure="${HARNESS_MIGRATE_FAIL:-false}"
+  local preflight_failure="${HARNESS_PREFLIGHT_FAIL:-false}"
+  local post_stop_preflight_failure="${HARNESS_POST_STOP_PREFLIGHT_FAIL:-false}"
+  local baseline_preflight_failure="${HARNESS_BASELINE_PREFLIGHT_FAIL:-false}"
+  local backup_failure="${HARNESS_BACKUP_FAIL:-false}"
+  local baseline_adoption="${HARNESS_BASELINE_ADOPTION:-false}"
+  local baseline_backup_marker="${HARNESS_BASELINE_BACKUP_MARKER:-}"
+  local deploy_command=(bash "${repo_root}/scripts/deploy_blue_green.sh" test-image)
+  if [[ "${cutover}" == true ]]; then
+    deploy_command+=(--maintenance-cutover)
+  fi
   local log="${harness_root}/${label}.log"
   local output="${harness_root}/${label}.out"
 
@@ -141,7 +183,12 @@ run_deploy() {
   rm -f \
     "${harness_root}/state/active-image" \
     "${harness_root}/state/active-extractor-image" \
-    "${harness_root}/state/green-image"
+    "${harness_root}/state/green-image" \
+    "${harness_root}/state/sqlx-baseline-adopted" \
+    "${harness_root}/state/sqlx-baseline-backup"
+  if [[ -n "${baseline_backup_marker}" ]]; then
+    printf '%s\n' "${baseline_backup_marker}" > "${harness_root}/state/sqlx-baseline-backup"
+  fi
 
   set +e
   env \
@@ -151,14 +198,20 @@ run_deploy() {
     HARNESS_ROLLBACK_FAIL="${rollback_failure}" \
     HARNESS_STOP_FAIL="${stop_failure}" \
     HARNESS_TARGET_SWITCH_FAIL="${target_switch_failure}" \
+    HARNESS_MIGRATE_FAIL="${migration_failure}" \
+    HARNESS_PREFLIGHT_FAIL="${preflight_failure}" \
+    HARNESS_POST_STOP_PREFLIGHT_FAIL="${post_stop_preflight_failure}" \
+    HARNESS_BASELINE_PREFLIGHT_FAIL="${baseline_preflight_failure}" \
+    HARNESS_BACKUP_FAIL="${backup_failure}" \
+    HARNESS_WRITERS_RUNNING="${HARNESS_WRITERS_RUNNING:-true}" \
     HARNESS_STATE_DIR="${harness_root}/state" \
     NEWSLY_DEPLOY_COMPOSE_FILE="${harness_root}/docker-compose.production.yml" \
     NEWSLY_DEPLOY_ENV_FILE="${harness_root}/.env.racknerd" \
     NEWSLY_DEPLOY_STATE_DIR="${harness_root}/state" \
     NEWSLY_DEPLOY_SWITCH_SCRIPT="${harness_root}/switch-api-slot" \
-    NEWSLY_SQLX_BASELINE_ADOPTION=false \
+    NEWSLY_SQLX_BASELINE_ADOPTION="${baseline_adoption}" \
     NEWSLY_EXTRACTOR_IMAGE=test-extractor \
-    bash "${repo_root}/scripts/deploy_blue_green.sh" test-image > "${output}" 2>&1
+    "${deploy_command[@]}" > "${output}" 2>&1
   local status=$?
   set -e
 
@@ -221,5 +274,63 @@ assert_contains " stop workers scheduler" "${stop_failure_log}"
 assert_contains "docker start newsly-workers" "${stop_failure_log}"
 assert_contains "docker start newsly-scheduler" "${stop_failure_log}"
 assert_not_contains "switch green" "${stop_failure_log}"
+
+empty_writer_stop_failure_log="$(HARNESS_WRITERS_RUNNING=false run_deploy empty-writer-stop-failure false 1 false true)"
+assert_contains " stop workers scheduler" "${empty_writer_stop_failure_log}"
+assert_not_contains "docker start" "${empty_writer_stop_failure_log}"
+assert_not_contains "switch green" "${empty_writer_stop_failure_log}"
+
+cutover_log="$(HARNESS_MAINTENANCE_CUTOVER=true run_deploy cutover false 0)"
+assert_contains "verify-council-retirement" "${cutover_log}"
+assert_contains " stop api_blue api_green workers scheduler" "${cutover_log}"
+assert_contains "exec pg_dump" "${cutover_log}"
+assert_contains "pg_restore --list" "${cutover_log}"
+assert_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_log}"
+assert_before " stop api_blue api_green workers scheduler" "exec pg_dump" "${cutover_log}"
+assert_before "pg_restore --list" "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_log}"
+assert_before "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "switch green" "${cutover_log}"
+
+cutover_failed_log="$(HARNESS_MAINTENANCE_CUTOVER=true run_deploy cutover-public-failure true 1)"
+assert_contains "exec pg_dump" "${cutover_failed_log}"
+assert_contains "pg_restore --list" "${cutover_failed_log}"
+assert_contains "switch green" "${cutover_failed_log}"
+assert_not_contains "switch blue" "${cutover_failed_log}"
+assert_not_contains "docker start" "${cutover_failed_log}"
+assert_not_contains " up -d --no-deps workers scheduler" "${cutover_failed_log}"
+
+cutover_migration_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_MIGRATE_FAIL=true run_deploy cutover-migration-failure false 1)"
+assert_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_migration_log}"
+assert_not_contains "docker start" "${cutover_migration_log}"
+assert_not_contains "switch green" "${cutover_migration_log}"
+
+cutover_preflight_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_PREFLIGHT_FAIL=true run_deploy cutover-preflight-failure false 1)"
+assert_not_contains " stop api_blue" "${cutover_preflight_log}"
+assert_not_contains "exec pg_dump" "${cutover_preflight_log}"
+
+cutover_post_stop_preflight_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_POST_STOP_PREFLIGHT_FAIL=true run_deploy cutover-post-stop-preflight-failure false 1)"
+assert_contains " stop api_blue api_green workers scheduler" "${cutover_post_stop_preflight_log}"
+assert_not_contains "exec pg_dump" "${cutover_post_stop_preflight_log}"
+assert_not_contains "docker start" "${cutover_post_stop_preflight_log}"
+assert_not_contains "switch green" "${cutover_post_stop_preflight_log}"
+
+cutover_backup_failure_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_BACKUP_FAIL=true run_deploy cutover-backup-failure false 1)"
+assert_contains " stop api_blue api_green workers scheduler" "${cutover_backup_failure_log}"
+assert_contains "exec pg_dump" "${cutover_backup_failure_log}"
+assert_not_contains "docker start" "${cutover_backup_failure_log}"
+assert_not_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_backup_failure_log}"
+assert_not_contains "switch green" "${cutover_backup_failure_log}"
+
+baseline_preflight_log="$(HARNESS_BASELINE_ADOPTION=true HARNESS_BASELINE_PREFLIGHT_FAIL=true run_deploy baseline-preflight-failure false 1)"
+assert_contains "verify-baseline" "${baseline_preflight_log}"
+assert_not_contains " stop api_blue api_green workers scheduler" "${baseline_preflight_log}"
+assert_not_contains "docker start" "${baseline_preflight_log}"
+
+baseline_missing_backup_log="$(HARNESS_BASELINE_ADOPTION=true HARNESS_BASELINE_BACKUP_MARKER=/data/backups/sqlx-baseline/missing.dump run_deploy baseline-missing-backup false 1)"
+assert_contains "verify-baseline" "${baseline_missing_backup_log}"
+assert_contains " stop api_blue api_green workers scheduler" "${baseline_missing_backup_log}"
+assert_contains "docker start newsly-workers" "${baseline_missing_backup_log}"
+assert_contains "docker start newsly-scheduler" "${baseline_missing_backup_log}"
+assert_not_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${baseline_missing_backup_log}"
+assert_not_contains "switch green" "${baseline_missing_backup_log}"
 
 echo "Blue-green deploy ordering guard OK."

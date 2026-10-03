@@ -193,13 +193,11 @@ pub(super) async fn get_or_create_dig_deeper_session(
         r#"
         INSERT INTO chat_sessions (
             user_id, content_id, title, session_type, context_snapshot,
-            llm_provider, llm_model, created_at, updated_at,
-            council_mode, is_hidden_from_history, is_archived
+            llm_provider, llm_model, created_at, updated_at
         )
         VALUES (
             $1::bigint::integer, $2::bigint::integer, $3, $4, $5,
-            $6, $7, timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp()),
-            FALSE, FALSE, FALSE
+            $6, $7, timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
         )
         RETURNING id::bigint
         "#,
@@ -298,32 +296,21 @@ pub(super) fn processing_context_for_session(
     user_prompt: &str,
     source: &str,
 ) -> ChatTurnProcessingContext {
-    ChatTurnProcessingContext {
-        version: 1,
-        kind: ChatTurnKind::Article,
-        user_prompt: user_prompt.to_owned(),
-        source: source.to_owned(),
-        session: ChatTurnSessionSnapshot {
-            user_id: session.user_id,
-            effective_session_id: session.id,
-            visible_session_id: session.id,
-            model: fallback_nonempty(&session.llm_model, DEFAULT_MODEL),
-            provider: fallback_nonempty(&session.llm_provider, DEFAULT_PROVIDER),
-            title: session.title.clone(),
-            session_type: session.session_type.clone(),
-            content_id: session.content_id,
-            news_item_id: session.news_item_id,
-            parent_session_id: session.parent_session_id,
-            topic: session.topic.clone(),
-            context_snapshot: session.context_snapshot.clone(),
-            is_hidden_from_history: session.is_hidden_from_history,
-            council_persona_id: session.council_persona_id.clone(),
-            council_persona_name: session.council_persona_name.clone(),
-            council_persona_prompt: session.council_persona_prompt.clone(),
-        },
-        screen_context: None,
-        council_run: None,
-    }
+    let snapshot = ChatTurnSessionSnapshot {
+        title: session.title.clone(),
+        session_type: session.session_type.clone(),
+        content_id: session.content_id,
+        news_item_id: session.news_item_id,
+        topic: session.topic.clone(),
+        context_snapshot: session.context_snapshot.clone(),
+        ..ChatTurnSessionSnapshot::new(
+            session.user_id,
+            session.id,
+            fallback_nonempty(&session.llm_model, DEFAULT_MODEL),
+            fallback_nonempty(&session.llm_provider, DEFAULT_PROVIDER),
+        )
+    };
+    ChatTurnProcessingContext::new(ChatTurnKind::Article, user_prompt, source, snapshot, None)
 }
 
 pub(super) fn lifecycle_is_valid(
@@ -333,14 +320,9 @@ pub(super) fn lifecycle_is_valid(
     if session.is_archived {
         return false;
     }
-    let snapshot = &context.session;
-    if context.kind == ChatTurnKind::Council {
-        session.is_hidden_from_history
-            && session.parent_session_id == Some(snapshot.visible_session_id)
-            && snapshot.parent_session_id == Some(snapshot.visible_session_id)
-    } else {
-        !session.is_hidden_from_history
-    }
+    !session.is_hidden_from_history
+        && context.session.visible_session_id == session.id
+        && context.session.effective_session_id == session.id
 }
 
 pub(super) fn content_display_title(content: &ContentRow) -> String {

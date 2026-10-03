@@ -370,7 +370,7 @@ pub(super) async fn prepare_linked_turn(
 
     let llm_task_id = match context.kind {
         ChatTurnKind::DeepResearch => None,
-        ChatTurnKind::Article | ChatTurnKind::Council | ChatTurnKind::Assistant => {
+        ChatTurnKind::Article | ChatTurnKind::Assistant => {
             cancel_stale_chat_llm_tasks(transaction, user_id, request.queue_task_id, message_id)
                 .await?;
             Some(
@@ -402,7 +402,6 @@ pub(super) async fn prepare_linked_turn(
         queue_task_id: request.queue_task_id,
         user_id,
         session_id,
-        visible_session_id: context.session.visible_session_id,
         message_id,
         stream_generation: request.stream_generation,
         context,
@@ -452,14 +451,10 @@ pub(super) async fn load_session_for_update(
             user_id::bigint AS user_id,
             content_id::bigint AS content_id,
             news_item_id::bigint AS news_item_id,
-            parent_session_id::bigint AS parent_session_id,
             title,
             session_type,
             topic,
             context_snapshot,
-            council_persona_id,
-            council_persona_name,
-            council_persona_prompt,
             is_hidden_from_history,
             llm_model,
             llm_provider,

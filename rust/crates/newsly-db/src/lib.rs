@@ -29,7 +29,6 @@ mod auth;
 mod briefing;
 mod briefing_refresh;
 mod chat;
-mod chat_council;
 mod chat_tasks;
 mod chat_tooling;
 mod chat_transcripts;
@@ -41,6 +40,9 @@ mod content_feeds;
 mod content_misc;
 mod content_read;
 mod content_submission;
+mod council_retirement;
+#[cfg(test)]
+mod council_retirement_tests;
 mod discussions;
 mod e2e_fixtures;
 mod fingerprint;
@@ -145,13 +147,6 @@ pub use chat::{
     get_chat_message_status, get_chat_session_detail, get_chat_session_summary, list_chat_sessions,
     stage_assistant_turn, stage_chat_message, update_chat_session,
 };
-pub use chat_council::{
-    CouncilCandidateCompletion, CouncilPersonaSeed, CouncilRepositoryError, CouncilRunContext,
-    CouncilRunKind, CouncilSelectOutcome, CouncilStageOutcome, SelectCouncilBranchInput,
-    StageCouncilRetryInput, StageCouncilStartInput, StagedCouncilWork, finalize_council_candidate,
-    finalize_failed_council_candidate, select_council_branch, stage_council_retry,
-    stage_council_start, visible_council_session_id,
-};
 pub use chat_tasks::{
     AssistantScreenContext, ChatAdvisoryWriteOutcome, ChatContentMaterial,
     ChatTaskPreparationOutcome, ChatTaskRejection, ChatTaskRepositoryError, ChatTaskSnapshot,
@@ -204,6 +199,7 @@ pub use content_submission::{
     AppliedContentSubmission, ContentSubmissionInput, ContentSubmissionRepositoryError,
     SubmissionTaskResolution, apply_content_submission,
 };
+pub use council_retirement::{CouncilRetirementPreflight, verify_council_retirement};
 pub use discussions::{
     ContentDiscussionProjection, DiscussionRepositoryError, NewsDiscussionProjection,
     find_visible_content_discussion, find_visible_news_discussion,

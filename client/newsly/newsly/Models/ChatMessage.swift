@@ -125,51 +125,6 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
     }
 }
 
-struct CouncilCandidate: Codable, Identifiable, Equatable {
-    let personaId: String
-    let personaName: String
-    let childSessionId: Int
-    let content: String
-    let status: String
-    let order: Int
-
-    var id: String { "\(personaId)-\(childSessionId)" }
-
-    enum CodingKeys: String, CodingKey {
-        case personaId = "persona_id"
-        case personaName = "persona_name"
-        case childSessionId = "child_session_id"
-        case content
-        case status
-        case order
-    }
-
-    init(
-        personaId: String,
-        personaName: String,
-        childSessionId: Int,
-        content: String,
-        status: String,
-        order: Int
-    ) {
-        self.personaId = personaId
-        self.personaName = personaName
-        self.childSessionId = childSessionId
-        self.content = content
-        self.status = status
-        self.order = order
-    }
-
-    init(api response: APICouncilCandidate) {
-        personaId = response.personaId
-        personaName = response.personaName
-        childSessionId = response.childSessionId
-        content = response.content
-        status = response.status
-        order = response.order
-    }
-}
-
 /// Individual message in a chat session
 struct ChatMessage: Codable, Identifiable, Equatable {
     let id: Int
@@ -183,8 +138,6 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let status: APIMessageProcessingStatus?
     let error: String?
     let feedOptions: [AssistantFeedOption]
-    let councilCandidates: [CouncilCandidate]
-    let activeCouncilChildSessionId: Int?
 
     init(
         id: Int,
@@ -197,9 +150,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         processLabel: String? = nil,
         status: APIMessageProcessingStatus? = nil,
         error: String? = nil,
-        feedOptions: [AssistantFeedOption] = [],
-        councilCandidates: [CouncilCandidate] = [],
-        activeCouncilChildSessionId: Int? = nil
+        feedOptions: [AssistantFeedOption] = []
     ) {
         self.id = id
         self.sourceMessageId = sourceMessageId
@@ -212,8 +163,6 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         self.status = status
         self.error = error
         self.feedOptions = feedOptions
-        self.councilCandidates = councilCandidates
-        self.activeCouncilChildSessionId = activeCouncilChildSessionId
     }
 
     init(api response: APIChatMessage) {
@@ -228,9 +177,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
             processLabel: response.processLabel,
             status: response.status,
             error: response.error,
-            feedOptions: response.feedOptions.map(AssistantFeedOption.init(api:)),
-            councilCandidates: response.councilCandidates.map(CouncilCandidate.init(api:)),
-            activeCouncilChildSessionId: response.activeCouncilChildSessionId
+            feedOptions: response.feedOptions.map(AssistantFeedOption.init(api:))
         )
     }
 
@@ -254,8 +201,6 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(status, forKey: .status)
         try container.encodeIfPresent(error, forKey: .error)
         try container.encode(feedOptions, forKey: .feedOptions)
-        try container.encode(councilCandidates, forKey: .councilCandidates)
-        try container.encodeIfPresent(activeCouncilChildSessionId, forKey: .activeCouncilChildSessionId)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -265,8 +210,6 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         case displayType = "display_type"
         case processLabel = "process_label"
         case feedOptions = "feed_options"
-        case councilCandidates = "council_candidates"
-        case activeCouncilChildSessionId = "active_council_child_session_id"
     }
 
     var isProcessing: Bool {
@@ -314,9 +257,6 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         !feedOptions.isEmpty
     }
 
-    var hasCouncilCandidates: Bool {
-        !councilCandidates.isEmpty
-    }
 }
 
 private enum ChatMessageTimestampFormatter {

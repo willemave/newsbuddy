@@ -7,7 +7,6 @@ import SwiftUI
 
 struct ChatErrorBanner: View {
     let error: String
-    let onAddExperts: () -> Void
     let onDismiss: () -> Void
 
     var body: some View {
@@ -16,27 +15,9 @@ struct ChatErrorBanner: View {
                 .font(.appSymbol(size: 15, weight: .semibold))
                 .foregroundStyle(Color.statusDestructive)
 
-            VStack(alignment: .leading, spacing: 6) {
-                if isCouncilConfigurationError {
-                    Text("Council setup required")
-                        .font(.terracottaBodySmall.weight(.semibold))
-                        .foregroundStyle(Color.onSurface)
-
-                    Text("Add at least two experts in Settings to enable council chat.")
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurface)
-
-                    Button("Add Experts", action: onAddExperts)
-                        .buttonStyle(.plain)
-                        .font(.terracottaBodySmall.weight(.semibold))
-                        .foregroundStyle(Color.brandPrimary)
-                        .accessibilityIdentifier("knowledge.chat_error_add_experts")
-                } else {
-                    Text(error)
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurface)
-                }
-            }
+            Text(error)
+                .font(.terracottaBodySmall)
+                .foregroundStyle(Color.onSurface)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: onDismiss) {
@@ -60,20 +41,12 @@ struct ChatErrorBanner: View {
         .padding(.horizontal, 16)
         .accessibilityIdentifier("knowledge.chat_error_banner")
     }
-
-    private var isCouncilConfigurationError: Bool {
-        let normalized = error.lowercased()
-        return normalized.contains("add at least")
-            && normalized.contains("experts")
-            && normalized.contains("council")
-    }
 }
 
 #if DEBUG
 #Preview("Chat Error Banner") {
     ChatErrorBanner(
-        error: "Add at least two experts in Settings to enable council chat.",
-        onAddExperts: {},
+        error: "The message could not be sent.",
         onDismiss: {}
     )
     .padding(.vertical)

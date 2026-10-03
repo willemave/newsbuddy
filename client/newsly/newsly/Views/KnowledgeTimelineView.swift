@@ -375,9 +375,6 @@ struct KnowledgeView: View {
                 } label: {
                     Label("Remove", systemImage: "bookmark.slash")
                 }
-                if content.savedLibraryItemState == .ready {
-                    sourceActionButton(.council, for: content)
-                }
             }
         case .chat(let session, let preview):
             Button {
@@ -548,12 +545,6 @@ struct KnowledgeView: View {
         case .chat:
             Task {
                 if let route = await viewModel.chats.openSourceChat(for: content) {
-                    onSelectSession(route)
-                }
-            }
-        case .council:
-            Task {
-                if let route = await viewModel.chats.startSourceCouncil(for: content) {
                     onSelectSession(route)
                 }
             }

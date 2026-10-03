@@ -1,7 +1,6 @@
 use newsly_contracts::{
     AssistantFeedOption, ChatMessageDisplayType, ChatMessageDto, ChatMessageRole,
-    ChatSessionDetailDto, ChatSessionSummaryDto, CouncilCandidate, MessageProcessingStatus,
-    MessageStatusResponse,
+    ChatSessionDetailDto, ChatSessionSummaryDto, MessageProcessingStatus, MessageStatusResponse,
 };
 use newsly_db::{
     ChatMessageProjection, ChatMessageStatusProjection, ChatSessionDetailProjection,
@@ -34,8 +33,8 @@ pub(super) fn session(value: ChatSessionProjection) -> ChatSessionSummaryDto {
         has_messages: value.has_messages,
         last_message_preview: value.last_message_preview,
         last_message_role: value.last_message_role,
-        council_mode: value.council_mode,
-        active_child_session_id: value.active_child_session_id,
+        council_mode: false,
+        active_child_session_id: None,
     }
 }
 
@@ -54,26 +53,12 @@ pub(super) fn message(value: ChatMessageProjection) -> Result<ChatMessageDto, St
     let role = role(&value.role)?;
     let display_type = display_type(&value.display_type)?;
     let status = status(&value.status)?;
-    let metadata = (
-        values::<AssistantFeedOption>(value.feed_options, "feed option"),
-        values::<CouncilCandidate>(value.council_candidates, "council candidate"),
-    );
-    let (feed_options, council_candidates, active_council_child_session_id) = match metadata {
-        (Ok(feed_options), Ok(council_candidates)) => (
-            feed_options,
-            council_candidates,
-            value.active_council_child_session_id,
-        ),
-        (feed_options, council_candidates) => {
-            tracing::warn!(
-                feed_options_error = ?feed_options.err(),
-                council_candidates_error = ?council_candidates.err(),
-                source_message_id = value.source_message_id,
-                "ignoring malformed durable chat render metadata"
-            );
-            (Vec::new(), Vec::new(), None)
-        }
-    };
+    let feed_options = values::<AssistantFeedOption>(value.feed_options, "feed option")
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, source_message_id = value.source_message_id,
+                "ignoring malformed durable chat render metadata");
+            Vec::new()
+        });
     Ok(ChatMessageDto {
         id: value.id,
         source_message_id: Some(value.source_message_id),
@@ -92,8 +77,8 @@ pub(super) fn message(value: ChatMessageProjection) -> Result<ChatMessageDto, St
         status,
         error: value.error,
         feed_options,
-        council_candidates,
-        active_council_child_session_id,
+        council_candidates: Vec::new(),
+        active_council_child_session_id: None,
     })
 }
 
@@ -102,7 +87,7 @@ pub(super) fn processing_user(staged: &StagedChatTurn) -> ChatMessageDto {
         id: staged.message_id,
         source_message_id: Some(staged.message_id),
         display_key: format!("server|{}|user|message", staged.message_id),
-        session_id: staged.visible_session_id,
+        session_id: staged.session_id,
         role: ChatMessageRole::User,
         content: staged.user_prompt.clone(),
         timestamp: staged.created_at,

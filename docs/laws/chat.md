@@ -8,7 +8,7 @@ CH3. Closed, archived, failed, or otherwise unwritable sessions reject new sends
 
 CH4. Context resolves through its exact typed identity. Coincidental numeric IDs never change the target.
 
-CH5. Session history is user-scoped and stably paged. Archived sessions and internal council branches stay hidden, and archiving a council leaves source content and Knowledge saves intact.
+CH5. Session history is user-scoped and stably paged. Archived sessions stay hidden, and archiving a chat leaves source content and Knowledge saves intact.
 
 CH6. The visible transcript contains user and assistant output without model scaffolding or tool chatter. In-flight assistant text is a durable advisory snapshot under the final row identity until terminal state replaces it.
 
@@ -16,7 +16,7 @@ CH7. Stable timeline identity prevents polling from duplicating or replacing the
 
 CH8. Cancellation remains distinct from failure, recoverable errors preserve the transcript, and dictated prompts follow the same durable send path as typed prompts.
 
-CH9. Council branches run independently, retain failed candidates for inspection, support targeted retry, and route later sends to the selected branch.
+CH9. Chat follows one conversation with one assistant response per accepted turn. Retired council conversations retain their selected response and visible follow-ups as ordinary chats; alternate branch records remain archived. Shared history and council retry prompts are not duplicated during conversion, and later sends use ordinary chat without expert impersonation.
 
 CH10. Opening global chat dismisses covering presentations and installs one visible route.
 

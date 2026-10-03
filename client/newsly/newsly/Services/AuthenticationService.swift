@@ -156,13 +156,11 @@ final class AuthenticationService: NSObject {
     func updateCurrentUserProfile(
         fullName: String? = nil,
         twitterUsername: String? = nil,
-        councilPersonas: [CouncilPersona]? = nil,
         readingExperience: ReadingExperience? = nil
     ) async throws -> User {
         let body = APIUpdateUserProfileRequest(
             fullName: fullName,
             twitterUsername: twitterUsername,
-            councilPersonas: councilPersonas?.map(\.apiInput),
             readingExperience: readingExperience
         )
         do {

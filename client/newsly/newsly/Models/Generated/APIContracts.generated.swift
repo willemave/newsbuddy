@@ -441,6 +441,7 @@ enum APIFeedType: Codable, Equatable, Hashable {
     case substack
     case podcast_rss
     case youtube
+    case aggregator
     case unknown(String)
 
     static let knownCases: [APIFeedType] = [
@@ -448,6 +449,7 @@ enum APIFeedType: Codable, Equatable, Hashable {
         .substack,
         .podcast_rss,
         .youtube,
+        .aggregator,
     ]
 
     var rawValue: String {
@@ -456,6 +458,7 @@ enum APIFeedType: Codable, Equatable, Hashable {
         case .substack: "substack"
         case .podcast_rss: "podcast_rss"
         case .youtube: "youtube"
+        case .aggregator: "aggregator"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -466,6 +469,7 @@ enum APIFeedType: Codable, Equatable, Hashable {
         case "substack": self = .substack
         case "podcast_rss": self = .podcast_rss
         case "youtube": self = .youtube
+        case "aggregator": self = .aggregator
         default: self = .unknown(rawValue)
         }
     }

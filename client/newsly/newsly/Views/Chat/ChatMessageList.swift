@@ -13,20 +13,16 @@ struct ChatMessageList: View {
     let isLoading: Bool
     let loadErrorMessage: String?
     let errorMessage: String?
-    let isStartingCouncil: Bool
     let isSending: Bool
     let thinkingStartedAt: Date?
     let latestProcessSummary: String?
     let hasVisiblePartialResponse: Bool
     let session: ChatSessionSummary?
     let scrollToBottomRequest: Int
-    let retryingCouncilChildSessionId: Int?
     let feedOptionActionModel: AssistantFeedOptionActionModel
-    let onOpenCouncilSettings: () -> Void
     let onDismissError: () -> Void
     let onRetryLoad: () -> Void
     let onRetrySend: (String) -> Void
-    let onRetryCouncilCandidate: (CouncilCandidate) -> Void
     let onDigDeeper: (String) -> Void
     let onShare: (String) -> Void
 
@@ -54,7 +50,6 @@ struct ChatMessageList: View {
                     if let errorMessage {
                         ChatErrorBanner(
                             error: errorMessage,
-                            onAddExperts: onOpenCouncilSettings,
                             onDismiss: onDismissError
                         )
                     }
@@ -85,10 +80,8 @@ struct ChatMessageList: View {
                         ForEach(timeline) { item in
                             MessageRow(
                                 item: item,
-                                retryingCouncilChildSessionId: retryingCouncilChildSessionId,
                                 feedOptionActionModel: feedOptionActionModel,
                                 onRetrySend: onRetrySend,
-                                onRetryCouncilCandidate: onRetryCouncilCandidate,
                                 onDigDeeper: onDigDeeper,
                                 onShare: onShare
                             )
@@ -202,24 +195,7 @@ struct ChatMessageList: View {
 
     @ViewBuilder
     private var emptyTimelineState: some View {
-        if isStartingCouncil {
-            VStack(alignment: .leading, spacing: 18) {
-                if let session, let articleTitle = session.articleTitle {
-                    ArticlePreviewCard(
-                        title: articleTitle,
-                        source: session.articleSource,
-                        summary: session.articleSummary,
-                        url: session.articleUrl
-                    )
-                }
-
-                ThinkingBubbleView(
-                    startDate: thinkingStartedAt,
-                    statusText: "Gathering council perspectives"
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else if isSending {
+        if isSending {
             InitialSuggestionsLoadingView()
                 .frame(maxWidth: .infinity)
         } else if let session, let articleTitle = session.articleTitle {
@@ -299,20 +275,16 @@ private struct ChatLoadErrorState: View {
         isLoading: false,
         loadErrorMessage: nil,
         errorMessage: nil,
-        isStartingCouncil: false,
         isSending: true,
         thinkingStartedAt: Date(timeIntervalSinceNow: -42),
         latestProcessSummary: "Drafting a grounded response",
         hasVisiblePartialResponse: false,
         session: ChatPreviewFixtures.session,
         scrollToBottomRequest: 0,
-        retryingCouncilChildSessionId: nil,
         feedOptionActionModel: ChatPreviewActionModels.feedOptions(),
-        onOpenCouncilSettings: {},
         onDismissError: {},
         onRetryLoad: {},
         onRetrySend: { _ in },
-        onRetryCouncilCandidate: { _ in },
         onDigDeeper: { _ in },
         onShare: { _ in }
     )

@@ -186,18 +186,6 @@ private final class PollingChatSessionService: ChatSessionServicing {
         throw ChatServiceError.timeout
     }
 
-    func startCouncil(sessionId: Int, message: String) async throws -> ChatSessionDetail {
-        throw ChatServiceError.timeout
-    }
-
-    func selectCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail {
-        throw ChatServiceError.timeout
-    }
-
-    func retryCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail {
-        throw ChatServiceError.timeout
-    }
-
     func updateSessionProvider(sessionId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
         throw ChatServiceError.timeout
     }

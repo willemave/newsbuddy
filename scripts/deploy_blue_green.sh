@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: deploy_blue_green.sh <image>" >&2
+if [[ $# -lt 1 || $# -gt 2 || ( $# -eq 2 && "$2" != --maintenance-cutover ) ]]; then
+  echo "usage: deploy_blue_green.sh <image> [--maintenance-cutover]" >&2
   exit 2
 fi
 
 image="$1"
+maintenance_cutover=false
+if [[ "${2:-}" == --maintenance-cutover ]]; then
+  maintenance_cutover=true
+fi
 extractor_image="${NEWSLY_EXTRACTOR_IMAGE:-${image}-extractor}"
 app_dir="${NEWSLY_DEPLOY_APP_DIR:-/opt/news_app}"
 compose_file="${NEWSLY_DEPLOY_COMPOSE_FILE:-${app_dir}/docker-compose.production.yml}"
@@ -78,11 +82,43 @@ if [[ "${baseline_adoption}" != "true" && "${baseline_adoption}" != "false" ]]; 
   echo "NEWSLY_SQLX_BASELINE_ADOPTION must be true or false" >&2
   exit 1
 fi
-if [[ "${baseline_adoption}" == "true" && -f "${sqlx_adoption_marker}" ]]; then
-  echo "SQLx baseline was already adopted; remove NEWSLY_SQLX_BASELINE_ADOPTION=true" >&2
-  exit 1
+if [[ "${baseline_adoption}" == "true" && "${maintenance_cutover}" == "true" ]]; then
+  echo "Baseline adoption and maintenance cutover are separate operations" >&2
+  exit 2
 fi
-if [[ "${baseline_adoption}" == "true" ]]; then
+
+if [[ "${maintenance_cutover}" == "true" ]]; then
+  deployment_mode="council_retirement"
+elif [[ "${baseline_adoption}" == "true" ]]; then
+  deployment_mode="baseline_adoption"
+else
+  deployment_mode="online"
+fi
+
+case "${deployment_mode}" in
+  online)
+    writer_drain_policy="before_switch"
+    route_rollback_policy="restore_prior_slot"
+    ;;
+  baseline_adoption)
+    writer_drain_policy="maintenance_barrier"
+    route_rollback_policy="fail_closed"
+    if [[ -f "${sqlx_adoption_marker}" ]]; then
+      echo "SQLx baseline was already adopted; remove NEWSLY_SQLX_BASELINE_ADOPTION=true" >&2
+      exit 1
+    fi
+    ;;
+  council_retirement)
+    writer_drain_policy="maintenance_barrier"
+    route_rollback_policy="fail_closed"
+    ;;
+  *)
+    echo "Internal error: unsupported deployment mode ${deployment_mode}" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${deployment_mode}" == "baseline_adoption" ]]; then
   case "${sqlx_backup_dir}" in
     /data/*) ;;
     *)
@@ -109,25 +145,13 @@ for attempt in $(seq 1 60); do
   sleep 5
 done
 
-if [[ "${baseline_adoption}" == "true" ]]; then
-  echo "Running read-only SQLx baseline eligibility preflight with the exact image"
-  compose --profile ops run --rm --no-deps \
-    --entrypoint /usr/local/bin/newsly-db \
-    migrate verify-baseline
-fi
-
-barrier_containers=()
-restore_barrier_on_failure=false
-normal_writer_containers=()
-restore_normal_writers_on_failure=false
-restore_barrier_containers() {
-  for container in "${barrier_containers[@]}"; do
-    docker start "${container}" >/dev/null || true
-  done
-}
-
-restore_normal_writers() {
-  for container in "${normal_writer_containers[@]}"; do
+restorable_containers=()
+failure_restore_policy="none"
+restore_recorded_containers() {
+  if [[ ${#restorable_containers[@]} -eq 0 ]]; then
+    return
+  fi
+  for container in "${restorable_containers[@]}"; do
     docker start "${container}" >/dev/null || true
   done
 }
@@ -170,101 +194,174 @@ authority_migration_state() {
   fi
 }
 
+create_verified_database_backup() {
+  local temporary_path="$1"
+  local final_path="$2"
+  local failure_message="$3"
+
+  if ! docker exec newsly-postgres sh -c \
+    'exec pg_dump --format=custom --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"' \
+    > "${temporary_path}"; then
+    rm -f "${temporary_path}"
+    echo "${failure_message}" >&2
+    return 1
+  fi
+  docker exec -i newsly-postgres pg_restore --list < "${temporary_path}" >/dev/null
+  if [[ "${temporary_path}" != "${final_path}" ]]; then
+    mv "${temporary_path}" "${final_path}"
+  fi
+  chmod 600 "${final_path}"
+  sha256sum "${final_path}" > "${final_path}.sha256"
+  chmod 600 "${final_path}.sha256"
+  sha256sum --check --status "${final_path}.sha256"
+}
+
+verify_recorded_database_backup() {
+  local backup_path="$1"
+  sha256sum --check --status "${backup_path}.sha256"
+  docker exec -i newsly-postgres pg_restore --list < "${backup_path}" >/dev/null
+}
+
+record_running_containers() {
+  restorable_containers=()
+  for container in "$@"; do
+    if [[ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" == "true" ]]; then
+      restorable_containers+=("${container}")
+    fi
+  done
+}
+
 restore_processes_after_failed_deploy() {
   local status=$?
   trap - EXIT
-  if [[ "${status}" -ne 0 && "${restore_barrier_on_failure}" == "true" ]]; then
-    echo "Deployment failed after entering the SQLx maintenance barrier; restoring prior containers" >&2
-    restore_barrier_containers
-  fi
-  if [[ "${status}" -ne 0 && "${restore_normal_writers_on_failure}" == "true" ]]; then
-    echo "Deployment failed before writer replacement; restoring prior workers and scheduler" >&2
-    restore_normal_writers
+  if [[ "${status}" -ne 0 ]]; then
+    case "${failure_restore_policy}" in
+      maintenance_barrier)
+        echo "Deployment failed after entering the SQLx maintenance barrier; restoring prior containers" >&2
+        restore_recorded_containers
+        ;;
+      online_writers)
+        echo "Deployment failed before writer replacement; restoring prior workers and scheduler" >&2
+        restore_recorded_containers
+        ;;
+      none) ;;
+      *)
+        echo "Internal error: unsupported failure restoration policy ${failure_restore_policy}" >&2
+        ;;
+    esac
   fi
   exit "${status}"
 }
 trap restore_processes_after_failed_deploy EXIT
 
-if [[ "${baseline_adoption}" == "true" ]]; then
-  echo "Entering the one-time SQLx baseline-adoption maintenance barrier"
-  for container in newsly-api-blue newsly-api-green newsly-workers newsly-scheduler; do
-    if [[ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" == "true" ]]; then
-      barrier_containers+=("${container}")
-    fi
-  done
-  restore_barrier_on_failure=true
-  compose stop api_blue api_green workers scheduler
+case "${deployment_mode}" in
+  council_retirement)
+    echo "Running read-only council retirement preflight before stopping writers"
+    compose --profile ops run --rm --no-deps \
+      --entrypoint /usr/local/bin/newsly-db \
+      migrate verify-council-retirement
 
-  if [[ -f "${sqlx_backup_marker}" ]]; then
-    sqlx_backup_path="$(tr -d '\r\n' < "${sqlx_backup_marker}")"
-    case "${sqlx_backup_path}" in
-      "${sqlx_backup_dir}"/*) ;;
-      *)
-        echo "Recorded SQLx baseline backup is outside ${sqlx_backup_dir}" >&2
-        exit 1
-        ;;
-    esac
-    if [[ ! -f "${sqlx_backup_path}" || ! -f "${sqlx_backup_path}.sha256" ]]; then
-      echo "Recorded SQLx baseline backup is missing: ${sqlx_backup_path}" >&2
-      exit 1
-    fi
-    sha256sum --check --status "${sqlx_backup_path}.sha256"
-    docker exec -i newsly-postgres pg_restore --list < "${sqlx_backup_path}" >/dev/null
-    echo "Reusing verified pre-adoption database backup: ${sqlx_backup_path}"
-  else
-    echo "Creating recoverable pre-adoption database backup"
-    mkdir -p "${sqlx_backup_dir}"
-    chmod 700 "${sqlx_backup_dir}"
+    echo "Entering the explicit maintenance cutover; failures leave prior writers stopped"
+    # Keep restoration disabled. Migration outcome can be ambiguous, and automatic recovery must
+    # never restart old binaries after a one-way cutover.
+    compose stop api_blue api_green workers scheduler
+    compose --profile ops run --rm --no-deps \
+      --entrypoint /usr/local/bin/newsly-db \
+      migrate verify-council-retirement
+
+    # Every attempt takes a fresh verified backup after writers have stopped. The state directory
+    # is already the deployer's durable, private host directory (also overrideable in the harness).
+    cutover_backup_dir="${state_dir}/maintenance-backups"
+    mkdir -p "${cutover_backup_dir}"
+    chmod 700 "${cutover_backup_dir}"
     backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    sqlx_backup_temp="$(mktemp "${sqlx_backup_dir}/pre-adoption-${backup_timestamp}.XXXXXX.dump")"
-    if ! docker exec newsly-postgres sh -c \
-      'exec pg_dump --format=custom --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"' \
-      > "${sqlx_backup_temp}"; then
-      rm -f "${sqlx_backup_temp}"
-      echo "Pre-adoption database backup failed" >&2
+    cutover_backup="$(mktemp "${cutover_backup_dir}/pre-cutover-${backup_timestamp}.dump.XXXXXX")"
+    create_verified_database_backup \
+      "${cutover_backup}" \
+      "${cutover_backup}" \
+      "Maintenance cutover backup failed; prior writers remain stopped"
+    echo "Verified maintenance backup: ${cutover_backup}"
+
+    compose --profile ops run --rm --no-deps \
+      -e NEWSLY_SQLX_BASELINE_ADOPTION=false \
+      -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
+      migrate
+    echo "Maintenance migration committed; prior application runtime remains stopped"
+    ;;
+  baseline_adoption)
+    echo "Running read-only SQLx baseline eligibility preflight with the exact image"
+    compose --profile ops run --rm --no-deps \
+      --entrypoint /usr/local/bin/newsly-db \
+      migrate verify-baseline
+
+    echo "Entering the one-time SQLx baseline-adoption maintenance barrier"
+    record_running_containers newsly-api-blue newsly-api-green newsly-workers newsly-scheduler
+    failure_restore_policy="maintenance_barrier"
+    compose stop api_blue api_green workers scheduler
+
+    if [[ -f "${sqlx_backup_marker}" ]]; then
+      sqlx_backup_path="$(tr -d '\r\n' < "${sqlx_backup_marker}")"
+      case "${sqlx_backup_path}" in
+        "${sqlx_backup_dir}"/*) ;;
+        *)
+          echo "Recorded SQLx baseline backup is outside ${sqlx_backup_dir}" >&2
+          exit 1
+          ;;
+      esac
+      if [[ ! -f "${sqlx_backup_path}" || ! -f "${sqlx_backup_path}.sha256" ]]; then
+        echo "Recorded SQLx baseline backup is missing: ${sqlx_backup_path}" >&2
+        exit 1
+      fi
+      verify_recorded_database_backup "${sqlx_backup_path}"
+      echo "Reusing verified pre-adoption database backup: ${sqlx_backup_path}"
+    else
+      echo "Creating recoverable pre-adoption database backup"
+      mkdir -p "${sqlx_backup_dir}"
+      chmod 700 "${sqlx_backup_dir}"
+      backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+      sqlx_backup_temp="$(mktemp "${sqlx_backup_dir}/pre-adoption-${backup_timestamp}.XXXXXX.dump")"
+      sqlx_backup_path="${sqlx_backup_dir}/pre-adoption-${backup_timestamp}.dump"
+      create_verified_database_backup \
+        "${sqlx_backup_temp}" \
+        "${sqlx_backup_path}" \
+        "Pre-adoption database backup failed"
+      backup_marker_temp="$(mktemp "${state_dir}/sqlx-baseline-backup.XXXXXX")"
+      printf '%s\n' "${sqlx_backup_path}" > "${backup_marker_temp}"
+      mv "${backup_marker_temp}" "${sqlx_backup_marker}"
+      echo "Verified pre-adoption database backup: ${sqlx_backup_path}"
+    fi
+
+    echo "Running one-time baseline adoption with the exact-image SQLx binary"
+    if ! compose --profile ops run --rm --no-deps \
+      -e NEWSLY_SQLX_BASELINE_ADOPTION=true \
+      -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
+      migrate; then
+      migration_state="$(authority_migration_state)"
+      if [[ "${migration_state}" == "applied" ]]; then
+        failure_restore_policy="none"
+        echo "Rust authority committed before migration validation failed; prior runtime remains stopped" >&2
+      elif [[ "${migration_state}" == "unknown" ]]; then
+        failure_restore_policy="none"
+        echo "Could not prove that Rust authority is inactive; prior runtime remains stopped" >&2
+      fi
       exit 1
     fi
-    docker exec -i newsly-postgres pg_restore --list < "${sqlx_backup_temp}" >/dev/null
-    sqlx_backup_path="${sqlx_backup_dir}/pre-adoption-${backup_timestamp}.dump"
-    mv "${sqlx_backup_temp}" "${sqlx_backup_path}"
-    chmod 600 "${sqlx_backup_path}"
-    sha256sum "${sqlx_backup_path}" > "${sqlx_backup_path}.sha256"
-    chmod 600 "${sqlx_backup_path}.sha256"
-    backup_marker_temp="$(mktemp "${state_dir}/sqlx-baseline-backup.XXXXXX")"
-    printf '%s\n' "${sqlx_backup_path}" > "${backup_marker_temp}"
-    mv "${backup_marker_temp}" "${sqlx_backup_marker}"
-    echo "Verified pre-adoption database backup: ${sqlx_backup_path}"
-  fi
+    failure_restore_policy="none"
+    touch "${sqlx_adoption_marker}"
 
-  echo "Running one-time baseline adoption with the exact-image SQLx binary"
-  if ! compose --profile ops run --rm --no-deps \
-    -e NEWSLY_SQLX_BASELINE_ADOPTION=true \
-    -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
-    migrate; then
-    migration_state="$(authority_migration_state)"
-    if [[ "${migration_state}" == "applied" ]]; then
-      restore_barrier_on_failure=false
-      echo "Rust authority committed before migration validation failed; prior runtime remains stopped" >&2
-    elif [[ "${migration_state}" == "unknown" ]]; then
-      restore_barrier_on_failure=false
-      echo "Could not prove that Rust authority is inactive; prior runtime remains stopped" >&2
-    fi
-    exit 1
-  fi
-  restore_barrier_on_failure=false
-  touch "${sqlx_adoption_marker}"
-
-  # The authority migration is intentionally one-way. From this point onward, starting an older
-  # API or worker could violate the durable route/task fences. Keep the prior processes stopped and
-  # fail closed if the new Rust runtime cannot become healthy.
-  echo "Rust runtime authority is active; prior application runtime remains stopped during cutover"
-else
-  echo "Running backward-compatible database migrations while the active API remains online"
-  compose --profile ops run --rm --no-deps \
-    -e NEWSLY_SQLX_BASELINE_ADOPTION=false \
-    -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=false \
-    migrate
-fi
+    # The authority migration is intentionally one-way. From this point onward, starting an older
+    # API or worker could violate the durable route/task fences. Keep the prior processes stopped and
+    # fail closed if the new Rust runtime cannot become healthy.
+    echo "Rust runtime authority is active; prior application runtime remains stopped during cutover"
+    ;;
+  online)
+    echo "Running backward-compatible database migrations while the active API remains online"
+    compose --profile ops run --rm --no-deps \
+      -e NEWSLY_SQLX_BASELINE_ADOPTION=false \
+      -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=false \
+      migrate
+    ;;
+esac
 
 echo "Starting database-free document extractor"
 compose up -d --no-deps document-extractor
@@ -305,20 +402,16 @@ if [[ "${public_base_url}" != https://* ]]; then
   exit 1
 fi
 
-if [[ "${baseline_adoption}" == "false" ]]; then
+if [[ "${writer_drain_policy}" == "before_switch" ]]; then
   echo "Draining workers and scheduler before the API version switch"
-  for container in newsly-workers newsly-scheduler; do
-    if [[ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" == "true" ]]; then
-      normal_writer_containers+=("${container}")
-    fi
-  done
-  restore_normal_writers_on_failure=true
+  record_running_containers newsly-workers newsly-scheduler
+  failure_restore_policy="online_writers"
   compose stop workers scheduler
 fi
 
 # Once target switching begins, the new API may emit work even if the public probe later fails.
 # Never restart an older writer binary after this point.
-restore_normal_writers_on_failure=false
+failure_restore_policy="none"
 
 echo "Switching Nginx to ${target_slot}"
 "${switch_script}" "${target_slot}"
@@ -337,7 +430,7 @@ for attempt in $(seq 1 3); do
 done
 if [[ "${public_origin_healthy}" != true ]]; then
   echo "Public HTTPS origin did not reach the new API slot" >&2
-  if [[ "${baseline_adoption}" == "false" && ( "${active_slot}" == "blue" || "${active_slot}" == "green" ) ]]; then
+  if [[ "${route_rollback_policy}" == "restore_prior_slot" && ( "${active_slot}" == "blue" || "${active_slot}" == "green" ) ]]; then
     echo "Restoring public traffic to the previously active ${active_slot} API slot" >&2
     if ! "${switch_script}" "${active_slot}"; then
       echo "Automatic public-route rollback failed; manual intervention is required" >&2
@@ -355,7 +448,7 @@ compose up -d --no-deps bgutil-provider
 
 echo "Updating workers and scheduler"
 compose up -d --no-deps workers scheduler
-restore_barrier_on_failure=false
+failure_restore_policy="none"
 
 printf '%s\n' "${image}" > "${state_dir}/active-image"
 printf '%s\n' "${image}" > "${state_dir}/${target_slot}-image"

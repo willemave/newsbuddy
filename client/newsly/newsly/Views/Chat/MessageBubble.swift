@@ -10,10 +10,8 @@ struct MessageBubble: View {
     @Environment(\.openURL) private var openURL
 
     let message: ChatMessage
-    let retryingCouncilChildSessionId: Int?
     var onDigDeeper: ((String) -> Void)?
     var onShare: ((String) -> Void)?
-    var onRetryCouncilCandidate: ((CouncilCandidate) -> Void)?
     var feedOptionActionModel: AssistantFeedOptionActionModel
 
     var body: some View {
@@ -27,7 +25,7 @@ struct MessageBubble: View {
     }
 
     private var style: MessageBubbleStyle {
-        MessageBubbleStyle(message: message)
+        MessageBubbleStyle(isUser: message.isUser)
     }
 
     private var assistantTextColor: UIColor {
@@ -63,25 +61,14 @@ struct MessageBubble: View {
                 .textSelection(.enabled)
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                if message.hasCouncilCandidates {
-                    CouncilCandidatesBubble(
-                        message: message,
-                        textColor: assistantTextColor,
-                        retryingChildSessionId: retryingCouncilChildSessionId,
-                        onRetryCandidate: { candidate in
-                            onRetryCouncilCandidate?(candidate)
-                        }
-                    )
-                } else {
-                    SelectableMarkdownView(
-                        markdown: message.content,
-                        textColor: assistantTextColor,
-                        baseFont: .chatBody,
-                        adjustsFontForContentSizeCategory: true,
-                        scalingTextStyle: .callout,
-                        onDigDeeper: onDigDeeper
-                    )
-                }
+                SelectableMarkdownView(
+                    markdown: message.content,
+                    textColor: assistantTextColor,
+                    baseFont: .chatBody,
+                    adjustsFontForContentSizeCategory: true,
+                    scalingTextStyle: .callout,
+                    onDigDeeper: onDigDeeper
+                )
 
                 if message.hasFeedOptions {
                     AssistantFeedOptionsSection(
@@ -186,21 +173,16 @@ private struct MessageBubbleChrome<Content: View>: View {
         .foregroundStyle(style.foregroundColor)
     }
 
-    @ViewBuilder
     private var bubbleSurface: some View {
-        if style.rendersOwnBubble {
-            framedContent
-        } else {
-            framedContent
-                .padding(.horizontal, MessageBubbleMetrics.horizontalInset)
-                .padding(.vertical, MessageBubbleMetrics.verticalInset)
-                .background(style.backgroundColor, in: style.shape)
-                .overlay {
-                    if let strokeColor = style.strokeColor {
-                        style.shape.stroke(strokeColor, lineWidth: 0.5)
-                    }
+        framedContent
+            .padding(.horizontal, MessageBubbleMetrics.horizontalInset)
+            .padding(.vertical, MessageBubbleMetrics.verticalInset)
+            .background(style.backgroundColor, in: style.shape)
+            .overlay {
+                if let strokeColor = style.strokeColor {
+                    style.shape.stroke(strokeColor, lineWidth: 0.5)
                 }
-        }
+            }
     }
 
     @ViewBuilder
@@ -215,12 +197,6 @@ private struct MessageBubbleChrome<Content: View>: View {
 
 private struct MessageBubbleStyle {
     let isUser: Bool
-    let rendersOwnBubble: Bool
-
-    init(message: ChatMessage) {
-        isUser = message.isUser
-        rendersOwnBubble = !message.isUser && message.hasCouncilCandidates
-    }
 
     var isAssistant: Bool {
         !isUser
@@ -270,17 +246,14 @@ private enum MessageBubbleMetrics {
     VStack(spacing: 16) {
         MessageBubble(
             message: ChatPreviewFixtures.userMessage,
-            retryingCouncilChildSessionId: nil,
             feedOptionActionModel: ChatPreviewActionModels.feedOptions()
         )
         MessageBubble(
             message: ChatPreviewFixtures.assistantMessage,
-            retryingCouncilChildSessionId: nil,
             feedOptionActionModel: ChatPreviewActionModels.feedOptions()
         )
         MessageBubble(
             message: ChatPreviewFixtures.processSummaryMessage,
-            retryingCouncilChildSessionId: nil,
             feedOptionActionModel: ChatPreviewActionModels.feedOptions()
         )
     }

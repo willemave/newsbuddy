@@ -496,6 +496,23 @@ identities. Tool progress is separate from confirmed transcript text. Queue
 lease plus chat stream generation fence every partial and final publication.
 Provider response IDs support resumable operations without replaying accepted
 work.
+HTTP-staged turns and worker-created Dig Deeper turns use one typed durable-context
+constructor and Serde encoding; legacy decoding does not define new turn payloads.
+
+Chat has no council execution path. Historical councils are converted under an explicit
+maintenance barrier into the parent transcript plus the selected branch's visible follow-ups,
+preserving session and message IDs. Other branch records stay hidden and archived. The conversion
+refuses processing council messages and malformed ownership/boundary links. Validated database
+constraints prevent older binaries from recreating council state. `newsly-db
+verify-council-retirement` reports bounded, content-free blockers before the cutover.
+
+The API owns temporary retired endpoint responses and inert council wire fields required by
+installed clients: false mode, null branch IDs, empty candidates, and empty personas. Persona
+profile inputs are accepted and ignored. Remove this compatibility only when minimum supported
+clients and route telemetry establish it is unused. The DB owns a bounded decode-only vocabulary
+for retired fields on ordinary queued turns; remove it after pre-cutover queued rows have settled.
+Historical schema columns remain for retained records until the rollback/data-retention decision
+allows contraction. Content audio discussion is independent of this chat retirement.
 
 Directly verified Share feeds and articles/episodes use the existing host action
 finalizer without starting an agent. Explicit chat and presentation requests also

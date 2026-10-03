@@ -310,6 +310,11 @@ mod tests {
         ("delete", "/api/learning/decks/{deck_id}"),
         ("delete", "/api/scrapers/{config_id}"),
     ];
+    const RETIRED_NO_SUCCESS_OPERATION_IDS: &[&str] = &[
+        "retryContentChatSessionsCouncilModeBranch",
+        "selectContentChatSessionsCouncilModeBranch",
+        "startContentChatSessionsCouncilMode",
+    ];
     const NON_JSON_ERROR_RESPONSES: &[(&str, &str, &str)] = &[
         (
             "get",
@@ -325,6 +330,17 @@ mod tests {
 
     fn public_document() -> Value {
         serde_json::to_value(newsly_api::openapi_document()).expect("serialize OpenAPI")
+    }
+
+    fn retired_operation_without_success(operation: &Value) -> Option<&str> {
+        let operation_id = operation.get("operationId")?.as_str()?;
+        (RETIRED_NO_SUCCESS_OPERATION_IDS.contains(&operation_id)
+            && operation.get("deprecated").and_then(Value::as_bool) == Some(true)
+            && operation
+                .get("responses")
+                .and_then(Value::as_object)
+                .is_some_and(|responses| responses.contains_key("410")))
+        .then_some(operation_id)
     }
 
     #[test]
@@ -460,6 +476,7 @@ mod tests {
         let document = public_document();
         let paths = document["paths"].as_object().expect("paths object");
         let mut seen_exceptions = HashSet::new();
+        let mut seen_retired_operations = HashSet::new();
 
         for (path, path_item) in paths {
             if !path.starts_with("/api/") {
@@ -481,10 +498,12 @@ mod tests {
                             .is_ok_and(|status_code| (200..400).contains(&status_code))
                     })
                     .collect::<Vec<_>>();
-                assert!(
-                    !success_responses.is_empty(),
-                    "{method} {path} has no success response"
-                );
+                if success_responses.is_empty() {
+                    let operation_id = retired_operation_without_success(operation)
+                        .unwrap_or_else(|| panic!("{method} {path} has no success response"));
+                    seen_retired_operations.insert(operation_id);
+                    continue;
+                }
                 let has_json_schema = success_responses.iter().any(|(_, response)| {
                     response
                         .pointer("/content/application~1json/schema")
@@ -517,6 +536,27 @@ mod tests {
             seen_exceptions,
             NON_JSON_SUCCESS_OPERATIONS.iter().copied().collect()
         );
+        assert_eq!(
+            seen_retired_operations,
+            RETIRED_NO_SUCCESS_OPERATION_IDS.iter().copied().collect()
+        );
+    }
+
+    #[test]
+    fn unrelated_operations_cannot_use_the_retired_no_success_exception() {
+        let unrelated = json!({
+            "operationId": "someOtherOperation",
+            "deprecated": true,
+            "responses": {"410": {"description": "Gone"}}
+        });
+        assert_eq!(retired_operation_without_success(&unrelated), None);
+
+        let missing_gone = json!({
+            "operationId": "startContentChatSessionsCouncilMode",
+            "deprecated": true,
+            "responses": {"401": {"description": "Unauthorized"}}
+        });
+        assert_eq!(retired_operation_without_success(&missing_gone), None);
     }
 
     #[test]

@@ -3,7 +3,7 @@ import XCTest
 @testable import newsly
 
 final class UserProfileCodingTests: XCTestCase {
-    func testUserDecodesCouncilPersonas() throws {
+    func testUserDecodesProfileWithLegacyFields() throws {
         let json = """
         {
           "id": 1,
@@ -52,28 +52,9 @@ final class UserProfileCodingTests: XCTestCase {
 
         let user = try decoder.decode(User.self, from: json)
 
-        XCTAssertEqual(user.councilPersonas.map(\.displayName), ["Analyst", "Skeptic", "Builder", "Historian"])
-    }
-
-    func testUpdateUserProfileRequestEncodesCouncilPersonas() throws {
-        let request = APIUpdateUserProfileRequest(
-            fullName: nil,
-            twitterUsername: "willem_aw",
-            councilPersonas: [
-                APICouncilPersonaInput(
-                    id: "einstein",
-                    displayName: "Albert Einstein",
-                    instructionPrompt: "Reduce the issue to first principles.",
-                    sortOrder: 0
-                )
-            ]
-        )
-
-        let data = try JSONEncoder().encode(request)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-
-        let councilPersonas = try XCTUnwrap(json["council_personas"] as? [[String: Any]])
-        XCTAssertEqual(councilPersonas.first?["display_name"] as? String, "Albert Einstein")
+        XCTAssertEqual(user.fullName, "Test User")
+        XCTAssertEqual(user.twitterUsername, "willem_aw")
+        XCTAssertTrue(user.hasXBookmarkSync)
     }
 
     func testUpdateUserProfileRequestEncodesReadingExperience() throws {
@@ -98,7 +79,7 @@ final class UserProfileCodingTests: XCTestCase {
         XCTAssertEqual(json["timezone_revision"] as? Int, 7)
     }
 
-    func testUserFallsBackToDefaultCouncilPersonasWhenMissingFromPayload() throws {
+    func testUserFallsBackToDefaultReadingExperienceWhenMissingFromPayload() throws {
         let json = """
         {
           "id": 1,
@@ -121,7 +102,6 @@ final class UserProfileCodingTests: XCTestCase {
 
         let user = try decoder.decode(User.self, from: json)
 
-        XCTAssertEqual(user.councilPersonas, CouncilPersona.defaults)
         XCTAssertEqual(user.readingExperience, .briefing)
     }
 }

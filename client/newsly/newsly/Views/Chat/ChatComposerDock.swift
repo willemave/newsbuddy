@@ -9,9 +9,7 @@ struct ChatComposerDock: View {
     @Binding var inputText: String
     let isInputFocused: FocusState<Bool>.Binding
     let session: ChatSessionSummary?
-    let canStartCouncil: Bool
     let canStartDeepResearch: Bool
-    let isStartingCouncil: Bool
     let isSending: Bool
     let isRecording: Bool
     let isTranscribing: Bool
@@ -19,7 +17,6 @@ struct ChatComposerDock: View {
     let voiceDictationAvailable: Bool
     let onShowHistory: (() -> Void)?
     let onSwitchProvider: (ChatModelProvider) -> Void
-    let onStartCouncil: () -> Void
     let onStartDeepResearch: () -> Void
     let onToggleVoiceRecording: () -> Void
     let onSend: () -> Void
@@ -43,7 +40,6 @@ struct ChatComposerDock: View {
     private var showsMoreActionsMenu: Bool {
         onShowHistory != nil ||
         session != nil ||
-        canStartCouncil ||
         canStartDeepResearch
     }
 
@@ -84,40 +80,23 @@ struct ChatComposerDock: View {
                     Label("Current: \(session.providerDisplayName)", systemImage: session.providerIconFallback)
                         .foregroundStyle(Color.onSurfaceSecondary)
 
-                    if session.isCouncilMode {
-                        Label("Switching unavailable in Council", systemImage: "person.3.sequence.fill")
-                            .disabled(true)
-                    } else {
-                        ForEach(ChatModelProvider.selectableProviders, id: \.self) { provider in
-                            Button {
-                                onSwitchProvider(provider)
-                            } label: {
-                                Label(provider.chatDisplayName, systemImage: provider.iconName)
-                            }
-                            .disabled(provider.rawValue == session.llmProvider)
+                    ForEach(ChatModelProvider.selectableProviders, id: \.self) { provider in
+                        Button {
+                            onSwitchProvider(provider)
+                        } label: {
+                            Label(provider.chatDisplayName, systemImage: provider.iconName)
                         }
+                        .disabled(provider.rawValue == session.llmProvider)
                     }
                 }
             }
 
-            if canStartCouncil || canStartDeepResearch {
+            if canStartDeepResearch {
                 Section("Actions") {
-                    if canStartCouncil {
-                        Button(action: onStartCouncil) {
-                            Label(
-                                isStartingCouncil ? "Starting Council…" : "Council",
-                                systemImage: "person.3.sequence.fill"
-                            )
-                        }
-                        .disabled(isStartingCouncil || isSending)
+                    Button(action: onStartDeepResearch) {
+                        Label("Deep Research", systemImage: "magnifyingglass.circle.fill")
                     }
-
-                    if canStartDeepResearch {
-                        Button(action: onStartDeepResearch) {
-                            Label("Deep Research", systemImage: "magnifyingglass.circle.fill")
-                        }
-                        .disabled(isSending)
-                    }
+                    .disabled(isSending)
                 }
             }
         } label: {
@@ -294,9 +273,7 @@ private struct ChatComposerDockPreviewHost: View {
             inputText: $inputText,
             isInputFocused: $isInputFocused,
             session: ChatPreviewFixtures.session,
-            canStartCouncil: true,
             canStartDeepResearch: true,
-            isStartingCouncil: false,
             isSending: false,
             isRecording: false,
             isTranscribing: false,
@@ -304,7 +281,6 @@ private struct ChatComposerDockPreviewHost: View {
             voiceDictationAvailable: true,
             onShowHistory: {},
             onSwitchProvider: { _ in },
-            onStartCouncil: {},
             onStartDeepResearch: {},
             onToggleVoiceRecording: {},
             onSend: {}

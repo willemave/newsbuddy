@@ -683,79 +683,6 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
     }
 
-    func testCancelCouncilSelectionClearsInFlightState() async {
-        let chatService = MockChatSessionService(selectCouncilBranchHandler: { _, _ in
-            try await Task.sleep(nanoseconds: 60_000_000_000)
-            throw CancellationError()
-        })
-        let viewModel = ChatSessionViewModel(
-            lifecycle: makeActiveLifecycle(),
-            route: ChatSessionRoute(session: Self.session(activeChildSessionId: 200)),
-            dependencies: .test(
-                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
-                chatService: chatService
-            )
-        )
-
-        let selectionTask = Task {
-            await viewModel.selectCouncilBranch(childSessionId: 201)
-        }
-
-        let didStartSelection = await waitUntil { viewModel.selectingCouncilChildSessionId == 201 }
-        XCTAssertTrue(didStartSelection)
-
-        viewModel.cancelCouncilSelection()
-        await selectionTask.value
-
-        XCTAssertNil(viewModel.selectingCouncilChildSessionId)
-        XCTAssertFalse(viewModel.councilSelectionTimedOut)
-        XCTAssertNil(viewModel.errorMessage)
-    }
-
-    func testRetryCouncilCandidateAppliesReturnedDetail() async {
-        let retriedMessage = ChatMessage(
-            id: 9,
-            sourceMessageId: 9,
-            role: .assistant,
-            timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
-            content: "Ben Thompson regenerated.",
-            councilCandidates: [
-                CouncilCandidate(
-                    personaId: "ben_thompson",
-                    personaName: "Ben Thompson",
-                    childSessionId: 201,
-                    content: "Ben Thompson regenerated.",
-                    status: "completed",
-                    order: 0
-                )
-            ],
-            activeCouncilChildSessionId: 201
-        )
-        let detail = ChatSessionDetail(
-            session: Self.session(activeChildSessionId: 201),
-            messages: [retriedMessage]
-        )
-        let chatService = MockChatSessionService(retryCouncilBranchHandler: { _, childSessionId in
-            XCTAssertEqual(childSessionId, 201)
-            return detail
-        })
-        let viewModel = ChatSessionViewModel(
-            lifecycle: makeActiveLifecycle(),
-            route: ChatSessionRoute(session: Self.session(activeChildSessionId: 200)),
-            dependencies: .test(
-                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
-                chatService: chatService
-            )
-        )
-
-        await viewModel.retryCouncilCandidate(childSessionId: 201)
-
-        XCTAssertNil(viewModel.retryingCouncilChildSessionId)
-        XCTAssertEqual(viewModel.activeCouncilChildSessionId, 201)
-        XCTAssertEqual(viewModel.councilCandidates.first?.status, "completed")
-        XCTAssertEqual(viewModel.councilCandidates.first?.content, "Ben Thompson regenerated.")
-    }
-
     func testHandleDisappearKeepsPreAckSendAliveAndHandsOffAfterServerAck() async {
         let ackGate = AsyncGate()
         let chatService = MockChatSessionService(
@@ -969,8 +896,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 session: Self.session(
                     contentId: 7,
                     articleTitle: "Tracked Article",
-                    hasMessages: false,
-                    councilMode: false
+                    hasMessages: false
                 ),
                 messages: []
             )
@@ -1049,9 +975,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         newsItemId: Int? = nil,
         articleTitle: String? = nil,
         hasPendingMessage: Bool = false,
-        activeChildSessionId: Int? = nil,
-        hasMessages: Bool = true,
-        councilMode: Bool? = true
+        hasMessages: Bool = true
     ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: 42,
@@ -1073,9 +997,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             isSavedToKnowledge: false,
             hasMessages: hasMessages,
             lastMessagePreview: nil,
-            lastMessageRole: nil,
-            councilMode: councilMode,
-            activeChildSessionId: activeChildSessionId
+            lastMessageRole: nil
         )
     }
 
@@ -1121,8 +1043,6 @@ private final class MockChatSessionService: ChatSessionServicing {
     private let getSessionHandler: ((Int) async throws -> ChatSessionDetail)?
     private let sendMessageHandler: ((Int, String) async throws -> SendChatMessageResponse)?
     private let messageStatusHandler: ((Int) async throws -> MessageStatusResponse)?
-    private let selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
-    private let retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
     private(set) var initialSuggestionsCallCount = 0
     private(set) var messageStatusCallCount = 0
     private(set) var sentMessages: [(sessionId: Int, message: String)] = []
@@ -1130,15 +1050,11 @@ private final class MockChatSessionService: ChatSessionServicing {
     init(
         getSessionHandler: ((Int) async throws -> ChatSessionDetail)? = nil,
         sendMessageHandler: ((Int, String) async throws -> SendChatMessageResponse)? = nil,
-        messageStatusHandler: ((Int) async throws -> MessageStatusResponse)? = nil,
-        selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)? = nil,
-        retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)? = nil
+        messageStatusHandler: ((Int) async throws -> MessageStatusResponse)? = nil
     ) {
         self.getSessionHandler = getSessionHandler
         self.sendMessageHandler = sendMessageHandler
         self.messageStatusHandler = messageStatusHandler
-        self.selectCouncilBranchHandler = selectCouncilBranchHandler
-        self.retryCouncilBranchHandler = retryCouncilBranchHandler
     }
 
     func getSession(id: Int) async throws -> ChatSessionDetail {
@@ -1166,24 +1082,6 @@ private final class MockChatSessionService: ChatSessionServicing {
 
     func getInitialSuggestions(sessionId: Int) async throws -> ChatMessage {
         initialSuggestionsCallCount += 1
-        throw ChatServiceError.timeout
-    }
-
-    func startCouncil(sessionId: Int, message: String) async throws -> ChatSessionDetail {
-        throw ChatServiceError.timeout
-    }
-
-    func selectCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail {
-        if let selectCouncilBranchHandler {
-            return try await selectCouncilBranchHandler(sessionId, childSessionId)
-        }
-        throw ChatServiceError.timeout
-    }
-
-    func retryCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail {
-        if let retryCouncilBranchHandler {
-            return try await retryCouncilBranchHandler(sessionId, childSessionId)
-        }
         throw ChatServiceError.timeout
     }
 

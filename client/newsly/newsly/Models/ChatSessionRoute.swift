@@ -15,7 +15,6 @@ struct ChatSessionRoute: Hashable {
     let initialUserMessageText: String?
     let initialUserMessageTimestamp: Date?
     let pendingMessageId: Int?
-    let pendingCouncilPrompt: String?
     let focusComposerOnAppear: Bool
     var stableKey: String {
         [
@@ -25,7 +24,6 @@ struct ChatSessionRoute: Hashable {
             initialUserMessageText ?? "",
             initialUserMessageTimestamp.map(ServerDate.format) ?? "",
             pendingMessageId.map(String.init) ?? "",
-            pendingCouncilPrompt ?? "",
             String(focusComposerOnAppear)
         ].joined(separator: "|")
     }
@@ -38,7 +36,6 @@ struct ChatSessionRoute: Hashable {
         initialUserMessageText: String? = nil,
         initialUserMessageTimestamp: Date? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
     ) {
         self.sessionId = sessionId
@@ -48,7 +45,6 @@ struct ChatSessionRoute: Hashable {
         self.initialUserMessageText = initialUserMessageText
         self.initialUserMessageTimestamp = initialUserMessageTimestamp
         self.pendingMessageId = pendingMessageId
-        self.pendingCouncilPrompt = pendingCouncilPrompt
         self.focusComposerOnAppear = focusComposerOnAppear
     }
 
@@ -57,7 +53,6 @@ struct ChatSessionRoute: Hashable {
         initialUserMessageText: String? = nil,
         initialUserMessageTimestamp: Date? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
     ) {
         self.init(
@@ -68,7 +63,6 @@ struct ChatSessionRoute: Hashable {
             initialUserMessageText: initialUserMessageText,
             initialUserMessageTimestamp: initialUserMessageTimestamp,
             pendingMessageId: pendingMessageId,
-            pendingCouncilPrompt: pendingCouncilPrompt,
             focusComposerOnAppear: focusComposerOnAppear
         )
     }

@@ -189,7 +189,7 @@ impl ChatAgentRuntime {
                 let route = route_assistant_turn(&snapshot.context.user_prompt, context)?;
                 (route.instruction, route.allowed_tools)
             }
-            ChatTurnKind::Article | ChatTurnKind::Council => (None, article_tools()),
+            ChatTurnKind::Article => (None, article_tools()),
             ChatTurnKind::DeepResearch => unreachable!(),
         };
         let engine = RigAgentEngine::new(

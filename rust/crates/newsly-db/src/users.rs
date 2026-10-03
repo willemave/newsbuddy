@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
@@ -10,7 +9,6 @@ pub struct UserProfileProjection {
     pub email: String,
     pub full_name: Option<String>,
     pub twitter_username: Option<String>,
-    pub council_personas: Option<Value>,
     pub is_admin: bool,
     pub is_active: bool,
     pub has_completed_new_user_tutorial: bool,
@@ -27,7 +25,6 @@ pub struct UserProfileProjection {
 pub struct UserProfilePatch {
     pub full_name: Option<Option<String>>,
     pub twitter_username: Option<Option<String>>,
-    pub council_personas: Option<Value>,
     pub reading_experience: Option<String>,
 }
 
@@ -242,13 +239,6 @@ pub async fn update_user_profile(
             .execute(&mut **transaction)
             .await?;
     }
-    if let Some(council_personas) = &patch.council_personas {
-        sqlx::query("UPDATE users SET council_personas = $1, updated_at = NOW() WHERE id = $2")
-            .bind(council_personas)
-            .bind(user_id)
-            .execute(&mut **transaction)
-            .await?;
-    }
     if let Some(reading_experience) = &patch.reading_experience {
         sqlx::query("UPDATE users SET reading_experience = $1, updated_at = NOW() WHERE id = $2")
             .bind(reading_experience)
@@ -274,7 +264,6 @@ where
             app_user.email,
             app_user.full_name,
             app_user.twitter_username,
-            app_user.council_personas,
             app_user.is_admin,
             app_user.is_active,
             app_user.has_completed_new_user_tutorial,

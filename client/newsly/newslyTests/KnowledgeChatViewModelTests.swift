@@ -550,7 +550,6 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         let chatService = MockKnowledgeChatService(
             pageResponses: [.success(makeSessionListResponse(
                 sessions: [
-                    makeSession(id: 3, contentId: 7, councilMode: true),
                     makeSession(id: 4, newsItemId: 7),
                     makeSession(id: 5, contentId: 7),
                     makeSession(id: 6, contentId: 7)
@@ -591,22 +590,6 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertEqual(route?.focusComposerOnAppear, true)
         XCTAssertEqual(chatService.startedSources, [KnowledgeSourceKey(id: 7, isNews: true)])
         XCTAssertEqual(viewModel.sessions.map(\.id), [9, 5])
-    }
-
-    func testStartSourceCouncilQueuesCouncilPromptOnNewChat() async {
-        let chatService = MockKnowledgeChatService(turnResponses: [])
-        chatService.startResponses = [.success(makeSession(id: 10, contentId: 8))]
-        let viewModel = KnowledgeChatViewModel(chatService: chatService)
-
-        let route = await viewModel.startSourceCouncil(
-            for: .knowledgeSourceFixture(id: 8, title: "Compilers 2.0")
-        )
-
-        XCTAssertEqual(route?.sessionId, 10)
-        XCTAssertEqual(
-            route?.pendingCouncilPrompt,
-            DetailChatCoordinator.councilPrompt(sourceTitle: "Compilers 2.0")
-        )
     }
 
     func testOpenSourceChatSurfacesStartFailure() async {
@@ -657,8 +640,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         contentId: Int? = nil,
         newsItemId: Int? = nil,
         sessionType: String = "knowledge_chat",
-        isWaitingForContent: Bool = false,
-        councilMode: Bool? = nil
+        isWaitingForContent: Bool = false
     ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: id,
@@ -681,8 +663,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             isSavedToKnowledge: false,
             hasMessages: true,
             lastMessagePreview: nil,
-            lastMessageRole: nil,
-            councilMode: councilMode
+            lastMessageRole: nil
         )
     }
 }

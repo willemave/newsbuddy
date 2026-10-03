@@ -68,6 +68,7 @@ string_enum!(FeedType {
     Substack => "substack",
     PodcastRss => "podcast_rss",
     Youtube => "youtube",
+    Aggregator => "aggregator",
 });
 
 const fn default_message_status() -> MessageProcessingStatus {
@@ -205,6 +206,8 @@ pub struct AssistantFeedOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+/// Compatibility shape for council responses stored in older chat messages. The public Newsly API
+/// owns this type until the minimum supported client version no longer decodes these candidates.
 pub struct CouncilCandidate {
     #[schemars(length(min = 1, max = 50))]
     #[schema(min_length = 1, max_length = 50)]
@@ -252,7 +255,11 @@ pub struct ChatMessageDto {
     #[serde(default)]
     pub feed_options: Vec<AssistantFeedOption>,
     #[serde(default)]
+    /// Always empty after council retirement. Remove with `CouncilCandidate` after the installed
+    /// client compatibility window closes.
     pub council_candidates: Vec<CouncilCandidate>,
+    /// Always `None` after council retirement. Remove after the minimum supported client version
+    /// no longer decodes an active council candidate.
     pub active_council_child_session_id: Option<i64>,
 }
 
@@ -307,7 +314,11 @@ pub struct ChatSessionSummaryDto {
     pub last_message_preview: Option<String>,
     pub last_message_role: Option<String>,
     #[serde(default)]
+    /// Always `false` after council retirement. Remove after the minimum supported client version
+    /// no longer decodes council mode.
     pub council_mode: bool,
+    /// Always `None` after council retirement. Remove after the minimum supported client version
+    /// no longer decodes an active council branch.
     pub active_child_session_id: Option<i64>,
 }
 

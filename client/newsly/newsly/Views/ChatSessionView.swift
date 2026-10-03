@@ -6,20 +6,6 @@ private enum ChatSessionDesign {
     static let edgeBackSwipeThreshold: CGFloat = 80
 }
 
-private enum ChatSessionSheetDestination: Identifiable {
-    case councilSettings
-    case share(ShareContent)
-
-    var id: String {
-        switch self {
-        case .councilSettings:
-            "councilSettings"
-        case .share(let content):
-            "share.\(content.id.uuidString)"
-        }
-    }
-}
-
 struct ChatSessionView: View {
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(ActiveChatSessionManager.self) private var activeSessionManager
@@ -58,7 +44,6 @@ struct ChatSessionView: View {
 }
 
 private struct ChatSessionContent: View {
-    @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
 
@@ -71,7 +56,7 @@ private struct ChatSessionContent: View {
 
     @State private var viewModel: ChatSessionViewModel
     @FocusState private var isInputFocused: Bool
-    @State private var activeSheet: ChatSessionSheetDestination?
+    @State private var activeSheet: ShareContent?
     @State private var scrollToBottomRequest = 0
     @State private var edgeBackDragOffset: CGFloat = 0
     @State private var edgeBackSwipeFeedbackTrigger = 0
@@ -98,14 +83,6 @@ private struct ChatSessionContent: View {
         )
         self.onShowHistory = onShowHistory
         self.onClose = onClose
-    }
-
-    private var defaultCouncilPrompt: String {
-        if let title = viewModel.session?.articleTitle ?? viewModel.session?.displayTitle,
-           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Give me your perspective on \(title). Keep it short: 2-4 concise bullets on what matters, what is weak or missing, and what follows."
-        }
-        return "Give me your perspective on this conversation. Keep it short: 2-4 concise bullets on what matters, what is weak or missing, and what follows."
     }
 
     var body: some View {
@@ -143,14 +120,8 @@ private struct ChatSessionContent: View {
             .onDisappear {
                 viewModel.handleDisappear()
             }
-            .sheet(item: $activeSheet) { destination in
-                switch destination {
-                case .councilSettings:
-                    SettingsNavigationStack(scrollToCouncilOnAppear: true)
-                        .environment(authViewModel)
-                case .share(let content):
-                    ShareSheet(content: content)
-                }
+            .sheet(item: $activeSheet) { content in
+                ShareSheet(content: content)
             }
             .sensoryFeedback(.impact(weight: .light), trigger: edgeBackSwipeFeedbackTrigger)
     }
@@ -177,20 +148,16 @@ private struct ChatSessionContent: View {
             isLoading: viewModel.isLoading,
             loadErrorMessage: viewModel.loadErrorMessage,
             errorMessage: viewModel.errorMessage,
-            isStartingCouncil: viewModel.isStartingCouncil,
             isSending: viewModel.isSending,
             thinkingStartedAt: viewModel.thinkingStartedAt,
             latestProcessSummary: viewModel.latestProcessSummary,
             hasVisiblePartialResponse: viewModel.hasVisiblePartialResponse,
             session: viewModel.session,
             scrollToBottomRequest: scrollToBottomRequest,
-            retryingCouncilChildSessionId: viewModel.retryingCouncilChildSessionId,
             feedOptionActionModel: feedOptionActionModel,
-            onOpenCouncilSettings: openCouncilSettings,
             onDismissError: dismissError,
             onRetryLoad: retryLoad,
             onRetrySend: retrySend,
-            onRetryCouncilCandidate: retryCouncilCandidate,
             onDigDeeper: digDeeper,
             onShare: presentShareSheet
         )
@@ -265,24 +232,15 @@ private struct ChatSessionContent: View {
     }
 
     private func presentShareSheet(for content: String) {
-        activeSheet = .share(
-            ShareContent(
-                messageContent: content,
-                articleTitle: viewModel.session?.articleTitle,
-                articleUrl: viewModel.session?.articleUrl
-            )
+        activeSheet = ShareContent(
+            messageContent: content,
+            articleTitle: viewModel.session?.articleTitle,
+            articleUrl: viewModel.session?.articleUrl
         )
     }
 
     private var bottomDock: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !viewModel.councilCandidates.isEmpty {
-                councilBranchSwitcher
-                    .padding(.horizontal, Spacing.appHorizontalMargin)
-            }
-
-            composerDock
-        }
+        composerDock
         .padding(.top, 6)
         .padding(.bottom, 6)
         .padding(.bottom, persistentBottomChromeInset)
@@ -293,9 +251,7 @@ private struct ChatSessionContent: View {
             inputText: $viewModel.inputText,
             isInputFocused: $isInputFocused,
             session: viewModel.session,
-            canStartCouncil: viewModel.canStartCouncil,
             canStartDeepResearch: viewModel.canStartDeepResearch,
-            isStartingCouncil: viewModel.isStartingCouncil,
             isSending: viewModel.isSending,
             isRecording: viewModel.isRecording,
             isTranscribing: viewModel.isTranscribing,
@@ -303,31 +259,18 @@ private struct ChatSessionContent: View {
             voiceDictationAvailable: viewModel.voiceDictationAvailable,
             onShowHistory: onShowHistory,
             onSwitchProvider: switchProvider,
-            onStartCouncil: startCouncil,
             onStartDeepResearch: startDeepResearch,
             onToggleVoiceRecording: toggleVoiceRecording,
             onSend: sendMessage
         )
     }
 
-    private var councilBranchSwitcher: some View {
-        CouncilBranchTabs(
-            candidates: viewModel.councilCandidates,
-            activeChildSessionId: viewModel.activeCouncilChildSessionId,
-            selectingChildSessionId: viewModel.selectingCouncilChildSessionId,
-            hasSelectionTimedOut: viewModel.councilSelectionTimedOut,
-            onSelect: selectCouncilCandidate,
-            onCancelSelection: cancelCouncilSelection
-        )
-    }
 }
 
 private extension ChatSessionContent {
     func switchProvider(_ provider: ChatModelProvider) {
         Task { await switchToProvider(provider) }
     }
-
-    func openCouncilSettings() { activeSheet = .councilSettings }
 
     func dismissError() { viewModel.errorMessage = nil }
 
@@ -338,18 +281,8 @@ private extension ChatSessionContent {
         viewModel.performSendMessage(text: text)
     }
 
-    func retryCouncilCandidate(_ candidate: CouncilCandidate) {
-        scrollToBottomRequest += 1
-        viewModel.performRetryCouncilCandidate(childSessionId: candidate.childSessionId)
-    }
-
     func digDeeper(into selectedText: String) {
         viewModel.performDigDeeper(into: selectedText)
-    }
-
-    func startCouncil() {
-        scrollToBottomRequest += 1
-        viewModel.performStartCouncil(message: defaultCouncilPrompt)
     }
 
     func startDeepResearch() {
@@ -362,16 +295,6 @@ private extension ChatSessionContent {
         scrollToBottomRequest += 1
         viewModel.performSendMessage()
     }
-
-    func selectCouncilCandidate(_ candidate: CouncilCandidate) {
-        guard viewModel.activeCouncilChildSessionId != candidate.childSessionId else { return }
-        Task {
-            await viewModel.selectCouncilBranch(childSessionId: candidate.childSessionId)
-            scrollToBottomRequest += 1
-        }
-    }
-
-    func cancelCouncilSelection() { viewModel.cancelCouncilSelection() }
 
     func isHorizontalBackSwipe(_ value: DragGesture.Value) -> Bool {
         value.translation.width > 0

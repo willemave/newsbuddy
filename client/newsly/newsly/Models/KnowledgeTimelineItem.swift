@@ -85,7 +85,6 @@ struct KnowledgeSourceDerivatives: OptionSet, Hashable {
     let rawValue: Int
 
     static let chat = Self(rawValue: 1 << 0)
-    static let council = Self(rawValue: 1 << 1)
     static let deck = Self(rawValue: 1 << 2)
     static let narration = Self(rawValue: 1 << 3)
 
@@ -100,7 +99,7 @@ struct KnowledgeSourceDerivatives: OptionSet, Hashable {
         }
 
         for session in chats {
-            let derivative: Self = session.isCouncilMode ? .council : .chat
+            let derivative: Self = .chat
             if let contentId = session.contentId {
                 mark(KnowledgeSourceKey(id: contentId, isNews: false), derivative)
             }

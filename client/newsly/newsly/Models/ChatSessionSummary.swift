@@ -39,8 +39,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let hasMessages: Bool?
     let lastMessagePreview: String?
     let lastMessageRole: String?
-    let councilMode: Bool?
-    let activeChildSessionId: Int?
     private let cachedLastActivityDate: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -67,8 +65,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         case hasMessages = "has_messages"
         case lastMessagePreview = "last_message_preview"
         case lastMessageRole = "last_message_role"
-        case councilMode = "council_mode"
-        case activeChildSessionId = "active_child_session_id"
     }
 
     init(
@@ -94,9 +90,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         isSavedToKnowledge: Bool?,
         hasMessages: Bool?,
         lastMessagePreview: String?,
-        lastMessageRole: String?,
-        councilMode: Bool? = nil,
-        activeChildSessionId: Int? = nil
+        lastMessageRole: String?
     ) {
         self.id = id
         self.contentId = contentId
@@ -121,8 +115,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.hasMessages = hasMessages
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageRole = lastMessageRole
-        self.councilMode = councilMode
-        self.activeChildSessionId = activeChildSessionId
         self.cachedLastActivityDate = lastMessageAt ?? createdAt
     }
 
@@ -150,9 +142,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
             isSavedToKnowledge: response.isSavedToKnowledge,
             hasMessages: response.hasMessages,
             lastMessagePreview: response.lastMessagePreview,
-            lastMessageRole: response.lastMessageRole,
-            councilMode: response.councilMode,
-            activeChildSessionId: response.activeChildSessionId
+            lastMessageRole: response.lastMessageRole
         )
     }
 
@@ -188,8 +178,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         try container.encodeIfPresent(hasMessages, forKey: .hasMessages)
         try container.encodeIfPresent(lastMessagePreview, forKey: .lastMessagePreview)
         try container.encodeIfPresent(lastMessageRole, forKey: .lastMessageRole)
-        try container.encodeIfPresent(councilMode, forKey: .councilMode)
-        try container.encodeIfPresent(activeChildSessionId, forKey: .activeChildSessionId)
     }
 
     private static let displayDateFormatter: DateFormatter = {
@@ -328,16 +316,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         sessionType == "deep_research" || llmProvider.lowercased() == "deep_research"
     }
 
-    var isCouncilMode: Bool {
-        councilMode ?? false
-    }
-
-    var canStartCouncil: Bool {
-        !isCouncilMode && sessionType != "deep_research"
-    }
-
     var canStartDeepResearch: Bool {
-        !isDeepResearch && !isCouncilMode
+        !isDeepResearch
     }
 
     /// Icon name for the session type (used in chat list)

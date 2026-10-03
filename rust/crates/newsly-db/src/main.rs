@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use newsly_db::{
     Database, DatabaseConfig, adopt_existing_database, embedded_migration_count,
-    run_migrations_with_barrier, verify_existing_baseline,
+    run_migrations_with_barrier, verify_council_retirement, verify_existing_baseline,
 };
 use secrecy::SecretString;
 
@@ -49,6 +49,8 @@ enum Command {
     },
     /// Verify that an existing database is exactly eligible for baseline adoption without writing.
     VerifyBaseline,
+    /// Report blocking council messages and malformed links without reading transcripts or writing.
+    VerifyCouncilRetirement,
     /// Print the number of migrations embedded in this exact binary.
     MigrationCount,
 }
@@ -118,6 +120,18 @@ async fn main() -> Result<()> {
                 .await
                 .context("baseline verification failed")?;
             println!("database exactly matches the frozen Alembic-head baseline");
+        }
+        Command::VerifyCouncilRetirement => {
+            let database =
+                Database::connect_lazy(&config).context("invalid database configuration")?;
+            let report = verify_council_retirement(database.pool()).await?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            database.close().await;
+            if !report.is_ready() {
+                bail!(
+                    "council retirement is blocked; drain or explicitly repair the reported records before entering the maintenance barrier"
+                );
+            }
         }
         Command::MigrationCount => unreachable!("handled before database initialization"),
     }

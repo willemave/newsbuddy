@@ -4540,26 +4540,6 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatSessionDetailDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid council branch",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "401": {
             "description": "Invalid credentials",
             "content": {
@@ -4570,48 +4550,8 @@
               }
             }
           },
-          "403": {
-            "description": "Not authorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Archived session, active retry, or stale owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
+          "410": {
+            "description": "Council mode has been removed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4621,6 +4561,7 @@
             }
           }
         },
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -4658,26 +4599,6 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatSessionDetailDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid council branch",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "401": {
             "description": "Invalid credentials",
             "content": {
@@ -4688,48 +4609,8 @@
               }
             }
           },
-          "403": {
-            "description": "Not authorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Archived session or stale owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
+          "410": {
+            "description": "Council mode has been removed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4739,6 +4620,7 @@
             }
           }
         },
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -4776,26 +4658,6 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatSessionDetailDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Council mode cannot be started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "401": {
             "description": "Invalid credentials",
             "content": {
@@ -4806,48 +4668,8 @@
               }
             }
           },
-          "403": {
-            "description": "Not authorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Archived session or stale owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
+          "410": {
+            "description": "Council mode has been removed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4857,6 +4679,7 @@
             }
           }
         },
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -4905,7 +4728,7 @@
             }
           },
           "400": {
-            "description": "Invalid council branch",
+            "description": "Invalid chat message",
             "content": {
               "application/json": {
                 "schema": {
@@ -14605,14 +14428,16 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CouncilCandidate"
-            }
+            },
+            "description": "Always empty after council retirement. Remove with `CouncilCandidate` after the installed\nclient compatibility window closes."
           },
           "active_council_child_session_id": {
             "type": [
               "integer",
               "null"
             ],
-            "format": "int64"
+            "format": "int64",
+            "description": "Always `None` after council retirement. Remove after the minimum supported client version\nno longer decodes an active council candidate."
           }
         }
       },
@@ -14816,14 +14641,16 @@
             ]
           },
           "council_mode": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Always `false` after council retirement. Remove after the minimum supported client version\nno longer decodes council mode."
           },
           "active_child_session_id": {
             "type": [
               "integer",
               "null"
             ],
-            "format": "int64"
+            "format": "int64",
+            "description": "Always `None` after council retirement. Remove after the minimum supported client version\nno longer decodes an active council branch."
           }
         }
       },
@@ -15932,6 +15759,7 @@
       },
       "CouncilCandidate": {
         "type": "object",
+        "description": "Compatibility shape for council responses stored in older chat messages. The public Newsly API\nowns this type until the minimum supported client version no longer decodes these candidates.",
         "required": [
           "persona_id",
           "persona_name",
@@ -15976,6 +15804,7 @@
       },
       "CouncilPersonaConfig": {
         "type": "object",
+        "description": "Compatibility shape owned by the public Newsly API. Remove after the minimum supported client\nversion no longer decodes or sends council persona settings.",
         "required": [
           "id",
           "display_name",
@@ -16755,7 +16584,8 @@
           "atom",
           "substack",
           "podcast_rss",
-          "youtube"
+          "youtube",
+          "aggregator"
         ]
       },
       "HealthChecks": {
@@ -20067,7 +19897,8 @@
             ],
             "items": {
               "$ref": "#/components/schemas/CouncilPersonaInput"
-            }
+            },
+            "description": "Accepted and ignored after council retirement. Remove after the minimum supported client\nversion no longer sends expert settings."
           },
           "reading_experience": {
             "oneOf": [
@@ -20232,7 +20063,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CouncilPersonaConfig"
-            }
+            },
+            "description": "Always empty after council retirement. Remove after the minimum supported client version\nno longer decodes expert settings."
           },
           "has_x_bookmark_sync": {
             "type": "boolean"

@@ -29,15 +29,11 @@ pub(crate) struct DisplayMessageProjection {
     pub status: String,
     pub error: Option<String>,
     pub feed_options: Vec<Value>,
-    pub council_candidates: Vec<Value>,
-    pub active_council_child_session_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct RenderMetadataProjection {
     pub feed_options: Vec<Value>,
-    pub council_candidates: Vec<Value>,
-    pub active_council_child_session_id: Option<i64>,
 }
 
 impl RenderMetadataProjection {
@@ -47,11 +43,6 @@ impl RenderMetadataProjection {
         };
         Self {
             feed_options: value_array(object.get("feed_options")),
-            council_candidates: value_array(object.get("council_candidates")),
-            active_council_child_session_id: object
-                .get("active_council_child_session_id")
-                .and_then(Value::as_i64)
-                .filter(|value| *value > 0),
         }
     }
 }
@@ -157,8 +148,6 @@ pub(crate) fn display_messages(
                             status: row.status.clone(),
                             error: row.error.clone(),
                             feed_options: Vec::new(),
-                            council_candidates: Vec::new(),
-                            active_council_child_session_id: None,
                         });
                         break;
                     }
@@ -203,8 +192,6 @@ pub(crate) fn display_messages(
                 status: row.status.clone(),
                 error: row.error.clone(),
                 feed_options: Vec::new(),
-                council_candidates: Vec::new(),
-                active_council_child_session_id: None,
             });
         }
 
@@ -225,8 +212,6 @@ pub(crate) fn display_messages(
                     render_metadata.feed_options,
                     active_feed_urls,
                 ),
-                council_candidates: render_metadata.council_candidates,
-                active_council_child_session_id: render_metadata.active_council_child_session_id,
             });
         }
     }

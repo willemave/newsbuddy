@@ -685,7 +685,6 @@ private struct ContentDetailContentView: View {
             isStartingAction: chatCoordinator.isStartingChat,
             onClose: { activeSheet = nil },
             onStartChat: { startChat(for: content) },
-            onAskCouncil: { startCouncil(for: content) },
             onCreateLearningDeck: {
                 pendingSheetDestination = .learningDeckCreate
                 activeSheet = nil
@@ -705,13 +704,6 @@ private struct ContentDetailContentView: View {
     private func startChat(for content: ContentDetail) {
         Task {
             let route = await chatCoordinator.startChat(content: content)
-            openGlobalChat(route)
-        }
-    }
-
-    private func startCouncil(for content: ContentDetail) {
-        Task {
-            let route = await chatCoordinator.startCouncil(content: content)
             openGlobalChat(route)
         }
     }

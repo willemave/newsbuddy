@@ -5,6 +5,9 @@ use serde_json::{Value, json};
 use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
+use crate::chat_tasks::{
+    AssistantScreenContext, ChatTurnKind, ChatTurnProcessingContext, ChatTurnSessionSnapshot,
+};
 use crate::chat_transcripts::{
     ChatTranscriptError, DisplayMessageProjection, RenderMetadataProjection, StoredChatMessage,
     display_messages, latest_assistant_text, latest_message_preview, overlay_subscription_state,
@@ -41,8 +44,6 @@ pub struct ChatSessionProjection {
     pub has_messages: bool,
     pub last_message_preview: Option<String>,
     pub last_message_role: Option<String>,
-    pub council_mode: bool,
-    pub active_child_session_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,8 +65,6 @@ pub struct ChatMessageProjection {
     pub status: String,
     pub error: Option<String>,
     pub feed_options: Vec<Value>,
-    pub council_candidates: Vec<Value>,
-    pub active_council_child_session_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,8 +150,7 @@ pub struct StageAssistantTurnInput<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StagedChatTurn {
-    pub visible_session_id: i64,
-    pub effective_session_id: i64,
+    pub session_id: i64,
     pub message_id: i64,
     pub created_at: DateTime<Utc>,
     pub user_prompt: String,
@@ -166,7 +164,6 @@ pub enum StageChatTurnOutcome {
     Forbidden,
     Archived,
     Hidden,
-    NoActiveCouncilBranch,
     NewsItemNotFound,
     UserInactive,
 }
@@ -177,17 +174,10 @@ struct ChatSessionRow {
     user_id: i64,
     content_id: Option<i64>,
     news_item_id: Option<i64>,
-    parent_session_id: Option<i64>,
     title: Option<String>,
     session_type: Option<String>,
     topic: Option<String>,
     context_snapshot: Option<String>,
-    council_persona_id: Option<String>,
-    council_persona_name: Option<String>,
-    council_persona_prompt: Option<String>,
-    council_mode: bool,
-    active_child_session_id: Option<i64>,
-    branch_start_message_id: Option<i64>,
     is_hidden_from_history: bool,
     llm_model: String,
     llm_provider: String,
@@ -357,28 +347,10 @@ pub async fn get_chat_session_detail(
         .iter()
         .map(StoredChatMessage::from)
         .collect::<Vec<_>>();
-    let mut messages = display_messages(&parent_stored, session_id, &active_feed_urls)
+    let messages = display_messages(&parent_stored, session_id, &active_feed_urls)
         .into_iter()
         .map(Into::into)
         .collect::<Vec<_>>();
-
-    if row.council_mode
-        && let Some(active_child_id) = row.active_child_session_id
-        && let Some(child) = load_session(pool, active_child_id).await?
-        && child.parent_session_id == Some(row.id)
-        && child.is_hidden_from_history
-    {
-        let child_rows = load_message_rows(pool, child.id, child.branch_start_message_id).await?;
-        let child_stored = child_rows
-            .iter()
-            .map(StoredChatMessage::from)
-            .collect::<Vec<_>>();
-        messages.extend(
-            display_messages(&child_stored, session_id, &active_feed_urls)
-                .into_iter()
-                .map(Into::into),
-        );
-    }
 
     let session = present_session(pool, user_id, row).await?;
     Ok(ChatRecordAccess::Found(ChatSessionDetailProjection {
@@ -401,8 +373,6 @@ impl From<DisplayMessageProjection> for ChatMessageProjection {
             status: value.status,
             error: value.error,
             feed_options: value.feed_options,
-            council_candidates: value.council_candidates,
-            active_council_child_session_id: value.active_council_child_session_id,
         }
     }
 }
@@ -468,13 +438,13 @@ pub async fn create_chat_session(
         r"
         INSERT INTO chat_sessions (
             user_id, content_id, news_item_id, title, session_type, topic,
-            context_snapshot, council_mode, is_hidden_from_history,
-            llm_model, llm_provider, created_at, updated_at, is_archived
+            context_snapshot,
+            llm_model, llm_provider, created_at, updated_at
         )
         VALUES (
             $1::bigint::integer, $2::bigint::integer, $3::bigint::integer, $4, $5, $6,
-            $7, FALSE, FALSE, $8, $9,
-            timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp()), FALSE
+            $7, $8, $9,
+            timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
         )
         RETURNING id::bigint
         ",
@@ -528,7 +498,7 @@ pub async fn update_chat_session(
     Ok(ChatMutationOutcome::Applied)
 }
 
-/// Archive an owned session and every hidden council child atomically.
+/// Archive an owned session atomically.
 ///
 /// # Errors
 ///
@@ -551,11 +521,9 @@ pub async fn archive_chat_session(
             SET is_archived = TRUE,
                 updated_at = timezone('UTC', clock_timestamp())
             WHERE id::bigint = $1
-               OR ($2 AND parent_session_id::bigint = $1)
             ",
         )
         .bind(session_id)
-        .bind(row.council_mode)
         .execute(&mut **transaction)
         .await?;
     }
@@ -571,38 +539,28 @@ pub async fn stage_chat_message(
     transaction: &mut Transaction<'_, Postgres>,
     input: &StageChatMessageInput<'_>,
 ) -> Result<StageChatTurnOutcome, ChatRepositoryError> {
-    let Some(parent) = load_session_for_update(transaction, input.session_id).await? else {
+    let Some(session) = load_session_for_update(transaction, input.session_id).await? else {
         return Ok(StageChatTurnOutcome::NotFound);
     };
-    if parent.user_id != input.user_id {
+    if session.user_id != input.user_id {
         return Ok(StageChatTurnOutcome::Forbidden);
     }
-    if parent.is_archived {
+    if session.is_archived {
         return Ok(StageChatTurnOutcome::Archived);
     }
-    if parent.is_hidden_from_history {
+    if session.is_hidden_from_history {
         return Ok(StageChatTurnOutcome::Hidden);
     }
 
-    let (effective, kind, source, screen_context) = if parent.council_mode {
-        let Some(active_child_id) = parent.active_child_session_id else {
-            return Ok(StageChatTurnOutcome::NoActiveCouncilBranch);
-        };
-        let Some(child) = load_session_for_update(transaction, active_child_id).await? else {
-            return Ok(StageChatTurnOutcome::NoActiveCouncilBranch);
-        };
-        if child.parent_session_id != Some(parent.id) || !child.is_hidden_from_history {
-            return Ok(StageChatTurnOutcome::NoActiveCouncilBranch);
-        }
-        (child, "council", "council", None)
-    } else if parent.session_type.as_deref() == Some("deep_research") {
-        (parent.clone(), "deep_research", "realtime", None)
-    } else if is_assistant_session_type(parent.session_type.as_deref()) {
+    let (kind, source, screen_context) = if session.session_type.as_deref() == Some("deep_research")
+    {
+        (ChatTurnKind::DeepResearch, "realtime", None)
+    } else if is_assistant_session_type(session.session_type.as_deref()) {
         let context = json!({
-            "screen_type": parent.session_type.as_deref().unwrap_or("unknown"),
-            "screen_title": parent.title,
-            "content_id": parent.content_id,
-            "news_item_id": parent.news_item_id,
+            "screen_type": session.session_type.as_deref().unwrap_or("unknown"),
+            "screen_title": session.title,
+            "content_id": session.content_id,
+            "news_item_id": session.news_item_id,
             "visible_content_ids": [],
             "visible_news_item_ids": [],
             "selected_topic": Value::Null,
@@ -610,15 +568,14 @@ pub async fn stage_chat_message(
             "note": Value::Null,
             "assistant_action": Value::Null,
         });
-        (parent.clone(), "assistant", "assistant", Some(context))
+        (ChatTurnKind::Assistant, "assistant", Some(context))
     } else {
-        (parent.clone(), "article", "realtime", None)
+        (ChatTurnKind::Article, "realtime", None)
     };
 
-    let staged = stage_turn_for_sessions(
+    let staged = stage_session_turn(
         transaction,
-        &parent,
-        &effective,
+        &session,
         input.user_prompt,
         kind,
         source,
@@ -731,13 +688,13 @@ pub async fn stage_assistant_turn(
             r"
             INSERT INTO chat_sessions (
                 user_id, content_id, news_item_id, title, session_type, topic,
-                context_snapshot, council_mode, is_hidden_from_history,
-                llm_model, llm_provider, created_at, updated_at, is_archived
+                context_snapshot,
+                llm_model, llm_provider, created_at, updated_at
             )
             VALUES (
                 $1::bigint::integer, $2::bigint::integer, $3::bigint::integer, $4,
-                $5, $6, $7, FALSE, FALSE, $8, $9,
-                timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp()), FALSE
+                $5, $6, $7, $8, $9,
+                timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
             )
             RETURNING id::bigint
             ",
@@ -758,12 +715,11 @@ pub async fn stage_assistant_turn(
             .ok_or(ChatRepositoryError::InsertedSessionMissing)?
     };
 
-    let staged = stage_turn_for_sessions(
+    let staged = stage_session_turn(
         transaction,
         &session,
-        &session,
         input.user_prompt,
-        "assistant",
+        ChatTurnKind::Assistant,
         "assistant",
         Some(input.screen_context),
     )
@@ -795,7 +751,6 @@ pub async fn get_chat_message_status(
     if session.user_id != user_id {
         return Ok(ChatRecordAccess::Forbidden);
     }
-    let visible_session_id = session.parent_session_id.unwrap_or(session.id);
 
     let projection = match row.status.as_str() {
         "processing" => {
@@ -803,7 +758,7 @@ pub async fn get_chat_message_status(
                 (!partial.trim().is_empty()).then(|| ChatMessageProjection {
                     id: 1_000_000_000_i64.saturating_add(message_id),
                     source_message_id: message_id,
-                    session_id: visible_session_id,
+                    session_id: session.id,
                     role: "assistant".to_owned(),
                     content: partial.clone(),
                     timestamp: row
@@ -814,8 +769,6 @@ pub async fn get_chat_message_status(
                     status: "processing".to_owned(),
                     error: None,
                     feed_options: Vec::new(),
-                    council_candidates: Vec::new(),
-                    active_council_child_session_id: None,
                 })
             });
             ChatMessageStatusProjection {
@@ -850,7 +803,7 @@ pub async fn get_chat_message_status(
             let assistant_message = ChatMessageProjection {
                 id: 1_000_000_000_i64.saturating_add(message_id),
                 source_message_id: message_id,
-                session_id: visible_session_id,
+                session_id: session.id,
                 role: "assistant".to_owned(),
                 content: assistant_content,
                 timestamp: row.created_at.and_utc(),
@@ -859,8 +812,6 @@ pub async fn get_chat_message_status(
                 status: "completed".to_owned(),
                 error: None,
                 feed_options: overlay_subscription_state(metadata.feed_options, &active_feed_urls),
-                council_candidates: metadata.council_candidates,
-                active_council_child_session_id: metadata.active_council_child_session_id,
             };
             ChatMessageStatusProjection {
                 message_id,
@@ -879,43 +830,41 @@ pub async fn get_chat_message_status(
     Ok(ChatRecordAccess::Found(projection))
 }
 
-async fn stage_turn_for_sessions(
+async fn stage_session_turn(
     transaction: &mut Transaction<'_, Postgres>,
-    visible: &ChatSessionRow,
-    effective: &ChatSessionRow,
+    session: &ChatSessionRow,
     user_prompt: &str,
-    kind: &str,
+    kind: ChatTurnKind,
     source: &str,
     screen_context: Option<&Value>,
 ) -> Result<StagedChatTurn, ChatRepositoryError> {
     let now = Utc::now();
     let transcript = processing_transcript(user_prompt, now);
     let message_list = serde_json::to_string(&transcript)?;
-    let processing_context = json!({
-        "version": 1,
-        "kind": kind,
-        "user_prompt": user_prompt,
-        "source": source,
-        "session": {
-            "user_id": effective.user_id,
-            "effective_session_id": effective.id,
-            "visible_session_id": visible.id,
-            "model": effective.llm_model,
-            "provider": effective.llm_provider,
-            "title": effective.title,
-            "session_type": effective.session_type,
-            "content_id": effective.content_id,
-            "news_item_id": effective.news_item_id,
-            "parent_session_id": effective.parent_session_id,
-            "topic": effective.topic,
-            "context_snapshot": effective.context_snapshot,
-            "is_hidden_from_history": effective.is_hidden_from_history,
-            "council_persona_id": effective.council_persona_id,
-            "council_persona_name": effective.council_persona_name,
-            "council_persona_prompt": effective.council_persona_prompt,
-        },
-        "screen_context": screen_context,
-    });
+    let snapshot = ChatTurnSessionSnapshot {
+        title: session.title.clone(),
+        session_type: session.session_type.clone(),
+        content_id: session.content_id,
+        news_item_id: session.news_item_id,
+        topic: session.topic.clone(),
+        context_snapshot: session.context_snapshot.clone(),
+        ..ChatTurnSessionSnapshot::new(
+            session.user_id,
+            session.id,
+            session.llm_model.clone(),
+            session.llm_provider.clone(),
+        )
+    };
+    let screen_context = screen_context
+        .map(|value| serde_json::from_value::<AssistantScreenContext>(value.clone()))
+        .transpose()?;
+    let processing_context = serde_json::to_value(ChatTurnProcessingContext::new(
+        kind,
+        user_prompt,
+        source,
+        snapshot,
+        screen_context,
+    ))?;
 
     let inserted = sqlx::query_as::<_, InsertedMessageRow>(
         r"
@@ -929,7 +878,7 @@ async fn stage_turn_for_sessions(
         RETURNING id::bigint AS id, created_at
         ",
     )
-    .bind(effective.id)
+    .bind(session.id)
     .bind(message_list)
     .bind(&processing_context)
     .fetch_one(&mut **transaction)
@@ -943,28 +892,12 @@ async fn stage_turn_for_sessions(
         WHERE id::bigint = $1
         ",
     )
-    .bind(effective.id)
+    .bind(session.id)
     .bind(inserted.created_at)
     .execute(&mut **transaction)
     .await?;
-    if visible.id != effective.id {
-        sqlx::query(
-            r"
-            UPDATE chat_sessions
-            SET last_message_at = $2,
-                updated_at = $2
-            WHERE id::bigint = $1
-            ",
-        )
-        .bind(visible.id)
-        .bind(inserted.created_at)
-        .execute(&mut **transaction)
-        .await?;
-    }
-
     Ok(StagedChatTurn {
-        visible_session_id: visible.id,
-        effective_session_id: effective.id,
+        session_id: session.id,
         message_id: inserted.id,
         created_at: inserted.created_at.and_utc(),
         user_prompt: user_prompt.to_owned(),
@@ -983,20 +916,6 @@ async fn present_session(
     user_id: i64,
     row: ChatSessionRow,
 ) -> Result<ChatSessionProjection, ChatRepositoryError> {
-    let preview_session_id = if row.council_mode {
-        match row.active_child_session_id {
-            Some(child_id) => load_session(pool, child_id)
-                .await?
-                .filter(|child| {
-                    child.parent_session_id == Some(row.id) && child.is_hidden_from_history
-                })
-                .map_or(row.id, |child| child.id),
-            None => row.id,
-        }
-    } else {
-        row.id
-    };
-
     let has_pending_message = sqlx::query_scalar::<_, bool>(
         r"
         SELECT EXISTS(
@@ -1005,7 +924,7 @@ async fn present_session(
         )
         ",
     )
-    .bind(preview_session_id)
+    .bind(row.id)
     .fetch_one(pool)
     .await?;
     let has_messages = sqlx::query_scalar::<_, bool>(
@@ -1017,7 +936,7 @@ async fn present_session(
     let last_message = sqlx::query_as::<_, ChatMessageRow>(AssertSqlSafe(format!(
         "{MESSAGE_PROJECTION_SQL} WHERE session_id::bigint = $1 ORDER BY id DESC LIMIT 1"
     )))
-    .bind(preview_session_id)
+    .bind(row.id)
     .fetch_optional(pool)
     .await?;
     let (last_message_preview, last_message_role) = last_message
@@ -1088,8 +1007,6 @@ async fn present_session(
         has_messages,
         last_message_preview,
         last_message_role,
-        council_mode: row.council_mode,
-        active_child_session_id: row.active_child_session_id,
     })
 }
 
@@ -1684,17 +1601,10 @@ const SESSION_PROJECTION_SQL: &str = r"
         user_id::bigint AS user_id,
         content_id::bigint AS content_id,
         news_item_id::bigint AS news_item_id,
-        parent_session_id::bigint AS parent_session_id,
         title,
         session_type,
         topic,
         context_snapshot,
-        council_persona_id,
-        council_persona_name,
-        council_persona_prompt,
-        council_mode,
-        active_child_session_id::bigint AS active_child_session_id,
-        branch_start_message_id::bigint AS branch_start_message_id,
         is_hidden_from_history,
         llm_model,
         llm_provider,

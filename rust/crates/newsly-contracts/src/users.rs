@@ -21,6 +21,8 @@ impl ReadingExperience {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
+/// Compatibility shape owned by the public Newsly API. Remove after the minimum supported client
+/// version no longer decodes or sends council persona settings.
 pub struct CouncilPersonaConfig {
     pub id: String,
     pub display_name: String,
@@ -39,17 +41,6 @@ pub struct CouncilPersonaInput {
     pub sort_order: i32,
 }
 
-impl From<CouncilPersonaInput> for CouncilPersonaConfig {
-    fn from(value: CouncilPersonaInput) -> Self {
-        Self {
-            id: value.id,
-            display_name: value.display_name,
-            instruction_prompt: value.instruction_prompt,
-            sort_order: value.sort_order,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 // Account, entitlement, and onboarding flags are independent public wire facts.
 #[allow(clippy::struct_excessive_bools)]
@@ -62,6 +53,8 @@ pub struct UserResponse {
     pub is_active: bool,
     pub twitter_username: Option<String>,
     #[serde(default)]
+    /// Always empty after council retirement. Remove after the minimum supported client version
+    /// no longer decodes expert settings.
     pub council_personas: Vec<CouncilPersonaConfig>,
     #[serde(default)]
     pub has_x_bookmark_sync: bool,
@@ -89,6 +82,8 @@ const fn default_reading_experience() -> ReadingExperience {
 pub struct UpdateUserProfileRequest {
     pub full_name: Option<String>,
     pub twitter_username: Option<String>,
+    /// Accepted and ignored after council retirement. Remove after the minimum supported client
+    /// version no longer sends expert settings.
     pub council_personas: Option<Vec<CouncilPersonaInput>>,
     pub reading_experience: Option<ReadingExperience>,
     #[serde(default, deserialize_with = "deserialize_optional_timezone")]

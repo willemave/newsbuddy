@@ -269,10 +269,8 @@ struct LearningDeckChatPanel: View {
                         ForEach(viewModel.timeline) { item in
                             MessageRow(
                                 item: item,
-                                retryingCouncilChildSessionId: nil,
                                 feedOptionActionModel: feedOptionActionModel,
                                 onRetrySend: { viewModel.performSendMessage(text: $0) },
-                                onRetryCouncilCandidate: { _ in },
                                 onDigDeeper: { viewModel.performSendMessage(text: "Dig deeper into this: \"\($0)\"") },
                                 onShare: { UIPasteboard.general.string = $0 }
                             )

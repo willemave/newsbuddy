@@ -1,14 +1,9 @@
-use std::collections::HashSet;
-
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
-use newsly_contracts::{
-    CouncilPersonaConfig, CouncilPersonaInput, ReadingExperience, UpdateUserProfileRequest,
-    UserResponse,
-};
+use newsly_contracts::{ReadingExperience, UpdateUserProfileRequest, UserResponse};
 use newsly_db::{
     NewsCategoryScheduleError, RouteWriteFenceError, UserProfilePatch, UserProfileProjection,
     canonicalize_timezone, find_user_profile, set_user_news_category_timezone, update_user_profile,
@@ -171,15 +166,11 @@ fn validate_patch(payload: UpdateUserProfileRequest) -> Result<UserProfilePatch,
         .twitter_username
         .map(|value| normalize_twitter_username(&value))
         .transpose()?;
-    let council_personas = payload
-        .council_personas
-        .map(validate_council_personas)
-        .transpose()?
-        .map(|personas| serde_json::to_value(personas).expect("personas serialize to JSON"));
+    // `payload.council_personas` is intentionally ignored. The public Newsly API owns this
+    // compatibility input until the minimum supported client version no longer sends it.
     Ok(UserProfilePatch {
         full_name,
         twitter_username,
-        council_personas,
         reading_experience: payload
             .reading_experience
             .map(|experience| experience.as_str().to_owned()),
@@ -207,50 +198,7 @@ fn normalize_twitter_username(value: &str) -> Result<Option<String>, String> {
     Ok(Some(cleaned.to_ascii_lowercase()))
 }
 
-fn validate_council_personas(
-    personas: Vec<CouncilPersonaInput>,
-) -> Result<Vec<CouncilPersonaConfig>, String> {
-    if !(2..=3).contains(&personas.len()) {
-        return Err("council_personas must contain 2-3 entries".to_owned());
-    }
-    let mut normalized = Vec::with_capacity(personas.len());
-    let mut ids = HashSet::new();
-    for persona in personas {
-        let mut persona = CouncilPersonaConfig::from(persona);
-        persona.id = String::from(persona.id.trim());
-        persona.display_name = String::from(persona.display_name.trim());
-        persona.instruction_prompt = String::from(persona.instruction_prompt.trim());
-        if persona.id.is_empty()
-            || persona.id.chars().count() > 50
-            || persona.display_name.is_empty()
-            || persona.display_name.chars().count() > 80
-            || persona.instruction_prompt.chars().count() > 1_500
-            || !(0..=2).contains(&persona.sort_order)
-        {
-            return Err("council_personas contains an invalid expert configuration".to_owned());
-        }
-        if !ids.insert(persona.id.clone()) {
-            return Err("council_personas must use unique ids".to_owned());
-        }
-        normalized.push(persona);
-    }
-    normalized.sort_by_key(|persona| persona.sort_order);
-    if normalized
-        .iter()
-        .enumerate()
-        .any(|(index, persona)| usize::try_from(persona.sort_order) != Ok(index))
-    {
-        return Err("council_personas sort_order values must be contiguous".to_owned());
-    }
-    Ok(normalized)
-}
-
 pub(super) fn user_response(profile: UserProfileProjection) -> UserResponse {
-    let council_personas = profile
-        .council_personas
-        .and_then(|value| serde_json::from_value(value).ok())
-        .and_then(|personas| validate_council_personas(personas).ok())
-        .unwrap_or_default();
     let reading_experience = match profile.reading_experience.as_str() {
         "classic" => ReadingExperience::Classic,
         _ => ReadingExperience::Briefing,
@@ -263,7 +211,7 @@ pub(super) fn user_response(profile: UserProfileProjection) -> UserResponse {
         is_admin: profile.is_admin,
         is_active: profile.is_active,
         twitter_username: profile.twitter_username,
-        council_personas,
+        council_personas: Vec::new(),
         has_x_bookmark_sync: profile.has_x_bookmark_sync,
         has_completed_onboarding: profile.has_completed_onboarding,
         has_completed_new_user_tutorial: profile.has_completed_new_user_tutorial,
@@ -347,4 +295,33 @@ fn internal_error(error: impl std::fmt::Display, request_id: &str) -> ApiError {
         request_id.to_owned(),
     )
     .with_retryable(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use newsly_contracts::ReadingExperience;
+
+    use super::validate_patch;
+
+    #[test]
+    fn retired_council_personas_do_not_block_profile_updates() {
+        let payload = serde_json::from_value(serde_json::json!({
+            "full_name": "  Ada Lovelace  ",
+            "reading_experience": "classic",
+            "council_personas": [{
+                "id": "",
+                "display_name": "",
+                "instruction_prompt": "ignored",
+                "sort_order": 99
+            }]
+        }))
+        .expect("compatibility payload must decode");
+
+        let patch = validate_patch(payload).expect("retired persona settings must be ignored");
+        assert_eq!(patch.full_name, Some(Some("Ada Lovelace".to_owned())));
+        assert_eq!(
+            patch.reading_experience,
+            Some(ReadingExperience::Classic.as_str().to_owned())
+        );
+    }
 }

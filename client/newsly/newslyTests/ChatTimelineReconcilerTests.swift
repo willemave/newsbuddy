@@ -135,61 +135,6 @@ final class ChatTimelineReconcilerTests: XCTestCase {
         XCTAssertEqual(result[1].id, .server(sourceMessageId: 99, role: .assistant, displayType: .message))
     }
 
-    func testReconcilePreservesProcessSummaryAndCouncilOrdering() {
-        let councilCandidates = [
-            CouncilCandidate(
-                personaId: "skeptic",
-                personaName: "Skeptic",
-                childSessionId: 202,
-                content: "Skeptic branch",
-                status: "completed",
-                order: 1
-            ),
-            CouncilCandidate(
-                personaId: "analyst",
-                personaName: "Analyst",
-                childSessionId: 201,
-                content: "Analyst branch",
-                status: "completed",
-                order: 0
-            )
-        ]
-        let detail = detail(messages: [
-            message(
-                id: 1,
-                role: .user,
-                timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
-                content: "Start council"
-            ),
-            message(
-                id: 2,
-                role: .tool,
-                timestamp: ServerDate.parse("2026-04-01T10:00:01Z")!,
-                content: "Thinking",
-                displayType: .process_summary
-            ),
-            message(
-                id: 3,
-                role: .assistant,
-                timestamp: ServerDate.parse("2026-04-01T10:00:02Z")!,
-                content: "",
-                councilCandidates: councilCandidates,
-                activeCouncilChildSessionId: 201
-            )
-        ])
-
-        var aliases: [ChatTimelineID: UUID] = [:]
-        let result = ChatTimelineReconciler().reconcile(
-            current: [],
-            detail: detail,
-            pendingSends: [:],
-            localIdentityAliases: &aliases
-        )
-
-        XCTAssertEqual(result.map(\.message.displayType), [.message, .process_summary, .message])
-        XCTAssertEqual(result.last?.message.councilCandidates.map(\.personaName), ["Skeptic", "Analyst"])
-    }
-
     func testReconcileOrdersSameTimestampTurnAsUserSummaryThenAssistant() {
         let timestamp = ServerDate.parse("2026-04-01T10:00:00Z")!
         let detail = detail(messages: [
@@ -342,9 +287,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
         content: String,
         displayType: APIChatMessageDisplayType = .message,
         status: APIMessageProcessingStatus? = .completed,
-        error: String? = nil,
-        councilCandidates: [CouncilCandidate] = [],
-        activeCouncilChildSessionId: Int? = nil
+        error: String? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -355,9 +298,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             content: content,
             displayType: displayType,
             status: status,
-            error: error,
-            councilCandidates: councilCandidates,
-            activeCouncilChildSessionId: activeCouncilChildSessionId
+            error: error
         )
     }
 }
