@@ -120,7 +120,7 @@ require_cmd xcrun
 require_cmd jq
 
 if [[ -z "$UDID" ]]; then
-  UDID="$(axe list-simulators | awk -F '|' '$3 ~ /Booted/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1; exit}')"
+  UDID="$(newsly_booted_simulator_udid)"
 fi
 
 if [[ -z "$UDID" ]]; then
@@ -182,25 +182,12 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Launching app: $BUNDLE_ID"
-debug_user_id="$(
-  curl --fail --silent --show-error \
-    --request POST \
-    --header 'Content-Type: application/json' \
-    --data '{"has_completed_onboarding":true,"has_completed_new_user_tutorial":true}' \
-    "${API_BASE_URL%/}/auth/debug/new-user" |
-    jq -er '.user.id'
-)"
+debug_user_id="$(newsly_create_debug_user "${API_BASE_URL}")"
 
 launch_authenticated_app() {
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" \
-    -newslyE2EEnabled true \
-    -newslyE2EAutoLogin true \
-    -newslyE2EServerHost "${api_host}" \
-    -newslyE2EServerPort "${api_port}" \
-    -newslyE2EUseHTTPS "${api_use_https}" \
-    -newslyE2EUserId "$debug_user_id" \
-    -newslyE2ECompleteOnboarding true \
-    -newslyE2ECompleteTutorial true >/dev/null
+  newsly_launch_authenticated_app \
+    "${UDID}" "${BUNDLE_ID}" "${api_host}" "${api_port}" \
+    "${api_use_https}" "${debug_user_id}" >/dev/null
 }
 
 capture_nonempty_ui_tree() {

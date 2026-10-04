@@ -2,8 +2,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ $# -ne 0 ]]; then
-  echo "Usage: $0" >&2
+CHECK=false
+if [[ $# -eq 1 && "$1" == "--check" ]]; then
+  CHECK=true
+elif [[ $# -ne 0 ]]; then
+  echo "Usage: $0 [--check]" >&2
   exit 2
 fi
 
@@ -30,18 +33,32 @@ CLIENT_POLICY="contracts/client_codegen_policy.toml"
   --app-swift-models "$CONTRACT_TMP_DIR/APIModels.generated.swift" \
   --share-swift-contracts "$CONTRACT_TMP_DIR/ShareContracts.generated.swift" \
   --share-swift-models "$CONTRACT_TMP_DIR/ShareModels.generated.swift"
-mkdir -p docs/library/reference contracts/openapi
-cp "$CONTRACT_TMP_DIR/public.openapi.json" docs/library/reference/openapi.json
-cp "$CONTRACT_TMP_DIR/public.openapi.json" contracts/openapi/public.openapi.json
-mkdir -p client/newsly/newsly/Models/Generated client/newsly/ShareExtension/Generated
-cp "$CONTRACT_TMP_DIR/APIContracts.generated.swift" \
-  client/newsly/newsly/Models/Generated/APIContracts.generated.swift
-cp "$CONTRACT_TMP_DIR/APIModels.generated.swift" \
-  client/newsly/newsly/Models/Generated/APIModels.generated.swift
-cp "$CONTRACT_TMP_DIR/ShareContracts.generated.swift" \
-  client/newsly/ShareExtension/Generated/ShareContracts.generated.swift
-cp "$CONTRACT_TMP_DIR/ShareModels.generated.swift" \
-  client/newsly/ShareExtension/Generated/ShareModels.generated.swift
-echo "Wrote Rust public OpenAPI: docs/library/reference/openapi.json"
-echo "Wrote Rust contract-corpus OpenAPI: contracts/openapi/public.openapi.json"
-echo "Wrote Rust-generated app and Share Extension Swift contracts."
+DRIFTED=false
+sync_artifact() {
+  local generated="$1" destination="$2"
+  if [[ "$CHECK" == true ]]; then
+    if [[ ! -f "$destination" ]] || ! cmp -s "$destination" "$generated"; then
+      DRIFTED=true
+      echo "Contract drift detected: $destination" >&2
+      diff -u "$destination" "$generated" || true
+    fi
+  else
+    mkdir -p "$(dirname "$destination")"
+    cp "$generated" "$destination"
+  fi
+}
+
+sync_artifact "$CONTRACT_TMP_DIR/public.openapi.json" contracts/openapi/public.openapi.json
+sync_artifact "$CONTRACT_TMP_DIR/APIContracts.generated.swift" client/newsly/newsly/Models/Generated/APIContracts.generated.swift
+sync_artifact "$CONTRACT_TMP_DIR/APIModels.generated.swift" client/newsly/newsly/Models/Generated/APIModels.generated.swift
+sync_artifact "$CONTRACT_TMP_DIR/ShareContracts.generated.swift" client/newsly/ShareExtension/Generated/ShareContracts.generated.swift
+sync_artifact "$CONTRACT_TMP_DIR/ShareModels.generated.swift" client/newsly/ShareExtension/Generated/ShareModels.generated.swift
+if [[ "$DRIFTED" == true ]]; then
+  echo "Contract artifacts are stale. Run scripts/regenerate_public_contracts.sh." >&2
+  exit 1
+fi
+if [[ "$CHECK" == true ]]; then
+  echo "Rust-owned public contract artifacts are up to date."
+else
+  echo "Wrote canonical public OpenAPI and generated app/Share Extension Swift contracts."
+fi

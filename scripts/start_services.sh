@@ -42,6 +42,7 @@ load_environment() {
   newsly_normalize_database_environment
 
   export ENVIRONMENT="${ENVIRONMENT:-development}"
+  export DEBUG="${DEBUG:-false}"
   export NEWSLY_RUST_LOG_FORMAT="${NEWSLY_RUST_LOG_FORMAT:-pretty}"
   export DOCUMENT_EXTRACTOR_SHARED_SECRET="${DOCUMENT_EXTRACTOR_SHARED_SECRET:-local-extractor-secret}"
   export NEWSLY_DOCUMENT_EXTRACTOR_SHARED_SECRET="${NEWSLY_DOCUMENT_EXTRACTOR_SHARED_SECRET:-${DOCUMENT_EXTRACTOR_SHARED_SECRET}}"
@@ -51,6 +52,7 @@ load_environment() {
   # to its SQLx pool. Production sets capacity explicitly; the local launcher
   # defaults to one pooled connection per background process and two for the API.
   if [[ "${local_e2e}" == "true" ]]; then
+    export DEBUG=true
     export NEWSLY_RUST_DATABASE_MAX_CONNECTIONS=2
     export NEWSLY_RUST_DATABASE_MIN_CONNECTIONS=0
     export NEWSLY_RUST_WORKER_DATABASE_MAX_CONNECTIONS=1
@@ -139,6 +141,7 @@ worker_processes=(
   onboarding_discovery
   briefing_refresh
   news_lens
+  news_recluster
   chat
   run_llm_task
 )

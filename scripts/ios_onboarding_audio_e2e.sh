@@ -14,6 +14,10 @@ set -euo pipefail
 #   scripts/ios_onboarding_audio_e2e.sh --phrase "I read about chess and space launches"
 #   scripts/ios_onboarding_audio_e2e.sh --voice Daniel --udid <SIM_UDID>
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/rust_runtime.sh
+source "${script_dir}/lib/rust_runtime.sh"
+
 BUNDLE_ID="org.willemaw.newsly"
 UDID=""
 API_HOST="127.0.0.1"
@@ -52,13 +56,15 @@ done
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
 if [[ -z "${UDID}" ]]; then
-  UDID="$(xcrun simctl list devices booted | grep -Eo '[0-9A-F-]{36}' | head -1 || true)"
+  UDID="$(newsly_booted_simulator_udid)"
 fi
 if [[ -z "${UDID}" ]]; then
   echo "No booted simulator; boot one or pass --udid." >&2
   exit 1
 fi
-if ! curl -sf "http://${API_HOST}:${API_PORT}/health" >/dev/null; then
+IFS=$'\t' read -r api_scheme API_HOST API_PORT api_use_https \
+  < <(newsly_parse_api_base_url "http://${API_HOST}:${API_PORT}")
+if ! curl -sf "${api_scheme}://${API_HOST}:${API_PORT}/health" >/dev/null; then
   echo "Local API is not answering on ${API_HOST}:${API_PORT}; start scripts/dev.sh first." >&2
   exit 1
 fi

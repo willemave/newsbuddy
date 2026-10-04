@@ -1,5 +1,7 @@
 # Go CLI Rewrite Plan
 
+> **Superseded:** Newsbuddy is now the Rust `newsly-cli` crate. This historical Go CLI plan is retained only as implementation history.
+
 **Date:** 2026-03-09  
 **Scope:** `cli/` rewrite, CLI-specific OpenAPI contract cleanup, Go build/test wiring
 

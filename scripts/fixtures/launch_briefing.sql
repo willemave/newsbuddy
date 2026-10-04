@@ -72,6 +72,6 @@ BEGIN
    UPDATE briefing_segments SET blocks=jsonb_insert(briefing_segments.blocks,'{1}',jsonb_build_object('type','figure','image_url',(SELECT content_metadata->>'image_url' FROM contents WHERE id=cid),'caption','Pillars of Creation · NASA, ESA, CSA, STScI','placement','full')) WHERE id=(SELECT id FROM briefing_segments WHERE user_id=uid ORDER BY created_at DESC LIMIT 1);
  END IF;
  DELETE FROM content_read_status WHERE user_id=uid;
- UPDATE briefing_states SET version=version+1,masthead_deck='Space, our planet, and the energy that connects them.',last_append_at=now() WHERE user_id=uid;
+ UPDATE briefing_states SET version=version+1,masthead_deck='Space, our planet, and the energy that connects them.' WHERE user_id=uid;
 END $$;
 COMMIT;

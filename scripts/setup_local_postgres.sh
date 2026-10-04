@@ -9,7 +9,11 @@ POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 APP_DB="${POSTGRES_DB:-newsly}"
 APP_USER="${POSTGRES_USER:-newsly}"
-APP_PASSWORD="${POSTGRES_PASSWORD:-$(openssl rand -hex 18)}"
+APP_PASSWORD="${POSTGRES_PASSWORD:-}"
+PASSWORD_EXPLICIT="false"
+if [[ "${POSTGRES_PASSWORD+x}" == "x" ]]; then
+  PASSWORD_EXPLICIT="true"
+fi
 ENV_FILE="${NEWSLY_ENV_FILE:-${PROJECT_ROOT}/.env}"
 
 usage() {
@@ -20,7 +24,6 @@ Options:
   --env-file PATH    Env file to update (default: .env)
   --db NAME          Database name (default: ${APP_DB})
   --user NAME        Database role (default: ${APP_USER})
-  --password VALUE   Database password (default: generated)
   --host HOST        Host written into DATABASE_URL (default: ${POSTGRES_HOST})
   --port PORT        Port written into DATABASE_URL (default: ${POSTGRES_PORT})
   -h, --help         Show this help
@@ -44,10 +47,6 @@ while [[ $# -gt 0 ]]; do
       APP_USER="$2"
       shift 2
       ;;
-    --password)
-      APP_PASSWORD="$2"
-      shift 2
-      ;;
     --host)
       POSTGRES_HOST="$2"
       shift 2
@@ -67,6 +66,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${PASSWORD_EXPLICIT}" == "true" && -z "${APP_PASSWORD}" ]]; then
+  echo "ERROR: POSTGRES_PASSWORD cannot be empty." >&2
+  exit 1
+fi
 
 if ! command -v brew >/dev/null 2>&1; then
   echo "ERROR: Homebrew is required to install local PostgreSQL." >&2
@@ -98,17 +102,60 @@ if ! pg_isready -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" >/dev/null 2>&1; the
 fi
 
 echo "Ensuring application role and database exist..."
-NEWSLY_SETUP_APP_USER="${APP_USER}" \
-NEWSLY_SETUP_APP_PASSWORD="${APP_PASSWORD}" \
-psql postgres --set=ON_ERROR_STOP=1 <<'SQL'
+ROLE_EXISTS="$(NEWSLY_SETUP_APP_USER="${APP_USER}" psql postgres \
+  --set=ON_ERROR_STOP=1 \
+  --tuples-only \
+  --no-align <<'SQL'
+\getenv app_user NEWSLY_SETUP_APP_USER
+SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user');
+SQL
+)"
+
+read_env_value() {
+  local key="$1"
+  [[ -f "${ENV_FILE}" ]] || return 0
+  sed -n "s/^${key}=//p" "${ENV_FILE}" | tail -n 1 | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+}
+
+existing_database_password() {
+  local url authority userinfo
+  url="$(read_env_value DATABASE_URL)"
+  [[ "${url}" == *://* ]] || return 1
+  authority="${url#*://}"
+  authority="${authority%%/*}"
+  [[ "${authority}" == *@* ]] || return 1
+  userinfo="${authority%@*}"
+  [[ "${userinfo}" == *:* ]] || return 1
+  printf '%s\n' "${userinfo#*:}"
+}
+
+if [[ "${ROLE_EXISTS}" == "f" ]]; then
+  if [[ -z "${APP_PASSWORD}" ]]; then
+    APP_PASSWORD="$(openssl rand -hex 18)"
+  fi
+  NEWSLY_SETUP_APP_USER="${APP_USER}" \
+  NEWSLY_SETUP_APP_PASSWORD="${APP_PASSWORD}" \
+  psql postgres --set=ON_ERROR_STOP=1 <<'SQL'
 \getenv app_user NEWSLY_SETUP_APP_USER
 \getenv app_password NEWSLY_SETUP_APP_PASSWORD
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_password')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user')
 \gexec
+SQL
+elif [[ "${PASSWORD_EXPLICIT}" == "true" ]]; then
+  NEWSLY_SETUP_APP_USER="${APP_USER}" \
+  NEWSLY_SETUP_APP_PASSWORD="${APP_PASSWORD}" \
+  psql postgres --set=ON_ERROR_STOP=1 <<'SQL'
+\getenv app_user NEWSLY_SETUP_APP_USER
+\getenv app_password NEWSLY_SETUP_APP_PASSWORD
 SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'app_user', :'app_password')
 \gexec
 SQL
+else
+  APP_PASSWORD="$(existing_database_password)" || {
+    echo "ERROR: role ${APP_USER} already exists, but ${ENV_FILE} has no reusable DATABASE_URL password; set POSTGRES_PASSWORD explicitly." >&2
+    exit 1
+  }
+fi
 
 if ! NEWSLY_SETUP_APP_DB="${APP_DB}" psql postgres \
   --set=ON_ERROR_STOP=1 \

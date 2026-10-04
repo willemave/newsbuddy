@@ -68,9 +68,7 @@ FROM debian:bookworm-slim
 ARG YT_DLP_GIT_SHA=fdcc954df4955267ec1627cbeb347b661a110e7c
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
 
-ENV APP_HOME=/app \
-    ADMIN_STATIC_DIR=/app/static \
-    NEWSLY_DATA_ROOT=/data \
+ENV ADMIN_STATIC_DIR=/app/static \
     PORT=8000 \
     NEWSLY_RUST_LOG_FORMAT=json
 
@@ -94,7 +92,6 @@ RUN python3 -m venv /opt/newsly-yt-dlp \
 
 COPY docker/ /app/docker/
 COPY contracts/ /app/contracts/
-COPY rust/assets/admin-static/ /app/static/
 
 COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-db /usr/local/bin/newsly-db
 COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-api /usr/local/bin/newsly-api

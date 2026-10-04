@@ -197,6 +197,7 @@ echo "== Local Rust API for authenticated iOS tests =="
   cargo build --locked --package newsly-api --bin newsly-api
 )
 ENVIRONMENT=development \
+  DEBUG=true \
   NEWSLY_RUST_BIND_ADDR="0.0.0.0:${api_port}" \
   rust/target/debug/newsly-api \
   >"$result_root/local-api.log" 2>&1 &
@@ -217,10 +218,7 @@ curl --fail --silent --show-error "$api_base_url/health/ready" >/dev/null || {
 }
 
 if [[ -z "$simulator_udid" ]]; then
-  simulator_udid="$(
-    xcrun simctl list devices available -j |
-      jq -r '[.devices[][] | select(.state == "Booted" and (.name | startswith("iPhone")))][0].udid // empty'
-  )"
+  simulator_udid="$(newsly_booted_simulator_udid iphone)"
 fi
 if [[ -z "$simulator_udid" ]]; then
   simulator_udid="$(

@@ -39,7 +39,6 @@ Open enums:
 
 - `ContentType`
 - `ContentStatus`
-- `TaskType`
 - `TaskStatus`
 - `SummaryKind`
 - `SubmissionOutcome`
@@ -51,8 +50,6 @@ Open enums:
 - `AgentSearchResultKind`
 - `OnboardingSuggestionType`
 - `OnboardingSelectedSourceType`
-- `NewsItemVisibilityScope`
-- `NewsItemStatus`
 - `LearningDeckSourceKind`
 - `LearningDeckRunStatus`
 - `LearningDeckStatus`

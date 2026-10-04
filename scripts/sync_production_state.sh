@@ -3,11 +3,14 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "${script_dir}/.." && pwd)"
+# shellcheck source=lib/rust_runtime.sh
+source "${script_dir}/lib/rust_runtime.sh"
 
 remote_host="${REMOTE_HOST:-news-app-server}"
 remote_container="${REMOTE_CONTAINER:-newsly-workers}"
+remote_database_container="${REMOTE_DATABASE_CONTAINER:-newsly-postgres}"
 remote_data_root="/data"
-env_file="${NEWSLY_ENV_FILE:-${repository_root}/.env}"
+env_file="${NEWSLY_ENV_FILE:-}"
 database_url="${DATABASE_URL:-}"
 target_db=""
 dump_path=""
@@ -31,7 +34,9 @@ started by this command.
 
 Options:
   --remote-host HOST       SSH host (default: news-app-server)
-  --remote-container NAME  Production container used for dump/assets
+  --remote-container NAME  Production container used for assets (default: newsly-workers)
+  --remote-database-container NAME
+                           Production PostgreSQL container (default: newsly-postgres)
   --remote-data-root PATH  Production data root (default: /data)
   --env-file PATH          Local env file to read and update (default: .env)
   --target-db NAME         Local database name override
@@ -60,6 +65,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --remote-host) require_value "$@"; remote_host="$2"; shift 2 ;;
     --remote-container) require_value "$@"; remote_container="$2"; shift 2 ;;
+    --remote-database-container) require_value "$@"; remote_database_container="$2"; shift 2 ;;
     --remote-data-root) require_value "$@"; remote_data_root="$2"; shift 2 ;;
     --env-file) require_value "$@"; env_file="$2"; shift 2 ;;
     --target-db) require_value "$@"; target_db="$2"; shift 2 ;;
@@ -98,14 +104,16 @@ for command_name in ssh psql pg_restore createdb dropdb tar lsof screen curl; do
   fi
 done
 
-read_env_value() {
-  local key="$1"
-  [[ -f "${env_file}" ]] || return 0
-  sed -n "s/^${key}=//p" "${env_file}" | tail -n 1 | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
-}
-
+env_file="$(newsly_resolve_env_file "${repository_root}" "${env_file}")"
+if [[ -z "${env_file}" ]]; then
+  env_file="${repository_root}/.env"
+fi
 if [[ -z "${database_url}" ]]; then
-  database_url="$(read_env_value DATABASE_URL)"
+  if [[ -f "${env_file}" ]]; then
+    newsly_load_dotenv "${env_file}"
+    newsly_normalize_database_environment
+  fi
+  database_url="${DATABASE_URL:-}"
 fi
 if [[ -z "${database_url}" ]]; then
   database_url="postgresql://newsly:root@127.0.0.1:5432/newsly"
@@ -130,10 +138,21 @@ fi
 target_database_url="${database_prefix}/${target_db}${database_query}"
 admin_database_url="${database_prefix}/postgres${database_query}"
 
+validate_dump() {
+  local path="$1"
+  [[ -s "${path}" ]] && pg_restore --list "${path}" >/dev/null 2>&1
+}
+
 if [[ -z "${dump_path}" ]]; then
   dump_directory="${repository_root}/.local_dumps"
   if [[ "${reuse_dump}" == "true" ]]; then
-    dump_path="$(find "${dump_directory}" -maxdepth 1 -type f -name 'newsly_prod_*.dump' -print 2>/dev/null | sort | tail -n 1)"
+    while IFS= read -r candidate; do
+      if validate_dump "${candidate}"; then
+        dump_path="${candidate}"
+        break
+      fi
+      echo "Skipping invalid production dump: ${candidate}" >&2
+    done < <(find "${dump_directory}" -maxdepth 1 -type f -name 'newsly_prod_*.dump' -print 2>/dev/null | sort -r)
   else
     dump_path="${dump_directory}/newsly_prod_$(date -u +%Y%m%dT%H%M%SZ).dump"
   fi
@@ -146,6 +165,15 @@ remote_exec() {
   printf -v quoted_script '%q' "${remote_script}"
   ssh "${remote_host}" \
     "sudo docker exec ${quoted_container} bash -lc ${quoted_script}"
+}
+
+remote_database_exec() {
+  local remote_script="$1"
+  local quoted_container quoted_script
+  printf -v quoted_container '%q' "${remote_database_container}"
+  printf -v quoted_script '%q' "${remote_script}"
+  ssh "${remote_host}" \
+    "sudo docker exec ${quoted_container} sh -c ${quoted_script}"
 }
 
 stop_local_api() {
@@ -207,16 +235,34 @@ write_database_url() {
 }
 
 restore_database() {
+  local partial_dump_path
   if [[ "${reuse_dump}" == "true" ]]; then
-    if [[ -z "${dump_path}" || ! -f "${dump_path}" ]]; then
-      echo "--reuse-dump requires an existing --dump-path or prior dump" >&2
+    if [[ -z "${dump_path}" ]]; then
+      echo "--reuse-dump requires a valid --dump-path or prior dump" >&2
       exit 1
     fi
     echo "Reusing production dump: ${dump_path}"
   else
     mkdir -p "$(dirname "${dump_path}")"
     echo "Pulling production PostgreSQL dump to ${dump_path}"
-    remote_exec 'set -euo pipefail; PGPASSWORD="${POSTGRES_PASSWORD:?}" pg_dump --format=custom --compress=6 --no-owner --no-privileges -h 127.0.0.1 -U "${POSTGRES_USER:?}" -d "${POSTGRES_DB:?}"' >"${dump_path}"
+    partial_dump_path="${dump_path}.partial"
+    if ! remote_database_exec 'set -eu; exec pg_dump --format=custom --compress=6 --no-owner --no-privileges --username "${POSTGRES_USER:?}" --dbname "${POSTGRES_DB:?}"' >"${partial_dump_path}"; then
+      rm -f -- "${partial_dump_path}"
+      echo "failed to create production PostgreSQL dump" >&2
+      exit 1
+    fi
+    if ! validate_dump "${partial_dump_path}"; then
+      rm -f -- "${partial_dump_path}"
+      echo "production PostgreSQL dump failed validation" >&2
+      exit 1
+    fi
+    mv "${partial_dump_path}" "${dump_path}"
+    chmod 600 "${dump_path}"
+  fi
+
+  if ! validate_dump "${dump_path}"; then
+    echo "refusing to replace ${target_db}: invalid PostgreSQL dump: ${dump_path}" >&2
+    exit 1
   fi
 
   local existing

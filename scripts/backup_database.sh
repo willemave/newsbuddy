@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=lib/rust_runtime.sh
+source "${SCRIPT_DIR}/lib/rust_runtime.sh"
 
 ENV_FILE="${NEWSLY_ENV_FILE:-}"
 BACKUP_DIR="${BACKUP_DIR:-}"
@@ -24,52 +26,6 @@ Environment:
   BACKUP_RETENTION_DAYS   Retention override in days
   NEWSLY_ENV_FILE         Preferred env file to source
 EOF
-}
-
-resolve_env_file() {
-  if [[ -n "${ENV_FILE}" && -f "${ENV_FILE}" ]]; then
-    printf '%s\n' "${ENV_FILE}"
-    return 0
-  fi
-
-  if [[ -n "${NEWSLY_ENV_FILE:-}" && -f "${NEWSLY_ENV_FILE}" ]]; then
-    printf '%s\n' "${NEWSLY_ENV_FILE}"
-    return 0
-  fi
-
-  if [[ -f "${PROJECT_ROOT}/.env.racknerd" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env.racknerd"
-    return 0
-  fi
-
-  if [[ -f "${PROJECT_ROOT}/.env" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env"
-    return 0
-  fi
-
-  if [[ -f "${PROJECT_ROOT}/.env.docker.local" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env.docker.local"
-    return 0
-  fi
-
-  if [[ -f "${PROJECT_ROOT}/.env.docker" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env.docker"
-    return 0
-  fi
-
-  return 1
-}
-
-load_env_file() {
-  local env_path="$1"
-  if [[ -z "${env_path}" ]]; then
-    return 0
-  fi
-
-  set -a
-  # shellcheck source=/dev/null
-  source "${env_path}"
-  set +a
 }
 
 default_backup_dir() {
@@ -148,9 +104,10 @@ if ! [[ "${RETENTION_DAYS}" =~ ^[0-9]+$ ]]; then
 fi
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
-  resolved_env_file="$(resolve_env_file || true)"
+  resolved_env_file="$(newsly_resolve_env_file "${PROJECT_ROOT}" "${ENV_FILE}")"
   if [[ -n "${resolved_env_file}" ]]; then
-    load_env_file "${resolved_env_file}"
+    newsly_load_dotenv "${resolved_env_file}"
+    newsly_normalize_database_environment
   fi
 fi
 

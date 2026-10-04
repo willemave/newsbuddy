@@ -25,8 +25,8 @@ Environment-specific pool settings remain available for ordinary local runs.
 - `scripts/build_agent_vm_template.sh` — network-free template validation/dry-run and explicit E2B publication with a source receipt.
 - `scripts/deploy_blue_green.sh` — remote blue-green API and singleton worker/scheduler rollout.
 - `scripts/deploy/switch-api-slot.sh` — atomic Nginx upstream switch.
-- `scripts/deploy/push_envs.sh` — explicit env-only host sync outside an application deploy.
-- `scripts/sync_production_state.sh` — supported production-to-local state snapshot entrypoint.
+- `scripts/deploy/push_envs.sh` — validated, atomic `.env.racknerd` host sync outside an application deploy.
+- `scripts/sync_production_state.sh` — supported production-to-local state snapshot entrypoint; it dumps from the PostgreSQL container and validates custom-format dumps before replacing the local database.
 - `scripts/sync_logs_from_server.sh` and `scripts/view_remote_errors.sh` — narrow SSH log helpers.
 - `scripts/start_bgutil_provider.sh` — optional pinned YouTube proof-of-origin helper for native media testing.
 
@@ -46,7 +46,7 @@ updated separately when publishing the Rust build.
 
 ## Contracts and guardrails
 
-- `scripts/export_openapi_schema.sh` — export Rust public OpenAPI.
+- `scripts/regenerate_public_contracts.sh --check` — verify the canonical public OpenAPI and generated Swift artifacts.
 - `scripts/regenerate_public_contracts.sh` — refresh Rust OpenAPI plus generated app Swift and Share Extension artifacts.
 - `scripts/check_public_contracts.sh` — fail on public contract, agent-operation inventory, or native-client generation drift.
 - `scripts/architecture_guard.sh` — check retired-authority absence, module ratchets, formatting, and contracts.
@@ -57,6 +57,7 @@ updated separately when publishing the Rust build.
 - `scripts/codex_bootstrap.sh` — fetch locked Rust/Python-island/Node dependencies and resolve Swift packages.
 - `scripts/codex_run_ios.sh` — build, install, create a Rust debug user, and launch the current Simulator app.
 - `scripts/axe_simulator_smoke.sh` — create a Rust debug user and run a lightweight AXe Simulator smoke.
+- `scripts/run_maestro_flow.sh` — seed or reuse the canonical Rust E2E fixture manifest and run one checked-in Maestro flow with its declared environment.
 
 Both iOS launchers accept `--api-base-url http://127.0.0.1:<PORT>`; use an
 explicit non-default port when another checkout or process owns port 8000.
@@ -68,7 +69,6 @@ explicit non-default port when another checkout or process owns port 8000.
 - `docker/entrypoint.sh` and `docker/supervisord.worker-programs.conf` are
   image-private dispatch and worker-supervision configuration. API and
   scheduler modes execute their Rust binaries directly.
-- `scripts/deploy/common.sh` is sourced only by deploy tooling.
 - `python/evals/scripts/*.py` are retained offline model/evaluation pipelines;
   `python/document_extractor` exposes only its package console entrypoint.
 - `docs/generate_architecture.sh`, `.agents/skills/*/scripts`, and the root

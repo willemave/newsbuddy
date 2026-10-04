@@ -83,10 +83,10 @@ increasing stalls, failed starts, duplicate generation, or unwanted provider cos
 
 ## Reading the implemented timings
 
-Filter API/worker logs for `Audio timing`. The request events carry `request_id`,
-and the enqueue/commit events connect it to `episode_group_id` and the first
-`audio_episode_id`. The `audio_episode_attempt` span carries `task_id`,
-`audio_episode_id`, and `retry_count` through provider work and finalization.
+Filter API/worker logs for `Audio timing` and `Worker timing`. The request events carry
+`request_id`, and the enqueue/commit events connect it to `episode_group_id` and the first
+`audio_episode_id`. The `worker_attempt` span carries `task_id`, `task_type`, and `retry_count`
+through provider work and finalization.
 Each `audio_tts_chunk` child span identifies its `chunk_index`.
 
 | Stage | What the duration measures |

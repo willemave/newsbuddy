@@ -1,5 +1,7 @@
 # OpenAPI-First Architecture Plan
 
+> **Superseded:** The OpenAPI architecture described here has shipped. See `docs/architecture.md` for the current contract ownership model.
+
 **Date:** 2026-03-21  
 **Scope:** public HTTP contracts, backend boundary cleanup, CLI/iOS contract usage, local verification scripts  
 **Primary goals:** OpenAPI as source of truth, thin router boundaries, generated transport contracts, local drift detection

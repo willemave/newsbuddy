@@ -8,14 +8,24 @@ pre-commit:
     - name: module size guardrails
       run: scripts/check_module_size_guardrails.sh
 
-    - name: ruff check
-      glob: "**/*.py"
-      run: uvx --from ruff==0.11.12 ruff check --fix {staged_files}
+    - name: evals ruff check
+      glob: "python/evals/**/*.py"
+      run: uv run --project python/evals ruff check --fix {staged_files}
       stage_fixed: true
 
-    - name: ruff format
-      glob: "**/*.py"
-      run: uvx --from ruff==0.11.12 ruff format {staged_files}
+    - name: evals ruff format
+      glob: "python/evals/**/*.py"
+      run: uv run --project python/evals ruff format {staged_files}
+      stage_fixed: true
+
+    - name: extractor ruff check
+      glob: "python/document_extractor/**/*.py"
+      run: uv run --project python/document_extractor ruff check --fix {staged_files}
+      stage_fixed: true
+
+    - name: extractor ruff format
+      glob: "python/document_extractor/**/*.py"
+      run: uv run --project python/document_extractor ruff format {staged_files}
       stage_fixed: true
 
     - name: Rust format

@@ -27,15 +27,10 @@ certs/
 
 # Runtime state and local artifacts
 data/
-db/
 docker/local-data/
 logs/
 logs_from_server/
 static/
-*.db
-*.sqlite3
-*.db-shm
-*.db-wal
 
 # Visual artifacts; retain product and reference assets
 *.png
@@ -65,3 +60,4 @@ outputs/
 test-results/
 tmp/ios-performance-traces/
 work/knowledge_summary_eval_*/
+.agents/settings.local.json

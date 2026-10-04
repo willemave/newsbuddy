@@ -98,7 +98,6 @@ services:
     container_name: newsly-api-blue
     environment:
       <<: *newsly-environment
-      FORWARDED_ALLOW_IPS: ${NEWSLY_FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}
       NEWSLY_RUNTIME_MODE: api
     ports:
       - "127.0.0.1:8001:8000"
@@ -115,7 +114,6 @@ services:
     container_name: newsly-api-green
     environment:
       <<: *newsly-environment
-      FORWARDED_ALLOW_IPS: ${NEWSLY_FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}
       NEWSLY_RUNTIME_MODE: api
     ports:
       - "127.0.0.1:8002:8000"

@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export APP_HOME="${APP_HOME:-/app}"
-export NEWSLY_DATA_ROOT="${NEWSLY_DATA_ROOT:-/data}"
-export NEWSLY_APP_DATA_ROOT="${NEWSLY_APP_DATA_ROOT:-${NEWSLY_DATA_ROOT}}"
+data_root=/data
 export PORT="${PORT:-8000}"
 export NEWSLY_RUNTIME_MODE="${NEWSLY_RUNTIME_MODE:-api}"
 
-export MEDIA_BASE_DIR="${MEDIA_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/media}"
-export LOGS_BASE_DIR="${LOGS_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/logs}"
-export IMAGES_BASE_DIR="${IMAGES_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/images}"
-export CONTENT_BODY_LOCAL_ROOT="${CONTENT_BODY_LOCAL_ROOT:-${NEWSLY_APP_DATA_ROOT}/content_bodies}"
-export PODCAST_SCRATCH_DIR="${PODCAST_SCRATCH_DIR:-${NEWSLY_APP_DATA_ROOT}/scratch}"
-export PERSONAL_MARKDOWN_ROOT="${PERSONAL_MARKDOWN_ROOT:-${NEWSLY_APP_DATA_ROOT}/personal_markdown}"
+export MEDIA_BASE_DIR="${MEDIA_BASE_DIR:-${data_root}/media}"
+export LOGS_BASE_DIR="${LOGS_BASE_DIR:-${data_root}/logs}"
+export IMAGES_BASE_DIR="${IMAGES_BASE_DIR:-${data_root}/images}"
+export CONTENT_BODY_LOCAL_ROOT="${CONTENT_BODY_LOCAL_ROOT:-${data_root}/content_bodies}"
+export PODCAST_SCRATCH_DIR="${PODCAST_SCRATCH_DIR:-${data_root}/scratch}"
+export PERSONAL_MARKDOWN_ROOT="${PERSONAL_MARKDOWN_ROOT:-${data_root}/personal_markdown}"
 
 mkdir -p \
-  "${NEWSLY_APP_DATA_ROOT}" \
+  "${data_root}" \
   "${MEDIA_BASE_DIR}" \
   "${LOGS_BASE_DIR}" \
   "${IMAGES_BASE_DIR}" \

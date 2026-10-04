@@ -22,3 +22,9 @@ Rerunning replaces the edition without duplicate stories. Read state resets for
 the demo user. Normal small E2E fixtures and personal data are not used.
 Restart the locally configured Simulator app after applying to refresh its cache.
 No workers or paid model calls are required. The overlay does not create audio.
+
+Validate the overlay against the current local schema in a disposable database:
+
+```sh
+scripts/tests/check_launch_briefing_fixture.sh
+```

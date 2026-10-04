@@ -118,3 +118,40 @@ newsly_parse_api_base_url() {
 
   printf '%s\t%s\t%s\t%s\n' "${scheme}" "${host}" "${port}" "${use_https}"
 }
+
+newsly_booted_simulator_udid() {
+  local device_filter="${1:-any}"
+  if [[ "${device_filter}" == "iphone" ]]; then
+    xcrun simctl list devices booted -j |
+      jq -r '[.devices[][] | select(.state == "Booted" and .isAvailable != false and (.name | startswith("iPhone")))][0].udid // empty'
+  else
+    xcrun simctl list devices booted -j |
+      jq -r '[.devices[][] | select(.state == "Booted" and .isAvailable != false)][0].udid // empty'
+  fi
+}
+
+newsly_create_debug_user() {
+  local api_base_url="${1%/}"
+  curl --fail --silent --show-error \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --data '{"has_completed_onboarding":true,"has_completed_new_user_tutorial":true}' \
+    "${api_base_url}/auth/debug/new-user" |
+    jq -er '.user.id'
+}
+
+newsly_launch_authenticated_app() {
+  local simulator_udid="$1" bundle_id="$2" api_host="$3" api_port="$4"
+  local api_use_https="$5" debug_user_id="$6"
+  shift 6
+  xcrun simctl launch "${simulator_udid}" "${bundle_id}" \
+    -newslyE2EEnabled true \
+    -newslyE2EAutoLogin true \
+    -newslyE2EServerHost "${api_host}" \
+    -newslyE2EServerPort "${api_port}" \
+    -newslyE2EUseHTTPS "${api_use_https}" \
+    -newslyE2EUserId "${debug_user_id}" \
+    -newslyE2ECompleteOnboarding true \
+    -newslyE2ECompleteTutorial true \
+    "$@"
+}

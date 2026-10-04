@@ -45,10 +45,7 @@ IFS=$'\t' read -r api_scheme api_host api_port api_use_https \
   < <(newsly_parse_api_base_url "${api_base_url}")
 api_base_url="${api_scheme}://${api_host}:${api_port}"
 
-simulator_udid="$(
-  xcrun simctl list devices booted -j |
-    jq -r '[.devices[][] | select(.state == "Booted" and .isAvailable != false)][0].udid // empty'
-)"
+simulator_udid="$(newsly_booted_simulator_udid)"
 
 if [[ -z "$simulator_udid" ]]; then
   echo "No booted iOS Simulator found. Boot one in Xcode and run this action again." >&2
@@ -75,23 +72,10 @@ xcodebuild \
 
 xcrun simctl install "$simulator_udid" "$app_path"
 
-debug_user_id="$(
-  curl --fail --silent --show-error \
-    --request POST \
-    --header 'Content-Type: application/json' \
-    --data '{"has_completed_onboarding":true,"has_completed_new_user_tutorial":true}' \
-    "${api_base_url}/auth/debug/new-user" |
-    jq -er '.user.id'
-)"
+debug_user_id="$(newsly_create_debug_user "${api_base_url}")"
 
-xcrun simctl launch "$simulator_udid" org.willemaw.newsly \
-  -newslyE2EEnabled true \
-  -newslyE2EAutoLogin true \
-  -newslyE2EServerHost "${api_host}" \
-  -newslyE2EServerPort "${api_port}" \
-  -newslyE2EUseHTTPS "${api_use_https}" \
-  -newslyE2EUserId "$debug_user_id" \
-  -newslyE2ECompleteOnboarding true \
-  -newslyE2ECompleteTutorial true
+newsly_launch_authenticated_app \
+  "${simulator_udid}" org.willemaw.newsly "${api_host}" "${api_port}" \
+  "${api_use_https}" "${debug_user_id}"
 
-exec npx serve-sim "$simulator_udid"
+exec npx serve-sim@0.1.47 "$simulator_udid"

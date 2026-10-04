@@ -1,5 +1,7 @@
 # Typed Contracts Implementation Plan
 
+> **Superseded:** The typed-contract migration is complete. Current contract architecture and commands live in `docs/architecture.md` and `docs/library/operations/command-index.md`.
+
 Date: 2026-06-09
 
 ## Goal

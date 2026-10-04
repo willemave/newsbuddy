@@ -7,6 +7,7 @@ x-newsly-environment: &newsly-environment
   DOCUMENT_EXTRACTOR_URL: http://document-extractor:8200
   DOCUMENT_EXTRACTOR_SHARED_SECRET: ${DOCUMENT_EXTRACTOR_SHARED_SECRET:-local-extractor-secret}
   ENVIRONMENT: development
+  DEBUG: ${DEBUG:-true}
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-jwt-secret}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-local-development-admin-password}
   PUBLIC_BASE_URL: http://127.0.0.1:${PORT:-8000}

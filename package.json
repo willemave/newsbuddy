@@ -1,12 +1,8 @@
 {
   "devDependencies": {
-    "@tailwindcss/cli": "^4.2.2",
-    "lefthook": "^2.1.6",
-    "tailwindcss": "^4.2.2"
+    "lefthook": "^2.1.6"
   },
   "scripts": {
-    "dev": "npx @tailwindcss/cli -i ./rust/assets/admin-static/css/styles.css -o ./rust/assets/admin-static/css/app.css --watch",
-    "build:css": "npx @tailwindcss/cli -i ./rust/assets/admin-static/css/styles.css -o ./rust/assets/admin-static/css/app.css --minify",
     "hooks:install": "lefthook install"
   }
 }

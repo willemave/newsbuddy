@@ -50,9 +50,9 @@ Then set at minimum:
 The `NEWSLY_PUBLIC_BASE_URL` line is optional: production Compose defaults it to
 the RackNerd HTTPS origin shown above unless `.env.racknerd` overrides it.
 
-The API launcher trusts forwarded headers from loopback and Docker's private
-`172.16.0.0/12` range by default. Set `NEWSLY_FORWARDED_ALLOW_IPS` only if the
-production Docker network uses a different, explicitly known subnet.
+Nginx is the production proxy trust boundary. The Rust API uses
+`x-forwarded-proto` to infer the public scheme only when `PUBLIC_BASE_URL` is
+unset.
 
 ## Deploy flow
 
@@ -140,7 +140,10 @@ The host Nginx configuration and atomic slot-switch helper live at
 `scripts/deploy/newsly-nginx.conf` and
 `scripts/deploy/switch-api-slot.sh`. Install them as
 `/etc/nginx/nginx.conf` and `/opt/newsly/bin/switch-api-slot`, respectively,
-when provisioning a replacement host.
+when provisioning a replacement host. Rust owns `/` and `/robots.txt`; Nginx
+proxies those routes and serves only the file-backed image alias. The 2026-10-03
+reference cleanup must be installed and checked with `nginx -t` during a separately
+authorized host update; editing this file does not update the live host.
 
 Operator commands use `newsly-admin` from the stable `newsly-workers` container
 for database settings and the Rust admin surface or container runtime for logs. The default SSH target is the local

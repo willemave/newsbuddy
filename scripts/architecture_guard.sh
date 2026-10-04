@@ -91,4 +91,6 @@ scripts/check_ios_wire_boundaries.sh
 scripts/build_agent_vm_template.sh --check >/dev/null
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 scripts/tests/test_deploy_blue_green.sh
+scripts/tests/test_setup_local_postgres.sh
+scripts/tests/test_sync_production_state.sh
 scripts/check_public_contracts.sh
