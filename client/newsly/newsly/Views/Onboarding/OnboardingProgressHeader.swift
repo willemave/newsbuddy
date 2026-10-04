@@ -42,7 +42,7 @@ struct OnboardingProgressHeader: View {
             return (2, step == .audio ? "Voice setup" : "Matching sources")
         case .suggestions:
             return (3, "Review picks")
-        case .fastNews, .aggregators:
+        case .aggregators:
             return (4, "News aggregators")
         case .reddit:
             return (5, "Reddit")

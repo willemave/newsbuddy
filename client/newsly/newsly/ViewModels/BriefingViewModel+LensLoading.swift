@@ -227,13 +227,7 @@ extension BriefingViewModel {
         let summary = if usesReadCompatibility, let existingSummary = lenses[lensKey]?.lens {
             existingSummary
         } else {
-            APIBriefingLensSummary(
-                key: response.lens.key,
-                tier: response.lens.tier,
-                title: response.lens.title,
-                deck: response.lens.deck,
-                position: response.lens.position,
-                segmentCount: response.lens.segmentCount,
+            response.lens.with(
                 unreadSourceCount: max(
                     response.lens.unreadSourceCount - optimisticUnreadCount,
                     0
@@ -347,23 +341,6 @@ extension BriefingViewModel {
         guard optimisticallyReadSourceKeys.contains(source.sourceKey), !source.read else {
             return source
         }
-        return APIBriefingSource(
-            sourceKey: source.sourceKey,
-            kind: source.kind,
-            id: source.id,
-            title: source.title,
-            publisher: source.publisher,
-            summary: source.summary,
-            keyPoints: source.keyPoints,
-            url: source.url,
-            imageUrl: source.imageUrl,
-            thumbnailUrl: source.thumbnailUrl,
-            publishedAt: source.publishedAt,
-            contentType: source.contentType,
-            durationSeconds: source.durationSeconds,
-            readingMinutes: source.readingMinutes,
-            read: true,
-            discussion: source.discussion
-        )
+        return source.markedRead()
     }
 }

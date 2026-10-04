@@ -10,8 +10,7 @@ struct ChatSessionCard: View {
 
     /// Whether this session was recently active (within last 5 minutes)
     private var isRecentlyActive: Bool {
-        guard let date = session.lastActivityDate else { return false }
-        return Date().timeIntervalSince(date) < 300
+        Date().timeIntervalSince(session.lastActivityDate) < 300
     }
 
     private enum BadgeStyle {
@@ -27,8 +26,7 @@ struct ChatSessionCard: View {
     }
 
     private var relativeTimeLabel: String? {
-        guard let date = session.lastActivityDate else { return nil }
-        return ContentTimestampFormatter.compactRelativeText(from: date).uppercased()
+        ContentTimestampFormatter.compactRelativeText(from: session.lastActivityDate).uppercased()
     }
 
     var body: some View {

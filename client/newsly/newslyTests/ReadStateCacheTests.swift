@@ -28,6 +28,7 @@ final class ReadStateCacheTests: XCTestCase {
     func testMarkReadAndSyncRollsBackWhenSyncFails() async {
         let cache = ReadStateCache(
             contentReadRepository: FailingReadStatusRepository(),
+            newsReadRepository: TestNoopReadStatusRepository(),
             badgeStatsStore: makeBadgeStatsStore()
         )
 
@@ -42,7 +43,11 @@ final class ReadStateCacheTests: XCTestCase {
     }
 
     func testApplyingProjectsAndFiltersCachedReadState() {
-        let cache = ReadStateCache(badgeStatsStore: makeBadgeStatsStore())
+        let cache = ReadStateCache(
+            contentReadRepository: TestNoopReadStatusRepository(),
+            newsReadRepository: TestNoopReadStatusRepository(),
+            badgeStatsStore: makeBadgeStatsStore()
+        )
         cache.markReadLocally([
             ReadStateKey(id: 20, contentType: .news),
         ], adjustUnreadCounts: false)
@@ -68,24 +73,15 @@ final class ReadStateCacheTests: XCTestCase {
             shortSummary: "Summary",
             createdAt: "2026-03-18T05:00:00Z",
             processedAt: "2026-03-18T06:00:00Z",
-            classification: nil,
-            publicationDate: nil,
             isRead: false,
             isSavedToKnowledge: false,
             imageUrl: nil,
             thumbnailUrl: nil,
-            primaryTopic: nil,
-            topComment: nil,
-            commentCount: nil,
-            newsSummary: nil,
-            newsKeyPoints: nil
         )
     }
 
     private func makeBadgeStatsStore() -> BadgeStatsStore {
-        BadgeStatsStore(
-            notificationCenter: NotificationCenter()
-        )
+        BadgeStatsStore(fetchStats: { throw CancellationError() })
     }
 }
 

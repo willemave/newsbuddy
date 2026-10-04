@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Observation
 
 enum LinkReadLaterState: Equatable {
     case idle
@@ -22,26 +23,24 @@ protocol ToastPresenting: AnyObject {
 extension ToastService: ToastPresenting {}
 
 @MainActor
+@Observable
 final class LinkSubmissionCoordinator {
-    typealias SubmitHandler = (URL, String?) async throws -> SubmitContentResponse
-
-    var onStateWillChange: (() -> Void)?
-
-    private let submitLinkToLongFormHandler: SubmitHandler
+    @ObservationIgnored
+    private let contentService: any ContentDetailServicing
+    @ObservationIgnored
     private let toastPresenter: any ToastPresenting
     private var linkStates: [String: LinkReadLaterState] = [:]
 
     init(
-        submitLinkToLongFormHandler: @escaping SubmitHandler,
+        contentService: any ContentDetailServicing,
         toastPresenter: any ToastPresenting
     ) {
-        self.submitLinkToLongFormHandler = submitLinkToLongFormHandler
+        self.contentService = contentService
         self.toastPresenter = toastPresenter
     }
 
     func reset() {
         guard !linkStates.isEmpty else { return }
-        onStateWillChange?()
         linkStates = [:]
     }
 
@@ -55,24 +54,7 @@ final class LinkSubmissionCoordinator {
             return
         }
 
-        await addLinkToReadLater(
-            id: link.id,
-            url: url,
-            title: link.title,
-            alreadyExistsMessage: "Already in Read Later",
-            successMessage: "Added to Read Later",
-            errorPrefix: "Failed to add to Read Later"
-        )
-    }
-
-    private func addLinkToReadLater(
-        id linkID: String,
-        url: URL,
-        title: String?,
-        alreadyExistsMessage: String,
-        successMessage: String,
-        errorPrefix: String
-    ) async {
+        let linkID = link.id
         let state = linkStates[linkID] ?? .idle
         guard state != .adding && state != .added else {
             return
@@ -81,22 +63,25 @@ final class LinkSubmissionCoordinator {
         setState(.adding, for: linkID)
 
         do {
-            let response = try await submitLinkToLongFormHandler(url, title)
+            let response = try await contentService.submitContent(
+                url: url,
+                title: link.title,
+                platform: nil
+            )
             setState(.added, for: linkID)
             if response.alreadyExists {
-                toastPresenter.show(alreadyExistsMessage, type: .info, duration: 3.0)
+                toastPresenter.show("Already in Read Later", type: .info, duration: 3.0)
             } else {
-                toastPresenter.showSuccess(successMessage)
+                toastPresenter.showSuccess("Added to Read Later")
             }
         } catch {
             setState(.failed, for: linkID)
-            toastPresenter.showError("\(errorPrefix): \(error.localizedDescription)")
+            toastPresenter.showError("Failed to add to Read Later: \(error.localizedDescription)")
         }
     }
 
     private func setState(_ state: LinkReadLaterState, for linkID: String) {
         guard linkStates[linkID] != state else { return }
-        onStateWillChange?()
         linkStates[linkID] = state
     }
 }

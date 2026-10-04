@@ -7,7 +7,7 @@ final class ContentListViewModelTests: XCTestCase {
         let service = RecentlyReadContentService(contents: [makeReadSummary(id: 42)])
         let viewModel = ContentListViewModel(
             contentService: service,
-            readStateCache: ReadStateCache()
+            readStateCache: makeTestReadStateCache()
         )
 
         await viewModel.loadRecentlyRead()
@@ -18,7 +18,7 @@ final class ContentListViewModelTests: XCTestCase {
     func testReadyContentIDsStaySynchronizedWithContentMutations() {
         let viewModel = ContentListViewModel(
             contentService: RecentlyReadContentService(contents: []),
-            readStateCache: ReadStateCache()
+            readStateCache: makeTestReadStateCache()
         )
 
         viewModel.contents = [
@@ -42,7 +42,7 @@ final class ContentListViewModelTests: XCTestCase {
         let service = ModeSwapContentService()
         let viewModel = ContentListViewModel(
             contentService: service,
-            readStateCache: ReadStateCache()
+            readStateCache: makeTestReadStateCache()
         )
 
         await viewModel.loadKnowledgeLibrary(query: "chips")
@@ -61,7 +61,7 @@ final class ContentListViewModelTests: XCTestCase {
         let service = StaleKnowledgeMutationContentService(content: content)
         let viewModel = ContentListViewModel(
             contentService: service,
-            readStateCache: ReadStateCache()
+            readStateCache: makeTestReadStateCache()
         )
         await viewModel.loadKnowledgeLibrary()
 
@@ -83,7 +83,7 @@ final class ContentListViewModelTests: XCTestCase {
         )
         let viewModel = ContentListViewModel(
             contentService: service,
-            readStateCache: ReadStateCache()
+            readStateCache: makeTestReadStateCache()
         )
         await viewModel.loadKnowledgeLibrary()
 
@@ -106,7 +106,7 @@ final class ContentListViewModelTests: XCTestCase {
         service.reprocessedContent = makeReadSummary(id: 42, status: .new, isSavedToKnowledge: true)
         let viewModel = ContentListViewModel(
             contentService: service,
-            readStateCache: ReadStateCache()
+            readStateCache: makeTestReadStateCache()
         )
         await viewModel.loadKnowledgeLibrary()
         XCTAssertEqual(viewModel.contents.first?.savedLibraryItemState, .unavailable)
@@ -145,17 +145,10 @@ final class ContentListViewModelTests: XCTestCase {
             shortSummary: "Summary",
             createdAt: "2026-07-12T12:00:00Z",
             processedAt: "2026-07-12T12:01:00Z",
-            classification: nil,
-            publicationDate: nil,
             isRead: true,
             isSavedToKnowledge: isSavedToKnowledge,
             imageUrl: nil,
             thumbnailUrl: nil,
-            primaryTopic: nil,
-            topComment: nil,
-            commentCount: nil,
-            newsSummary: nil,
-            newsKeyPoints: nil
         )
     }
 }
@@ -221,10 +214,6 @@ private final class KnowledgeRemovalReconciliationService: ContentSummaryListSer
             isSavedToKnowledge: true,
             message: "Reprocessing started"
         )
-    }
-
-    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
     }
 
     func markContentAsUnread(id: Int) async throws {
@@ -300,10 +289,6 @@ private final class StaleKnowledgeMutationContentService: ContentSummaryListServ
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 
-    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
-    }
-
     func markContentAsUnread(id: Int) async throws {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
@@ -362,10 +347,6 @@ private final class ModeSwapContentService: ContentSummaryListServicing {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 
-    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
-    }
-
     func markContentAsUnread(id: Int) async throws {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
@@ -399,17 +380,10 @@ private final class ModeSwapContentService: ContentSummaryListServicing {
             shortSummary: "Summary",
             createdAt: "2026-07-12T12:00:00Z",
             processedAt: "2026-07-12T12:01:00Z",
-            classification: nil,
-            publicationDate: nil,
             isRead: true,
             isSavedToKnowledge: true,
             imageUrl: nil,
             thumbnailUrl: nil,
-            primaryTopic: nil,
-            topComment: nil,
-            commentCount: nil,
-            newsSummary: nil,
-            newsKeyPoints: nil
         )
     }
 }
@@ -461,10 +435,6 @@ private final class RecentlyReadContentService: ContentSummaryListServicing {
     }
 
     func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
-    }
-
-    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 

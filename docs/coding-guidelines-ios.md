@@ -172,6 +172,11 @@ Order SwiftUI view files this way:
 
 ## Type And Accessibility
 
+- App-owned modal forms and actions use `modalBody` (17pt) for primary copy and
+  controls, `modalSupporting` (15pt) for explanatory copy, and `modalCaption`
+  (13pt) only for quiet metadata. Titles use `modalTitle`. These fonts scale with
+  Dynamic Type; allow wrapping and scrolling instead of shrinking labels to fit.
+
 - Use App Text Size for chrome, settings, controls, and navigation-heavy
   surfaces. Use Content Text Size for reading surfaces: Long Read, Fast Read,
   content detail, and chat routes.

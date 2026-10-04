@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct LandingView: View {
-    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(AuthenticationController.self) private var authViewModel
     #if DEBUG && targetEnvironment(simulator)
     @State private var showingDebugMenu = false
     @State private var tapCount = 0

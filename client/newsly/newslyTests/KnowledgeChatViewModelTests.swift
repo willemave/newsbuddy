@@ -2,6 +2,15 @@ import Foundation
 import XCTest
 @testable import newsly
 
+private extension KnowledgeChatViewModel {
+    convenience init(chatService: any KnowledgeChatServicing) {
+        self.init(
+            chatService: chatService,
+            transcriptionService: TestUnavailableSpeechTranscriber()
+        )
+    }
+}
+
 @MainActor
 final class KnowledgeChatViewModelTests: XCTestCase {
     func testVoiceMicStopsRecordingAndStartsAssistantTurnWithTranscript() async {
@@ -15,13 +24,12 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        let startRoute = await viewModel.toggleVoiceRecording()
-        XCTAssertNil(startRoute)
+        await viewModel.toggleVoiceRecording()
         XCTAssertTrue(viewModel.isVoiceRecording)
 
-        let route = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
 
-        XCTAssertEqual(route?.sessionId, 91)
+        XCTAssertEqual(viewModel.completedVoiceRoute?.sessionId, 91)
         XCTAssertEqual(chatService.receivedMessages, ["What should I read next?"])
         XCTAssertEqual(chatService.receivedScreenTypes, ["knowledge_hub"])
         XCTAssertEqual(transcriptionService.startCallCount, 1)
@@ -44,7 +52,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
         await transcriptionService.simulateSilenceAutoStop()
         try? await Task.sleep(nanoseconds: 50_000_000)
 
@@ -66,7 +74,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
         await transcriptionService.simulateAutomaticStop(reason: .maximumDuration)
         for _ in 0..<100 where viewModel.completedVoiceRoute == nil {
             await Task.yield()
@@ -84,7 +92,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
         await transcriptionService.simulateNoSpeechTimeout()
         for _ in 0..<100 where viewModel.errorMessage == nil {
             await Task.yield()
@@ -94,7 +102,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         }
 
         XCTAssertEqual(viewModel.errorMessage, "No speech detected. Try again.")
-        _ = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
         XCTAssertTrue(viewModel.isVoiceRecording)
         XCTAssertNil(viewModel.errorMessage)
         viewModel.cancelVoiceRecording()
@@ -109,10 +117,10 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await viewModel.toggleVoiceRecording()
-        let route = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
 
-        XCTAssertNil(route)
+        XCTAssertNil(viewModel.completedVoiceRoute)
         XCTAssertEqual(viewModel.errorMessage, "I didn't catch that. Try again.")
         XCTAssertTrue(chatService.receivedMessages.isEmpty)
     }
@@ -128,7 +136,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await startViewModel.toggleVoiceRecording()
+        await startViewModel.toggleVoiceRecording()
         XCTAssertEqual(startViewModel.errorMessage, "Failed to record audio.")
         XCTAssertFalse(startViewModel.isVoiceRecording)
 
@@ -142,8 +150,8 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await stopViewModel.toggleVoiceRecording()
-        _ = await stopViewModel.toggleVoiceRecording()
+        await stopViewModel.toggleVoiceRecording()
+        await stopViewModel.toggleVoiceRecording()
         XCTAssertEqual(
             stopViewModel.errorMessage,
             "Transcription failed: scripted failure"
@@ -159,7 +167,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        _ = await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
         viewModel.cancelVoiceRecording()
 
         XCTAssertEqual(transcriptionService.resetCallCount, 1)
@@ -262,6 +270,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         )
         let viewModel = KnowledgeChatViewModel(
             chatService: chatService,
+            transcriptionService: TestUnavailableSpeechTranscriber(),
             activeChatPollIntervalNanoseconds: 1_000_000
         )
 
@@ -546,25 +555,16 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.sessions.map(\.id), [91, 1])
     }
 
-    func testOpenSourceChatResumesLatestKnowledgeChatForThatSource() async {
-        let chatService = MockKnowledgeChatService(
-            pageResponses: [.success(makeSessionListResponse(
-                sessions: [
-                    makeSession(id: 4, newsItemId: 7),
-                    makeSession(id: 5, contentId: 7),
-                    makeSession(id: 6, contentId: 7)
-                ],
-                nextCursor: nil,
-                hasMore: false
-            ))],
-            turnResponses: []
-        )
+    func testOpenSourceChatResumesTheSourcesExistingChat() async {
+        let chatService = MockKnowledgeChatService(turnResponses: [])
+        chatService.existingSourceChatResult = .success(makeSession(id: 5, contentId: 7))
         let viewModel = KnowledgeChatViewModel(chatService: chatService)
-        await viewModel.loadChats()
 
-        let route = await viewModel.openSourceChat(for: .knowledgeSourceFixture(id: 7))
+        let route = await viewModel.openSourceChat(for: .content(7))
 
         XCTAssertEqual(route?.sessionId, 5)
+        XCTAssertEqual(route?.focusComposerOnAppear, false)
+        XCTAssertEqual(chatService.lookedUpSources, [.content(7)])
         XCTAssertTrue(chatService.startedSources.isEmpty)
     }
 
@@ -581,26 +581,25 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         let viewModel = KnowledgeChatViewModel(chatService: chatService)
         await viewModel.loadChats()
 
-        let route = await viewModel.openSourceChat(
-            for: .knowledgeSourceFixture(id: 7, contentType: .news)
-        )
+        let route = await viewModel.openSourceChat(for: .news(7))
 
         XCTAssertEqual(route?.sessionId, 9)
         XCTAssertEqual(route?.newsItemId, 7)
         XCTAssertEqual(route?.focusComposerOnAppear, true)
-        XCTAssertEqual(chatService.startedSources, [KnowledgeSourceKey(id: 7, isNews: true)])
+        XCTAssertEqual(chatService.startedSources, [.news(7)])
         XCTAssertEqual(viewModel.sessions.map(\.id), [9, 5])
     }
 
-    func testOpenSourceChatSurfacesStartFailure() async {
+    func testOpenSourceChatSurfacesLookupFailureWithoutStarting() async {
         let chatService = MockKnowledgeChatService(turnResponses: [])
-        chatService.startResponses = [.failure(MockKnowledgeChatService.MockError.boom)]
+        chatService.existingSourceChatResult = .failure(MockKnowledgeChatService.MockError.boom)
         let viewModel = KnowledgeChatViewModel(chatService: chatService)
 
-        let route = await viewModel.openSourceChat(for: .knowledgeSourceFixture(id: 7))
+        let route = await viewModel.openSourceChat(for: .content(7))
 
         XCTAssertNil(route)
         XCTAssertEqual(viewModel.errorMessage, "Boom")
+        XCTAssertTrue(chatService.startedSources.isEmpty)
         XCTAssertFalse(viewModel.isCreatingSession)
     }
 
@@ -799,7 +798,9 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
     var receivedNotes: [String?] = []
     var receivedAssistantActions: [String?] = []
     var deletedSessionIDs: [Int] = []
-    var startedSources: [KnowledgeSourceKey] = []
+    var lookedUpSources: [KnowledgeSource] = []
+    var startedSources: [KnowledgeSource] = []
+    var existingSourceChatResult: Result<ChatSessionSummary?, Error> = .success(nil)
     var startResponses: [Result<ChatSessionSummary, Error>] = []
 
     private var pageResponses: [Result<ChatSessionListResponse, Error>]
@@ -875,13 +876,13 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
         }
     }
 
-    func startArticleChat(contentId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
-        startedSources.append(KnowledgeSourceKey(id: contentId, isNews: false))
-        return try nextStartResponse()
+    func existingSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary? {
+        lookedUpSources.append(source)
+        return try existingSourceChatResult.get()
     }
 
-    func startNewsChat(newsItemId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
-        startedSources.append(KnowledgeSourceKey(id: newsItemId, isNews: true))
+    func startSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary {
+        startedSources.append(source)
         return try nextStartResponse()
     }
 

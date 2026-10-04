@@ -7,7 +7,6 @@ import SwiftUI
 import os.log
 
 enum DetailSwipeOrigin: String {
-    case content
     case leadingEdge
     case trailingEdge
 }
@@ -47,8 +46,7 @@ enum DetailSwipePolicy {
         origin: DetailSwipeOrigin,
         translation: CGSize,
         currentIndex: Int,
-        itemCount: Int,
-        leadingEdgePreviousEnabled: Bool = true
+        itemCount: Int
     ) -> DetailSwipeAction {
         guard isHorizontalSwipe(translation, threshold: actionThreshold) else {
             return .ignore
@@ -57,7 +55,6 @@ enum DetailSwipePolicy {
         switch origin {
         case .leadingEdge
             where translation.width > actionThreshold
-                && leadingEdgePreviousEnabled
                 && currentIndex > 0:
             return .previous
         case .leadingEdge where translation.width > actionThreshold:
@@ -82,7 +79,6 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     let surfaceName: String
     let edgeWidth: CGFloat
     let topHitExclusionHeight: CGFloat
-    let leadingEdgePreviousEnabled: Bool
     let onDismiss: () -> Void
     let onNext: () -> Void
     let onPrevious: () -> Void
@@ -100,7 +96,6 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         surfaceName: String,
         edgeWidth: CGFloat,
         topHitExclusionHeight: CGFloat = 0,
-        leadingEdgePreviousEnabled: Bool = true,
         onDismiss: @escaping () -> Void,
         onNext: @escaping () -> Void,
         onPrevious: @escaping () -> Void,
@@ -111,7 +106,6 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         self.surfaceName = surfaceName
         self.edgeWidth = edgeWidth
         self.topHitExclusionHeight = topHitExclusionHeight
-        self.leadingEdgePreviousEnabled = leadingEdgePreviousEnabled
         self.onDismiss = onDismiss
         self.onNext = onNext
         self.onPrevious = onPrevious
@@ -198,8 +192,7 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                     origin: origin,
                     translation: value.translation,
                     currentIndex: currentIndex,
-                    itemCount: contentIds.count,
-                    leadingEdgePreviousEnabled: leadingEdgePreviousEnabled
+                    itemCount: contentIds.count
                 )
 
                 switch action {

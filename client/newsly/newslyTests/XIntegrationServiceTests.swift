@@ -4,16 +4,17 @@ import XCTest
 
 final class XIntegrationServiceTests: XCTestCase {
     func testConnectionPresentationMarksReauthAsReconnectRequired() {
-        let response = XConnectionResponse(
+        let response = APIXConnectionResponse(
             provider: "x",
             connected: false,
             isActive: false,
-            providerUserID: "123",
+            providerUserId: "123",
             providerUsername: "willemaw",
             scopes: ["tweet.read", "users.read", "bookmark.read", "offline.access"],
             lastSyncedAt: nil,
             lastStatus: "failed",
-            lastError: "X API 400: invalid_request"
+            lastError: "X API 400: invalid_request",
+            twitterUsername: nil
         )
 
         XCTAssertTrue(response.needsAttention)
@@ -27,16 +28,17 @@ final class XIntegrationServiceTests: XCTestCase {
     }
 
     func testConnectionPresentationPrefersUsernameWhenHealthy() {
-        let response = XConnectionResponse(
+        let response = APIXConnectionResponse(
             provider: "x",
             connected: true,
             isActive: true,
-            providerUserID: "123",
+            providerUserId: "123",
             providerUsername: "willemaw",
             scopes: ["tweet.read", "users.read", "bookmark.read", "offline.access"],
             lastSyncedAt: nil,
             lastStatus: "success",
-            lastError: nil
+            lastError: nil,
+            twitterUsername: nil
         )
 
         XCTAssertFalse(response.needsAttention)
@@ -45,16 +47,17 @@ final class XIntegrationServiceTests: XCTestCase {
     }
 
     func testUserInitiatedDisconnectDoesNotNeedAttention() {
-        let response = XConnectionResponse(
+        let response = APIXConnectionResponse(
             provider: "x",
             connected: false,
             isActive: false,
-            providerUserID: "123",
+            providerUserId: "123",
             providerUsername: "willemaw",
             scopes: [],
             lastSyncedAt: nil,
             lastStatus: "disconnected",
-            lastError: nil
+            lastError: nil,
+            twitterUsername: nil
         )
 
         XCTAssertFalse(response.needsAttention)
@@ -62,8 +65,8 @@ final class XIntegrationServiceTests: XCTestCase {
 
     func testStartOAuthStartsWithoutUserEnteredUsername() async throws {
         let client = MockXIntegrationAPIClient()
-        client.startResponse = XOAuthStartResponse(
-            authorizeURL: "https://x.com/i/oauth2/authorize?state=test",
+        client.startResponse = APIXOAuthStartResponse(
+            authorizeUrl: "https://x.com/i/oauth2/authorize?state=test",
             state: "test",
             scopes: ["tweet.read", "users.read", "bookmark.read"]
         )
@@ -78,21 +81,22 @@ final class XIntegrationServiceTests: XCTestCase {
     @MainActor
     func testConnectViaOAuthExchangesCodeFromCallback() async throws {
         let client = MockXIntegrationAPIClient()
-        client.startResponse = XOAuthStartResponse(
-            authorizeURL: "https://x.com/i/oauth2/authorize?state=start-state",
+        client.startResponse = APIXOAuthStartResponse(
+            authorizeUrl: "https://x.com/i/oauth2/authorize?state=start-state",
             state: "start-state",
             scopes: ["tweet.read", "users.read"]
         )
-        client.exchangeResponse = XConnectionResponse(
+        client.exchangeResponse = APIXConnectionResponse(
             provider: "x",
             connected: true,
             isActive: true,
-            providerUserID: "123",
+            providerUserId: "123",
             providerUsername: "willemaw",
             scopes: ["tweet.read", "users.read"],
             lastSyncedAt: nil,
             lastStatus: "connected",
-            lastError: nil
+            lastError: nil,
+            twitterUsername: nil
         )
         let service = XIntegrationService(
             client: client,
@@ -118,8 +122,8 @@ final class XIntegrationServiceTests: XCTestCase {
     @MainActor
     func testConnectViaOAuthThrowsWhenCallbackContainsOAuthError() async throws {
         let client = MockXIntegrationAPIClient()
-        client.startResponse = XOAuthStartResponse(
-            authorizeURL: "https://x.com/i/oauth2/authorize?state=start-state",
+        client.startResponse = APIXOAuthStartResponse(
+            authorizeUrl: "https://x.com/i/oauth2/authorize?state=start-state",
             state: "start-state",
             scopes: ["tweet.read", "users.read"]
         )
@@ -145,8 +149,8 @@ final class XIntegrationServiceTests: XCTestCase {
     @MainActor
     func testConnectViaOAuthThrowsWhenCallbackMissingCode() async throws {
         let client = MockXIntegrationAPIClient()
-        client.startResponse = XOAuthStartResponse(
-            authorizeURL: "https://x.com/i/oauth2/authorize?state=start-state",
+        client.startResponse = APIXOAuthStartResponse(
+            authorizeUrl: "https://x.com/i/oauth2/authorize?state=start-state",
             state: "start-state",
             scopes: ["tweet.read", "users.read"]
         )
@@ -168,8 +172,8 @@ final class XIntegrationServiceTests: XCTestCase {
     @MainActor
     func testConnectViaOAuthThrowsWhenCallbackMissingState() async throws {
         let client = MockXIntegrationAPIClient()
-        client.startResponse = XOAuthStartResponse(
-            authorizeURL: "https://x.com/i/oauth2/authorize?state=start-state",
+        client.startResponse = APIXOAuthStartResponse(
+            authorizeUrl: "https://x.com/i/oauth2/authorize?state=start-state",
             state: "start-state",
             scopes: ["tweet.read", "users.read"]
         )
@@ -191,8 +195,8 @@ final class XIntegrationServiceTests: XCTestCase {
     @MainActor
     func testConnectViaOAuthThrowsWhenAuthorizeURLIsInvalid() async throws {
         let client = MockXIntegrationAPIClient()
-        client.startResponse = XOAuthStartResponse(
-            authorizeURL: "https://[::1",
+        client.startResponse = APIXOAuthStartResponse(
+            authorizeUrl: "https://[::1",
             state: "start-state",
             scopes: ["tweet.read", "users.read"]
         )
@@ -208,22 +212,22 @@ final class XIntegrationServiceTests: XCTestCase {
 }
 
 private final class MockXIntegrationAPIClient: XIntegrationAPIClientProtocol {
-    var startResponse: XOAuthStartResponse?
-    var exchangeResponse: XConnectionResponse?
+    var startResponse: APIXOAuthStartResponse?
+    var exchangeResponse: APIXConnectionResponse?
     private(set) var startOAuthCallCount = 0
     private(set) var recordedExchangeCode: String?
     private(set) var recordedExchangeState: String?
 
-    func fetchConnection() async throws -> XConnectionResponse {
+    func fetchConnection() async throws -> APIXConnectionResponse {
         throw XIntegrationError.callbackParsingFailed
     }
 
-    func startOAuth() async throws -> XOAuthStartResponse {
+    func startOAuth() async throws -> APIXOAuthStartResponse {
         startOAuthCallCount += 1
         return try XCTUnwrap(startResponse)
     }
 
-    func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
+    func exchangeOAuth(code: String, state: String) async throws -> APIXConnectionResponse {
         recordedExchangeCode = code
         recordedExchangeState = state
         return try XCTUnwrap(exchangeResponse)

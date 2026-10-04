@@ -53,8 +53,8 @@ final class AssistantFeedOptionActionModel {
 
         do {
             let config = try await service.subscribeFeed(
-                feedURL: option.feedURL,
-                feedType: option.feedType,
+                feedURL: option.feedUrl,
+                feedType: option.feedType.rawValue,
                 displayName: option.title
             )
             subscribedOptionIds.insert(option.id)
@@ -272,15 +272,3 @@ private struct FeedOptionActionButtonStyle: ButtonStyle {
         }
     }
 }
-
-#if DEBUG
-#Preview("Assistant Feed Options Section") {
-    AssistantFeedOptionsSection(
-        options: [ChatPreviewFixtures.feedOption],
-        actionModel: ChatPreviewActionModels.feedOptions(),
-        onPreview: { _ in }
-    )
-    .padding()
-    .background(Color.surfacePrimary)
-}
-#endif

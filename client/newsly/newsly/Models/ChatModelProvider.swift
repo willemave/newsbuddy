@@ -36,41 +36,12 @@ enum ChatModelProvider: String, Codable, CaseIterable {
         }
     }
 
-    /// Custom asset icon name
-    var iconAsset: String {
-        switch self {
-        case .openai:
-            return "openai-icon"
-        case .anthropic:
-            return "claude-icon"
-        case .deep_research:
-            return "deep-research-icon"
-        }
-    }
-
     var chatDisplayName: String {
         switch self {
         case .openai:
             return "GPT-5.6 Sol"
         default:
             return displayName
-        }
-    }
-
-    /// Whether this provider uses deep research (longer processing times)
-    var isDeepResearch: Bool {
-        self == .deep_research
-    }
-
-    /// Short description for the provider
-    var tagline: String {
-        switch self {
-        case .openai:
-            return "Fast, versatile reasoning"
-        case .anthropic:
-            return "Thoughtful, nuanced responses"
-        case .deep_research:
-            return "Comprehensive analysis (2-5 min)"
         }
     }
 

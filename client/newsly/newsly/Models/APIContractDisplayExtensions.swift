@@ -18,26 +18,3 @@ extension APIContentType {
         }
     }
 }
-
-extension APIContentStatus {
-    var displayName: String {
-        switch self {
-        case .new:
-            "New"
-        case .pending:
-            "Pending"
-        case .processing:
-            "Processing"
-        case .awaiting_image:
-            "Awaiting Image"
-        case .completed:
-            "Completed"
-        case .failed:
-            "Failed"
-        case .skipped:
-            "Skipped"
-        case .unknown:
-            "Unknown"
-        }
-    }
-}

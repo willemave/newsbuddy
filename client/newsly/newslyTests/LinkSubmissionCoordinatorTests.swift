@@ -5,11 +5,12 @@ import XCTest
 final class LinkSubmissionCoordinatorTests: XCTestCase {
     func testAddedLinkIsNotSubmittedAgain() async {
         var attempts = 0
+        let service = LinkSubmissionContentService { _, _ in
+            attempts += 1
+            return Self.submitResponse()
+        }
         let coordinator = LinkSubmissionCoordinator(
-            submitLinkToLongFormHandler: { _, _ in
-                attempts += 1
-                return Self.submitResponse()
-            },
+            contentService: service,
             toastPresenter: StubLinkSubmissionToastPresenter()
         )
         let link = Self.relevantLink(
@@ -24,17 +25,13 @@ final class LinkSubmissionCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: link.id), .added)
     }
 
-    func testResetClearsLinkStateAndPublishesChange() async {
-        var changeNotifications = 0
+    func testResetClearsLinkState() async {
         let coordinator = LinkSubmissionCoordinator(
-            submitLinkToLongFormHandler: { _, _ in
+            contentService: LinkSubmissionContentService { _, _ in
                 Self.submitResponse()
             },
             toastPresenter: StubLinkSubmissionToastPresenter()
         )
-        coordinator.onStateWillChange = {
-            changeNotifications += 1
-        }
         let link = Self.relevantLink(
             url: "https://example.com/reset-link",
             title: "Reset link"
@@ -43,11 +40,9 @@ final class LinkSubmissionCoordinatorTests: XCTestCase {
         await coordinator.addRelevantLinkToReadLater(link)
         XCTAssertEqual(coordinator.state(for: link.id), .added)
 
-        changeNotifications = 0
         coordinator.reset()
 
         XCTAssertEqual(coordinator.state(for: link.id), .idle)
-        XCTAssertEqual(changeNotifications, 1)
     }
 
     nonisolated private static func submitResponse() -> SubmitContentResponse {
@@ -71,6 +66,28 @@ final class LinkSubmissionCoordinatorTests: XCTestCase {
             source: nil
         )
     }
+}
+
+private final class LinkSubmissionContentService: ContentDetailServicing {
+    private let submit: (URL, String?) async throws -> SubmitContentResponse
+
+    init(submit: @escaping (URL, String?) async throws -> SubmitContentResponse) {
+        self.submit = submit
+    }
+
+    func submitContent(url: URL, title: String?, platform: String?) async throws -> SubmitContentResponse {
+        try await submit(url, title)
+    }
+
+    func fetchContentDetail(id: Int) async throws -> ContentDetail { throw CancellationError() }
+    func fetchNewsItemDetail(id: Int) async throws -> ContentDetail { throw CancellationError() }
+    func fetchContentBody(id: Int, variant: String, contentType: APIContentType?) async throws -> ContentBody { throw CancellationError() }
+    func trackContentOpened(contentId: Int, surface: String, contextData: [String: Any]) async throws -> TrackContentInteractionResponse { throw CancellationError() }
+    func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse { throw CancellationError() }
+    func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse { throw CancellationError() }
+    func convertNewsToArticle(id: Int) async throws -> ConvertNewsResponse { throw CancellationError() }
+    func convertNewsItemToArticle(id: Int) async throws -> ConvertNewsResponse { throw CancellationError() }
+    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse { throw CancellationError() }
 }
 
 @MainActor

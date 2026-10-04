@@ -60,21 +60,11 @@ extension LearningDeck {
             status: apiResponse.status.map(LearningDeckRunStatus.init(apiValue:)),
             shareEnabled: apiResponse.shareEnabled,
             viewerAvailable: apiResponse.viewerAvailable,
-            sourceNotesAvailable: apiResponse.sourceNotesAvailable,
             thumbnailURL: apiResponse.thumbnailUrl,
             latestSuccessfulRunId: apiResponse.latestSuccessfulRunId,
             latestRun: apiResponse.latestRun.map(LearningDeckRun.init(apiResponse:)),
             createdAt: apiResponse.createdAt,
             updatedAt: apiResponse.updatedAt
-        )
-    }
-}
-
-extension LearningDeckShareResponse {
-    init(apiResponse: APILearningDeckShareResponse) {
-        self.init(
-            shareEnabled: apiResponse.shareEnabled,
-            shareURL: apiResponse.shareUrl
         )
     }
 }

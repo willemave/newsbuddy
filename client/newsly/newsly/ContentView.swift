@@ -13,7 +13,6 @@ struct ContentView: View {
     private let session: AuthenticatedSession
     private let tabCoordinator: TabCoordinatorViewModel
     private let knowledgeViewModel: KnowledgeTimelineViewModel
-    private let readingStateStore: ReadingStateStore
     private let readStateCache: ReadStateCache
     private let submissionStatusViewModel: SubmissionStatusViewModel
     private let chatNavigation: ChatNavigationCoordinator
@@ -33,7 +32,6 @@ struct ContentView: View {
         self.session = session
         self.tabCoordinator = session.tabCoordinator
         self.knowledgeViewModel = session.knowledgeViewModel
-        self.readingStateStore = session.readingStateStore
         self.readStateCache = session.readStateCache
         self.submissionStatusViewModel = session.submissionStatusViewModel
         self.chatNavigation = session.chatNavigation
@@ -49,7 +47,6 @@ struct ContentView: View {
                     path: $briefingPath,
                     scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .briefing),
                     viewModel: tabCoordinator.briefingVM,
-                    readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
                     dependencyFactory: dependencyFactory
@@ -63,7 +60,6 @@ struct ContentView: View {
                     isSelectedRootTab: tabCoordinator.selectedTab == .knowledge,
                     viewModel: knowledgeViewModel,
                     readStateCache: readStateCache,
-                    readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize,
                     dependencyFactory: dependencyFactory,
                     onOpenSettings: { showSettingsSheet = true },
@@ -99,7 +95,6 @@ struct ContentView: View {
                 SettingsView(showsDismissButton: true)
                 .withContentRoutes(
                     path: $settingsPath,
-                    readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
                     dependencyFactory: dependencyFactory
@@ -113,7 +108,6 @@ struct ContentView: View {
         .tint(Color.appChromeAccent)
         .font(.appBody)
         .dynamicTypeSize(appTextSize)
-        .environment(readingStateStore)
         .environment(readStateCache)
         .environment(session.badgeStatsStore)
         .environment(session.xConnectionStore)

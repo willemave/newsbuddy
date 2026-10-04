@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct TwitterSettingsView: View {
-    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(AuthenticationController.self) private var authViewModel
     @Environment(RootDependencyFactory.self) private var dependencyFactory
     @Environment(XConnectionStore.self) private var xConnectionStore
     @State private var showingAlert = false
@@ -29,6 +29,7 @@ struct TwitterSettingsView: View {
             }
             .padding(.bottom, 40)
         }
+        .font(.modalBody)
         .background(Color.surfacePrimary)
         .navigationTitle("X / Twitter")
         .navigationBarTitleDisplayMode(.inline)
@@ -98,7 +99,7 @@ struct TwitterSettingsView: View {
                 .frame(width: 6, height: 6)
 
             Text(statusLabel)
-                .font(.listCaption)
+                .font(.modalSupporting)
                 .foregroundStyle(Color.onSurfaceSecondary)
         }
         .padding(.horizontal, 10)
@@ -108,11 +109,11 @@ struct TwitterSettingsView: View {
 
     private var syncSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Bookmark Sync")
+            SectionHeader(title: "Bookmark Sync", font: .modalSupporting.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("Posts you bookmark on X are pulled in and read alongside the rest of your long-form feed.")
-                    .font(.listCaption)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Spacing.rowHorizontal)
@@ -123,13 +124,13 @@ struct TwitterSettingsView: View {
 
                     HStack(spacing: 12) {
                         Text("Last synced")
-                            .font(.listTitle)
+                            .font(.modalBody)
                             .foregroundStyle(Color.onSurface)
 
                         Spacer(minLength: 8)
 
                         Text(lastSyncedLabel)
-                            .font(.listCaption)
+                            .font(.modalSupporting)
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }
                     .appRow(.compact)
@@ -141,7 +142,7 @@ struct TwitterSettingsView: View {
 
     private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Connection")
+            SectionHeader(title: "Connection", font: .modalSupporting.weight(.semibold))
 
             Group {
                 if isXConnected {
@@ -189,7 +190,7 @@ struct TwitterSettingsView: View {
         }
     }
 
-    private var xConnection: XConnectionResponse? {
+    private var xConnection: APIXConnectionResponse? {
         xConnectionStore.connection
     }
 
@@ -219,10 +220,12 @@ struct TwitterSettingsView: View {
     }
 
     private var lastSyncedLabel: String {
-        ContentTimestampFormatter.detailMetaText(from: xConnection?.lastSyncedAt) ?? "Not yet"
+        xConnection?.lastSyncedAt.map {
+            ContentTimestampFormatter.detailMetaText(from: $0)
+        } ?? "Not yet"
     }
 
-    private func connectionIssueCard(connection: XConnectionResponse) -> some View {
+    private func connectionIssueCard(connection: APIXConnectionResponse) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.appSymbol(size: 15))
@@ -231,24 +234,24 @@ struct TwitterSettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(connection.issueTitle)
-                    .font(.listTitle.weight(.semibold))
+                    .font(.modalBody.weight(.semibold))
                     .foregroundStyle(Color.onSurface)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(connection.issueMessage)
-                    .font(.listCaption)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let details = connection.issueDetails {
                     Text(details)
-                        .font(.appCaption)
+                        .font(.modalCaption)
                         .foregroundStyle(Color.statusDestructive)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text("Bookmarks already synced stay in Knowledge.")
-                    .font(.appCaption)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

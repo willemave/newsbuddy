@@ -7,6 +7,8 @@
 
 import SwiftUI
 
+private let cachedImageScale: CGFloat = 2.0
+
 enum ImageRequestSizing {
     private static let pixelBucket = 128
 
@@ -26,7 +28,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     let url: URL?
     let thumbnailUrl: URL?
     let cacheIdentifier: String?
-    let scale: CGFloat
     let targetSize: CGSize?
     @ViewBuilder let content: (Image) -> Content
     @ViewBuilder let placeholder: () -> Placeholder
@@ -40,7 +41,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         thumbnailUrl: URL? = nil,
         cacheIdentifier: String? = nil,
         targetSize: CGSize? = nil,
-        scale: CGFloat = 2.0,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
@@ -48,7 +48,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         self.thumbnailUrl = thumbnailUrl
         self.cacheIdentifier = cacheIdentifier
         self.targetSize = targetSize
-        self.scale = scale
         self.content = content
         self.placeholder = placeholder
     }
@@ -82,7 +81,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     }
 
     private var targetPixelSize: Int? {
-        ImageRequestSizing.targetPixelSize(for: targetSize, scale: scale)
+        ImageRequestSizing.targetPixelSize(for: targetSize, scale: cachedImageScale)
     }
 
     private func loadImage() async {
@@ -138,51 +137,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
                 loadedImage = image
             }
         }
-    }
-}
-
-// MARK: - Convenience Initializers
-
-extension CachedAsyncImage where Placeholder == ProgressView<EmptyView, EmptyView> {
-    /// Creates a CachedAsyncImage with a default ProgressView placeholder.
-    init(
-        url: URL?,
-        thumbnailUrl: URL? = nil,
-        cacheIdentifier: String? = nil,
-        targetSize: CGSize? = nil,
-        scale: CGFloat = 2.0,
-        @ViewBuilder content: @escaping (Image) -> Content
-    ) {
-        self.init(
-            url: url,
-            thumbnailUrl: thumbnailUrl,
-            cacheIdentifier: cacheIdentifier,
-            targetSize: targetSize,
-            scale: scale,
-            content: content,
-            placeholder: { ProgressView() }
-        )
-    }
-}
-
-extension CachedAsyncImage where Content == Image, Placeholder == ProgressView<EmptyView, EmptyView> {
-    /// Creates a CachedAsyncImage that displays the image directly.
-    init(
-        url: URL?,
-        thumbnailUrl: URL? = nil,
-        cacheIdentifier: String? = nil,
-        targetSize: CGSize? = nil,
-        scale: CGFloat = 2.0
-    ) {
-        self.init(
-            url: url,
-            thumbnailUrl: thumbnailUrl,
-            cacheIdentifier: cacheIdentifier,
-            targetSize: targetSize,
-            scale: scale,
-            content: { $0 },
-            placeholder: { ProgressView() }
-        )
     }
 }
 

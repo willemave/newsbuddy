@@ -54,6 +54,7 @@ struct ContentDetailView: View {
 }
 
 private struct ContentDetailContentView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private static let scrollChromeStep: CGFloat = 4
 
     @Namespace private var readerTransitionNamespace
@@ -64,7 +65,6 @@ private struct ContentDetailContentView: View {
     private let dependencyFactory: RootDependencyFactory
     @State private var viewModel: ContentDetailViewModel
     @Environment(AppLifecycle.self) private var lifecycle
-    @Environment(ReadingStateStore.self) private var readingStateStore
     @Environment(\.dismiss) private var dismiss
     @State private var chatCoordinator: DetailChatCoordinator
     @State private var currentIndex: Int
@@ -139,7 +139,6 @@ private struct ContentDetailContentView: View {
             surfaceName: navigationSurfaceName,
             edgeWidth: DetailDesign.edgeNavigationSwipeWidth,
             topHitExclusionHeight: DetailDesign.edgeNavigationTopExclusionHeight,
-            leadingEdgePreviousEnabled: navigationContext.surface != .fastNews,
             onDismiss: { dismiss() },
             onNext: navigateToNext,
             onPrevious: navigateToPrevious
@@ -284,12 +283,11 @@ private struct ContentDetailContentView: View {
             if let oldValue, oldValue != newValue {
                 podcastAudioController.stopIfSpeaking(forContentId: oldValue)
             }
-            guard let id = newValue, let content = viewModel.content else {
+            guard newValue != nil, let content = viewModel.content else {
                 discussionCoordinator.reset()
                 return
             }
             discussionCoordinator.reset()
-            readingStateStore.setCurrent(contentId: id, type: content.contentType)
             logSummarySnapshot(content: content, context: "content_change")
             if pendingScrollTarget != .comments && content.contentType == .news {
                 Task {
@@ -329,7 +327,6 @@ private struct ContentDetailContentView: View {
             )
             podcastAudioController.stopIfSpeaking(forContentId: viewModel.content?.id)
             viewModel.suspendAutomaticReads()
-            readingStateStore.clear()
         }
         .alert(item: $activeAlert) { alert in
             Alert(
@@ -343,53 +340,7 @@ private struct ContentDetailContentView: View {
             guard !presentPendingSheetIfNeeded() else { return }
             presentPendingShareIfNeeded()
         }) {
-            switch $0 {
-            case .share:
-                shareSheet
-                    .presentationDetents([.height(340)])
-                    .presentationDragIndicator(.hidden)
-                    .presentationCornerRadius(24)
-
-            case .download:
-                downloadSheet
-                    .presentationDetents([.height(320)])
-                    .presentationDragIndicator(.hidden)
-                    .presentationCornerRadius(24)
-
-            case .tweet:
-                if let content = viewModel.content {
-                    TweetSuggestionsSheet(
-                        contentId: content.id,
-                        viewModel: dependencyFactory.makeTweetSuggestionsViewModel()
-                    )
-                }
-
-            case .knowledgeActions:
-                if let content = viewModel.content {
-                    knowledgeActionsSheet(content: content)
-                        .presentationDetents([.height(320), .large])
-                        .presentationDragIndicator(.hidden)
-                        .presentationCornerRadius(24)
-                }
-
-            case .learningDeckCreate:
-                if let content = viewModel.content {
-                    LearningDeckContentCreateSheet(
-                        content: content,
-                        focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
-                        learningDeckService: dependencyFactory.learningDeckService,
-                        onOpenDeck: { deck, url in
-                            activeLearningDeckReader = LearningDeckReaderDestination(
-                                deck: deck,
-                                url: url
-                            )
-                        },
-                        onNotice: { title, message in
-                            activeAlert = ViewAlert(title: title, message: message)
-                        }
-                    )
-                }
-            }
+            sheetContent(for: $0)
         }
         .fullScreenCover(item: $activeReaderContent) { content in
             ArticleReaderView(
@@ -631,8 +582,61 @@ private struct ContentDetailContentView: View {
         )
     }
 
-    // MARK: - Share Sheet
+    // MARK: - Sheets
     @ViewBuilder
+    private func sheetContent(for destination: DetailSheetDestination) -> some View {
+        switch destination {
+        case .share:
+            shareSheet
+                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(24)
+
+        case .download:
+            downloadSheet
+                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(24)
+
+        case .tweet:
+            if let content = viewModel.content {
+                TweetSuggestionsSheet(
+                    contentId: content.id,
+                    viewModel: dependencyFactory.makeTweetSuggestionsViewModel()
+                )
+            }
+
+        case .knowledgeActions:
+            if let content = viewModel.content {
+                knowledgeActionsSheet(content: content)
+                    .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.height(320), .large])
+                    .presentationContentInteraction(.scrolls)
+                    .presentationDragIndicator(.hidden)
+                    .presentationCornerRadius(24)
+            }
+
+        case .learningDeckCreate:
+            if let content = viewModel.content {
+                LearningDeckContentCreateSheet(
+                    content: content,
+                    focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
+                    learningDeckService: dependencyFactory.learningDeckService,
+                    onOpenDeck: { deck, url in
+                        activeLearningDeckReader = LearningDeckReaderDestination(
+                            deck: deck,
+                            url: url
+                        )
+                    },
+                    onNotice: { title, message in
+                        activeAlert = ViewAlert(title: title, message: message)
+                    }
+                )
+            }
+        }
+    }
+
     private var shareSheet: some View {
         DetailShareSheet(
             onClose: { activeSheet = nil },

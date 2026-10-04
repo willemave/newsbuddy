@@ -9,18 +9,11 @@ import Foundation
 
 typealias PaginationMetadata = APIPaginationMetadata
 
-struct ContentListResponse: Codable {
+struct ContentListResponse {
     let contents: [ContentSummary]
     let availableDates: [String]
     let contentTypes: [String]
     let meta: PaginationMetadata
-
-    enum CodingKeys: String, CodingKey {
-        case contents
-        case availableDates = "available_dates"
-        case contentTypes = "content_types"
-        case meta
-    }
 
     init(
         contents: [ContentSummary],
@@ -50,10 +43,6 @@ struct ContentListResponse: Codable {
             contentTypes: response.contentTypes.map(\.rawValue),
             meta: response.meta
         )
-    }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIContentListResponse(from: decoder))
     }
 
     var total: Int? { meta.total }

@@ -26,11 +26,10 @@ struct BriefingAttributedTextBuilder {
 
     func build(
         paragraphs: [APIBriefingParagraph],
-        weight: String?,
         discussionChips: [String: BriefingDiscussionChip] = [:]
     ) -> Result {
         let output = NSMutableAttributedString()
-        let baseFont = font(for: weight, bold: false)
+        let baseFont = Self.passageBodyFont()
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = Self.passageLineSpacing
         paragraphStyle.paragraphSpacing = 10
@@ -43,7 +42,7 @@ struct BriefingAttributedTextBuilder {
             let runs = paragraph.runs
             for (runIndex, run) in runs.enumerated() {
                 var attributes: [NSAttributedString.Key: Any] = [
-                    .font: font(for: weight, bold: run.bold),
+                    .font: Self.passageBodyFont(bold: run.bold),
                     .foregroundColor: UIColor.appReaderBodyText,
                     .paragraphStyle: paragraphStyle
                 ]
@@ -246,10 +245,6 @@ struct BriefingAttributedTextBuilder {
             return "\(Int(rounded.rounded()))k"
         }
         return String(format: "%.1fk", rounded)
-    }
-
-    private func font(for _: String?, bold: Bool) -> UIFont {
-        Self.passageBodyFont(bold: bold)
     }
 
     private func url(for sourceKey: String) -> URL? {

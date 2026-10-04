@@ -10,7 +10,7 @@ struct SettingsDebugSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Debug")
+            SectionHeader(title: "Debug", font: .modalSupporting.weight(.semibold))
 
             Button(action: onOpenDebugMenu) {
                 SettingsRow(

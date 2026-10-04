@@ -20,7 +20,7 @@ final class FeedHistoryViewModel {
     private let configId: Int
     private let service: any FeedHistoryServicing
 
-    init(configId: Int, service: any FeedHistoryServicing = ScraperConfigService.shared) {
+    init(configId: Int, service: any FeedHistoryServicing) {
         self.configId = configId
         self.service = service
     }

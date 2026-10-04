@@ -127,8 +127,6 @@ private final class AudioRecordingSessionLease {
 /// Service for voice dictation using the authenticated backend transcription API.
 @MainActor
 final class VoiceDictationService: NSObject, SpeechTranscribing {
-    static let shared = VoiceDictationService()
-
     private struct ActiveSession {
         let id: UUID
         let continuation: AsyncStream<SpeechTranscriptionEvent>.Continuation
@@ -172,7 +170,7 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
 
     private let audioSessionLease = AudioRecordingSessionLease()
 
-    private let openAIService = OpenAIService.shared
+    private let openAIService: OpenAIService
 
     private let testTranscriptionOperation: (@MainActor (URL) async throws -> String)?
 
@@ -180,15 +178,22 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
     private var audioFixture: E2EAudioFixture?
     #endif
 
-    private override init() {
+    init(openAIService: OpenAIService) {
+        self.openAIService = openAIService
         testTranscriptionOperation = nil
         super.init()
     }
 
+    var isAvailable: Bool {
+        openAIService.isTranscriptionAvailable
+    }
+
     #if DEBUG
     init(
+        openAIService: OpenAIService,
         testTranscriptionOperation: @escaping @MainActor (URL) async throws -> String
     ) {
+        self.openAIService = openAIService
         self.testTranscriptionOperation = testTranscriptionOperation
         super.init()
     }

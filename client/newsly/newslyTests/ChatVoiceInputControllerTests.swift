@@ -8,7 +8,6 @@ final class ChatVoiceInputControllerTests: XCTestCase {
         let controller = ChatVoiceInputController(
             transcriptionService: transcriber,
             refreshAvailability: { true },
-            setBackendAvailability: { _ in },
             initiallyAvailable: true
         )
         var errors: [String] = []

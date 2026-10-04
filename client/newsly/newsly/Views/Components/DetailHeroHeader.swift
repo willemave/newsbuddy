@@ -182,7 +182,6 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
 
             ContentTimestampText(
                 rawValue: content.primaryTimestamp,
-                style: .detailMeta,
                 fallback: "Recent"
             )
             .font(.appCaption)
@@ -203,7 +202,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
         [
             content.detailTypeLabel,
             content.source,
-            ContentTimestampFormatter.text(from: content.primaryTimestamp, style: .detailMeta) ?? "Recent"
+            ContentTimestampFormatter.detailMetaText(from: content.primaryTimestamp) ?? "Recent"
         ]
         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }

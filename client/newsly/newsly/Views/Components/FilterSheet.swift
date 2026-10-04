@@ -20,7 +20,7 @@ struct FilterSheet: View {
             VStack(spacing: 0) {
                 Form {
                     // Content Type Section
-                    Section(header: Text("Content Type")) {
+                    Section(header: Text("Content Type").font(.modalSupporting)) {
                         Picker("Content Type", selection: $selectedContentType) {
                             Text("All Types").tag("all")
                             ForEach(contentTypes, id: \.self) { type in
@@ -33,7 +33,7 @@ struct FilterSheet: View {
                     }
                     
                     // Date Section
-                    Section(header: Text("Date")) {
+                    Section(header: Text("Date").font(.modalSupporting)) {
                         Menu {
                             Button("All Dates") {
                                 selectedDate = ""
@@ -60,6 +60,7 @@ struct FilterSheet: View {
                     }
                     
                 }
+                .font(.modalBody)
             }
             .navigationTitle("Filters")
             .navigationBarTitleDisplayMode(.inline)

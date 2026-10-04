@@ -16,13 +16,14 @@ final class ArtifactResponseFixtureTests: XCTestCase {
             let generated = try JSONDecoder().decode(APIContentDetailResponse.self, from: currentData)
             XCTAssertNotNil(generated.longformArtifact)
             XCTAssertNil(generated.structuredSummary)
-            let current = try JSONDecoder().decode(ContentDetail.self, from: currentData)
-            let previous = try JSONDecoder().decode(ContentDetail.self, from: previousData)
+            let current = ContentDetail(api: generated)
+            let previous = ContentDetail(
+                api: try JSONDecoder().decode(APIContentDetailResponse.self, from: previousData)
+            )
             let artifact = try XCTUnwrap(current.longformArtifact)
             let previousArtifact = try XCTUnwrap(previous.longformArtifact)
             XCTAssertEqual(artifact.artifact.type, fixture["name"] as? String)
             XCTAssertNotNil(artifact.feedPreview)
-            XCTAssertNotNil(artifact.selectionTrace)
             XCTAssertEqual(artifact.detailSections.map(\.id), previousArtifact.detailSections.map(\.id))
             for option: ShareContentOption in [.medium, .full] {
                 let rendered = try XCTUnwrap(ShareMarkdownBuilder(content: current, contentBody: nil).markdown(for: option))

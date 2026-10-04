@@ -15,19 +15,14 @@ private func onboardingServiceElapsedMilliseconds(since start: Date) -> Int {
 }
 
 final class OnboardingService {
-    static let shared = OnboardingService()
-    private let client = APIClient.shared
+    private let client: APIClient
 
-    private init() {}
+    init(client: APIClient) {
+        self.client = client
+    }
 
     func audioDiscover(request: OnboardingAudioDiscoverRequest) async throws -> OnboardingAudioDiscoverResponse {
         let startedAt = Date()
-        if let fixtureResponse = OnboardingE2EFixtureStore.shared?.audioDiscoverResponse {
-            onboardingServiceLogger.info(
-                "Audio discovery fixture response | runId=\(fixtureResponse.runId) elapsedMs=\(onboardingServiceElapsedMilliseconds(since: startedAt))"
-            )
-            return fixtureResponse
-        }
         onboardingServiceLogger.info(
             "Audio discovery request started | transcriptChars=\(request.transcript.count) locale=\(request.locale ?? "nil", privacy: .public)"
         )
@@ -53,9 +48,6 @@ final class OnboardingService {
 
     func discoveryStatus(runId: Int) async throws -> OnboardingDiscoveryStatusResponse {
         let startedAt = Date()
-        if let fixtureResponse = OnboardingE2EFixtureStore.shared?.discoveryStatusResponse {
-            return fixtureResponse
-        }
         let queryItems = [URLQueryItem(name: "run_id", value: String(runId))]
         let wireResponse: APIOnboardingDiscoveryStatusResponse = try await client.request(
             APIEndpoints.onboardingDiscoveryStatus,

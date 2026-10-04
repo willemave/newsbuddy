@@ -8,7 +8,7 @@
 import Foundation
 
 /// Full chat session details with message history
-struct ChatSessionDetail: Codable {
+struct ChatSessionDetail {
     let session: ChatSessionSummary
     let messages: [ChatMessage]
 
@@ -23,26 +23,15 @@ struct ChatSessionDetail: Codable {
             messages: response.messages.map(ChatMessage.init(api:))
         )
     }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIChatSessionDetail(from: decoder))
-    }
 }
 
 /// Response after sending a message (async)
 /// Returns immediately with user message and message_id to poll for completion
-struct SendChatMessageResponse: Codable {
+struct SendChatMessageResponse {
     let sessionId: Int
     let userMessage: ChatMessage
     let messageId: Int
     let status: APIMessageProcessingStatus
-
-    enum CodingKeys: String, CodingKey {
-        case sessionId = "session_id"
-        case userMessage = "user_message"
-        case messageId = "message_id"
-        case status
-    }
 
     init(
         sessionId: Int,
@@ -65,13 +54,10 @@ struct SendChatMessageResponse: Codable {
         )
     }
 
-    init(from decoder: Decoder) throws {
-        self.init(api: try APISendMessageResponse(from: decoder))
-    }
 }
 
 /// Response when polling for message completion status
-struct MessageStatusResponse: Codable {
+struct MessageStatusResponse {
     let messageId: Int
     let status: APIMessageProcessingStatus
     let assistantMessage: ChatMessage?
@@ -79,16 +65,6 @@ struct MessageStatusResponse: Codable {
     let streamGeneration: Int?
     let streamRevision: Int?
     let error: String?
-
-    enum CodingKeys: String, CodingKey {
-        case messageId = "message_id"
-        case status
-        case assistantMessage = "assistant_message"
-        case partialAssistantMessage = "partial_assistant_message"
-        case streamGeneration = "stream_generation"
-        case streamRevision = "stream_revision"
-        case error
-    }
 
     init(
         messageId: Int,
@@ -118,10 +94,6 @@ struct MessageStatusResponse: Codable {
             streamRevision: response.streamRevision,
             error: response.error
         )
-    }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIMessageStatusResponse(from: decoder))
     }
 
     var isCompleted: Bool {
@@ -205,18 +177,11 @@ struct AssistantScreenContext: Codable, Equatable {
     }
 }
 
-struct AssistantTurnResponse: Codable {
+struct AssistantTurnResponse {
     let session: ChatSessionSummary
     let userMessage: ChatMessage
     let messageId: Int
     let status: APIMessageProcessingStatus
-
-    enum CodingKeys: String, CodingKey {
-        case session
-        case userMessage = "user_message"
-        case messageId = "message_id"
-        case status
-    }
 
     init(
         session: ChatSessionSummary,
@@ -237,9 +202,5 @@ struct AssistantTurnResponse: Codable {
             messageId: response.messageId,
             status: response.status
         )
-    }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIAssistantTurnResponse(from: decoder))
     }
 }

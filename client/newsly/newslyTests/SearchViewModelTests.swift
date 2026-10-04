@@ -209,11 +209,13 @@ final class SearchViewModelTests: XCTestCase {
         await viewModel.subscribeToFeed(result)
 
         XCTAssertEqual(
-            viewModel.actionErrorMessages["feed:failed-feed"],
-            "That action didn't finish. Please try again."
+            viewModel.actionState(for: .feed("failed-feed")),
+            SearchActionState(
+                isInFlight: false,
+                completedLabel: nil,
+                errorMessage: "That action didn't finish. Please try again."
+            )
         )
-        XCTAssertNil(viewModel.completedActionLabels["feed:failed-feed"])
-        XCTAssertTrue(viewModel.actionInFlightIds.isEmpty)
     }
 
     func testDuplicateFeedSubscriptionReportsTruthfulOutcome() async throws {
@@ -228,7 +230,7 @@ final class SearchViewModelTests: XCTestCase {
         await viewModel.subscribeToFeed(result)
 
         XCTAssertEqual(
-            viewModel.completedActionLabels["feed:existing-feed"],
+            viewModel.actionState(for: .feed("existing-feed")).completedLabel,
             "Already subscribed"
         )
     }
@@ -251,7 +253,10 @@ final class SearchViewModelTests: XCTestCase {
         viewModel.submitSearch()
         let searchCompleted = await waitUntil { viewModel.hasSubmittedSearch }
         XCTAssertTrue(searchCompleted)
-        XCTAssertEqual(viewModel.completedActionLabels["feed:existing-feed"], "Subscribed")
+        XCTAssertEqual(
+            viewModel.actionState(for: .feed("existing-feed")).completedLabel,
+            "Subscribed"
+        )
 
         if let result = viewModel.feedResults.first {
             await viewModel.subscribeToFeed(result)
@@ -273,7 +278,10 @@ final class SearchViewModelTests: XCTestCase {
         await viewModel.addPodcastEpisode(result)
 
         XCTAssertEqual(contentService.submitCallCount, 1)
-        XCTAssertEqual(viewModel.completedActionLabels["episode:\(result.id)"], "Added")
+        XCTAssertEqual(
+            viewModel.actionState(for: .episode(result.id)).completedLabel,
+            "Added"
+        )
     }
 
     func testRepeatedPodcastSubscriptionRunsOnce() async throws {
@@ -289,7 +297,7 @@ final class SearchViewModelTests: XCTestCase {
 
         XCTAssertEqual(feedService.subscribeCallCount, 1)
         XCTAssertEqual(
-            viewModel.completedActionLabels["podcast-feed:https://example.com/feed.xml"],
+            viewModel.actionState(for: .podcastFeed("https://example.com/feed.xml")).completedLabel,
             "Subscribed"
         )
     }
@@ -381,7 +389,6 @@ private final class SearchContentServiceMock: SearchContentServicing {
 
     func submitContent(
         url: URL,
-        contentType: String?,
         title: String?,
         platform: String?
     ) async throws -> SubmitContentResponse {
@@ -419,7 +426,7 @@ private final class SearchContentServiceMock: SearchContentServicing {
 }
 
 @MainActor
-private final class SearchFeedServiceMock: SearchFeedSubscribing {
+private final class SearchFeedServiceMock: FeedSubscribing {
     private let error: Error?
     private let subscriptionOutcome: APIFeedSubscriptionOutcome?
     private(set) var subscribeCallCount = 0
@@ -485,7 +492,8 @@ private func makeMixedResponse(
       "podcasts": []
     }
     """
-    return try! JSONDecoder().decode(MixedSearchResponse.self, from: Data(json.utf8))
+    let response = try! JSONDecoder().decode(APIMixedSearchResponse.self, from: Data(json.utf8))
+    return MixedSearchResponse(api: response)
 }
 
 private func makeContentSummary(id: Int) -> ContentSummary {
@@ -500,8 +508,6 @@ private func makeContentSummary(id: Int) -> ContentSummary {
         shortSummary: "Summary",
         createdAt: "2026-08-07T12:00:00Z",
         processedAt: "2026-08-07T12:01:00Z",
-        classification: nil,
-        publicationDate: nil,
         isRead: false,
         isSavedToKnowledge: false
     )

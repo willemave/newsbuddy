@@ -33,7 +33,7 @@ final class ReadStatusRepository: ReadStatusRepositoryType {
     private let encoder = JSONEncoder()
     private let endpoint: ReadStatusEndpoint
 
-    init(client: APIClient = .shared, endpoint: ReadStatusEndpoint = .content) {
+    init(client: APIClient, endpoint: ReadStatusEndpoint = .content) {
         self.client = client
         self.endpoint = endpoint
     }

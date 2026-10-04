@@ -170,7 +170,6 @@ struct ArticleReaderView: View {
 
                 ContentTimestampText(
                     rawValue: content.primaryTimestamp,
-                    style: .detailMeta,
                     fallback: "Recent"
                 )
                 .font(.terracottaBodySmall)

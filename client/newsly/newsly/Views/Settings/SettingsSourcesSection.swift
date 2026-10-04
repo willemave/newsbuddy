@@ -10,13 +10,14 @@ struct SettingsSourcesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Sources")
+            SectionHeader(title: "Sources", font: .modalSupporting.weight(.semibold))
 
             VStack(spacing: 0) {
                 NavigationLink {
-                    FeedSourcesView(
+                    SourcesView(
+                        kind: .feed,
                         viewModel: dependencyFactory.makeScraperSettingsViewModel(
-                            filterTypes: ["substack", "atom", "youtube"]
+                            filterTypes: APIScraperType.articleFeedRawValues
                         )
                     )
                 } label: {
@@ -30,9 +31,10 @@ struct SettingsSourcesSection: View {
                 RowDivider(leadingInset: Spacing.rowHorizontal)
 
                 NavigationLink {
-                    PodcastSourcesView(
+                    SourcesView(
+                        kind: .podcast,
                         viewModel: dependencyFactory.makeScraperSettingsViewModel(
-                            filterTypes: ["podcast_rss"]
+                            filterTypes: APIScraperType.podcastRawValues
                         )
                     )
                 } label: {

@@ -313,8 +313,7 @@ struct BriefingView: View {
                 EditorialMastheadHeader(
                     title: "Briefing",
                     titleAccessibilityIdentifier: "briefing.screen",
-                    trailingAccessory: mastheadListenAccessory,
-                    accessoryAlignment: .title
+                    trailingAccessory: mastheadListenAccessory
                 )
             }
 

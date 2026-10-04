@@ -30,15 +30,15 @@ struct SubmissionStatusRow: View {
                     HStack(spacing: 4) {
                         if let host = URL(string: submission.url)?.host {
                             Text(host)
-                                .font(.listCaption)
+                                .font(.modalSupporting)
                                 .foregroundStyle(Color.onSurfaceSecondary)
                         }
                         if let date = submission.statusDateDisplay {
                             Text("·")
-                                .font(.listCaption)
+                                .font(.modalSupporting)
                                 .foregroundStyle(Color.onSurfaceTertiary)
                             Text(date)
-                                .font(.listCaption)
+                                .font(.modalSupporting)
                                 .foregroundStyle(Color.onSurfaceSecondary)
                         }
                     }
@@ -60,11 +60,11 @@ struct SubmissionStatusRow: View {
                     if let detail = submission.statusDetailText {
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: submission.isError ? "info.circle" : "checkmark.circle")
-                                .font(.appCaption2)
+                                .font(.modalCaption)
                                 .foregroundStyle(statusColor)
                                 .padding(.top, 1)
                             Text(detail)
-                                .font(.appCaption)
+                                .font(.modalSupporting)
                                 .foregroundStyle(Color.onSurfaceSecondary)
                                 .lineLimit(2)
                         }
@@ -89,7 +89,7 @@ struct SubmissionStatusRow: View {
 
     private var statusIconName: String {
         if submission.isFeedSubscription {
-            switch submission.effectiveOutcome {
+            switch submission.outcome {
             case .subscribed:
                 return "checkmark.circle.fill"
             case .already_subscribed:
@@ -106,7 +106,7 @@ struct SubmissionStatusRow: View {
         }
 
         if submission.isLearningDeck {
-            switch submission.effectiveOutcome {
+            switch submission.outcome {
             case .completed:
                 return "rectangle.on.rectangle.fill"
             case .failed:
@@ -120,7 +120,7 @@ struct SubmissionStatusRow: View {
             }
         }
 
-        switch submission.effectiveOutcome {
+        switch submission.outcome {
         case .failed:
             return "exclamationmark.triangle.fill"
         case .skipped:
@@ -139,7 +139,7 @@ struct SubmissionStatusRow: View {
     }
 
     private var statusColor: Color {
-        switch submission.effectiveOutcome {
+        switch submission.outcome {
         case .failed, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
             return .statusDestructive
         case .skipped:

@@ -5,46 +5,14 @@
 
 import Foundation
 
-struct MixedSearchFeedResult: Codable, Identifiable {
-    let id: String
-    let title: String
-    let siteURL: String
-    let feedURL: String
-    let feedType: String
-    let feedFormat: String
-    let description: String?
-    let rationale: String?
-    let evidenceURL: String?
-    let isSubscribed: Bool
+typealias MixedSearchFeedResult = APIMixedSearchFeedResultResponse
 
-    enum CodingKeys: String, CodingKey {
-        case id
-        case title
-        case siteURL = "site_url"
-        case feedURL = "feed_url"
-        case feedType = "feed_type"
-        case feedFormat = "feed_format"
-        case description
-        case rationale
-        case evidenceURL = "evidence_url"
-        case isSubscribed = "is_subscribed"
-    }
-
+extension APIMixedSearchFeedResultResponse: Identifiable {
+    var siteURL: String { siteUrl }
+    var feedURL: String { feedUrl }
+    var evidenceURL: String? { evidenceUrl }
     var previewURLString: String {
         evidenceURL ?? siteURL
-    }
-
-    init(api response: APIMixedSearchFeedResultResponse) {
-        id = response.id
-        title = response.title
-        siteURL = response.siteUrl
-        feedURL = response.feedUrl
-        feedType = response.feedType
-        feedFormat = response.feedFormat
-        description = response.description
-        rationale = response.rationale
-        evidenceURL = response.evidenceUrl
-        isSubscribed = response.isSubscribed
     }
 }
 
@@ -86,7 +54,7 @@ struct PodcastSearchResult: Codable, Identifiable {
     }
 }
 
-struct MixedSearchResponse: Codable {
+struct MixedSearchResponse {
     let query: String
     let content: [ContentSummary]
     let feeds: [MixedSearchFeedResult]
@@ -95,11 +63,7 @@ struct MixedSearchResponse: Codable {
     init(api response: APIMixedSearchResponse) {
         query = response.query
         content = response.content.map(ContentSummary.init(api:))
-        feeds = response.feeds.map(MixedSearchFeedResult.init(api:))
+        feeds = response.feeds
         podcasts = response.podcasts.map(PodcastSearchResult.init(api:))
-    }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIMixedSearchResponse(from: decoder))
     }
 }

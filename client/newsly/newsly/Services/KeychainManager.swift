@@ -13,9 +13,12 @@ import Security
 final class KeychainManager: AuthTokenStore {
     static let shared = KeychainManager()
 
-    private init() {}
+    private init() {
+        removeRetiredOpenAIKeyOnce()
+    }
 
     private let serviceName = "com.newsly.app"
+    private let retiredOpenAIKeyCleanupFlag = "keychain_cleanup_openai_api_key_v1"
     private let accessGroupLock = NSLock()
     private var accessGroup: String?
 
@@ -317,7 +320,14 @@ final class KeychainManager: AuthTokenStore {
         deleteToken(key: .refreshAttempt)
         deleteToken(key: .credentialEnvelope)
         deleteToken(key: .credentialPublication)
-        deleteLegacyToken(named: "openaiApiKey")
+    }
+
+    /// Remove after 2027-04-03, once every supported build has run this migration.
+    private func removeRetiredOpenAIKeyOnce() {
+        let defaults = SharedContainer.userDefaults
+        guard !defaults.bool(forKey: retiredOpenAIKeyCleanupFlag) else { return }
+        guard deleteTokenReportingStatus(account: "openaiApiKey") else { return }
+        defaults.set(true, forKey: retiredOpenAIKeyCleanupFlag)
     }
 
     func decodedCredentialEnvelope() -> CredentialEnvelope? {
@@ -345,9 +355,53 @@ final class KeychainManager: AuthTokenStore {
         }
         return envelope
     }
+
+    func rawCredentialToken(
+        key: KeychainKey
+    ) -> CredentialStoreRead<RawCredentialToken> {
+        if let accessGroup = currentAccessGroup() {
+            switch rawToken(account: key.rawValue, accessGroup: accessGroup) {
+            case .value(let value):
+                return .value(RawCredentialToken(value: value, source: .accessGroup))
+            case .unavailable:
+                return .unavailable
+            case .missing:
+                break
+            }
+        }
+        switch rawToken(account: key.rawValue, accessGroup: nil) {
+        case .value(let value):
+            return .value(RawCredentialToken(value: value, source: .legacyKeychain))
+        case .missing:
+            return .missing
+        case .unavailable:
+            return .unavailable
+        }
+    }
+
+    func mirroredCredentialToken(key: KeychainKey) -> String? {
+        mirroredTokenFromSharedDefaults(key: key)
+    }
 }
 
-protocol AuthTokenStore: AnyObject {
+enum CredentialTokenSource: Equatable {
+    case accessGroup
+    case legacyKeychain
+}
+
+struct RawCredentialToken {
+    let value: String
+    let source: CredentialTokenSource
+}
+
+protocol RawCredentialStoring: AnyObject {
+    func rawCredentialToken(
+        key: KeychainManager.KeychainKey
+    ) -> CredentialStoreRead<RawCredentialToken>
+    func mirroredCredentialToken(key: KeychainManager.KeychainKey) -> String?
+}
+
+protocol AuthTokenStore: RawCredentialStoring {
     func getToken(key: KeychainManager.KeychainKey) -> String?
     func saveToken(_ token: String, key: KeychainManager.KeychainKey)
     func saveTokenReportingStatus(
@@ -360,6 +414,17 @@ protocol AuthTokenStore: AnyObject {
 }
 
 extension AuthTokenStore {
+    func rawCredentialToken(
+        key: KeychainManager.KeychainKey
+    ) -> CredentialStoreRead<RawCredentialToken> {
+        guard let value = getToken(key: key) else { return .missing }
+        return .value(RawCredentialToken(value: value, source: .legacyKeychain))
+    }
+
+    func mirroredCredentialToken(key: KeychainManager.KeychainKey) -> String? {
+        nil
+    }
+
     func saveTokenReportingStatus(
         _ token: String,
         key: KeychainManager.KeychainKey

@@ -14,8 +14,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .applePodcastShare)
-        XCTAssertEqual(match.platform, "apple_podcasts")
+        XCTAssertEqual(match, .applePodcastShare)
     }
 
     func testSpotifyEpisodeDetectedAsPodcastPlatformShare() {
@@ -23,8 +22,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .podcastPlatformShare)
-        XCTAssertEqual(match.platform, "spotify")
+        XCTAssertEqual(match, .podcastPlatformShare)
     }
 
     func testYouTubeSingleVideoDetectedAsSingleVideoHandler() {
@@ -32,8 +30,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeSingleVideo)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeSingleVideo)
     }
 
     func testYoutuBeShortLinkDetectedAsSingleVideoHandler() {
@@ -41,8 +38,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeSingleVideo)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeSingleVideo)
     }
 
     func testYouTubeShortsDetectedAsSingleVideoHandler() {
@@ -50,8 +46,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeSingleVideo)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeSingleVideo)
     }
 
     func testYouTubeLiveDetectedAsSingleVideoHandler() {
@@ -59,8 +54,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeSingleVideo)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeSingleVideo)
     }
 
     func testYouTubeEmbedDetectedAsSingleVideoHandler() {
@@ -68,8 +62,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeSingleVideo)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeSingleVideo)
     }
 
     func testYouTubeLegacyVDetectedAsSingleVideoHandler() {
@@ -77,8 +70,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeSingleVideo)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeSingleVideo)
     }
 
     func testYouTubeChannelDetectedAsGenericYouTubeShare() {
@@ -86,8 +78,7 @@ final class ShareURLRoutingTests: XCTestCase {
 
         let match = ShareURLRouting.handler(for: url)
 
-        XCTAssertEqual(match.kind, .youtubeShare)
-        XCTAssertEqual(match.platform, "youtube")
+        XCTAssertEqual(match, .youtubeShare)
     }
 
     func testPreferredURLPrioritizesSingleVideoOverChannelURL() {

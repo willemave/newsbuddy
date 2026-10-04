@@ -153,22 +153,17 @@ protocol SpeechTranscribing: AnyObject {
     ) throws -> SpeechTranscriptionSession
 }
 
-extension SpeechTranscribing {
-    var isAvailable: Bool {
-        CredentialSession.shared.hasStoredCredentialMaterial
-            && AppSettings.shared.backendTranscriptionAvailable
-    }
-}
-
 @MainActor
 enum SpeechTranscriberFactory {
-    static func makeVoiceDictationTranscriber() -> any SpeechTranscribing {
+    static func makeVoiceDictationTranscriber(
+        voiceDictationService: VoiceDictationService
+    ) -> any SpeechTranscribing {
 #if DEBUG
         if E2ETestLaunch.fakeSpeechEnabled {
             return E2EScriptedSpeechTranscriber.shared
         }
 #endif
-        return VoiceDictationService.shared
+        return voiceDictationService
     }
 }
 
@@ -188,12 +183,8 @@ enum E2ESpeechScenario: String, CaseIterable {
 @MainActor
 final class E2EScriptedSpeechTranscriber: SpeechTranscribing {
     static let shared = E2EScriptedSpeechTranscriber(
-        scenario: E2ESpeechScenario(
-            rawValue: E2ETestLaunch.fakeSpeechScenario ?? "success"
-        ) ?? .success,
-        transcript: E2ETestLaunch.fakeSpeechTranscript
-            ?? OnboardingE2EFixtureStore.shared?.transcript
-            ?? "E2E transcript"
+        scenario: .success,
+        transcript: E2ETestLaunch.fakeSpeechTranscript ?? "E2E transcript"
     )
 
     var isAvailable: Bool { true }

@@ -63,7 +63,7 @@ typealias CLILinkApproveResponse = APICliLinkApproveResponse
 final class CLILinkService {
     private let client: APIClient
 
-    init(client: APIClient = .shared) {
+    init(client: APIClient) {
         self.client = client
     }
 

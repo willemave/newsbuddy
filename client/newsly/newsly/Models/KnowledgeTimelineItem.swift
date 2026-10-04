@@ -6,14 +6,15 @@
 import Foundation
 
 enum KnowledgeTimelineItem: Identifiable {
-    case saved(ContentSummary)
+    case saved(KnowledgeSavedTimelineEntry)
     case chat(session: ChatSessionSummary, preview: String?)
     case deck(LearningDeck)
     case narration(AudioEpisode)
 
     var id: String {
         switch self {
-        case .saved(let content): "saved-\(content.id)"
+        case .saved(let entry):
+            entry.content.contentType == .news ? "saved-news-\(entry.content.id)" : "saved-\(entry.content.id)"
         case .chat(let session, _): "chat-\(session.id)"
         case .deck(let deck): "deck-\(deck.id)"
         case .narration(let episode): "narration-\(episode.id)"
@@ -22,9 +23,9 @@ enum KnowledgeTimelineItem: Identifiable {
 
     var activityDate: Date {
         switch self {
-        case .saved(let content): content.knowledgeActivityDate
-        case .chat(let session, _): session.lastActivityDate ?? session.createdAt
-        case .deck(let deck): deck.updatedAt ?? deck.latestRun?.updatedAt ?? deck.createdAt
+        case .saved(let entry): entry.activityDate
+        case .chat(let session, _): session.lastActivityDate
+        case .deck(let deck): deck.knowledgeActivityDate
         case .narration(let episode): episode.updatedAt ?? episode.createdAt
         }
     }
@@ -35,19 +36,109 @@ enum KnowledgeTimelineItem: Identifiable {
         decks: [LearningDeck],
         narrations: [AudioEpisode]
     ) -> [KnowledgeTimelineItem] {
-        let chatItems = chats.map { session in
+        let savedSources = Set(saved.map(KnowledgeSource.init))
+        let sourceChats = Dictionary(grouping: chats, by: \.knowledgeSource)
+        let sourceDecks = Dictionary(grouping: decks, by: \.knowledgeSource)
+        let savedItems = saved.map { content in
+            let source = KnowledgeSource(content)
+            return Self.saved(KnowledgeSavedTimelineEntry(
+                content: content,
+                chats: sourceChats[source] ?? [],
+                decks: sourceDecks[source] ?? []
+            ))
+        }
+        let chatItems = chats.filter { session in
+            !(session.knowledgeSource.map(savedSources.contains) ?? false)
+        }.map { session in
             Self.chat(
                 session: session,
                 preview: KnowledgeChatPreview.make(for: session)
             )
         }
-        let items = saved.map(Self.saved) + chatItems + decks.map(Self.deck) + narrations.map(Self.narration)
+        let deckItems = decks.filter { deck in
+            !(deck.knowledgeSource.map(savedSources.contains) ?? false)
+        }.map(Self.deck)
+        let items = savedItems + chatItems + deckItems + narrations.map(Self.narration)
         return items.sorted { lhs, rhs in
             if lhs.activityDate == rhs.activityDate {
                 return lhs.id < rhs.id
             }
             return lhs.activityDate > rhs.activityDate
         }
+    }
+}
+
+/// One saved source and the chats/decks opened from it. The source row keeps its
+/// identity while related work updates its activity and processing state.
+struct KnowledgeSavedTimelineEntry {
+    let content: ContentSummary
+    let chats: [ChatSessionSummary]
+    let decks: [LearningDeck]
+    // Stored presentation values let SwiftUI see activity changes even when a
+    // related chat's equality compares only its identity.
+    let activityDate: Date
+    let statusText: String?
+    let isBusy: Bool
+
+    init(content: ContentSummary, chats: [ChatSessionSummary] = [], decks: [LearningDeck] = []) {
+        self.content = content
+        self.chats = chats.sorted {
+            if $0.lastActivityDate == $1.lastActivityDate { return $0.id < $1.id }
+            return $0.lastActivityDate > $1.lastActivityDate
+        }
+        self.decks = decks.sorted {
+            if $0.knowledgeActivityDate == $1.knowledgeActivityDate { return $0.id < $1.id }
+            return $0.knowledgeActivityDate > $1.knowledgeActivityDate
+        }
+        let savedDate = content.knowledgeActivityDate
+        activityDate = max(
+            savedDate,
+            max(self.chats.first?.lastActivityDate ?? savedDate, self.decks.first?.knowledgeActivityDate ?? savedDate)
+        )
+
+        var parts: [String] = []
+        if let deck = self.decks.first(where: \.hasActiveLatestRun) ?? self.decks.first {
+            parts.append("Deck \(deck.statusLabel.lowercased())")
+        }
+        if chats.contains(where: \.isPreparingChat) {
+            parts.append("Chat preparing")
+        } else if chats.contains(where: \.isProcessing) {
+            parts.append("Chat answering")
+        }
+        statusText = parts.isEmpty ? nil : parts.joined(separator: " · ")
+
+        isBusy = decks.contains(where: \.hasActiveLatestRun)
+            || chats.contains { $0.isPreparingChat || $0.isProcessing }
+            || (content.savedLibraryItemState == .processing && !content.hasStalledKnowledgePreparation)
+    }
+}
+
+extension ChatSessionSummary {
+    var knowledgeSource: KnowledgeSource? {
+        if let contentId { return .content(contentId) }
+        if let newsItemId { return .news(newsItemId) }
+        return nil
+    }
+}
+
+extension ContentSummary {
+    var hasStalledKnowledgePreparation: Bool {
+        guard savedLibraryItemState == .processing,
+              let createdAt = ContentTimestampFormatter.parse(createdAt)
+        else { return false }
+        return AppClock.now.timeIntervalSince(createdAt) > 24 * 60 * 60
+    }
+}
+
+extension LearningDeck {
+    var knowledgeActivityDate: Date {
+        let runActivity = latestRun.map { max($0.createdAt, $0.updatedAt ?? $0.createdAt) } ?? createdAt
+        return max(createdAt, max(updatedAt ?? createdAt, runActivity))
+    }
+
+    var knowledgeSource: KnowledgeSource? {
+        guard sourceKind == .content, let sourceContentId else { return nil }
+        return .content(sourceContentId)
     }
 }
 
@@ -65,18 +156,21 @@ enum KnowledgePaginationSource: Equatable {
     }
 }
 
-/// Identifies a saved source; content and news item IDs are separate namespaces.
-struct KnowledgeSourceKey: Hashable {
-    let id: Int
-    let isNews: Bool
-
-    init(id: Int, isNews: Bool) {
-        self.id = id
-        self.isNews = isNews
-    }
+/// A saved source. Content and news item IDs are separate namespaces.
+enum KnowledgeSource: Hashable {
+    case content(Int)
+    case news(Int)
 
     init(_ content: ContentSummary) {
-        self.init(id: content.id, isNews: content.contentType == .news)
+        self = content.contentType == .news ? .news(content.id) : .content(content.id)
+    }
+
+    var contentId: Int? {
+        if case .content(let id) = self { id } else { nil }
+    }
+
+    var newsItemId: Int? {
+        if case .news(let id) = self { id } else { nil }
     }
 }
 
@@ -92,33 +186,22 @@ struct KnowledgeSourceDerivatives: OptionSet, Hashable {
         chats: [ChatSessionSummary],
         decks: [LearningDeck],
         narrations: [AudioEpisode]
-    ) -> [KnowledgeSourceKey: Self] {
-        var index: [KnowledgeSourceKey: Self] = [:]
-        func mark(_ key: KnowledgeSourceKey, _ derivative: Self) {
-            index[key, default: []].insert(derivative)
+    ) -> [KnowledgeSource: Self] {
+        var index: [KnowledgeSource: Self] = [:]
+        func mark(_ source: KnowledgeSource, _ derivative: Self) {
+            index[source, default: []].insert(derivative)
         }
 
         for session in chats {
-            let derivative: Self = .chat
-            if let contentId = session.contentId {
-                mark(KnowledgeSourceKey(id: contentId, isNews: false), derivative)
-            }
-            if let newsItemId = session.newsItemId {
-                mark(KnowledgeSourceKey(id: newsItemId, isNews: true), derivative)
-            }
+            if let contentId = session.contentId { mark(.content(contentId), .chat) }
+            if let newsItemId = session.newsItemId { mark(.news(newsItemId), .chat) }
         }
         for deck in decks where deck.sourceKind == .content {
-            if let contentId = deck.sourceContentId {
-                mark(KnowledgeSourceKey(id: contentId, isNews: false), .deck)
-            }
+            if let contentId = deck.sourceContentId { mark(.content(contentId), .deck) }
         }
         for episode in narrations {
-            for contentId in episode.sourceContentIds {
-                mark(KnowledgeSourceKey(id: contentId, isNews: false), .narration)
-            }
-            for newsItemId in episode.sourceItemIds {
-                mark(KnowledgeSourceKey(id: newsItemId, isNews: true), .narration)
-            }
+            episode.sourceContentIds.forEach { mark(.content($0), .narration) }
+            episode.sourceItemIds.forEach { mark(.news($0), .narration) }
         }
         return index
     }

@@ -198,13 +198,12 @@ final class ContentDetailViewModelTests: XCTestCase {
     func testAddRelevantLinkToReadLaterMarksLinkAsAddedOnSuccess() async {
         var receivedURL: URL?
         var receivedTitle: String?
-        let viewModel = makeViewModel(
-            submitLinkToLongFormHandler: { url, title in
+        let service = SubmittingContentDetailService { url, title in
                 receivedURL = url
                 receivedTitle = title
                 return Self.submitResponse()
-            }
-        )
+        }
+        let viewModel = makeViewModel(contentService: service)
         let link = RelevantLink(
             url: "https://example.com/relevant-story",
             title: "Relevant story",
@@ -229,7 +228,8 @@ final class ContentDetailViewModelTests: XCTestCase {
             contentType: detail.contentType,
             contentService: StubContentDetailService(),
             feedSubscriptionService: subscriber,
-            toastPresenter: StubToastPresenter()
+            toastPresenter: StubToastPresenter(),
+            readStateCache: makeTestReadStateCache()
         )
         viewModel.content = detail
 
@@ -253,7 +253,8 @@ final class ContentDetailViewModelTests: XCTestCase {
             contentType: detail.contentType,
             contentService: StubContentDetailService(),
             feedSubscriptionService: subscriber,
-            toastPresenter: StubToastPresenter()
+            toastPresenter: StubToastPresenter(),
+            readStateCache: makeTestReadStateCache()
         )
         viewModel.content = detail
 
@@ -345,7 +346,7 @@ final class ContentDetailViewModelTests: XCTestCase {
             }
             """
         let data = Data(json.utf8)
-        let generated = try JSONDecoder().decode(APIContentDetailResponse.self, from: data)
+        let generated = try decodeAPIContentDetailFixture(from: data)
         XCTAssertNotNil(generated.longformArtifact)
         XCTAssertNil(generated.structuredSummary)
         XCTAssertNil(generated.artifactType)
@@ -360,7 +361,11 @@ final class ContentDetailViewModelTests: XCTestCase {
         duplicated["artifact_type"] = "argument"
         duplicated["bullet_points"] = [["text": "Obsolete mirror", "category": "legacy"]]
         duplicated["topics"] = ["argument"]
-        let before = try JSONDecoder().decode(ContentDetail.self, from: JSONSerialization.data(withJSONObject: duplicated))
+        let before = ContentDetail(
+            api: try decodeAPIContentDetailFixture(
+                from: JSONSerialization.data(withJSONObject: duplicated)
+            )
+        )
         XCTAssertEqual(before.longformArtifact?.detailSections.map(\.id), artifact.detailSections.map(\.id))
         for option: ShareContentOption in [.medium, .full] {
             XCTAssertEqual(
@@ -476,23 +481,13 @@ final class ContentDetailViewModelTests: XCTestCase {
     }
 
     private func makeViewModel(
-        submitLinkToLongFormHandler: @escaping LinkSubmissionCoordinator.SubmitHandler
-    ) -> ContentDetailViewModel {
-        ContentDetailViewModel(
-            contentService: StubContentDetailService(),
-            feedSubscriptionService: StubDetectedFeedSubscriber(),
-            toastPresenter: StubToastPresenter(),
-            submitLinkToLongFormHandler: submitLinkToLongFormHandler
-        )
-    }
-
-    private func makeViewModel(
         contentService: any ContentDetailServicing
     ) -> ContentDetailViewModel {
         ContentDetailViewModel(
             contentService: contentService,
             feedSubscriptionService: StubDetectedFeedSubscriber(),
-            toastPresenter: StubToastPresenter()
+            toastPresenter: StubToastPresenter(),
+            readStateCache: makeTestReadStateCache()
         )
     }
 
@@ -527,7 +522,7 @@ final class ContentDetailViewModelTests: XCTestCase {
 
     private static func decodeDetail(from json: String) throws -> ContentDetail {
         let data = Data(json.utf8)
-        return try JSONDecoder().decode(ContentDetail.self, from: data)
+        return ContentDetail(api: try decodeAPIContentDetailFixture(from: data))
     }
 
     private static func articleDetail(
@@ -614,7 +609,6 @@ private enum StubDetailServiceError: Error {
 private class StubContentDetailService: ContentDetailServicing {
     func submitContent(
         url: URL,
-        contentType: String?,
         title: String?,
         platform: String?
     ) async throws -> SubmitContentResponse {
@@ -663,6 +657,22 @@ private class StubContentDetailService: ContentDetailServicing {
 
     func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
         throw StubDetailServiceError.unexpectedCall
+    }
+}
+
+private final class SubmittingContentDetailService: StubContentDetailService {
+    private let submit: (URL, String?) async throws -> SubmitContentResponse
+
+    init(submit: @escaping (URL, String?) async throws -> SubmitContentResponse) {
+        self.submit = submit
+    }
+
+    override func submitContent(
+        url: URL,
+        title: String?,
+        platform: String?
+    ) async throws -> SubmitContentResponse {
+        try await submit(url, title)
     }
 }
 
@@ -952,7 +962,7 @@ private final class ReplacingContentDetailService: RecordingContentDetailService
     }
 }
 
-private final class StubDetectedFeedSubscriber: DetectedFeedSubscribing {
+private final class StubDetectedFeedSubscriber: FeedSubscribing {
     private let result: Result<ScraperConfig, Error>
 
     init(result: Result<ScraperConfig, Error> = .failure(StubDetailServiceError.unexpectedCall)) {

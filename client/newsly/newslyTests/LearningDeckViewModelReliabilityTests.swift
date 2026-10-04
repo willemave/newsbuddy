@@ -580,14 +580,6 @@ private final class MockLearningDeckService: LearningDeckServicing {
         throw LearningDeckTestError.unimplemented
     }
 
-    func enableShare(deckId: Int) async throws -> LearningDeckShareResponse {
-        throw LearningDeckTestError.unimplemented
-    }
-
-    func disableShare(deckId: Int) async throws -> LearningDeckShareResponse {
-        throw LearningDeckTestError.unimplemented
-    }
-
     func deleteDeck(deckId: Int) async throws {
         throw LearningDeckTestError.unimplemented
     }
@@ -642,7 +634,6 @@ private func makeLearningDeck(
         status: runStatus,
         shareEnabled: false,
         viewerAvailable: viewerAvailable,
-        sourceNotesAvailable: false,
         latestSuccessfulRunId: latestSuccessfulRunId,
         latestRun: latestRun,
         createdAt: createdAt,

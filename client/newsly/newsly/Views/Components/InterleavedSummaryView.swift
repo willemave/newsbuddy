@@ -16,7 +16,6 @@ private enum InterleavedDesign {
 
 struct InterleavedSummaryView: View {
     let summary: InterleavedSummary
-    var contentId: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: InterleavedDesign.sectionSpacing) {
@@ -123,8 +122,7 @@ struct InterleavedSummaryView: View {
                 takeaway: "As AI coding tools mature, organizations that thoughtfully integrate them into their workflows will likely see significant competitive advantages, while those that delay may find themselves struggling to attract and retain developer talent.",
                 classification: "to_read",
                 summarizationDate: nil
-            ),
-            contentId: 123
+            )
         )
         .padding()
     }

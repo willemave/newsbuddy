@@ -14,9 +14,9 @@ import Observation
 @MainActor
 @Observable
 final class XConnectionStore {
-    typealias FetchConnection = @MainActor () async throws -> XConnectionResponse
+    typealias FetchConnection = @MainActor () async throws -> APIXConnectionResponse
 
-    private(set) var connection: XConnectionResponse?
+    private(set) var connection: APIXConnectionResponse?
 
     var needsAttention: Bool {
         connection?.needsAttention == true

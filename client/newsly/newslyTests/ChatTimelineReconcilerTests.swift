@@ -255,26 +255,9 @@ final class ChatTimelineReconcilerTests: XCTestCase {
     }
 
     private func session() -> ChatSessionSummary {
-        ChatSessionSummary(
+        .fixture(
             id: 7,
-            contentId: nil,
-            title: "Chat",
-            sessionType: "knowledge_chat",
-            topic: nil,
-            llmProvider: "openai",
-            llmModel: "openai:gpt-5.5",
-            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
-            updatedAt: nil,
-            lastMessageAt: nil,
-            articleTitle: nil,
-            articleUrl: nil,
-            articleSummary: nil,
-            articleSource: nil,
-            hasPendingMessage: false,
-            isSavedToKnowledge: false,
-            hasMessages: true,
-            lastMessagePreview: nil,
-            lastMessageRole: nil
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!
         )
     }
 

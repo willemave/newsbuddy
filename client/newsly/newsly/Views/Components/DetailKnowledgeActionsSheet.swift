@@ -70,7 +70,7 @@ struct DetailKnowledgeActionsSheet: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundColor(.statusDestructive)
             Text(message)
-                .font(.appFootnote)
+                .font(.modalSupporting)
                 .foregroundColor(.statusDestructive)
         }
         .padding(10)
@@ -95,10 +95,9 @@ private struct DetailKnowledgeActionTile: View {
                 Spacer(minLength: 0)
 
                 Text(title)
-                    .font(.appSubheadline.weight(.semibold))
+                    .font(.modalBody.weight(.semibold))
                     .foregroundColor(Color.onSurface)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.84)
                     .multilineTextAlignment(.leading)
             }
             .knowledgeActionSurface(minHeight: 112)
@@ -126,11 +125,11 @@ private struct DetailKnowledgeWideAction: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.appSubheadline.weight(.semibold))
+                        .font(.modalBody.weight(.semibold))
                         .foregroundColor(Color.onSurface)
 
                     Text(subtitle)
-                        .font(.appCaption)
+                        .font(.modalSupporting)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)

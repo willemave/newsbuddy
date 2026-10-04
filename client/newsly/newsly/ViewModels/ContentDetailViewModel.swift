@@ -13,7 +13,7 @@ import os.log
 private let logger = Logger(subsystem: "com.newsly", category: "ContentDetail")
 
 protocol ContentDetailServicing: AnyObject {
-    func submitContent(url: URL, contentType: String?, title: String?, platform: String?) async throws -> SubmitContentResponse
+    func submitContent(url: URL, title: String?, platform: String?) async throws -> SubmitContentResponse
     func fetchContentDetail(id: Int) async throws -> ContentDetail
     func fetchNewsItemDetail(id: Int) async throws -> ContentDetail
     func fetchContentBody(id: Int, variant: String, contentType: APIContentType?) async throws -> ContentBody
@@ -25,12 +25,7 @@ protocol ContentDetailServicing: AnyObject {
     func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse
 }
 
-protocol DetectedFeedSubscribing: AnyObject {
-    func subscribeFeed(feedURL: String, feedType: String, displayName: String?) async throws -> ScraperConfig
-}
-
 extension ContentService: ContentDetailServicing {}
-extension ScraperConfigService: DetectedFeedSubscribing {}
 
 @MainActor
 @Observable
@@ -74,8 +69,6 @@ final class ContentDetailViewModel {
     var isSubscribingToFeed = false
     var feedSubscriptionSuccessMessage: String?
     var feedSubscriptionError: String?
-    private var linkSubmissionRevision = 0
-
     var feedSubscriptionSuccess: Bool { feedSubscriptionSuccessMessage != nil }
     var isLoading: Bool {
         content == nil && initialLoadPhase == .loading
@@ -91,7 +84,7 @@ final class ContentDetailViewModel {
     @ObservationIgnored
     private let readStateCache: ReadStateCache
     @ObservationIgnored
-    private let feedSubscriptionService: any DetectedFeedSubscribing
+    private let feedSubscriptionService: any FeedSubscribing
     @ObservationIgnored
     private let toastPresenter: any ToastPresenting
     @ObservationIgnored
@@ -111,33 +104,20 @@ final class ContentDetailViewModel {
         contentId: Int = 0,
         contentType: APIContentType? = nil,
         contentService: any ContentDetailServicing,
-        feedSubscriptionService: any DetectedFeedSubscribing,
+        feedSubscriptionService: any FeedSubscribing,
         toastPresenter: any ToastPresenting,
-        readStateCache: ReadStateCache? = nil,
-        submitLinkToLongFormHandler: LinkSubmissionCoordinator.SubmitHandler? = nil
+        readStateCache: ReadStateCache
     ) {
         self.contentId = contentId
         self.contentType = contentType
         self.contentService = contentService
         self.feedSubscriptionService = feedSubscriptionService
         self.toastPresenter = toastPresenter
-        self.readStateCache = readStateCache ?? ReadStateCache()
-        let resolvedSubmitHandler = submitLinkToLongFormHandler ?? { [contentService] url, title in
-            try await contentService.submitContent(
-                url: url,
-                contentType: nil,
-                title: title,
-                platform: nil
-            )
-        }
-        let linkSubmissionCoordinator = LinkSubmissionCoordinator(
-            submitLinkToLongFormHandler: resolvedSubmitHandler,
+        self.readStateCache = readStateCache
+        self.linkSubmissionCoordinator = LinkSubmissionCoordinator(
+            contentService: contentService,
             toastPresenter: toastPresenter
         )
-        self.linkSubmissionCoordinator = linkSubmissionCoordinator
-        linkSubmissionCoordinator.onStateWillChange = { [weak self] in
-            self?.linkSubmissionRevision += 1
-        }
     }
     
     func updateContentId(_ newId: Int, contentType newContentType: APIContentType? = nil) {
@@ -513,8 +493,7 @@ final class ContentDetailViewModel {
     }
 
     func relevantLinkReadLaterState(for linkID: String) -> LinkReadLaterState {
-        _ = linkSubmissionRevision
-        return linkSubmissionCoordinator.state(for: linkID)
+        linkSubmissionCoordinator.state(for: linkID)
     }
 
     func addRelevantLinkToReadLater(_ link: RelevantLink) async {

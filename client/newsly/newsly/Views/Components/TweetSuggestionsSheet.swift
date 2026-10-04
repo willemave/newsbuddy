@@ -53,7 +53,7 @@ struct TweetSuggestionsSheet: View {
                     Menu {
                         Section {
                             Text("Current: \(viewModel.selectedProvider.displayName)")
-                                .font(.appCaption)
+                                .font(.modalCaption)
                         }
                         Section("Switch Model") {
                             ForEach(ChatModelProvider.tweetProviders, id: \.self) { provider in
@@ -71,9 +71,9 @@ struct TweetSuggestionsSheet: View {
                         HStack(spacing: 4) {
                             Text(viewModel.selectedProvider.displayName)
                             Image(systemName: "chevron.down")
-                                .font(.appCaption2)
+                                .font(.modalCaption)
                         }
-                        .font(.appSubheadline)
+                        .font(.modalSupporting)
                         .foregroundColor(Color.onSurface)
                     }
                     .disabled(viewModel.isLoading || viewModel.isRegenerating)
@@ -82,6 +82,7 @@ struct TweetSuggestionsSheet: View {
             .task {
                 await viewModel.initialize(contentId: contentId)
             }
+            .font(.modalBody)
         }
         .accessibilityIdentifier("content.tweet.sheet")
         .onDisappear {
@@ -96,12 +97,12 @@ struct TweetSuggestionsSheet: View {
             // Header row: Creativity label + badge
             HStack {
                 Text("Creativity")
-                    .font(.appHeadline)
+                    .font(.modalBody.weight(.semibold))
 
                 Spacer()
 
                 Text(viewModel.creativityLabel)
-                    .font(.appSubheadline)
+                    .font(.modalSupporting)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
@@ -112,7 +113,7 @@ struct TweetSuggestionsSheet: View {
             // Slider row with voice button
             HStack(spacing: 16) {
                 Text("1")
-                    .font(.appCaption)
+                    .font(.modalCaption)
                     .foregroundColor(Color.onSurfaceSecondary)
                 Slider(
                     value: Binding(
@@ -129,7 +130,7 @@ struct TweetSuggestionsSheet: View {
                 .tint(creativityColor)
                 .disabled(viewModel.isLoading || viewModel.isRegenerating)
                 Text("10")
-                    .font(.appCaption)
+                    .font(.modalCaption)
                     .foregroundColor(Color.onSurfaceSecondary)
 
                 if viewModel.voiceDictationAvailable {
@@ -143,7 +144,7 @@ struct TweetSuggestionsSheet: View {
                     ProgressView()
                         .scaleEffect(0.7)
                     Text("Transcribing...")
-                        .font(.appCaption)
+                        .font(.modalSupporting)
                         .foregroundColor(Color.onSurfaceSecondary)
                 }
             }
@@ -212,7 +213,7 @@ struct TweetSuggestionsSheet: View {
             ProgressView()
                 .scaleEffect(1.5)
             Text("Generating tweet suggestions...")
-                .font(.appSubheadline)
+                .font(.modalBody)
                 .foregroundColor(Color.onSurfaceSecondary)
         }
         .frame(minHeight: 200)
@@ -226,7 +227,7 @@ struct TweetSuggestionsSheet: View {
                 .font(.appLargeTitle)
                 .foregroundColor(.brandPrimary)
             Text(message)
-                .font(.appSubheadline)
+                .font(.modalBody)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.center)
             Button(viewModel.hasVoiceError ? "Try Voice Again" : "Try Again") {
@@ -289,7 +290,7 @@ struct TweetSuggestionCard: View {
             // Style Label Badge
             if let styleLabel = suggestion.styleLabel, !styleLabel.isEmpty {
                 Text(styleLabel.capitalized)
-                    .font(.appCaption)
+                    .font(.modalCaption)
                     .fontWeight(.medium)
                     .foregroundColor(.white)
                     .padding(.horizontal, 10)
@@ -300,14 +301,14 @@ struct TweetSuggestionCard: View {
 
             // Tweet Text
             Text(suggestion.text)
-                .font(.appBody)
+                .font(.modalBody)
                 .foregroundColor(Color.onSurface)
                 .fixedSize(horizontal: false, vertical: true)
 
             // Character Count
             HStack {
                 Text("\(suggestion.text.count)/280")
-                    .font(.appCaption)
+                    .font(.modalCaption)
                     .foregroundColor(suggestion.text.count > 280 ? .statusDestructive : Color.onSurfaceSecondary)
 
                 Spacer()
@@ -329,7 +330,7 @@ struct TweetSuggestionCard: View {
                             Image(systemName: "paperplane.fill")
                             Text("Tweet")
                         }
-                        .font(.appSubheadline)
+                        .font(.modalSupporting)
                         .fontWeight(.medium)
                     }
                     .buttonStyle(.borderedProminent)

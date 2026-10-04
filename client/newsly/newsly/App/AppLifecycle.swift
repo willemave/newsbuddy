@@ -35,7 +35,6 @@ final class AppLifecycle {
 
     private(set) var phase: Phase = .inactive
     private(set) var activation: Activation?
-    private(set) var lastInterruptionReturnAt: Date?
 
     @ObservationIgnored
     private let now: () -> Date
@@ -127,9 +126,6 @@ final class AppLifecycle {
             return
         }
 
-        if previousPhase == .inactive {
-            lastInterruptionReturnAt = occurredAt
-        }
     }
 }
 

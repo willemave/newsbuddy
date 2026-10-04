@@ -11,8 +11,7 @@ extension View {
             in: Circle(),
             tint: tint,
             opacity: 0.18,
-            interactive: isEnabled,
-            fallback: .materialStroke(strokeOpacity: 0.2)
+            interactive: isEnabled
         )
     }
 
@@ -21,8 +20,7 @@ extension View {
             in: Capsule(),
             tint: tint,
             opacity: 0.14,
-            interactive: isEnabled,
-            fallback: .tint(opacity: 0.54)
+            interactive: isEnabled
         )
     }
 
@@ -33,12 +31,7 @@ extension View {
             in: RoundedRectangle(cornerRadius: 18, style: .continuous),
             tint: tint,
             opacity: opacity,
-            interactive: true,
-            fallback: .fillStroke(
-                fill: Color.surfaceContainerHighest,
-                fillOpacity: 1,
-                strokeOpacity: isFocused ? 0.34 : 0.24
-            )
+            interactive: true
         )
     }
 
@@ -48,8 +41,7 @@ extension View {
             in: Circle(),
             tint: tint,
             opacity: isEnabled ? 0.3 : 0.16,
-            interactive: isEnabled,
-            fallback: .tint(opacity: 1)
+            interactive: isEnabled
         )
     }
 }

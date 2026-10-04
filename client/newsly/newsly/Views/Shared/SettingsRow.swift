@@ -65,7 +65,7 @@ struct SettingsRow<Accessory: View>: View {
 
                 if let subtitle {
                     Text(subtitle)
-                        .font(.listCaption)
+                        .font(.modalSupporting)
                         .foregroundStyle(subtitleColor)
                         .lineLimit(1)
                 }
@@ -107,55 +107,6 @@ struct NavigationChevron: View {
     }
 }
 
-// MARK: - Settings Toggle Row
-
-struct SettingsToggleRow: View {
-    let icon: String
-    let iconColor: Color
-    let title: String
-    var subtitle: String? = nil
-    @Binding var isOn: Bool
-
-    init(
-        icon: String,
-        iconColor: Color = .onSurfaceSecondary,
-        title: String,
-        subtitle: String? = nil,
-        isOn: Binding<Bool>
-    ) {
-        self.icon = icon
-        self.iconColor = iconColor
-        self.title = title
-        self.subtitle = subtitle
-        self._isOn = isOn
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            SettingsIcon(systemName: icon, color: iconColor)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.listTitle)
-                    .foregroundStyle(Color.onSurface)
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.listCaption)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(2)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-        }
-        .appRow(.compact)
-    }
-}
-
 #Preview {
     VStack(spacing: 0) {
         SettingsRow(icon: "books.vertical", title: "Saved")
@@ -164,14 +115,6 @@ struct SettingsToggleRow: View {
 
         SettingsRow(icon: "list.bullet.rectangle", title: "Feed Sources", subtitle: "12 sources")
 
-        RowDivider()
-
-        SettingsToggleRow(
-            icon: "eye",
-            title: "Show Read Articles",
-            subtitle: "Display both read and unread",
-            isOn: .constant(true)
-        )
     }
     .background(Color.surfacePrimary)
 }

@@ -27,8 +27,6 @@ final class ChatVoiceInputController {
     @ObservationIgnored
     private let refreshAvailability: () async -> Bool
     @ObservationIgnored
-    private let setBackendAvailability: (Bool) -> Void
-    @ObservationIgnored
     private var onTranscriptReady: (@MainActor (String) async -> Void)?
     @ObservationIgnored
     private var errorHandler: (@MainActor (String) -> Void)?
@@ -44,13 +42,17 @@ final class ChatVoiceInputController {
     init(
         transcriptionService: any SpeechTranscribing,
         refreshAvailability: @escaping () async -> Bool,
-        setBackendAvailability: @escaping (Bool) -> Void,
         initiallyAvailable: Bool
     ) {
         self.voiceCoordinator = VoiceDictationCoordinator(transcriber: transcriptionService)
         self.refreshAvailability = refreshAvailability
-        self.setBackendAvailability = setBackendAvailability
         self.isAvailable = initiallyAvailable
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            voiceCoordinator.cancel()
+        }
     }
 
     func configure(
@@ -68,13 +70,10 @@ final class ChatVoiceInputController {
         }
 
         isAvailable = await refreshAvailability()
-        if !isAvailable {
-            setBackendAvailability(false)
-        }
     }
 
     func start() async {
-        guard !isRecording, !isTranscribing else { return }
+        guard state != .starting, !isRecording, !isTranscribing else { return }
         let startedAt = Date()
         hasSubmittedTranscript = false
         hasReportedTerminalError = false
@@ -87,8 +86,9 @@ final class ChatVoiceInputController {
             chatVoiceLogger.error(
                 "Voice recording unavailable | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
-            resetCaptureState()
-            reportTerminalError("Microphone is unavailable right now. Try again in a moment.")
+            let message = "Microphone is unavailable right now. Try again in a moment."
+            resetCaptureState(state: .failed(message))
+            reportTerminalError(message)
             return
         }
 
@@ -119,7 +119,7 @@ final class ChatVoiceInputController {
             chatVoiceLogger.error(
                 "Voice recording start failed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
             )
-            resetCaptureState()
+            resetCaptureState(state: .failed(error.localizedDescription))
             reportTerminalError(error.localizedDescription)
         }
     }
@@ -143,7 +143,7 @@ final class ChatVoiceInputController {
             chatVoiceLogger.error(
                 "Voice transcription error | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
             )
-            resetCaptureState()
+            resetCaptureState(state: .failed(error.localizedDescription))
             reportError(error.localizedDescription)
         }
     }
@@ -196,7 +196,9 @@ final class ChatVoiceInputController {
     private func submit(_ transcript: String) async {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else {
-            reportError("I didn't catch that. Try again.")
+            let message = "I didn't catch that. Try again."
+            resetCaptureState(state: .failed(message))
+            reportError(message)
             return
         }
         guard !hasSubmittedTranscript else { return }

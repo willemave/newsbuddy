@@ -199,50 +199,6 @@ final class BriefingNarrationControllerTests: XCTestCase {
         XCTAssertEqual(service.narrationLensKeys, ["today"])
     }
 
-    func testConcurrentNarrationPreparationUsesSingleRequestPerLens() async throws {
-        let service = MockBriefingService()
-        service.narrationRequestDelayNanoseconds = 100_000_000
-        service.narrationManifest = makeBriefingNarration(
-            chapters: [makeAudioEpisode(id: 42)]
-        )
-        let controller = makeController(service: service)
-
-        async let first = controller.prepareNarration(for: "today")
-        async let second = controller.prepareNarration(for: "today")
-        let narrations = try await (first, second)
-
-        XCTAssertEqual(narrations.0.chapters.first?.id, 42)
-        XCTAssertEqual(narrations.1.chapters.first?.id, 42)
-        XCTAssertEqual(service.narrationLensKeys, ["today"])
-    }
-
-    func testCancellingOneWaiterKeepsSharedPreparationForOtherWaiter() async throws {
-        let service = MockBriefingService()
-        service.narrationRequestDelayNanoseconds = 100_000_000
-        service.narrationManifest = makeBriefingNarration(
-            chapters: [makeAudioEpisode(id: 42)]
-        )
-        let controller = makeController(service: service)
-
-        let cancelledWaiter = Task { @MainActor in
-            try await controller.prepareNarration(for: "today")
-        }
-        await waitFor { service.narrationLensKeys == ["today"] }
-        let activeWaiter = Task { @MainActor in
-            try await controller.prepareNarration(for: "today")
-        }
-        cancelledWaiter.cancel()
-
-        do {
-            _ = try await cancelledWaiter.value
-            XCTFail("Expected cancelled waiter to throw")
-        } catch where ClientFailure.classify(error) == .cancelled {}
-        let completed = try await activeWaiter.value
-
-        XCTAssertEqual(completed.chapters.first?.id, 42)
-        XCTAssertEqual(service.narrationLensKeys, ["today"])
-    }
-
     func testCancellingOnlyWaiterReturnsPromptlyAndStopsPreparation() async throws {
         let service = MockBriefingService()
         service.narrationWaitsForCancellation = true

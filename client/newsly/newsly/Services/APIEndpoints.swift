@@ -34,14 +34,8 @@ enum APIEndpoints {
     static func audioEpisode(id: Int) -> String {
         return "/api/content/audio-episodes/\(id)"
     }
-    static func audioEpisodeAudio(id: Int) -> String {
-        return "/api/content/audio-episodes/\(id)/audio"
-    }
     static func audioEpisodePlaybackFinished(id: Int) -> String {
         return "/api/content/audio-episodes/\(id)/playback-finished"
-    }
-    static func audioEpisodeShare(id: Int) -> String {
-        return "/api/content/audio-episodes/\(id)/share"
     }
     static func newsItem(id: Int) -> String {
         return "/api/news/items/\(id)"
@@ -71,8 +65,6 @@ enum APIEndpoints {
     static func contentDiscussion(id: Int) -> String {
         return "/api/content/\(id)/discussion"
     }
-    static let unreadCounts = "/api/content/stats/unread-counts"
-    static let processingCount = "/api/content/stats/processing-count"
     static let badgeStats = "/api/content/stats/badge"
     static func convertNewsToArticle(id: Int) -> String {
         return "/api/content/\(id)/convert-to-article"
@@ -165,8 +157,5 @@ enum APIEndpoints {
     }
     static func learningDeckSourceNotesURL(id: Int) -> String {
         return "/api/learning/decks/\(id)/source-notes-url"
-    }
-    static func learningDeckShare(id: Int) -> String {
-        return "/api/learning/decks/\(id)/share"
     }
 }

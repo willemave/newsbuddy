@@ -17,40 +17,9 @@ private enum SettingsSheetDestination: String, Identifiable {
     var id: String { rawValue }
 }
 
-struct SettingsNavigationStack: View {
-    @Environment(ReadingStateStore.self) private var readingStateStore
-    @Environment(ReadStateCache.self) private var readStateCache
-    @Environment(RootDependencyFactory.self) private var dependencyFactory
-
-    let showsDismissButton: Bool
-
-    @State private var path = NavigationPath()
-
-    init(
-        showsDismissButton: Bool = false
-    ) {
-        self.showsDismissButton = showsDismissButton
-    }
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            SettingsView(showsDismissButton: showsDismissButton)
-            .withContentRoutes(
-                path: $path,
-                readingStateStore: readingStateStore,
-                readStateCache: readStateCache,
-                contentTextSize: ContentTextSize(
-                    index: dependencyFactory.appSettings.contentTextSizeIndex
-                ).dynamicTypeSize,
-                dependencyFactory: dependencyFactory
-            )
-        }
-    }
-}
-
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(AuthenticationController.self) private var authViewModel
     @Environment(BadgeStatsStore.self) private var badgeStatsStore
     @Environment(XConnectionStore.self) private var xConnectionStore
     @Environment(RootDependencyFactory.self) private var dependencyFactory
@@ -92,6 +61,7 @@ struct SettingsView: View {
                 onOpenDebugMenu: openDebugMenu
             )
         }
+        .font(.modalBody)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .appNavigationTitle(

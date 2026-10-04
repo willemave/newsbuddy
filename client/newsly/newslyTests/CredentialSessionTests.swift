@@ -5,7 +5,7 @@ import XCTest
 final class CredentialSessionTests: XCTestCase {
     func testSignInJournalsBeforePublishingRefreshFirstAndEnvelopeLast() async throws {
         let tokenStore = RecordingAuthTokenStore()
-        let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
+        let storage = KeychainCredentialStorage(keychain: tokenStore)
         let session = makeCredentialSession(storage: storage)
 
         try await session.publishAuthenticated(
@@ -33,7 +33,7 @@ final class CredentialSessionTests: XCTestCase {
 
     func testLegacyCandidatePublishesRefreshFirstAndBindsOnlyAfterValidation() async throws {
         let tokenStore = RecordingAuthTokenStore()
-        let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
+        let storage = KeychainCredentialStorage(keychain: tokenStore)
         let session = makeCredentialSession(storage: storage)
 
         try await session.publishLegacyCandidate(
@@ -88,7 +88,7 @@ final class CredentialSessionTests: XCTestCase {
 
     func testCachedUserLoadKeepsEnvelopeWhenOnlyOneLegacyLegChanged() throws {
         let tokenStore = RecordingAuthTokenStore()
-        let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
+        let storage = KeychainCredentialStorage(keychain: tokenStore)
         let user = credentialUser()
         try storage.publishEnvelopeAndLegacy(
             CredentialEnvelope(
@@ -256,7 +256,7 @@ final class CredentialSessionTests: XCTestCase {
             try JSONEncoder().encode(publication).base64EncodedString(),
             key: .credentialPublication
         )
-        let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
+        let storage = KeychainCredentialStorage(keychain: tokenStore)
         let session = makeCredentialSession(storage: storage)
 
         let accessToken = try await session.accessToken(for: .required)
@@ -750,7 +750,7 @@ final class CredentialSessionTests: XCTestCase {
 
     func testTokenStoreCredentialDeletionReportsFailedCompatibilityLeg() throws {
         let tokenStore = RecordingAuthTokenStore(failedDeleteKeys: [.accessToken])
-        let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
+        let storage = KeychainCredentialStorage(keychain: tokenStore)
         try storage.publishEnvelopeAndLegacy(
             CredentialEnvelope(
                 tokens: CredentialTokens(accessToken: "access", refreshToken: "refresh"),

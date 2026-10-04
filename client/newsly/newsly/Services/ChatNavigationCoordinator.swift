@@ -21,11 +21,6 @@ final class ChatNavigationCoordinator {
         pendingRoutes.first
     }
 
-    var pendingRoute: ChatSessionRoute? {
-        guard presentedRoute == nil else { return nil }
-        return queuedRoute
-    }
-
     var queuedRouteReplacesCurrentNavigation: Bool {
         guard let queuedRoute else { return false }
         return navigationReplacementRoutes.contains(queuedRoute)
@@ -42,10 +37,6 @@ final class ChatNavigationCoordinator {
         guard presentedRoute != route, !pendingRoutes.contains(route) else { return }
         navigationReplacementRoutes.insert(route)
         pendingRoutes.append(route)
-    }
-
-    func openAssistantTurn(_ response: AssistantTurnResponse) {
-        open(ChatSessionRoute(assistantTurn: response))
     }
 
     @discardableResult

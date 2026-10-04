@@ -43,7 +43,7 @@ final class LearningDeckAPIMappingTests: XCTestCase {
         let deck = LearningDeck(apiResponse: response)
 
         XCTAssertEqual(deck.id, 41)
-        XCTAssertEqual(deck.sourceKind, .githubRepo)
+        XCTAssertEqual(deck.sourceKind, .github_repo)
         XCTAssertEqual(deck.status, .generating)
         XCTAssertEqual(deck.latestRun?.status, .validating)
         XCTAssertEqual(deck.latestRun?.timeline.first?.status, .preparing)
@@ -51,7 +51,6 @@ final class LearningDeckAPIMappingTests: XCTestCase {
         XCTAssertEqual(deck.createdAt, createdAt)
         XCTAssertEqual(deck.updatedAt, updatedAt)
         XCTAssertTrue(deck.shareEnabled)
-        XCTAssertTrue(deck.sourceNotesAvailable)
         XCTAssertEqual(deck.thumbnailURL, "/learning/signed/token/assets/thumbnail.png")
         XCTAssertEqual(deck.thumbnailCacheIdentifier, "learning-deck:41:attempt:6")
     }
@@ -89,15 +88,4 @@ final class LearningDeckAPIMappingTests: XCTestCase {
         XCTAssertEqual(deck.latestRun?.status, .unknown("future_run_status"))
     }
 
-    func testShareResponseMapsGeneratedWireNamingOnce() {
-        let response = APILearningDeckShareResponse(
-            shareEnabled: true,
-            shareUrl: "https://example.com/learning/shared"
-        )
-
-        let mapped = LearningDeckShareResponse(apiResponse: response)
-
-        XCTAssertTrue(mapped.shareEnabled)
-        XCTAssertEqual(mapped.shareURL, "https://example.com/learning/shared")
-    }
 }

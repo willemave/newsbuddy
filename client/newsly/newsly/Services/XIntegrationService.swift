@@ -8,31 +8,13 @@ import Foundation
 import UIKit
 
 protocol XIntegrationAPIClientProtocol {
-    func fetchConnection() async throws -> XConnectionResponse
-    func startOAuth() async throws -> XOAuthStartResponse
-    func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse
+    func fetchConnection() async throws -> APIXConnectionResponse
+    func startOAuth() async throws -> APIXOAuthStartResponse
+    func exchangeOAuth(code: String, state: String) async throws -> APIXConnectionResponse
     func disconnect() async throws
 }
 
-struct XOAuthStartResponse {
-    let authorizeURL: String
-    let state: String
-    let scopes: [String]
-}
-
-struct XConnectionResponse {
-    let provider: String
-    let connected: Bool
-    let isActive: Bool
-    let providerUserID: String?
-    let providerUsername: String?
-    let scopes: [String]
-    let lastSyncedAt: String?
-    let lastStatus: String?
-    let lastError: String?
-}
-
-extension XConnectionResponse {
+extension APIXConnectionResponse {
     var needsAttention: Bool {
         // A user-initiated disconnect is a choice, not a problem to badge.
         if connected || lastStatus == "disconnected" {
@@ -158,8 +140,6 @@ enum XIntegrationError: LocalizedError {
 }
 
 final class XIntegrationService {
-    static let shared = XIntegrationService()
-
     typealias OAuthSessionHandler = @MainActor (URL) async throws -> URL
 
     private let client: XIntegrationAPIClientProtocol
@@ -169,22 +149,26 @@ final class XIntegrationService {
     private var authSession: ASWebAuthenticationSession?
 
     init(
-        client: XIntegrationAPIClientProtocol = LiveXIntegrationAPIClient(),
+        client: XIntegrationAPIClientProtocol,
         oauthSessionHandler: OAuthSessionHandler? = nil
     ) {
         self.client = client
         self.oauthSessionHandler = oauthSessionHandler
     }
 
-    func fetchConnection() async throws -> XConnectionResponse {
+    convenience init(apiClient: APIClient) {
+        self.init(client: LiveXIntegrationAPIClient(client: apiClient))
+    }
+
+    func fetchConnection() async throws -> APIXConnectionResponse {
         try await client.fetchConnection()
     }
 
-    func startOAuth() async throws -> XOAuthStartResponse {
+    func startOAuth() async throws -> APIXOAuthStartResponse {
         try await client.startOAuth()
     }
 
-    func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
+    func exchangeOAuth(code: String, state: String) async throws -> APIXConnectionResponse {
         try await client.exchangeOAuth(code: code, state: state)
     }
 
@@ -193,9 +177,9 @@ final class XIntegrationService {
     }
 
     @MainActor
-    func connectViaOAuth() async throws -> XConnectionResponse {
+    func connectViaOAuth() async throws -> APIXConnectionResponse {
         let start = try await startOAuth()
-        guard let authorizeURL = URL(string: start.authorizeURL) else {
+        guard let authorizeURL = URL(string: start.authorizeUrl) else {
             throw XIntegrationError.invalidAuthorizeURL
         }
 
@@ -203,7 +187,7 @@ final class XIntegrationService {
         if let oauthSessionHandler {
             callbackURL = try await oauthSessionHandler(authorizeURL)
         } else {
-            callbackURL = try await runOAuthSession(authorizeURL: authorizeURL)
+            callbackURL = try await runOAuthSession(authorizeUrl: authorizeURL)
         }
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
               let queryItems = components.queryItems else {
@@ -227,10 +211,10 @@ final class XIntegrationService {
     }
 
     @MainActor
-    private func runOAuthSession(authorizeURL: URL) async throws -> URL {
+    private func runOAuthSession(authorizeUrl: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(
-                url: authorizeURL,
+                url: authorizeUrl,
                 callbackURLScheme: callbackScheme
             ) { callbackURL, error in
                 if let error = error as? ASWebAuthenticationSessionError {
@@ -267,61 +251,41 @@ final class XIntegrationService {
 private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
     private let client: APIClient
 
-    init(client: APIClient = .shared) {
+    init(client: APIClient) {
         self.client = client
     }
 
-    func fetchConnection() async throws -> XConnectionResponse {
+    func fetchConnection() async throws -> APIXConnectionResponse {
         let response: APIXConnectionResponse = try await client.request(
             APIEndpoints.xIntegrationConnection
         )
-        return XConnectionResponse(api: response)
+        return response
     }
 
-    func startOAuth() async throws -> XOAuthStartResponse {
+    func startOAuth() async throws -> APIXOAuthStartResponse {
         let body = try JSONEncoder().encode(APIXOAuthStartRequest(twitterUsername: nil))
         let response: APIXOAuthStartResponse = try await client.request(
             APIEndpoints.xIntegrationOAuthStart,
             method: .post,
             body: body
         )
-        return XOAuthStartResponse(
-            authorizeURL: response.authorizeUrl,
-            state: response.state,
-            scopes: response.scopes
-        )
+        return response
     }
 
-    func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
+    func exchangeOAuth(code: String, state: String) async throws -> APIXConnectionResponse {
         let body = try JSONEncoder().encode(APIXOAuthExchangeRequest(code: code, state: state))
         let response: APIXConnectionResponse = try await client.request(
             APIEndpoints.xIntegrationOAuthExchange,
             method: .post,
             body: body
         )
-        return XConnectionResponse(api: response)
+        return response
     }
 
     func disconnect() async throws {
         let _: APIIntegrationDisconnectResponse = try await client.request(
             APIEndpoints.xIntegrationConnection,
             method: .delete
-        )
-    }
-}
-
-private extension XConnectionResponse {
-    init(api response: APIXConnectionResponse) {
-        self.init(
-            provider: response.provider,
-            connected: response.connected,
-            isActive: response.isActive,
-            providerUserID: response.providerUserId,
-            providerUsername: response.providerUsername,
-            scopes: response.scopes,
-            lastSyncedAt: response.lastSyncedAt.map(ServerDate.format),
-            lastStatus: response.lastStatus,
-            lastError: response.lastError
         )
     }
 }

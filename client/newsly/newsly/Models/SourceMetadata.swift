@@ -5,18 +5,10 @@
 
 import Foundation
 
-struct SourceMetadataAuthor: Codable, Identifiable, Hashable {
+struct SourceMetadataAuthor: Decodable, Identifiable, Hashable {
     let name: String
     let affiliation: String?
-    let affiliationSource: String?
     let confidence: String?
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case affiliation
-        case affiliationSource = "affiliation_source"
-        case confidence
-    }
 
     var id: String {
         [name, affiliation].compactMap { $0 }.joined(separator: "|")
@@ -31,7 +23,7 @@ struct SourceMetadataAuthor: Codable, Identifiable, Hashable {
     }
 }
 
-struct SourceMetadataCategory: Codable, Identifiable, Hashable {
+struct SourceMetadataCategory: Decodable, Identifiable, Hashable {
     let term: String
     let primary: Bool?
 
@@ -42,8 +34,7 @@ struct SourceMetadataCategory: Codable, Identifiable, Hashable {
     }
 }
 
-struct SourceMetadata: Codable, Hashable {
-    let schemaVersion: Int?
+struct SourceMetadata: Decodable, Hashable {
     let kind: String?
     let provider: String?
     let sourceID: String?
@@ -56,13 +47,9 @@ struct SourceMetadata: Codable, Hashable {
     let categories: [SourceMetadataCategory]
     let publishedAt: String?
     let updatedAt: String?
-    let doi: String?
-    let journalRef: String?
     let comment: String?
-    let extractedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version"
         case kind
         case provider
         case sourceID = "source_id"
@@ -75,15 +62,11 @@ struct SourceMetadata: Codable, Hashable {
         case categories
         case publishedAt = "published_at"
         case updatedAt = "updated_at"
-        case doi
-        case journalRef = "journal_ref"
         case comment
-        case extractedAt = "extracted_at"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
         provider = try container.decodeIfPresent(String.self, forKey: .provider)
         sourceID = try container.decodeIfPresent(String.self, forKey: .sourceID)
@@ -96,10 +79,7 @@ struct SourceMetadata: Codable, Hashable {
         categories = try container.decodeIfPresent([SourceMetadataCategory].self, forKey: .categories) ?? []
         publishedAt = try container.decodeIfPresent(String.self, forKey: .publishedAt)
         updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
-        doi = try container.decodeIfPresent(String.self, forKey: .doi)
-        journalRef = try container.decodeIfPresent(String.self, forKey: .journalRef)
         comment = try container.decodeIfPresent(String.self, forKey: .comment)
-        extractedAt = try container.decodeIfPresent(String.self, forKey: .extractedAt)
     }
 
     var displaySynopsis: String? {

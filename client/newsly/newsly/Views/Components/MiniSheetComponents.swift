@@ -29,7 +29,7 @@ struct MiniSheetHeader: View {
 
             HStack {
                 Text(title)
-                    .font(.appTitle3)
+                    .font(.modalTitle)
                     .accessibilityIdentifier(titleAccessibilityIdentifier)
                 Spacer()
                 Button(action: dismiss) {
@@ -89,21 +89,20 @@ struct MiniSheetOptionRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.appSubheadline)
+                        .font(.modalBody)
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurface)
                     Text(subtitle)
-                        .font(.appCaption)
+                        .font(.modalSupporting)
                         .foregroundColor(Color.onSurfaceSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.88)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()
 
                 if let badge {
                     Text(badge)
-                        .font(.appCaption2)
+                        .font(.modalCaption)
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .padding(.horizontal, 7)

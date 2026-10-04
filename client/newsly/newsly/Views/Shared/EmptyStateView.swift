@@ -117,9 +117,6 @@ struct EmptyStateView: View {
     }
 }
 
-/// Backward-compatible alias.
-typealias SettingsEmptyStateView = EmptyStateView
-
 #Preview {
     VStack {
         EmptyStateView(

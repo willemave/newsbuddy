@@ -73,6 +73,8 @@ final class AuthenticationController {
     #if DEBUG
     @ObservationIgnored
     private var hasAttemptedE2EAutoLogin = false
+    @ObservationIgnored
+    private let debugCredentialSession: CredentialSession?
     #endif
 
     init(
@@ -85,7 +87,10 @@ final class AuthenticationController {
         self.authService = authService
         self.userCache = userCache ?? KeychainAuthenticatedUserCache(tokenStore: tokenStore)
         self.credentialStorage = credentialStorage
-            ?? CredentialStorageFactory.make(tokenStore: tokenStore)
+            ?? KeychainCredentialStorage(keychain: tokenStore)
+        #if DEBUG
+        self.debugCredentialSession = credentialSession
+        #endif
 
         credentialSession?.setTerminalHandler { [weak self] event in
             Task { @MainActor [weak self] in
@@ -171,11 +176,7 @@ final class AuthenticationController {
                 guard canCommit(generation) else { return }
                 errorMessage = nil
                 restorationRetryPending = false
-                lastKnownUser = user
-                userCache.save(user)
-                hasValidatedProfile = true
-                authState = .authenticated(user)
-                reportCurrentTimezoneIfNeeded()
+                commitAuthenticatedUser(user)
             } catch {
                 guard canCommit(generation) else { return }
                 handleRestorationFailure(error)
@@ -204,11 +205,7 @@ final class AuthenticationController {
                 let session = try await authService.signInWithApple()
                 guard canCommit(generation) else { return }
                 errorMessage = nil
-                lastKnownUser = session.user
-                userCache.save(session.user)
-                hasValidatedProfile = true
-                authState = .authenticated(session.user)
-                reportCurrentTimezoneIfNeeded()
+                commitAuthenticatedUser(session.user)
             } catch {
                 guard canCommit(generation) else { return }
                 presentAuthError(error)
@@ -242,6 +239,14 @@ final class AuthenticationController {
         hasValidatedProfile = false
         errorMessage = nil
         authState = .unauthenticated
+    }
+
+    private func commitAuthenticatedUser(_ user: User) {
+        lastKnownUser = user
+        userCache.save(user)
+        hasValidatedProfile = true
+        authState = .authenticated(user)
+        reportCurrentTimezoneIfNeeded()
     }
 
     func updateUser(_ user: User) {
@@ -331,6 +336,27 @@ final class AuthenticationController {
     }
 
     #if DEBUG
+    func signInWithStoredCredentials() async throws {
+        authState = .loading
+        let user = try await authService.getCurrentUser()
+        commitAuthenticatedUser(user)
+    }
+
+    func validateDebugTokens(_ tokens: CredentialTokens) async throws -> User {
+        guard let debugCredentialSession else {
+            throw CredentialStorageError.unavailable
+        }
+        authState = .loading
+        try await debugCredentialSession.publishLegacyCandidate(tokens: tokens)
+        let user = try await authService.getCurrentUser()
+        try await debugCredentialSession.bindCurrentCredentials(to: user.id)
+        return user
+    }
+
+    func commitDebugUser(_ user: User) {
+        commitAuthenticatedUser(user)
+    }
+
     func startDebugSession(userID: Int) {
         let generation = beginAuthWork(
             .credentialReplacement,
@@ -354,11 +380,7 @@ final class AuthenticationController {
                     hasCompletedNewUserTutorial: nil
                 )
                 guard canCommit(generation) else { return }
-                lastKnownUser = session.user
-                userCache.save(session.user)
-                hasValidatedProfile = true
-                authState = .authenticated(session.user)
-                reportCurrentTimezoneIfNeeded()
+                commitAuthenticatedUser(session.user)
             } catch {
                 guard canCommit(generation) else { return }
                 presentAuthError(error)
@@ -460,11 +482,7 @@ final class AuthenticationController {
                 )
                 guard canCommit(generation) else { return }
                 errorMessage = nil
-                lastKnownUser = session.user
-                userCache.save(session.user)
-                hasValidatedProfile = true
-                authState = .authenticated(session.user)
-                reportCurrentTimezoneIfNeeded()
+                commitAuthenticatedUser(session.user)
             } catch {
                 guard canCommit(generation) else { return }
                 presentAuthError(error)
@@ -553,7 +571,3 @@ final class AuthenticationController {
         }
     }
 }
-
-/// Compatibility name for presentation code while the controller migration is
-/// completed call site by call site.
-typealias AuthenticationViewModel = AuthenticationController

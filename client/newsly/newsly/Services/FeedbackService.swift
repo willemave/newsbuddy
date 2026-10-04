@@ -7,11 +7,9 @@ import Foundation
 import UIKit
 
 final class FeedbackService {
-    static let shared = FeedbackService()
-
     private let client: APIClient
 
-    init(client: APIClient = .shared) {
+    init(client: APIClient) {
         self.client = client
     }
 

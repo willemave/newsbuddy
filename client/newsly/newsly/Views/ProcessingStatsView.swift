@@ -3,9 +3,14 @@ import SwiftUI
 struct ProcessingStatsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var sourcesViewModel: ScraperSettingsViewModel
+    private let feedHistoryService: any FeedHistoryServicing
 
-    init(sourcesViewModel: ScraperSettingsViewModel) {
+    init(
+        sourcesViewModel: ScraperSettingsViewModel,
+        feedHistoryService: any FeedHistoryServicing
+    ) {
         self._sourcesViewModel = State(initialValue: sourcesViewModel)
+        self.feedHistoryService = feedHistoryService
     }
 
     var body: some View {
@@ -24,9 +29,10 @@ struct ProcessingStatsView: View {
                                            description: Text("Add an article or podcast feed in Sources."))
                 }
             }
-            feedSection("Article Feeds", types: ["substack", "atom", "youtube"])
-            feedSection("Podcasts", types: ["podcast_rss"])
+            feedSection("Article Feeds", types: APIScraperType.articleFeedTypes)
+            feedSection("Podcasts", types: APIScraperType.podcastTypes)
         }
+        .font(.modalBody)
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.surfacePrimary)
@@ -45,14 +51,20 @@ struct ProcessingStatsView: View {
     }
 
     @ViewBuilder
-    private func feedSection(_ title: String, types: [String]) -> some View {
-        let feeds = sourcesViewModel.configs.filter { types.contains($0.scraperType) }
+    private func feedSection(_ title: String, types: Set<APIScraperType>) -> some View {
+        let feeds = sourcesViewModel.configs.filter {
+            APIScraperType(rawValue: $0.scraperType).map(types.contains) ?? false
+        }
             .sorted { ($0.displayName ?? "").localizedStandardCompare($1.displayName ?? "") == .orderedAscending }
         if !feeds.isEmpty {
             Section {
                 ForEach(feeds) { config in
                     NavigationLink {
-                        FeedHistoryView(config: config, sourcesViewModel: sourcesViewModel)
+                        FeedHistoryView(
+                            config: config,
+                            sourcesViewModel: sourcesViewModel,
+                            service: feedHistoryService
+                        )
                     } label: {
                         FeedStatusRow(config: config)
                     }
@@ -65,7 +77,7 @@ struct ProcessingStatsView: View {
                     Text(title).font(.appHeadline).foregroundStyle(Color.onSurface)
                     Spacer()
                     Text("\(feeds.count) \(feeds.count == 1 ? "feed" : "feeds")")
-                        .font(.appCaption).foregroundStyle(Color.onSurfaceSecondary)
+                        .font(.modalSupporting).foregroundStyle(Color.onSurfaceSecondary)
                 }
                 .textCase(nil)
                 .padding(.bottom, 6)
@@ -84,8 +96,8 @@ private struct FeedStatusRow: View {
 
     private var symbol: String {
         switch config.scraperType {
-        case "podcast_rss": "waveform"
-        case "youtube": "play.rectangle"
+        case APIScraperType.podcast_rss.rawValue: "waveform"
+        case APIScraperType.youtube.rawValue: "play.rectangle"
         default: "newspaper"
         }
     }
@@ -117,7 +129,7 @@ private struct FeedStatusRow: View {
                         .font(.appHeadline)
                         .foregroundStyle(Color.onSurface)
                     Text(activity)
-                        .font(.appCaption.weight(hasWork ? .semibold : .regular))
+                        .font(.modalSupporting.weight(hasWork ? .semibold : .regular))
                         .foregroundStyle(hasWork ? Color.brandPrimary : Color.onSurfaceSecondary)
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -135,12 +147,12 @@ private struct FeedStatusRow: View {
                 }
                 if let issue = stats.issueSummary {
                     Label(issue, systemImage: "exclamationmark.triangle.fill")
-                        .font(.appCaption.weight(.semibold))
+                        .font(.modalSupporting.weight(.semibold))
                         .foregroundStyle(Color.statusDestructive)
                 }
                 if stats.ingestionError != nil {
                     Label("Could not refresh feed", systemImage: "exclamationmark.triangle.fill")
-                        .font(.appCaption.weight(.semibold))
+                        .font(.modalSupporting.weight(.semibold))
                         .foregroundStyle(Color.statusDestructive)
                 }
             }
@@ -153,10 +165,10 @@ private struct FeedStatusRow: View {
     private func metric(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.appCaption)
+                .font(.modalCaption)
                 .foregroundStyle(Color.onSurfaceSecondary)
             Text(value)
-                .font(.appSans(size: 16, relativeTo: .callout, weight: .medium))
+                .font(.modalBody.weight(.medium))
                 .foregroundStyle(Color.onSurface)
                 .contentTransition(.numericText())
         }
@@ -186,11 +198,11 @@ struct FeedStatusSummary: View {
                         .foregroundStyle(Color.statusDestructive)
                 }
             }
-            .font(.appCaption)
+            .font(.modalSupporting)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         } else {
-            Text("Stats unavailable").font(.appCaption).foregroundStyle(.secondary)
+            Text("Stats unavailable").font(.modalSupporting).foregroundStyle(.secondary)
         }
     }
 }

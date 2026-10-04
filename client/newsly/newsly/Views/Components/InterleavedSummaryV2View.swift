@@ -15,7 +15,6 @@ private enum InterleavedV2Design {
 
 struct InterleavedSummaryV2View: View {
     let summary: InterleavedSummaryV2
-    var contentId: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: InterleavedV2Design.sectionSpacing) {
@@ -166,8 +165,7 @@ struct InterleavedSummaryV2View: View {
                 takeaway: "The biggest winners will be teams that treat AI as an operational capability, not just a feature, and invest in data and feedback loops early.",
                 classification: "to_read",
                 summarizationDate: nil
-            ),
-            contentId: 123
+            )
         )
         .padding()
     }

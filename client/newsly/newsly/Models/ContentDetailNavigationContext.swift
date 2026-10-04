@@ -5,20 +5,15 @@
 
 import Foundation
 
-enum ContentDetailNavigationSurface: String, Codable, Hashable {
+enum ContentDetailNavigationSurface: String, Hashable {
     case direct
-    case fastNews = "fast_news"
-    case longForm = "long_form"
-    case knowledge
-    case contentList = "content_list"
     case recentlyRead = "recently_read"
     case savedLibrary = "saved_library"
     case search
-    case newsGroup = "news_group"
     case briefing
 }
 
-enum ContentDetailScrollTarget: String, Codable, Hashable {
+enum ContentDetailScrollTarget: String, Hashable {
     case comments
 }
 

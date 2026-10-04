@@ -449,7 +449,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             self.sharedURL = best
             self.urlStatusLabel.text = "Ready: \(best.host ?? best.absoluteString)"
             self.updateSubmitState()
-            let handlerKind = ShareURLRouting.handler(for: best).kind.rawValue
+            let handlerKind = ShareURLRouting.handler(for: best).rawValue
             print("🔗 [ShareExt] extracted URL=\(best.absoluteString) handler=\(handlerKind)")
         }
     }
@@ -556,32 +556,31 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         let requestBody = try JSONEncoder().encode(payload)
 
         do {
-            let response: APIShareActionResponse = try await ShareExtensionTransport.shared.request(
-                "/api/share-actions",
-                method: .post,
-                body: requestBody
-            )
-            guard response.taskId > 0, response.mode == payload.mode else {
-                throw ShareError.invalidResponse
-            }
-        } catch let error as ShareExtensionTransportError {
-            switch error {
-            case .notAuthenticated:
-                throw ShareError.notAuthenticated
-            case .invalidURL:
-                throw ShareError.invalidURL
-            case .network(let underlying):
-                throw ShareError.networkError(underlying.localizedDescription)
-            case .server(let statusCode, let detail):
-                if let message = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty {
-                    throw ShareError.serverError(message)
-                }
-                throw ShareError.serverError("Request failed with status \(statusCode)")
-            case .invalidResponse:
+            let response = try await ShareExtensionTransport.shared.submitShareAction(body: requestBody)
+            guard response.map({ $0.taskId > 0 && $0.mode == payload.mode }) != false else {
                 throw ShareError.invalidResponse
             }
         } catch {
-            throw ShareError.serverError(error.localizedDescription)
+            switch ClientFailure.classify(error) {
+            case .authenticationRequired, .authenticationExpired:
+                throw ShareError.notAuthenticated
+            case .invalidRequest:
+                throw ShareError.configurationError("the server address is invalid")
+            case .connectivity, .cancelled, .unexpected:
+                throw ShareError.networkError(error.localizedDescription)
+            case .server(let statusCode, let envelope):
+                if let message = nonEmptyShareDetail(envelope.message) {
+                    throw ShareError.serverError(message)
+                }
+                throw ShareError.serverError("Request failed with status \(statusCode)")
+            case .http(let statusCode, let detail):
+                if let message = nonEmptyShareDetail(detail) {
+                    throw ShareError.serverError(message)
+                }
+                throw ShareError.serverError("Request failed with status \(statusCode)")
+            case .invalidResponse, .decoding:
+                throw ShareError.invalidResponse
+            }
         }
     }
 
@@ -667,7 +666,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             return .authenticationRequired
         case .invalidURL:
             return .invalidURL
-        case .invalidResponse, .networkError, .serverError, .userCancelled:
+        case .configurationError, .invalidResponse, .networkError, .serverError, .userCancelled:
             return .recoverable
         }
     }
@@ -799,6 +798,7 @@ private final class OptionRowView: UIControl {
 enum ShareError: LocalizedError {
     case notAuthenticated
     case invalidURL
+    case configurationError(String)
     case invalidResponse
     case networkError(String)
     case serverError(String)
@@ -810,6 +810,8 @@ enum ShareError: LocalizedError {
             return "Session expired. Open Newsbuddy and sign in again."
         case .invalidURL:
             return "No web link was found. Share a page or URL and try again."
+        case .configurationError(let message):
+            return "Newsbuddy isn't configured for sharing: \(message)"
         case .invalidResponse:
             return "Invalid server response"
         case .networkError(let message):
@@ -820,4 +822,10 @@ enum ShareError: LocalizedError {
             return "Cancelled"
         }
     }
+}
+
+private func nonEmptyShareDetail(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
 }

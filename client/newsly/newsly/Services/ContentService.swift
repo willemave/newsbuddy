@@ -43,18 +43,17 @@ enum ContentServiceError: LocalizedError {
 }
 
 class ContentService {
-    static let shared = ContentService()
-    private let client = APIClient.shared
-    
-    private init() {}
+    private let client: APIClient
+
+    init(client: APIClient) {
+        self.client = client
+    }
     
     func submitContent(url: URL,
-                       contentType: String? = nil,
                        title: String? = nil,
                        platform: String? = nil) async throws -> SubmitContentResponse {
         let payload = APISubmitContentRequest(
             url: url.absoluteString,
-            contentType: contentType.map(APIContentType.init(rawValue:)),
             title: title,
             platform: platform
         )
@@ -164,7 +163,7 @@ class ContentService {
             APIEndpoints.contentDetail(id: id),
             recoveryPolicy: .safeRead
         )
-        return try ContentDetail(api: response)
+        return ContentDetail(api: response)
     }
 
     func fetchNewsItemDetail(id: Int) async throws -> ContentDetail {
@@ -222,7 +221,7 @@ class ContentService {
             APIEndpoints.contentDiscussion(id: id)
         }
         let response: APIContentDiscussionResponse = try await client.request(path)
-        return ContentDiscussion(api: response)
+        return response
     }
 
     func trackContentInteraction(

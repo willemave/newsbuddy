@@ -21,7 +21,6 @@ struct NarrationPlaybackMetadata: Equatable {
 typealias AudioEpisode = APIAudioEpisodeResponse
 typealias BriefingNarration = APIBriefingNarrationResponse
 
-typealias AudioEpisodeShareResponse = APIAudioEpisodeShareResponse
 
 extension APIAudioEpisodeResponse: Identifiable {}
 

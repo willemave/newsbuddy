@@ -57,14 +57,4 @@ final class TwitterShareService {
         completion?(false)
     }
 
-    /// Check if Twitter/X app is installed.
-    var isTwitterAppInstalled: Bool {
-        for scheme in Self.twitterAppSchemes {
-            if let url = URL(string: scheme),
-               UIApplication.shared.canOpenURL(url) {
-                return true
-            }
-        }
-        return false
-    }
 }

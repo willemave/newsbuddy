@@ -8,7 +8,6 @@ import SwiftUI
 extension View {
     func withContentRoutes(
         path: Binding<NavigationPath>,
-        readingStateStore: ReadingStateStore,
         readStateCache: ReadStateCache,
         contentTextSize: DynamicTypeSize,
         contentTransitionNamespace: Namespace.ID? = nil,
@@ -26,7 +25,6 @@ extension View {
                 readStateCache: readStateCache
             )
             .dynamicTypeSize(contentTextSize)
-            .environment(readingStateStore)
             .environment(readStateCache)
             .contentZoomNavigationTransition(id: route.contentId, namespace: contentTransitionNamespace)
         }

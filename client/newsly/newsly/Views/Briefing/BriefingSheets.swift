@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 
 struct BriefingDigSheet: View {
@@ -32,7 +31,7 @@ struct BriefingDigSheet: View {
 
     private var fragmentHeader: some View {
         Label(viewModel.fragment ?? "Dig Deeper", systemImage: "magnifyingglass")
-            .font(.appCallout.weight(.semibold))
+            .font(.modalBody.weight(.semibold))
             .foregroundStyle(Color.onSurfaceSecondary)
             .lineLimit(2)
     }
@@ -53,10 +52,11 @@ struct BriefingDigSheet: View {
             .transition(.opacity)
         case .loaded(let results, let summary):
             VStack(alignment: .leading, spacing: 16) {
-                Markdown(BriefingDigViewModel.citationLinkedMarkdown(summary))
-                    .markdownTheme(.chat)
-                    .environment(\.openURL, citationOpenAction(results: results))
-                    .textSelection(.enabled)
+                SelectableMarkdownView(
+                    markdown: BriefingDigViewModel.citationLinkedMarkdown(summary),
+                    adjustsFontForContentSizeCategory: true,
+                    linkAction: { citationAction(for: $0, results: results) }
+                )
                     .accessibilityIdentifier("briefing.dig_summary")
                 resultLinks(results)
             }
@@ -64,7 +64,7 @@ struct BriefingDigSheet: View {
         case .error(let message):
             VStack(alignment: .leading, spacing: 12) {
                 Text(message)
-                    .font(.appCallout)
+                    .font(.modalBody)
                     .foregroundStyle(Color.statusDestructive)
                 Button("Try Again") {
                     viewModel.retry()
@@ -80,21 +80,23 @@ struct BriefingDigSheet: View {
         HStack(spacing: 10) {
             ProgressView()
             Text(label)
-                .font(.appCallout)
+                .font(.modalBody)
                 .foregroundStyle(Color.onSurfaceSecondary)
         }
     }
 
-    private func citationOpenAction(results: [APIBriefingDigSearchResult]) -> OpenURLAction {
-        OpenURLAction { url in
-            guard url.scheme == "digsource",
-                  let index = Int(url.host ?? ""),
-                  index >= 1,
-                  index <= results.count,
-                  let sourceURL = URL(string: results[index - 1].url)
-            else { return .systemAction }
+    private func citationAction(
+        for url: URL,
+        results: [APIBriefingDigSearchResult]
+    ) -> UIAction? {
+        guard url.scheme == "digsource",
+              let index = Int(url.host ?? ""),
+              index >= 1,
+              index <= results.count,
+              let sourceURL = URL(string: results[index - 1].url)
+        else { return nil }
+        return UIAction { _ in
             safariItem = BriefingSafariItem(url: sourceURL)
-            return .handled
         }
     }
 
@@ -110,7 +112,7 @@ struct BriefingDigSheet: View {
                             safariItem = BriefingSafariItem(url: url)
                         } label: {
                             Text(result.title)
-                                .font(.appCallout.weight(.semibold))
+                                .font(.modalBody.weight(.semibold))
                                 .foregroundStyle(Color.brandPrimary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -199,14 +201,14 @@ struct BriefingNarrationChapterSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(chapter.title)
                     .font(
-                        .appCallout.weight(index == selectedIndex ? .semibold : .regular)
+                        .modalBody.weight(index == selectedIndex ? .semibold : .regular)
                     )
                     .foregroundStyle(Color.onSurface)
 
                 let detail = chapterDetail(chapter)
                 if !detail.isEmpty {
                     Text(detail)
-                        .font(.appCaption)
+                        .font(.modalSupporting)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }

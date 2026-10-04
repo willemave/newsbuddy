@@ -27,10 +27,10 @@ struct CLILinkScannerSheet: View {
                             .foregroundStyle(Color.brandPrimary)
 
                         Text("Camera access is required")
-                            .font(.appHeadline)
+                            .font(.modalTitle)
 
                         Text("Allow camera access to scan the QR code shown by the Newsbuddy CLI.")
-                            .font(.appSubheadline)
+                            .font(.modalBody)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .multilineTextAlignment(.center)
 

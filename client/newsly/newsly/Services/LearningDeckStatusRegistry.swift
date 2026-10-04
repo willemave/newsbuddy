@@ -56,8 +56,6 @@ actor LearningDeckStatusRegistry {
 
     private typealias ObserverStore = KeyedPollingObserverStore<Int, LearningDeck, ObserverMetadata>
 
-    static let shared = LearningDeckStatusRegistry(statusService: LearningDeckService.shared)
-
     private let fetchDeck: FetchDeck
     private let policy: LearningDeckStatusPollingPolicy
     private let sleep: Sleep

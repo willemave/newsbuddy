@@ -87,7 +87,7 @@ struct SourceDetailSheet: View {
     private var infoCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("INFORMATION")
-                .font(.sectionHeader)
+                .font(.modalSupporting.weight(.semibold))
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .tracking(0.5)
 
@@ -102,7 +102,7 @@ struct SourceDetailSheet: View {
                     SourceTypeIcon(type: config.scraperType)
                         .accessibilityHidden(true)
                     Text(config.scraperType.capitalized)
-                        .font(.listValue)
+                        .font(.modalSupporting.monospacedDigit())
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
@@ -116,7 +116,7 @@ struct SourceDetailSheet: View {
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("SETTINGS")
-                .font(.sectionHeader)
+                .font(.modalSupporting.weight(.semibold))
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .tracking(0.5)
 
@@ -148,7 +148,7 @@ struct SourceDetailSheet: View {
             // Display name
             VStack(alignment: .leading, spacing: 6) {
                 Text("Display Name")
-                    .font(.listCaption)
+                    .font(.modalCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
 
                 FormTextField(
@@ -157,12 +157,13 @@ struct SourceDetailSheet: View {
                     backgroundColor: .surfacePrimary,
                     accessibilityLabel: "Display name"
                 )
+                .font(.modalBody)
             }
 
             // Feed URL
             VStack(alignment: .leading, spacing: 6) {
                 Text("Feed URL")
-                    .font(.listCaption)
+                    .font(.modalCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
 
                 FormTextField(
@@ -174,13 +175,14 @@ struct SourceDetailSheet: View {
                     backgroundColor: .surfacePrimary,
                     accessibilityLabel: "Feed URL"
                 )
+                .font(.modalBody)
             }
 
             // Limit (podcasts only)
-            if config.scraperType == "podcast_rss" {
+            if config.scraperType == APIScraperType.podcast_rss.rawValue {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Episode Limit (1-100)")
-                        .font(.listCaption)
+                        .font(.modalCaption)
                         .foregroundStyle(Color.onSurfaceSecondary)
 
                     FormTextField(
@@ -190,6 +192,7 @@ struct SourceDetailSheet: View {
                         backgroundColor: .surfacePrimary,
                         accessibilityLabel: "Episode limit"
                     )
+                    .font(.modalBody)
                 }
             }
         }
@@ -200,7 +203,7 @@ struct SourceDetailSheet: View {
     private func statsCard(_ stats: ScraperConfigStats) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("STATS")
-                .font(.sectionHeader)
+                .font(.modalSupporting.weight(.semibold))
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .tracking(0.5)
 
@@ -234,13 +237,13 @@ struct SourceDetailSheet: View {
     private func sourceIssueBanner(_ issue: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Source needs attention", systemImage: "exclamationmark.triangle.fill")
-                .font(.appSubheadline.weight(.semibold))
+                .font(.modalSupporting.weight(.semibold))
                 .foregroundStyle(Color.statusDestructive)
             Text(issue)
-                .font(.appSubheadline)
+                .font(.modalBody)
                 .foregroundStyle(Color.onSurface)
             Text("Update the source URL, pause the source, or remove it if these items aren't accessible.")
-                .font(.appCaption)
+                .font(.modalSupporting)
                 .foregroundStyle(Color.onSurfaceSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -255,7 +258,7 @@ struct SourceDetailSheet: View {
                 .accessibilityHidden(true)
 
             Text(error)
-                .font(.appSubheadline)
+                .font(.modalSupporting)
                 .foregroundStyle(Color.onSurface)
 
             Spacer()
@@ -273,7 +276,7 @@ struct SourceDetailSheet: View {
             HStack {
                 Spacer()
                 Label("Delete Source", systemImage: "trash")
-                    .font(.appBody.weight(.medium))
+                    .font(.modalBody.weight(.medium))
                 Spacer()
             }
             .padding(.vertical, 12)
@@ -304,7 +307,7 @@ struct SourceDetailSheet: View {
         displayName != (config.displayName ?? "") ||
         feedURL != (config.feedURL ?? "") ||
         isActive != config.isActive ||
-        (config.scraperType == "podcast_rss" && normalizedLimit != config.limit)
+        (config.scraperType == APIScraperType.podcast_rss.rawValue && normalizedLimit != config.limit)
     }
 
     private var normalizedLimit: Int? {
@@ -314,7 +317,7 @@ struct SourceDetailSheet: View {
     }
 
     private var limitIsValid: Bool {
-        guard config.scraperType == "podcast_rss" else { return true }
+        guard config.scraperType == APIScraperType.podcast_rss.rawValue else { return true }
         guard let value = normalizedLimit else { return true }
         return (1...100).contains(value)
     }
@@ -328,7 +331,7 @@ struct SourceDetailSheet: View {
             isActive: isActive != config.isActive ? isActive : nil,
             displayName: displayName != (config.displayName ?? "") ? displayName : nil,
             feedURL: feedURL != (config.feedURL ?? "") ? feedURL : nil,
-            limit: (config.scraperType == "podcast_rss" && normalizedLimit != config.limit) ? normalizedLimit : nil
+            limit: (config.scraperType == APIScraperType.podcast_rss.rawValue && normalizedLimit != config.limit) ? normalizedLimit : nil
         )
 
         if viewModel.errorMessage == nil {
@@ -343,7 +346,7 @@ struct SourceDetailSheet: View {
                 .foregroundStyle(Color.onSurface)
             Spacer()
             Text(value)
-                .font(.listValue)
+                .font(.modalSupporting.monospacedDigit())
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.trailing)
         }

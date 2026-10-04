@@ -78,7 +78,7 @@ final class AudioEpisodeServiceTests: XCTestCase {
         let episode = makeEpisode(id: 41)
 
         do {
-            _ = try await AudioEpisodeService.shared.streamResource(for: episode)
+            _ = try await AudioEpisodeService(client: makeTestAPIClient()).streamResource(for: episode)
             XCTFail("Expected missing stream resource to throw")
         } catch {
             XCTAssertEqual(error as? AudioEpisodeServiceError, .missingStreamResource)

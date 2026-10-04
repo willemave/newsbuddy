@@ -12,11 +12,6 @@ private func elapsedMilliseconds(since start: Date) -> Int {
     Int(Date().timeIntervalSince(start) * 1000)
 }
 
-enum AudioEpisodeDelivery: String {
-    case background
-    case stream
-}
-
 enum AudioEpisodeServiceError: LocalizedError, Equatable {
     case emptyLens
     case generationFailed
@@ -87,25 +82,22 @@ struct AudioEpisodePoller {
 }
 
 final class AudioEpisodeService {
-    static let shared = AudioEpisodeService()
 
-    private let client = APIClient.shared
+    private let client: APIClient
 
-    private init() {}
+    init(client: APIClient) {
+        self.client = client
+    }
 
-    func createContentCouncilEpisode(
-        contentId: Int,
-        delivery: AudioEpisodeDelivery = .background
-    ) async throws -> AudioEpisode {
+    func createContentCouncilEpisode(contentId: Int) async throws -> AudioEpisode {
         let startedAt = Date()
         audioEpisodeLogger.info(
-            "Create episode started | kind=content_council_discussion contentId=\(contentId) delivery=\(delivery.rawValue, privacy: .public)"
+            "Create episode started | kind=content_council_discussion contentId=\(contentId)"
         )
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.contentCouncilAudioEpisode(id: contentId),
-                method: .post,
-                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+                method: .post
             )
             audioEpisodeLogger.info(
                 "Create episode completed | kind=content_council_discussion contentId=\(contentId) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
@@ -119,19 +111,15 @@ final class AudioEpisodeService {
         }
     }
 
-    func createNewsItemDiscussionEpisode(
-        newsItemId: Int,
-        delivery: AudioEpisodeDelivery = .background
-    ) async throws -> AudioEpisode {
+    func createNewsItemDiscussionEpisode(newsItemId: Int) async throws -> AudioEpisode {
         let startedAt = Date()
         audioEpisodeLogger.info(
-            "Create episode started | kind=news_item_discussion newsItemId=\(newsItemId) delivery=\(delivery.rawValue, privacy: .public)"
+            "Create episode started | kind=news_item_discussion newsItemId=\(newsItemId)"
         )
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.newsItemAudioEpisode(id: newsItemId),
-                method: .post,
-                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+                method: .post
             )
             audioEpisodeLogger.info(
                 "Create episode completed | kind=news_item_discussion newsItemId=\(newsItemId) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
@@ -149,8 +137,7 @@ final class AudioEpisodeService {
         contentIds: [Int],
         newsItemIds: [Int] = [],
         title: String? = nil,
-        markSourceContentReadOnPlay: Bool = false,
-        delivery: AudioEpisodeDelivery = .background
+        markSourceContentReadOnPlay: Bool = false
     ) async throws -> AudioEpisode {
         let startedAt = Date()
         let payload = APICustomNarrationCreateRequest(
@@ -161,14 +148,13 @@ final class AudioEpisodeService {
         )
         let body = try JSONEncoder().encode(payload)
         audioEpisodeLogger.info(
-            "Create episode started | kind=custom_narration contentCount=\(contentIds.count) newsItemCount=\(newsItemIds.count) delivery=\(delivery.rawValue, privacy: .public)"
+            "Create episode started | kind=custom_narration contentCount=\(contentIds.count) newsItemCount=\(newsItemIds.count)"
         )
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.customNarrationAudioEpisodes,
                 method: .post,
-                body: body,
-                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+                body: body
             )
             audioEpisodeLogger.info(
                 "Create episode completed | kind=custom_narration episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) sourceCount=\(episode.sourceCount)"
@@ -180,18 +166,6 @@ final class AudioEpisodeService {
             )
             throw error
         }
-    }
-
-    func enableEpisodeShare(id: Int) async throws -> AudioEpisodeShareResponse {
-        let startedAt = Date()
-        let response: AudioEpisodeShareResponse = try await client.request(
-            APIEndpoints.audioEpisodeShare(id: id),
-            method: .post
-        )
-        audioEpisodeLogger.info(
-            "Enable episode share completed | episodeId=\(id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasPageUrl=\(response.sharePageUrl != nil) hasAudioUrl=\(response.shareAudioUrl != nil)"
-        )
-        return response
     }
 
     func fetchCustomNarrationEpisodes(limit: Int = 20) async throws -> [AudioEpisode] {
@@ -217,19 +191,6 @@ final class AudioEpisodeService {
             "Fetch episode completed | episodeId=\(id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
         )
         return episode
-    }
-
-    func fetchEpisodeAudio(id: Int) async throws -> Data {
-        let startedAt = Date()
-        let (data, _) = try await client.requestHTTP(
-            APIEndpoints.audioEpisodeAudio(id: id),
-            accept: "audio/mpeg",
-            recoveryPolicy: .safeRead
-        )
-        audioEpisodeLogger.info(
-            "Fetch episode audio completed | episodeId=\(id) bytes=\(data.count) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
-        )
-        return data
     }
 
     func markPlaybackFinished(id: Int) async throws {

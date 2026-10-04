@@ -18,7 +18,7 @@ final class PodcastAudioControllerTests: XCTestCase {
         let playbackTask = Task { @MainActor in
             try await controller.handleAudio(for: content, currentContentId: content.id)
         }
-        let didBeginCreation = await waitUntil {
+        let didBeginCreation = await waitUntil(attempts: 200) {
             service.isCreationPending(for: content.id)
         }
         XCTAssertTrue(didBeginCreation)
@@ -48,7 +48,7 @@ final class PodcastAudioControllerTests: XCTestCase {
         let playbackTask = Task { @MainActor in
             try await controller.handleAudio(for: content, currentContentId: content.id)
         }
-        let didBeginStream = await waitUntil {
+        let didBeginStream = await waitUntil(attempts: 200) {
             service.isStreamPending(for: episode.id)
         }
         XCTAssertTrue(didBeginStream)
@@ -85,7 +85,7 @@ final class PodcastAudioControllerTests: XCTestCase {
                 currentContentId: firstContent.id
             )
         }
-        let didBeginFirstCreation = await waitUntil {
+        let didBeginFirstCreation = await waitUntil(attempts: 200) {
             service.isCreationPending(for: firstContent.id)
         }
         XCTAssertTrue(didBeginFirstCreation)
@@ -96,7 +96,7 @@ final class PodcastAudioControllerTests: XCTestCase {
                 currentContentId: latestContent.id
             )
         }
-        let didBeginLatestCreation = await waitUntil {
+        let didBeginLatestCreation = await waitUntil(attempts: 200) {
             service.isCreationPending(for: latestContent.id)
         }
         XCTAssertTrue(didBeginLatestCreation)
@@ -124,7 +124,7 @@ final class PodcastAudioControllerTests: XCTestCase {
     }
 
     private func makeContent(id: Int) throws -> ContentDetail {
-        try ContentDetail(
+        ContentDetail(
             api: APIContentDetailResponse(
                 id: id,
                 contentType: .article,
@@ -190,13 +190,6 @@ final class PodcastAudioControllerTests: XCTestCase {
         )
     }
 
-    private func waitUntil(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<200 {
-            if condition() { return true }
-            await Task.yield()
-        }
-        return condition()
-    }
 }
 
 @MainActor
@@ -229,19 +222,11 @@ private final class DeferredPodcastAudioEpisodeService: PodcastAudioEpisodeServi
         return resource(for: episode.id)
     }
 
-    func createContentCouncilEpisode(
-        contentId: Int,
-        delivery: AudioEpisodeDelivery
-    ) async throws -> AudioEpisode {
-        _ = delivery
+    func createContentCouncilEpisode(contentId: Int) async throws -> AudioEpisode {
         return try await createEpisode(for: contentId)
     }
 
-    func createNewsItemDiscussionEpisode(
-        newsItemId: Int,
-        delivery: AudioEpisodeDelivery
-    ) async throws -> AudioEpisode {
-        _ = delivery
+    func createNewsItemDiscussionEpisode(newsItemId: Int) async throws -> AudioEpisode {
         return try await createEpisode(for: newsItemId)
     }
 

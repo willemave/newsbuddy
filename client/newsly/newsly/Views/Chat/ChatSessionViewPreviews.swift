@@ -15,7 +15,24 @@ private func makeChatPreviewLifecycle() -> AppLifecycle {
 
 @MainActor
 private func makeChatPreviewSessionManager() -> ActiveChatSessionManager {
-    ActiveChatSessionManager(startsPolling: false)
+    ActiveChatSessionManager(
+        messageCompletionRegistry: ChatMessageCompletionRegistry(
+            statusService: PreviewUnavailableMessageStatusService()
+        ),
+        notificationService: PreviewNoopChatCompletionNotifier(),
+        startsPolling: false
+    )
+}
+
+private final class PreviewUnavailableMessageStatusService: MessageStatusFetching {
+    func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
+        throw CancellationError()
+    }
+}
+
+@MainActor
+private final class PreviewNoopChatCompletionNotifier: ChatCompletionNotifying {
+    func showChatCompletedNotification(sessionId: Int, title: String, message: String) {}
 }
 
 #Preview {

@@ -483,12 +483,7 @@ final class LearningDeckReaderViewModel {
             upsertTimelineItem(
                 ChatTimelineItem(
                     id: .local(localId),
-                    message: ChatMessage(
-                        id: Self.localMessageId(for: localId),
-                        role: .user,
-                        timestamp: pendingSend.createdAt,
-                        content: resolvedText,
-                        status: .failed,
+                    message: pendingSend.placeholderMessage.failed(
                         error: error.localizedDescription
                     ),
                     pendingMessageId: nil,
@@ -656,19 +651,7 @@ final class LearningDeckReaderViewModel {
         upsertTimelineItem(
             ChatTimelineItem(
                 id: item.id,
-                message: ChatMessage(
-                    id: item.message.id,
-                    sourceMessageId: item.message.sourceMessageId,
-                    displayKey: item.message.displayKey,
-                    role: item.message.role,
-                    timestamp: item.message.timestamp,
-                    content: item.message.content,
-                    displayType: item.message.displayType,
-                    processLabel: item.message.processLabel,
-                    status: .failed,
-                    error: error,
-                    feedOptions: item.message.feedOptions
-                ),
+                message: item.message.failed(error: error),
                 pendingMessageId: nil,
                 retryText: item.retryText ?? item.message.content
             )

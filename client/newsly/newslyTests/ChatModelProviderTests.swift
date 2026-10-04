@@ -31,37 +31,20 @@ final class ChatModelProviderTests: XCTestCase {
     @MainActor
     func testTweetSuggestionsDefaultProviderIsOpenAI() {
         let viewModel = TweetSuggestionsViewModel(
-            contentService: ContentService.shared,
+            contentService: ContentService(client: makeTestAPIClient()),
             twitterService: TwitterShareService.shared,
-            transcriptionService: VoiceDictationService.shared,
-            refreshTranscriptionAvailability: { false },
-            setBackendTranscriptionAvailable: { _ in }
+            transcriptionService: TestUnavailableSpeechTranscriber(),
+            refreshTranscriptionAvailability: { false }
         )
 
         XCTAssertEqual(viewModel.selectedProvider, .openai)
     }
 
     private func makeSession(model: String) -> ChatSessionSummary {
-        ChatSessionSummary(
-            id: 1,
-            contentId: nil,
+        .fixture(
             title: nil,
             sessionType: nil,
-            topic: nil,
-            llmProvider: "openai",
-            llmModel: model,
-            createdAt: Date(timeIntervalSince1970: 0),
-            updatedAt: nil,
-            lastMessageAt: nil,
-            articleTitle: nil,
-            articleUrl: nil,
-            articleSummary: nil,
-            articleSource: nil,
-            hasPendingMessage: nil,
-            isSavedToKnowledge: nil,
-            hasMessages: nil,
-            lastMessagePreview: nil,
-            lastMessageRole: nil
+            llmModel: model
         )
     }
 }

@@ -41,9 +41,12 @@ protocol AuthenticationServicing: AnyObject {
 
 /// Authentication service handling Apple Sign In and token management
 final class AuthenticationService: NSObject {
-    static let shared = AuthenticationService()
+    private let apiClient: APIClient
+    private let credentialSession: CredentialSession
 
-    private override init() {
+    init(apiClient: APIClient, credentialSession: CredentialSession) {
+        self.apiClient = apiClient
+        self.credentialSession = credentialSession
         super.init()
     }
 
@@ -70,7 +73,7 @@ final class AuthenticationService: NSObject {
             authController.performRequests()
         }
         try Task.checkCancellation()
-        return try await sendAppleCredentialsToBackend(credentials)
+        return try await sendAppleCredentialsToBackend(credentials, nonce: nonce)
     }
 
     /// Logout user. Credential deletion is serialized with refresh rotation so
@@ -87,7 +90,7 @@ final class AuthenticationService: NSObject {
         }
         let didClear: Bool
         do {
-            didClear = try await CredentialSession.shared.clearCredentials(ifCurrent: event)
+            didClear = try await credentialSession.clearCredentials(ifCurrent: event)
         } catch {
             authLogger.error("Credential clear failed during logout: \(error.localizedDescription)")
             return .failed
@@ -103,8 +106,6 @@ final class AuthenticationService: NSObject {
 
     private func performLocalLogoutSideEffects() {
         BriefingSnapshotStore.invalidateAllSnapshots()
-        KeychainManager.shared.deleteLegacyToken(named: "openaiApiKey")
-        NotificationCenter.default.post(name: .authDidLogOut, object: nil)
     }
 
     /// Reauthenticate with Apple and request server-side revocation. The
@@ -123,7 +124,7 @@ final class AuthenticationService: NSObject {
         }
 
         do {
-            let _: APIDeleteAccountResponse = try await APIClient.shared.request(
+            let _: APIDeleteAccountResponse = try await apiClient.request(
                 APIEndpoints.authMe,
                 method: .delete,
                 body: JSONEncoder().encode(credentials),
@@ -137,7 +138,7 @@ final class AuthenticationService: NSObject {
 
     /// Get current user from backend
     func getCurrentUser() async throws -> User {
-        let response: APIUserResponse = try await APIClient.shared.request(
+        let response: APIUserResponse = try await apiClient.request(
             APIEndpoints.authMe,
             recoveryPolicy: .safeRead,
             authentication: .required,
@@ -147,34 +148,9 @@ final class AuthenticationService: NSObject {
         try Task.checkCancellation()
         // Legacy loose tokens establish identity only after this server
         // validation succeeds.
-        try await CredentialSession.shared.bindCurrentCredentials(to: user.id)
+        try await credentialSession.bindCurrentCredentials(to: user.id)
         try Task.checkCancellation()
         return user
-    }
-
-    /// Update authenticated user profile fields.
-    func updateCurrentUserProfile(
-        fullName: String? = nil,
-        twitterUsername: String? = nil,
-        readingExperience: ReadingExperience? = nil
-    ) async throws -> User {
-        let body = APIUpdateUserProfileRequest(
-            fullName: fullName,
-            twitterUsername: twitterUsername,
-            readingExperience: readingExperience
-        )
-        do {
-            let response: APIUserResponse = try await APIClient.shared.request(
-                APIEndpoints.authMe,
-                method: .patch,
-                body: JSONEncoder().encode(body),
-                authentication: .required,
-                decoding: .iso8601
-            )
-            return User(api: response)
-        } catch {
-            throw mapAuthenticationClientError(error)
-        }
     }
 
     /// Report the device's current IANA timezone using the last profile revision.
@@ -184,7 +160,7 @@ final class AuthenticationService: NSObject {
             timezoneRevision: revision
         )
         do {
-            let response: APIUserResponse = try await APIClient.shared.request(
+            let response: APIUserResponse = try await apiClient.request(
                 APIEndpoints.authMe,
                 method: .patch,
                 body: JSONEncoder().encode(body),
@@ -215,7 +191,7 @@ final class AuthenticationService: NSObject {
         )
 
         do {
-            let tokenResponse: APITokenResponse = try await APIClient.shared.request(
+            let tokenResponse: APITokenResponse = try await apiClient.request(
                 APIEndpoints.authDebugNewUser,
                 method: .post,
                 body: body,
@@ -279,14 +255,15 @@ final class AuthenticationService: NSObject {
 
     @MainActor
     private func sendAppleCredentialsToBackend(
-        _ credentials: AppleSignInCredentials
+        _ credentials: AppleSignInCredentials,
+        nonce: String
     ) async throws -> AuthSession {
         let request = APIAppleSignInRequest(
             idToken: credentials.identityToken,
-            email: nonEmptyAuthField(credentials.email),
-            fullName: nonEmptyAuthField(credentials.fullName)
+            fullName: nonEmptyAuthField(credentials.fullName),
+            nonce: nonce
         )
-        let tokenResponse: APITokenResponse = try await APIClient.shared.request(
+        let tokenResponse: APITokenResponse = try await apiClient.request(
             "/auth/apple",
             method: .post,
             body: JSONEncoder().encode(request),
@@ -298,6 +275,16 @@ final class AuthenticationService: NSObject {
         return AuthSession(
             user: User(api: tokenResponse.user),
             isNewUser: tokenResponse.isNewUser
+        )
+    }
+
+    private func persistSessionTokens(_ tokenResponse: APITokenResponse) async throws {
+        try await credentialSession.publishAuthenticated(
+            tokens: CredentialTokens(
+                accessToken: tokenResponse.accessToken,
+                refreshToken: tokenResponse.refreshToken
+            ),
+            userID: tokenResponse.user.id
         )
     }
 }
@@ -350,7 +337,6 @@ extension AuthenticationService: AuthenticationServicing {}
 
 private struct AppleSignInCredentials {
     let identityToken: String
-    let email: String?
     let fullName: String?
 }
 
@@ -381,7 +367,6 @@ private class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, 
         continuation.resume(
             returning: AppleSignInCredentials(
                 identityToken: identityToken,
-                email: appleIDCredential.email,
                 fullName: fullName
             )
         )
@@ -410,17 +395,6 @@ private func applePresentationAnchor() -> ASPresentationAnchor {
         ?? ASPresentationAnchor(windowScene: windowScene)
 }
 
-private func persistSessionTokens(_ tokenResponse: APITokenResponse) async throws {
-    try await CredentialSession.shared.publishAuthenticated(
-        tokens: CredentialTokens(
-            accessToken: tokenResponse.accessToken,
-            refreshToken: tokenResponse.refreshToken
-        ),
-        userID: tokenResponse.user.id
-    )
-    KeychainManager.shared.deleteLegacyToken(named: "openaiApiKey")
-}
-
 private func nonEmptyAuthField(_ value: String?) -> String? {
     guard let value, !value.isEmpty else { return nil }
     return value
@@ -445,5 +419,4 @@ private func mapAuthenticationClientError(_ error: Error) -> Error {
 }
 
 extension Notification.Name {
-    static let authDidLogOut = Notification.Name("authDidLogOut")
 }

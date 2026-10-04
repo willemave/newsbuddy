@@ -19,17 +19,48 @@ struct newslyApp: App {
     init() {
         KeychainManager.shared.configure(accessGroup: SharedContainer.keychainAccessGroup)
         AppChrome.configure()
-        let apiClient = APIClient.shared
-        let onboardingService = OnboardingService.shared
+        let tokenStore = KeychainManager.shared
+        let credentialSession = CredentialSession.makeAppSession(tokenStore: tokenStore)
+        let apiClient = APIClient(
+            session: .newslyDefault,
+            credentialSession: credentialSession
+        )
+        let authenticationService = AuthenticationService(
+            apiClient: apiClient,
+            credentialSession: credentialSession
+        )
+        let onboardingService = OnboardingService(client: apiClient)
+        let chatService = ChatService(client: apiClient)
+        let contentService = ContentService(client: apiClient)
+        let scraperConfigService = ScraperConfigService(client: apiClient)
+        let audioEpisodeService = AudioEpisodeService(client: apiClient)
+        let learningDeckService = LearningDeckService(client: apiClient)
+        let learningDeckStatusRegistry = LearningDeckStatusRegistry(
+            statusService: learningDeckService
+        )
+        let openAIService = OpenAIService(
+            apiClient: apiClient,
+            credentialSession: credentialSession
+        )
+        let voiceDictationService = VoiceDictationService(openAIService: openAIService)
+        let speechTranscriber = SpeechTranscriberFactory.makeVoiceDictationTranscriber(
+            voiceDictationService: voiceDictationService
+        )
+        let narrationPlaybackService = NarrationPlaybackService(
+            nowPlayingController: .shared,
+            markPlaybackFinished: { episodeID in
+                try await audioEpisodeService.markPlaybackFinished(id: episodeID)
+            }
+        )
         let dependencyFactory = RootDependencyFactory(
             dependencies: RootDependencyFactory.Dependencies(
                 apiClient: apiClient,
-                authenticationService: AuthenticationService.shared,
-                tokenStore: KeychainManager.shared,
-                credentialSession: CredentialSession.shared,
-                chatService: ChatService.shared,
-                contentService: ContentService.shared,
-                scraperConfigService: ScraperConfigService.shared,
+                authenticationService: authenticationService,
+                tokenStore: tokenStore,
+                credentialSession: credentialSession,
+                chatService: chatService,
+                contentService: contentService,
+                scraperConfigService: scraperConfigService,
                 toastService: ToastService.shared,
                 briefingService: LiveBriefingService(
                     apiClient: apiClient,
@@ -37,30 +68,27 @@ struct newslyApp: App {
                         _ = try await onboardingService.markTutorialComplete()
                     }
                 ),
-                narrationPlaybackService: NarrationPlaybackService.shared,
-                audioEpisodeService: AudioEpisodeService.shared,
+                narrationPlaybackService: narrationPlaybackService,
+                audioEpisodeService: audioEpisodeService,
                 onboardingService: onboardingService,
                 onboardingStateStore: OnboardingStateStore(
                     defaults: SharedContainer.userDefaults
                 ),
-                learningDeckService: LearningDeckService.shared,
-                learningDeckStatusRegistry: LearningDeckStatusRegistry.shared,
+                learningDeckService: learningDeckService,
+                learningDeckStatusRegistry: learningDeckStatusRegistry,
                 twitterShareService: TwitterShareService.shared,
-                openAIService: OpenAIService.shared,
+                openAIService: openAIService,
                 appSettings: AppSettings.shared,
-                xIntegrationService: XIntegrationService.shared,
-                feedbackService: FeedbackService.shared,
+                xIntegrationService: XIntegrationService(apiClient: apiClient),
+                feedbackService: FeedbackService(client: apiClient),
                 cliLinkService: CLILinkService(client: apiClient),
                 localNotificationService: LocalNotificationService.shared,
                 sharedDefaults: SharedContainer.userDefaults,
-                makeVoiceDictationTranscriber: {
-                    SpeechTranscriberFactory.makeVoiceDictationTranscriber()
-                },
-                makeChatNavigationCoordinator: { ChatNavigationCoordinator() }
+                speechTranscriber: speechTranscriber
             )
         )
         self.dependencyFactory = dependencyFactory
-        let authenticationController = dependencyFactory.makeAuthenticationViewModel()
+        let authenticationController = dependencyFactory.makeAuthenticationController()
         self._runtime = State(
             initialValue: AppRuntime(
                 dependencies: AppRuntime.Dependencies(
@@ -153,12 +181,6 @@ struct newslyApp: App {
             settings.serverHost = debugLogin.serverHost
             settings.serverPort = debugLogin.serverPort
             settings.useHTTPS = debugLogin.useHTTPS
-            if let appGroupID = SharedContainer.appGroupId,
-               let sharedDefaults = UserDefaults(suiteName: appGroupID) {
-                sharedDefaults.set(debugLogin.serverHost, forKey: ServerConfigurationDefaults.hostKey)
-                sharedDefaults.set(debugLogin.serverPort, forKey: ServerConfigurationDefaults.portKey)
-                sharedDefaults.set(debugLogin.useHTTPS, forKey: ServerConfigurationDefaults.useHTTPSKey)
-            }
             authViewModel.startDebugSession(userID: debugLogin.userID)
             return
         }

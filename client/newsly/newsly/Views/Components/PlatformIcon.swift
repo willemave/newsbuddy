@@ -17,13 +17,13 @@ struct PlatformIcon: View {
                 case .text(let value):
                     Text(value)
                         .font(.appSans(size: 13, weight: .bold))
-                        .foregroundColor(metadata.color)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .frame(width: 18, height: 18)
-                        .background(metadata.color.opacity(0.16))
+                        .background(Color.onSurfaceSecondary.opacity(0.16))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 case .system(let name):
                     Image(systemName: name)
-                        .foregroundColor(metadata.color)
+                        .foregroundColor(Color.onSurfaceSecondary)
                 }
             }
         }

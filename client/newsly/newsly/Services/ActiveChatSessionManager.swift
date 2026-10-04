@@ -16,17 +16,6 @@ protocol ChatCompletionNotifying: AnyObject {
     func showChatCompletedNotification(sessionId: Int, title: String, message: String)
 }
 
-@MainActor
-private final class NoopChatCompletionNotifier: ChatCompletionNotifying {
-    func showChatCompletedNotification(sessionId: Int, title: String, message: String) {}
-}
-
-private final class UnavailableMessageStatusService: MessageStatusFetching {
-    func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
-        throw CancellationError()
-    }
-}
-
 /// Represents an active chat session being polled in the background
 struct ActiveChatSession: Identifiable, Equatable {
     let id: Int  // session ID
@@ -81,37 +70,14 @@ final class ActiveChatSessionManager {
     @ObservationIgnored
     private var sessionIdsByItemKey: [String: [Int]] = [:]  // item key -> newest-first session IDs
 
-    @ObservationIgnored
-    private var authDidLogOutObserver: NSObjectProtocol?
-
     init(
-        messageCompletionRegistry: ChatMessageCompletionRegistry = ChatMessageCompletionRegistry(
-            statusService: UnavailableMessageStatusService()
-        ),
-        notificationService: (any ChatCompletionNotifying)? = nil,
-        startsPolling: Bool = true,
-        observesAuthenticationNotifications: Bool = true
+        messageCompletionRegistry: ChatMessageCompletionRegistry,
+        notificationService: any ChatCompletionNotifying,
+        startsPolling: Bool = true
     ) {
         self.messageCompletionRegistry = messageCompletionRegistry
-        self.notificationService = notificationService ?? NoopChatCompletionNotifier()
+        self.notificationService = notificationService
         self.startsPolling = startsPolling
-        if observesAuthenticationNotifications {
-            authDidLogOutObserver = NotificationCenter.default.addObserver(
-                forName: .authDidLogOut,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    self?.reset()
-                }
-            }
-        }
-    }
-
-    deinit {
-        if let authDidLogOutObserver {
-            NotificationCenter.default.removeObserver(authDidLogOutObserver)
-        }
     }
 
     /// Start tracking a new chat session
@@ -218,21 +184,6 @@ final class ActiveChatSessionManager {
         }
 
         return nil
-    }
-
-    /// Check if there's an active or completed session for this content
-    func hasActiveSession(forContentId contentId: Int) -> Bool {
-        getSession(forContentId: contentId) != nil
-    }
-
-    /// Number of sessions currently processing (for tab badge)
-    var processingCount: Int {
-        activeSessions.count
-    }
-
-    /// Whether any sessions are currently processing
-    var hasProcessingSessions: Bool {
-        !activeSessions.isEmpty
     }
 
     private func startPollingIfNeeded(sessionId: Int, messageId: Int) {

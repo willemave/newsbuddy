@@ -8,10 +8,19 @@ struct FeedHistoryView: View {
     @State private var viewModel: FeedHistoryViewModel
     @State private var status: String
 
-    init(config: ScraperConfig, sourcesViewModel: ScraperSettingsViewModel) {
+    init(
+        config: ScraperConfig,
+        sourcesViewModel: ScraperSettingsViewModel,
+        service: any FeedHistoryServicing
+    ) {
         self.config = config
         self.sourcesViewModel = sourcesViewModel
-        _viewModel = State(initialValue: FeedHistoryViewModel(configId: config.id))
+        _viewModel = State(
+            initialValue: FeedHistoryViewModel(
+                configId: config.id,
+                service: service
+            )
+        )
         _status = State(initialValue: (config.stats?.failedCount ?? 0) > 0 ? "failed" : "completed")
     }
 

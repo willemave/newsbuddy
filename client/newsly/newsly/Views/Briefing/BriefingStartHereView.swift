@@ -318,7 +318,7 @@ private struct BriefingStartHereGuide: View {
         ),
         BriefingStartHereFeature(
             title: "Ask and learn.",
-            detail: "The Learning tab turns your reading into conversations and study decks you can revisit."
+            detail: "Knowledge turns your reading into conversations and study decks you can revisit."
         ),
         BriefingStartHereFeature(
             title: "Send links from anywhere.",

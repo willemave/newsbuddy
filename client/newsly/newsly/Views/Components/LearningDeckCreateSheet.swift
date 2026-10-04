@@ -7,28 +7,16 @@ import SwiftUI
 
 struct LearningDeckCreateSheet: View {
     let sourceTitle: String?
-    let requiresURL: Bool
     let isSubmitting: Bool
-    let onCreate: (_ url: String?, _ interestsPrompt: String?) async -> Bool
+    let onCreate: (_ interestsPrompt: String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var focusRecorder: LearningDeckFocusRecorder
-    @State private var urlText = ""
     @State private var interestsText = ""
 
     private var canSubmit: Bool {
-        if isSubmitting {
-            return false
-        }
-        if requiresURL {
-            guard let normalizedURLText else { return false }
-            return URL(string: normalizedURLText) != nil
-        }
-        return true
-    }
-
-    private var normalizedURLText: String? {
-        nonEmptyTrimmed(urlText)
+        !isSubmitting
     }
 
     private var normalizedInterestsText: String? {
@@ -40,17 +28,13 @@ struct LearningDeckCreateSheet: View {
         return nonEmptyTrimmed(sourceTitle)
     }
 
-    private let focusSuggestions = ["Key takeaways", "How it works", "Why it matters"]
-
     init(
         sourceTitle: String?,
-        requiresURL: Bool,
         isSubmitting: Bool,
         focusRecorder: LearningDeckFocusRecorder,
-        onCreate: @escaping (_ url: String?, _ interestsPrompt: String?) async -> Bool
+        onCreate: @escaping (_ interestsPrompt: String?) async -> Bool
     ) {
         self.sourceTitle = sourceTitle
-        self.requiresURL = requiresURL
         self.isSubmitting = isSubmitting
         self._focusRecorder = State(initialValue: focusRecorder)
         self.onCreate = onCreate
@@ -58,129 +42,79 @@ struct LearningDeckCreateSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Learning Deck")
-                        .font(.terracottaHeadlineMedium)
-                        .foregroundStyle(Color.onSurface)
-
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                     if let sourceTitle = normalizedSourceTitle {
                         Text(sourceTitle)
-                            .font(.terracottaBodyMedium)
+                            .font(.modalBody)
                             .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(2)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .learningDeckCreatePanelSurface()
 
-                if requiresURL {
-                    TextField("Article, GitHub, podcast, or PDF URL", text: $urlText)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.terracottaBodyLarge)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .learningDeckCreateInputSurface()
-                        .accessibilityLabel("Learning Deck URL")
-                        .accessibilityIdentifier("learning_deck.create.url")
-                }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            HStack(spacing: 6) {
+                                Text("Focus")
+                                    .font(.modalBody.weight(.semibold))
+                                    .foregroundStyle(Color.onSurface)
+                                Text("optional")
+                                    .font(.modalSupporting)
+                                    .foregroundStyle(Color.onSurfaceSecondary)
+                            }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        HStack(spacing: 6) {
-                            Text("Focus")
-                                .font(.terracottaBodyMedium.weight(.semibold))
-                                .foregroundStyle(Color.onSurface)
-                            Text("optional")
-                                .font(.terracottaBodySmall)
-                                .foregroundStyle(Color.onSurfaceSecondary)
-                        }
+                            Spacer(minLength: 0)
 
-                        Spacer(minLength: 0)
-
-                        TapToTalkMicButton(
-                            isEnabled: !isSubmitting && !focusRecorder.isTranscribing,
-                            isRecording: focusRecorder.isRecording,
-                            isTranscribing: focusRecorder.isTranscribing,
-                            isBusy: focusRecorder.isVoiceActionInFlight && !focusRecorder.isRecording,
-                            size: 48,
-                            action: {
-                                Task {
-                                    await focusRecorder.toggleRecording { transcript in
-                                        appendInterestsTranscript(transcript)
+                            TapToTalkMicButton(
+                                isEnabled: !isSubmitting && !focusRecorder.isTranscribing,
+                                isRecording: focusRecorder.isRecording,
+                                isTranscribing: focusRecorder.isTranscribing,
+                                isBusy: focusRecorder.isVoiceActionInFlight && !focusRecorder.isRecording,
+                                size: 48,
+                                action: {
+                                    Task {
+                                        await focusRecorder.toggleRecording { transcript in
+                                            appendInterestsTranscript(transcript)
+                                        }
                                     }
                                 }
-                            }
-                        )
-                        .accessibilityLabel(focusRecorder.isRecording ? "Stop recording focus" : "Record deck focus")
-                        .accessibilityHint(
-                            focusRecorder.isRecording
-                                ? "Tap to stop and add the transcript to the Focus field"
-                                : "Tap to dictate what this Learning Deck should focus on"
-                        )
-                        .accessibilityIdentifier("learning_deck.focus_mic")
-                        .accessibilityValue(focusRecorder.state.accessibilityValue)
-                    }
-
-                    ZStack(alignment: .topLeading) {
-                        if normalizedInterestsText == nil {
-                            Text("What should this deck zoom in on? — e.g. the security tradeoffs, or just the key takeaways")
-                                .font(.terracottaBodyMedium)
-                                .foregroundStyle(Color.onSurfaceTertiary)
-                                .padding(.horizontal, 15)
-                                .padding(.vertical, 18)
-                                .allowsHitTesting(false)
+                            )
+                            .accessibilityLabel(focusRecorder.isRecording ? "Stop recording focus" : "Record deck focus")
+                            .accessibilityHint(
+                                focusRecorder.isRecording
+                                    ? "Tap to stop and add the transcript to the Focus field"
+                                    : "Tap to dictate what this Learning Deck should focus on"
+                            )
+                            .accessibilityIdentifier("learning_deck.focus_mic")
+                            .accessibilityValue(focusRecorder.state.accessibilityValue)
                         }
 
-                        TextEditor(text: $interestsText)
-                            .font(.terracottaBodyMedium)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 126)
-                            .padding(10)
-                    }
-                    .learningDeckCreateInputSurface()
-                    .accessibilityIdentifier("learning_deck.create.focus")
+                        TextField(
+                            "Deck focus",
+                            text: $interestsText,
+                            prompt: Text("What should this deck focus on?")
+                                .foregroundStyle(Color.onSurfaceTertiary),
+                            axis: .vertical
+                        )
+                        .font(.modalBody)
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(3...6)
+                        .padding(14)
+                        .background(Color.surfaceSecondary, in: RoundedRectangle(cornerRadius: 14))
+                        .accessibilityLabel("Deck focus")
+                        .accessibilityIdentifier("learning_deck.create.focus")
 
-                    if normalizedInterestsText == nil {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(focusSuggestions, id: \.self) { suggestion in
-                                    Button {
-                                        appendInterestsTranscript(suggestion)
-                                    } label: {
-                                        Text(suggestion)
-                                            .font(.terracottaBodySmall.weight(.semibold))
-                                            .foregroundStyle(Color.onSurface)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 7)
-                                            .background(Color.surfaceSecondary, in: Capsule())
-                                            .overlay {
-                                                Capsule()
-                                                    .stroke(Color.outlineVariant.opacity(0.18), lineWidth: 1)
-                                            }
-                                            .contentShape(Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityIdentifier("learning_deck.create.focus_suggestion")
-                                }
-                            }
-                        }
+                        focusRecordingStatus
                     }
-
-                    focusRecordingStatus
+                    .padding(16)
+                    .learningDeckCreatePanelSurface()
                 }
                 .padding(16)
-                .learningDeckCreatePanelSurface()
-
-                Spacer(minLength: 0)
             }
-            .padding(20)
+            .scrollDismissesKeyboard(.interactively)
             .disabled(isSubmitting)
+            .navigationTitle("Learning Deck")
+            .navigationBarTitleDisplayMode(.inline)
             .background {
                 LinearGradient(
                     colors: [
@@ -197,16 +131,14 @@ struct LearningDeckCreateSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .font(.modalBody)
                     .accessibilityIdentifier("learning_deck.create.cancel")
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task {
-                            let didCreate = await onCreate(
-                                requiresURL ? normalizedURLText : nil,
-                                normalizedInterestsText
-                            )
+                            let didCreate = await onCreate(normalizedInterestsText)
                             if didCreate {
                                 dismiss()
                             }
@@ -218,12 +150,13 @@ struct LearningDeckCreateSheet: View {
                             Text("Create")
                         }
                     }
+                    .font(.modalBody.weight(.semibold))
                     .disabled(!canSubmit)
                     .accessibilityIdentifier("learning_deck.create.submit")
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
         .accessibilityIdentifier("learning_deck.create.sheet")
         .onDisappear {
@@ -240,7 +173,7 @@ struct LearningDeckCreateSheet: View {
                     .frame(width: 7, height: 7)
 
                 Text("Recording focus...")
-                    .font(.terracottaBodySmall)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
             .accessibilityIdentifier("learning_deck.focus_recording")
@@ -250,13 +183,13 @@ struct LearningDeckCreateSheet: View {
                     .controlSize(.small)
 
                 Text("Transcribing focus...")
-                    .font(.terracottaBodySmall)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
             .accessibilityIdentifier("learning_deck.focus_transcribing")
         } else if let errorMessage = focusRecorder.errorMessage {
             Text(errorMessage)
-                .font(.terracottaBodySmall)
+                .font(.modalSupporting)
                 .foregroundStyle(Color.statusDestructive)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("learning_deck.focus_recording_error")
@@ -282,16 +215,5 @@ private extension View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
             }
-    }
-
-    @ViewBuilder
-    func learningDeckCreateInputSurface() -> some View {
-        glassSurface(
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous),
-            tint: Color.surfaceSecondary,
-            opacity: 0.22,
-            interactive: true,
-            fallback: .tintStroke(fillOpacity: 1, strokeOpacity: 0.18)
-        )
     }
 }

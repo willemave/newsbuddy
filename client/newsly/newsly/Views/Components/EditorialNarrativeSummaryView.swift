@@ -15,7 +15,6 @@ private enum EditorialNarrativeDesign {
 
 struct EditorialNarrativeSummaryView: View {
     let summary: EditorialNarrativeSummary
-    var contentId: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: EditorialNarrativeDesign.sectionSpacing) {
@@ -149,29 +148,6 @@ struct EditorialNarrativeSummaryView: View {
                         context: nil,
                         attribution: "Engineering manager"
                     ),
-                ],
-                archetypeReactions: [
-                    EditorialArchetypeReaction(
-                        archetype: "Paul Graham",
-                        paragraphs: [
-                            "The interesting opportunity is not generic enterprise AI but the specific workflow friction teams feel before they have the language to describe it. Small teams can win here by turning governance pain into product taste.",
-                            "What matters is whether users are pulled hard enough to change behavior. If they are, there is room to build tighter workflow software around the pain incumbents still treat as a feature request."
-                        ]
-                    ),
-                    EditorialArchetypeReaction(
-                        archetype: "Andy Grove",
-                        paragraphs: [
-                            "This looks like an operating shift more than a tooling shift. Governance moving upstream means the company is hitting a strategic inflection point where controls become part of product delivery.",
-                            "The chokepoints are approval latency, vendor sprawl, and weak observability. Leaders should track those closely because they determine whether the organization scales or stalls."
-                        ]
-                    ),
-                    EditorialArchetypeReaction(
-                        archetype: "Charlie Munger",
-                        paragraphs: [
-                            "The deeper force is incentives: budget owners and security teams are now rewarded for reliability and transparency instead of demo quality. Once those incentives change, behavior follows.",
-                            "That creates second-order effects in vendor selection, process discipline, and durable moats. The market usually notices the model upgrade before it notices the control structure around it."
-                        ]
-                    )
                 ],
                 keyPoints: [
                     EditorialKeyPoint(point: "Budget planning now includes model spend at workflow granularity."),

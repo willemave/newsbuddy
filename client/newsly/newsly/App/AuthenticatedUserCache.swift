@@ -22,7 +22,7 @@ final class KeychainAuthenticatedUserCache: AuthenticatedUserCaching {
         decoder: JSONDecoder = JSONDecoder()
     ) {
         self.tokenStore = tokenStore
-        credentialStorage = CredentialStorageFactory.make(tokenStore: tokenStore)
+        credentialStorage = KeychainCredentialStorage(keychain: tokenStore)
         self.encoder = encoder
         self.decoder = decoder
     }

@@ -23,7 +23,7 @@ struct SettingsFeedbackSheet: View {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $message)
                         .scrollContentBackground(.hidden)
-                        .font(.appBody)
+                        .font(.modalBody)
                         .foregroundStyle(Color.onSurface)
                         .frame(minHeight: 180)
                         .accessibilityLabel("Feedback message")
@@ -33,7 +33,7 @@ struct SettingsFeedbackSheet: View {
 
                     if message.isEmpty {
                         Text("What should we improve?")
-                            .font(.appBody)
+                            .font(.modalBody)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .padding(.horizontal, 17)
                             .padding(.vertical, 18)
@@ -43,7 +43,7 @@ struct SettingsFeedbackSheet: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.appFootnote)
+                        .font(.modalSupporting)
                         .foregroundStyle(Color.statusDestructive)
                 }
 

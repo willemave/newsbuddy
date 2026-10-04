@@ -8,6 +8,25 @@ import XCTest
 @testable import newsly
 
 final class ChatMessageDisplayTests: XCTestCase {
+    func testFailedMessagePreservesStableDisplayIdentity() {
+        let message = ChatMessage(
+            id: 7,
+            sourceMessageId: 3,
+            displayKey: "stable-display-key",
+            role: .user,
+            timestamp: Date(timeIntervalSince1970: 100),
+            content: "Try this",
+            status: .processing
+        )
+
+        let failed = message.failed(error: "Unavailable")
+
+        XCTAssertEqual(failed.displayKey, message.displayKey)
+        XCTAssertEqual(failed.sourceMessageId, message.sourceMessageId)
+        XCTAssertEqual(failed.status, .failed)
+        XCTAssertEqual(failed.error, "Unavailable")
+    }
+
     func testChatShareTextUsesPlainMarkdownContent() {
         let content = ShareContent(
             messageContent: "Here is **bold** text with [a source](https://example.com).",
@@ -41,7 +60,7 @@ final class ChatMessageDisplayTests: XCTestCase {
             """.utf8
         )
 
-        let message = try JSONDecoder().decode(ChatMessage.self, from: data)
+        let message = ChatMessage(api: try JSONDecoder().decode(APIChatMessage.self, from: data))
 
         XCTAssertEqual(message.role, .tool)
         XCTAssertEqual(message.displayType, .process_summary)
@@ -129,7 +148,9 @@ final class ChatMessageDisplayTests: XCTestCase {
             """.utf8
         )
 
-        let detail = try JSONDecoder().decode(ChatSessionDetail.self, from: data)
+        let detail = ChatSessionDetail(
+            api: try JSONDecoder().decode(APIChatSessionDetail.self, from: data)
+        )
 
         XCTAssertEqual(detail.messages.map(\.role), [.user, .tool, .assistant])
         XCTAssertTrue(detail.messages[1].isProcessSummary)
@@ -169,13 +190,40 @@ final class ChatMessageDisplayTests: XCTestCase {
             """.utf8
         )
 
-        let message = try JSONDecoder().decode(ChatMessage.self, from: data)
+        let message = ChatMessage(api: try JSONDecoder().decode(APIChatMessage.self, from: data))
 
         XCTAssertTrue(message.hasFeedOptions)
         XCTAssertEqual(message.feedOptions.count, 1)
         XCTAssertEqual(message.feedOptions[0].title, "lucumr")
         XCTAssertEqual(message.feedOptions[0].feedTypeLabel, "Atom")
         XCTAssertFalse(message.feedOptions[0].isSubscribed)
+    }
+
+    func testAssistantFeedOptionPresentsBuiltInAggregators() throws {
+        let data = Data(
+            """
+            {
+              "id": "5b2e0f4f9d1c7a33",
+              "title": "arXiv",
+              "site_url": "https://arxiv.org",
+              "feed_url": "aggregator://arxiv",
+              "feed_type": "aggregator",
+              "feed_format": "rss",
+              "description": "New AI and machine learning research papers, by arXiv category",
+              "rationale": null,
+              "evidence_url": "https://arxiv.org",
+              "is_subscribed": true
+            }
+            """.utf8
+        )
+
+        let option = try JSONDecoder().decode(APIAssistantFeedOption.self, from: data)
+
+        XCTAssertEqual(option.feedTypeLabel, "Aggregator")
+        XCTAssertEqual(option.systemIcon, "doc.text.magnifyingglass")
+        XCTAssertEqual(option.hostLabel, "arxiv.org")
+        XCTAssertEqual(option.subtitleText, option.description)
+        XCTAssertTrue(option.isSubscribed)
     }
 
     func testChatMessageIgnoresRetiredBranchMetadata() throws {
@@ -216,7 +264,7 @@ final class ChatMessageDisplayTests: XCTestCase {
             """.utf8
         )
 
-        let message = try JSONDecoder().decode(ChatMessage.self, from: data)
+        let message = ChatMessage(api: try JSONDecoder().decode(APIChatMessage.self, from: data))
 
         XCTAssertEqual(message.content, "Analyst branch")
         XCTAssertTrue(message.isAssistant)
@@ -292,7 +340,9 @@ final class ChatMessageDisplayTests: XCTestCase {
             """.utf8
         )
 
-        let detail = try JSONDecoder().decode(ChatSessionDetail.self, from: data)
+        let detail = ChatSessionDetail(
+            api: try JSONDecoder().decode(APIChatSessionDetail.self, from: data)
+        )
 
         XCTAssertEqual(detail.session.displayTitle, "Legacy Chat")
         XCTAssertEqual(detail.messages.first?.content, "Analyst branch")
@@ -303,13 +353,13 @@ final class ChatMessageDisplayTests: XCTestCase {
         let option = AssistantFeedOption(
             id: "8f7d2c42b0c1de90",
             title: "lucumr",
-            siteURL: "https://lucumr.pocoo.org/",
-            feedURL: "https://lucumr.pocoo.org/feed.atom",
-            feedType: "atom",
-            feedFormat: "atom",
+            siteUrl: "https://lucumr.pocoo.org/",
+            feedUrl: "https://lucumr.pocoo.org/feed.atom",
+            feedType: .atom,
+            feedFormat: .atom,
             description: nil,
             rationale: nil,
-            evidenceURL: nil
+            evidenceUrl: nil
         )
         let model = AssistantFeedOptionActionModel(
             service: MockAssistantFeedSubscriptionService(
@@ -319,7 +369,7 @@ final class ChatMessageDisplayTests: XCTestCase {
                         scraperType: "feed",
                         displayName: nil,
                         config: [:],
-                        feedUrl: option.feedURL,
+                        feedUrl: option.feedUrl,
                         limit: nil,
                         isActive: true,
                         createdAt: Date(),
@@ -344,10 +394,13 @@ final class ChatMessageDisplayTests: XCTestCase {
         let option = AssistantFeedOption(
             id: "paused-feed",
             title: "Paused Feed",
-            siteURL: "https://example.com/",
-            feedURL: "https://example.com/paused.xml",
-            feedType: "atom",
-            feedFormat: "rss"
+            siteUrl: "https://example.com/",
+            feedUrl: "https://example.com/paused.xml",
+            feedType: .atom,
+            feedFormat: .rss,
+            description: nil,
+            rationale: nil,
+            evidenceUrl: nil
         )
         let service = MockAssistantFeedSubscriptionService(
             result: .success(
@@ -356,7 +409,7 @@ final class ChatMessageDisplayTests: XCTestCase {
                     scraperType: "atom",
                     displayName: nil,
                     config: [:],
-                    feedUrl: option.feedURL,
+                    feedUrl: option.feedUrl,
                     limit: nil,
                     isActive: true,
                     createdAt: Date(),
@@ -384,13 +437,13 @@ final class ChatMessageDisplayTests: XCTestCase {
         let option = AssistantFeedOption(
             id: "bad-feed",
             title: "Bad feed",
-            siteURL: "https://example.com/",
-            feedURL: "https://example.com/feed.xml",
-            feedType: "rss",
-            feedFormat: "rss",
+            siteUrl: "https://example.com/",
+            feedUrl: "https://example.com/feed.xml",
+            feedType: .unknown("rss"),
+            feedFormat: .rss,
             description: nil,
             rationale: nil,
-            evidenceURL: nil
+            evidenceUrl: nil
         )
         let model = AssistantFeedOptionActionModel(
             service: MockAssistantFeedSubscriptionService(
@@ -410,10 +463,13 @@ final class ChatMessageDisplayTests: XCTestCase {
         let option = AssistantFeedOption(
             id: "active-feed",
             title: "Active feed",
-            siteURL: "https://example.com/",
-            feedURL: "https://example.com/feed.xml",
-            feedType: "atom",
-            feedFormat: "rss",
+            siteUrl: "https://example.com/",
+            feedUrl: "https://example.com/feed.xml",
+            feedType: .atom,
+            feedFormat: .rss,
+            description: nil,
+            rationale: nil,
+            evidenceUrl: nil,
             isSubscribed: true
         )
         let service = MockAssistantFeedSubscriptionService(

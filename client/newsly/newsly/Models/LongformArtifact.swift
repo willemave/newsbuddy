@@ -23,36 +23,6 @@ struct LongformFeedPreview: Codable, Equatable {
     }
 }
 
-struct LongformSelectionTrace: Codable {
-    let sourceHint: String
-    let candidates: [String]
-    let selected: String
-    let reason: String
-    let confidence: Double
-
-    enum CodingKeys: String, CodingKey {
-        case sourceHint = "source_hint"
-        case candidates
-        case selected
-        case reason
-        case confidence
-    }
-}
-
-struct LongformSourceContext: Codable {
-    let url: String
-    let sourceName: String?
-    let publicationDate: String?
-    let platform: String?
-
-    enum CodingKeys: String, CodingKey {
-        case url
-        case sourceName = "source_name"
-        case publicationDate = "publication_date"
-        case platform
-    }
-}
-
 struct LongformArtifactQuote: Codable, Identifiable {
     let text: String
     let attribution: String?
@@ -124,8 +94,6 @@ struct LongformArtifactEnvelope: Codable {
     let ask: String
     let artifact: LongformArtifactBody
     let generatedAt: String?
-    let sourceContext: LongformSourceContext?
-    let selectionTrace: LongformSelectionTrace?
     let feedPreview: LongformFeedPreview?
 
     enum CodingKeys: String, CodingKey {
@@ -134,8 +102,6 @@ struct LongformArtifactEnvelope: Codable {
         case ask
         case artifact
         case generatedAt = "generated_at"
-        case sourceContext = "source_context"
-        case selectionTrace = "selection_trace"
         case feedPreview = "feed_preview"
     }
 

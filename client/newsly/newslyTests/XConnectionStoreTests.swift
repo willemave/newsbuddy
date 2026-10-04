@@ -51,17 +51,18 @@ final class XConnectionStoreTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1)
     }
 
-    private static func connection(status: String, connected: Bool = false) -> XConnectionResponse {
-        XConnectionResponse(
+    private static func connection(status: String, connected: Bool = false) -> APIXConnectionResponse {
+        APIXConnectionResponse(
             provider: "x",
             connected: connected,
             isActive: connected,
-            providerUserID: "123",
+            providerUserId: "123",
             providerUsername: "willemaw",
             scopes: [],
             lastSyncedAt: nil,
             lastStatus: status,
-            lastError: nil
+            lastError: nil,
+            twitterUsername: nil
         )
     }
 }

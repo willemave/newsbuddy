@@ -13,7 +13,7 @@ struct SettingsLibrarySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Library")
+            SectionHeader(title: "Library", font: .modalSupporting.weight(.semibold))
 
             VStack(spacing: 0) {
                 libraryLink(
@@ -22,7 +22,6 @@ struct SettingsLibrarySection: View {
                     accessibilityIdentifier: "settings.search"
                 ) {
                     SearchView(
-                        readStateCache: readStateCache,
                         viewModel: dependencyFactory.makeSearchViewModel()
                     )
                 }
@@ -35,7 +34,6 @@ struct SettingsLibrarySection: View {
                     accessibilityIdentifier: "settings.recently_read"
                 ) {
                     RecentlyReadView(
-                        readStateCache: readStateCache,
                         viewModel: dependencyFactory.makeContentListViewModel(
                             readStateCache: readStateCache
                         )
@@ -67,8 +65,9 @@ struct SettingsLibrarySection: View {
                 NavigationLink {
                     ProcessingStatsView(
                         sourcesViewModel: dependencyFactory.makeScraperSettingsViewModel(
-                            filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
-                        )
+                            filterTypes: APIScraperType.libraryRawValues
+                        ),
+                        feedHistoryService: dependencyFactory.scraperConfigService
                     )
                 } label: {
                     SettingsRow(icon: "clock.arrow.circlepath", title: "Feed Status") {

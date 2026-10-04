@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct NewsSummaryMetadata: Codable {
+struct NewsSummaryMetadata: Decodable {
     let title: String?
     let articleURL: String?
     let keyPoints: [String]
@@ -59,66 +59,22 @@ struct NewsSummaryMetadata: Codable {
     }
 }
 
-struct NewsArticleMetadata: Codable {
+struct NewsArticleMetadata: Decodable {
     let url: String?
     let title: String?
-    let sourceDomain: String?
-
-    enum CodingKeys: String, CodingKey {
-        case url
-        case title
-        case sourceDomain = "source_domain"
-    }
 }
 
-struct NewsAggregatorMetadata: Codable {
+struct NewsAggregatorMetadata: Decodable {
     let name: String?
-    let title: String?
-    let externalID: String?
-    let metadata: [String: AnyCodable]?
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case title
-        case externalID = "external_id"
-        case metadata
-    }
-
-    var summaryText: String? {
-        metadata?["summary_text"]?.value as? String
-    }
-
-    var feedName: String? {
-        metadata?["feed_name"]?.value as? String
-    }
-
-    var sourceName: String? {
-        metadata?["source_name"]?.value as? String
-    }
-
-    var relatedLinks: [NewsRelatedLink] {
-        guard let raw = metadata?["related_links"]?.value else { return [] }
-        if let links = raw as? [[String: Any]] {
-            return links.compactMap { NewsRelatedLink(dictionary: $0) }
-        }
-        if let links = raw as? [Any] {
-            return links.compactMap { element in
-                guard let dict = element as? [String: Any] else { return nil }
-                return NewsRelatedLink(dictionary: dict)
-            }
-        }
-        return []
-    }
 }
 
-struct NewsMetadata: Codable {
+struct NewsMetadata: Decodable {
     let source: String?
     let platform: String?
     let summary: NewsSummaryMetadata?
     let article: NewsArticleMetadata?
     let aggregator: NewsAggregatorMetadata?
     let discussionURL: String?
-    let discoveryTime: String?
     let sourceMetadata: SourceMetadata?
 
     enum CodingKeys: String, CodingKey {
@@ -128,20 +84,6 @@ struct NewsMetadata: Codable {
         case article
         case aggregator
         case discussionURL = "discussion_url"
-        case discoveryTime = "discovery_time"
         case sourceMetadata = "source_metadata"
-    }
-}
-
-struct NewsRelatedLink: Identifiable {
-    let title: String?
-    let url: String
-
-    var id: String { url }
-
-    init?(dictionary: [String: Any]) {
-        guard let url = dictionary["url"] as? String else { return nil }
-        self.url = url
-        self.title = dictionary["title"] as? String
     }
 }

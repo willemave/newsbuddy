@@ -200,16 +200,6 @@ final class VoiceDictationCoordinatorTests: XCTestCase {
         gate.open()
     }
 
-    private func waitUntil(
-        attempts: Int = 100,
-        condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        for _ in 0..<attempts {
-            if condition() { return true }
-            await Task.yield()
-        }
-        return condition()
-    }
 }
 
 @MainActor

@@ -123,21 +123,6 @@ final class TypographyScalingTests: XCTestCase {
         XCTAssertGreaterThan(scaledFont.pointSize, baseFont.pointSize)
     }
 
-    func testSemanticUIFontAppliesDynamicTypeExactlyOnce() {
-        let traitCollection = UITraitCollection(preferredContentSizeCategory: .extraLarge)
-        let baseFont = UIFont.appSans(size: 16)
-
-        let scaledFont = UIFont.appSans(
-            textStyle: .callout,
-            compatibleWith: traitCollection
-        )
-        let expectedFont = UIFontMetrics(forTextStyle: .callout).scaledFont(
-            for: baseFont,
-            compatibleWith: traitCollection
-        )
-
-        XCTAssertEqual(scaledFont.pointSize, expectedFont.pointSize, accuracy: 0.01)
-    }
 }
 
 final class BriefingAttributedTextBuilderTests: XCTestCase {
@@ -154,8 +139,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: nil
+            ]
         )
         let actual = try XCTUnwrap(
             result.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil)
@@ -186,8 +170,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: "feature"
+            ]
         )
 
         let font = try XCTUnwrap(
@@ -218,8 +201,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: "feature"
+            ]
         )
 
         XCTAssertEqual(result.plainText, "Read this")
@@ -243,8 +225,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: nil
+            ]
         )
 
         XCTAssertEqual(result.plainText, "Read Story today.")
@@ -269,8 +250,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: nil
+            ]
         )
 
         XCTAssertEqual(result.plainText, "Read [AINews] New AI infra decacorns.")
@@ -302,7 +282,6 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                     ]
                 )
             ],
-            weight: nil,
             discussionChips: [
                 "news:8": BriefingDiscussionChip(sourceKey: "news:8", commentCount: 64)
             ]
@@ -360,7 +339,6 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                 APIBriefingParagraph(runs: [linkRun]),
                 APIBriefingParagraph(runs: [linkRun])
             ],
-            weight: nil,
             discussionChips: [
                 "news:7": BriefingDiscussionChip(sourceKey: "news:7", commentCount: 128)
             ]
@@ -403,8 +381,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: nil
+            ]
         )
 
         XCTAssertEqual(
@@ -434,8 +411,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         )
                     ]
                 )
-            ],
-            weight: nil
+            ]
         )
 
         XCTAssertEqual(result.plainText, "important context")
@@ -600,5 +576,32 @@ final class BriefingRenderModelTests: XCTestCase {
         XCTAssertTrue(initialModel.segments[0] === appendedModel.segments[0])
         XCTAssertEqual(appendedModel.segments.map(\.id), [10, 9])
         XCTAssertFalse(appendedModel.hasMore)
+    }
+}
+
+@MainActor
+final class SelectableMarkdownLinkTests: XCTestCase {
+    func testCitationLinksSurviveAttributedRendering() throws {
+        let renderer = MarkdownNSRenderer(
+            baseFont: .appReaderBody,
+            textColor: .appReaderBodyText,
+            traitCollection: UITraitCollection(userInterfaceStyle: .light)
+        )
+        let rendered = renderer.render("Fact [source](digsource://1).")
+        let range = (rendered.string as NSString).range(of: "source")
+        let link = try XCTUnwrap(rendered.attribute(.link, at: range.location, effectiveRange: nil))
+        XCTAssertEqual(String(describing: link), "digsource://1")
+    }
+
+    func testOptionalCitationCallbackPreservesSystemLinkAction() throws {
+        let coordinator = SelectableMarkdownView.Coordinator()
+        let defaultAction = UIAction { _ in }
+        let customAction = UIAction { _ in }
+        let ordinaryURL = try XCTUnwrap(URL(string: "https://example.com"))
+        let citationURL = try XCTUnwrap(URL(string: "digsource://1"))
+        XCTAssertTrue(coordinator.action(for: ordinaryURL, defaultAction: defaultAction) === defaultAction)
+        coordinator.linkAction = { $0.scheme == "digsource" ? customAction : nil }
+        XCTAssertTrue(coordinator.action(for: ordinaryURL, defaultAction: defaultAction) === defaultAction)
+        XCTAssertTrue(coordinator.action(for: citationURL, defaultAction: defaultAction) === customAction)
     }
 }

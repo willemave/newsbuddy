@@ -7,8 +7,6 @@ import Foundation
 
 enum AuthError: Error, LocalizedError {
     case notAuthenticated
-    case noRefreshToken
-    case refreshTokenExpired
     case refreshFailed
     case serverError(statusCode: Int, message: String?)
     case networkError(Error)
@@ -18,10 +16,6 @@ enum AuthError: Error, LocalizedError {
         switch self {
         case .notAuthenticated:
             return "Not authenticated"
-        case .noRefreshToken:
-            return "No refresh token available"
-        case .refreshTokenExpired:
-            return "Refresh token expired"
         case .refreshFailed:
             return "Failed to refresh token"
         case .serverError(let statusCode, let message):
@@ -35,7 +29,7 @@ enum AuthError: Error, LocalizedError {
 
     var userFacingMessage: String {
         switch self {
-        case .notAuthenticated, .noRefreshToken, .refreshTokenExpired:
+        case .notAuthenticated:
             return "Your session expired. Sign in again to continue."
         case .refreshFailed:
             return "We couldn't restore your session. Please try again."

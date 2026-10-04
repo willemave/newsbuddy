@@ -35,27 +35,6 @@ enum ChatPreviewFixtures {
         status: .completed
     )
 
-    static let feedOption = AssistantFeedOption(
-        id: "example-feed",
-        title: "Policy Signals Weekly",
-        siteURL: "https://example.com",
-        feedURL: "https://example.com/feed.xml",
-        feedType: "atom",
-        feedFormat: "atom",
-        description: "A concise weekly feed tracking policy and market signals.",
-        rationale: "Useful because it covers the same topic with a slower publishing cadence.",
-        evidenceURL: "https://example.com/policy-signals"
-    )
-
-    static let assistantWithFeedOptions = ChatMessage(
-        id: 4,
-        role: .assistant,
-        timestamp: timestamp,
-        content: "I found a feed that is likely worth tracking alongside this topic.",
-        status: .completed,
-        feedOptions: [feedOption]
-    )
-
     static let failedUserItem = ChatTimelineItem(
         id: .local(UUID(uuidString: "11111111-1111-1111-1111-111111111111")!),
         message: ChatMessage(

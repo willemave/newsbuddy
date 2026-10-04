@@ -30,7 +30,6 @@ struct BriefingTab: View {
     let scrollToTopRequest: Int
     @Namespace private var contentTransitionNamespace
     let viewModel: BriefingViewModel
-    let readingStateStore: ReadingStateStore
     let readStateCache: ReadStateCache
     let contentTextSize: DynamicTypeSize
     let dependencyFactory: RootDependencyFactory
@@ -46,7 +45,6 @@ struct BriefingTab: View {
             )
                 .withContentRoutes(
                     path: $path,
-                    readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
                     contentTransitionNamespace: contentTransitionNamespace,
@@ -68,7 +66,6 @@ struct KnowledgeTab: View {
     @Namespace private var chatTransitionNamespace
     let viewModel: KnowledgeTimelineViewModel
     let readStateCache: ReadStateCache
-    let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
     let dependencyFactory: RootDependencyFactory
     let onOpenSettings: () -> Void
@@ -84,8 +81,6 @@ struct KnowledgeTab: View {
                 onSearch: { path.append(KnowledgeSearchRoute()) },
                 onOpenSettings: onOpenSettings,
                 viewModel: viewModel,
-                settings: dependencyFactory.appSettings,
-                toastPresenter: dependencyFactory.toastService,
                 contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace
             )
@@ -99,7 +94,6 @@ struct KnowledgeTab: View {
             }
             .withContentRoutes(
                 path: $path,
-                readingStateStore: readingStateStore,
                 readStateCache: readStateCache,
                 contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace,

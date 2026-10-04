@@ -411,20 +411,22 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
                 contentService: contentService ?? KnowledgeTimelineContentService(
                     contents: saved,
                     loadDelayNanoseconds: savedLoadDelayNanoseconds
-                )
+                ),
+                readStateCache: makeTestReadStateCache()
             ),
             chats: KnowledgeChatViewModel(
-                chatService: KnowledgeTimelineChatService(loadFails: chatLoadFails)
+                chatService: KnowledgeTimelineChatService(loadFails: chatLoadFails),
+                transcriptionService: TestUnavailableSpeechTranscriber()
             ),
             decks: LearningDecksViewModel(
                 service: KnowledgeTimelineDeckService(decks: decks)
             ),
             narrations: CustomNarrationLibraryViewModel(
-                playbackService: .shared,
+                playbackService: NarrationPlaybackService(),
                 audioService: narrationService
                     ?? KnowledgeTimelineNarrationService(episodes: narrations),
-                badgeStatsStore: .shared,
-                toastPresenter: ToastService.shared
+                badgeStatsStore: makeTestBadgeStatsStore(),
+                readStateCache: makeTestReadStateCache()
             ),
             freshnessPolicy: freshnessPolicy,
             now: now
@@ -432,26 +434,13 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
     }
 
     private func makeSession(id: Int, activityDate: Date) -> ChatSessionSummary {
-        ChatSessionSummary(
+        .fixture(
             id: id,
-            contentId: nil,
             title: "Chat \(id)",
-            sessionType: "knowledge_chat",
-            topic: nil,
-            llmProvider: "openai",
-            llmModel: "openai:gpt-5.5",
             createdAt: activityDate.addingTimeInterval(-60),
             updatedAt: activityDate,
             lastMessageAt: activityDate,
-            articleTitle: nil,
-            articleUrl: nil,
-            articleSummary: nil,
-            articleSource: nil,
-            hasPendingMessage: false,
-            isSavedToKnowledge: false,
-            hasMessages: true,
-            lastMessagePreview: "A materialized preview",
-            lastMessageRole: nil
+            lastMessagePreview: "A materialized preview"
         )
     }
 
@@ -467,10 +456,6 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
             shortSummary: "Summary",
             createdAt: ServerDate.format(activityDate.addingTimeInterval(-365 * 24 * 60 * 60)),
             processedAt: nil,
-            classification: nil,
-            publicationDate: ServerDate.format(
-                activityDate.addingTimeInterval(-365 * 24 * 60 * 60)
-            ),
             isRead: false,
             isSavedToKnowledge: true,
             knowledgeSavedAt: ServerDate.format(activityDate)
@@ -489,7 +474,6 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
             status: .completed,
             shareEnabled: false,
             viewerAvailable: true,
-            sourceNotesAvailable: false,
             latestSuccessfulRunId: nil,
             latestRun: nil,
             createdAt: activityDate.addingTimeInterval(-60),
@@ -556,11 +540,11 @@ private final class KnowledgeTimelineChatService: KnowledgeChatServicing {
         throw Failure.unavailable
     }
 
-    func startArticleChat(contentId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
+    func existingSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary? {
         throw Failure.unavailable
     }
 
-    func startNewsChat(newsItemId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
+    func startSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary {
         throw Failure.unavailable
     }
 }
@@ -735,12 +719,6 @@ private final class KnowledgeTimelineDeckService: LearningDeckServicing {
     func retryDeck(deckId: Int) async throws -> LearningDeck { throw Failure.unused }
     func viewerURL(deckId: Int) async throws -> URL { throw Failure.unused }
     func sourceNotesURL(deckId: Int) async throws -> URL { throw Failure.unused }
-    func enableShare(deckId: Int) async throws -> LearningDeckShareResponse {
-        throw Failure.unused
-    }
-    func disableShare(deckId: Int) async throws -> LearningDeckShareResponse {
-        throw Failure.unused
-    }
     func deleteDeck(deckId: Int) async throws { throw Failure.unused }
 }
 
@@ -761,8 +739,7 @@ private final class KnowledgeTimelineNarrationService: CustomNarrationLibrarySer
         contentIds: [Int],
         newsItemIds: [Int],
         title: String?,
-        markSourceContentReadOnPlay: Bool,
-        delivery: AudioEpisodeDelivery
+        markSourceContentReadOnPlay: Bool
     ) async throws -> AudioEpisode { throw Failure.unused }
 
     func fetchEpisode(id: Int) async throws -> AudioEpisode { throw Failure.unused }
@@ -775,7 +752,4 @@ private final class KnowledgeTimelineNarrationService: CustomNarrationLibrarySer
         for episode: AudioEpisode
     ) async throws -> AuthorizedMediaResource { throw Failure.unused }
 
-    func enableEpisodeShare(id: Int) async throws -> AudioEpisodeShareResponse {
-        throw Failure.unused
-    }
 }

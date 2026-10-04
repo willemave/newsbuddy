@@ -9,16 +9,6 @@ import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ScraperSettings")
 
-private enum ScraperConfigMutation {
-    case upsert(ScraperConfig)
-    case remove
-}
-
-private struct VersionedScraperConfigMutation {
-    let revision: Int
-    let mutation: ScraperConfigMutation
-}
-
 protocol ScraperSettingsServicing: AnyObject {
     func listConfigs(types: [String]?, includeStats: Bool) async throws -> [ScraperConfig]
     func createConfig(
@@ -54,9 +44,7 @@ final class ScraperSettingsViewModel {
     @ObservationIgnored
     private var activeLoad: ActiveConfigLoad?
     @ObservationIgnored
-    private var mutationRevision = 0
-    @ObservationIgnored
-    private var configMutations: [Int: VersionedScraperConfigMutation] = [:]
+    private var mutationLog = AuthoritativeMutationLog<Int, ScraperConfig>()
 
     init(filterTypes: [String]? = nil, service: any ScraperSettingsServicing) {
         self.filterTypes = filterTypes
@@ -92,7 +80,7 @@ final class ScraperSettingsViewModel {
     }
 
     private func performLoadConfigs(includeStats: Bool, showLoading: Bool) async -> Bool {
-        let requestStartRevision = mutationRevision
+        let requestStartRevision = mutationLog.currentRevision
         if showLoading {
             isLoading = true
         }
@@ -170,7 +158,7 @@ final class ScraperSettingsViewModel {
         errorMessage = nil
         do {
             try await service.deleteConfig(configId: config.id)
-            recordMutation(.remove, for: config.id)
+            mutationLog.recordRemoval(id: config.id)
             configs.removeAll { $0.id == config.id }
         } catch {
             logger.error("Failed to delete scraper config: \(error.localizedDescription, privacy: .public)")
@@ -179,7 +167,7 @@ final class ScraperSettingsViewModel {
     }
 
     private func upsert(_ config: ScraperConfig) {
-        recordMutation(.upsert(config), for: config.id)
+        mutationLog.recordUpsert(config, id: config.id)
         if let index = configs.firstIndex(where: { $0.id == config.id }) {
             configs[index] = config
         } else {
@@ -187,44 +175,15 @@ final class ScraperSettingsViewModel {
         }
     }
 
-    private func recordMutation(_ mutation: ScraperConfigMutation, for configID: Int) {
-        mutationRevision &+= 1
-        configMutations[configID] = VersionedScraperConfigMutation(
-            revision: mutationRevision,
-            mutation: mutation
-        )
-    }
-
     private func reconcileLoadedConfigs(
         _ loadedConfigs: [ScraperConfig],
         requestStartRevision: Int
     ) -> [ScraperConfig] {
-        var reconciled = loadedConfigs
-        let loadedConfigIDs = Set(loadedConfigs.map(\.id))
-        let mutations = configMutations.sorted { $0.value.revision < $1.value.revision }
-
-        for (configID, versionedMutation) in mutations {
-            switch versionedMutation.mutation {
-            case .upsert(let config):
-                if versionedMutation.revision <= requestStartRevision,
-                   loadedConfigIDs.contains(configID) {
-                    configMutations.removeValue(forKey: configID)
-                    continue
-                }
-                if let index = reconciled.firstIndex(where: { $0.id == configID }) {
-                    reconciled[index] = config
-                } else {
-                    reconciled.insert(config, at: 0)
-                }
-            case .remove:
-                reconciled.removeAll { $0.id == configID }
-                if versionedMutation.revision <= requestStartRevision,
-                   !loadedConfigIDs.contains(configID) {
-                    configMutations.removeValue(forKey: configID)
-                }
-            }
-        }
-        return reconciled
+        mutationLog.reconcile(
+            authoritative: loadedConfigs,
+            requestStartRevision: requestStartRevision,
+            id: \.id
+        )
     }
 }
 

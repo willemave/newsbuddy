@@ -5,125 +5,30 @@
 
 import Foundation
 
-enum LearningDeckSourceKind: Equatable {
-    case content
-    case githubRepo
-    case unknown(String)
+typealias LearningDeckSourceKind = APILearningDeckSourceKind
+typealias LearningDeckRunStatus = APILearningDeckStatus
 
-    var rawValue: String {
-        switch self {
-        case .content:
-            return "content"
-        case .githubRepo:
-            return "github_repo"
-        case .unknown(let value):
-            return value
-        }
-    }
-
-    init(rawValue: String) {
-        switch rawValue {
-        case "content":
-            self = .content
-        case "github_repo":
-            self = .githubRepo
-        default:
-            self = .unknown(rawValue)
-        }
-    }
-}
-
-enum LearningDeckRunStatus: Equatable {
-    case queued
-    case preparing
-    case generating
-    case validating
-    case publishing
-    case completed
-    case failed
-    case cancelled
-    case ready
-    case unknown(String)
-
-    var rawValue: String {
-        switch self {
-        case .queued:
-            return "queued"
-        case .preparing:
-            return "preparing"
-        case .generating:
-            return "generating"
-        case .validating:
-            return "validating"
-        case .publishing:
-            return "publishing"
-        case .completed:
-            return "completed"
-        case .failed:
-            return "failed"
-        case .cancelled:
-            return "cancelled"
-        case .ready:
-            return "ready"
-        case .unknown(let value):
-            return value
-        }
-    }
-
+extension APILearningDeckStatus {
     var isActive: Bool {
         switch self {
         case .queued, .preparing, .generating, .validating, .publishing:
-            return true
+            true
         case .completed, .failed, .cancelled, .ready, .unknown:
-            return false
+            false
         }
     }
 
     var displayLabel: String {
         switch self {
-        case .queued:
-            return "Queued"
-        case .preparing:
-            return "Preparing"
-        case .generating:
-            return "Generating"
-        case .validating:
-            return "Checking"
-        case .publishing:
-            return "Publishing"
-        case .completed, .ready:
-            return "Ready"
-        case .failed:
-            return "Failed"
-        case .cancelled:
-            return "Cancelled"
-        case .unknown:
-            return "Pending"
-        }
-    }
-
-    init(rawValue: String) {
-        switch rawValue {
-        case "queued":
-            self = .queued
-        case "preparing":
-            self = .preparing
-        case "generating":
-            self = .generating
-        case "validating":
-            self = .validating
-        case "publishing":
-            self = .publishing
-        case "completed":
-            self = .completed
-        case "failed":
-            self = .failed
-        case "cancelled":
-            self = .cancelled
-        case "ready":
-            self = .ready
-        default:
-            self = .unknown(rawValue)
+        case .queued: "Queued"
+        case .preparing: "Preparing"
+        case .generating: "Generating"
+        case .validating: "Checking"
+        case .publishing: "Publishing"
+        case .completed, .ready: "Ready"
+        case .failed: "Failed"
+        case .cancelled: "Cancelled"
+        case .unknown: "Pending"
         }
     }
 }
@@ -189,7 +94,6 @@ struct LearningDeck: Identifiable {
     let status: LearningDeckRunStatus?
     let shareEnabled: Bool
     let viewerAvailable: Bool
-    let sourceNotesAvailable: Bool
     let thumbnailURL: String?
     let latestSuccessfulRunId: Int?
     let latestRun: LearningDeckRun?
@@ -207,7 +111,6 @@ struct LearningDeck: Identifiable {
         status: LearningDeckRunStatus?,
         shareEnabled: Bool,
         viewerAvailable: Bool,
-        sourceNotesAvailable: Bool,
         thumbnailURL: String? = nil,
         latestSuccessfulRunId: Int?,
         latestRun: LearningDeckRun?,
@@ -224,7 +127,6 @@ struct LearningDeck: Identifiable {
         self.status = status
         self.shareEnabled = shareEnabled
         self.viewerAvailable = viewerAvailable
-        self.sourceNotesAvailable = sourceNotesAvailable
         self.thumbnailURL = thumbnailURL
         self.latestSuccessfulRunId = latestSuccessfulRunId
         self.latestRun = latestRun
@@ -265,9 +167,4 @@ struct LearningDeck: Identifiable {
 
 struct LearningDeckListResponse {
     let decks: [LearningDeck]
-}
-
-struct LearningDeckShareResponse {
-    let shareEnabled: Bool
-    let shareURL: String?
 }

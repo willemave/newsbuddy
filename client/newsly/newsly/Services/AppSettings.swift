@@ -45,15 +45,6 @@ final class AppSettings {
     private var hasExplicitServerConfiguration: Bool {
         ServerConfigurationDefaults.hasPersistedServerConfiguration(in: userDefaults)
     }
-    private var normalizedHost: String {
-#if targetEnvironment(simulator)
-        if serverHost.caseInsensitiveCompare("localhost") == .orderedSame {
-            return "127.0.0.1"
-        }
-#endif
-        return serverHost
-    }
-
     var baseURL: String {
         if !hasExplicitServerConfiguration {
             appSettingsLogger.fault("Using implicit default server configuration")
@@ -61,11 +52,11 @@ final class AppSettings {
             preconditionFailure("Server host/port must be configured explicitly in debug builds")
 #endif
         }
-        let scheme = useHTTPS ? "https" : "http"
-        let isDefaultPort = (scheme == "https" && serverPort == "443")
-            || (scheme == "http" && serverPort == "80")
-        let portSuffix = isDefaultPort ? "" : ":\(serverPort)"
-        return "\(scheme)://\(normalizedHost)\(portSuffix)"
+        return ServerConfigurationDefaults.baseURLString(
+            host: serverHost,
+            port: serverPort,
+            useHTTPS: useHTTPS
+        )
     }
 
     func setAppTextSize(_ index: Int) {

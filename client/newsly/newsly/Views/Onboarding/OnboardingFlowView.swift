@@ -93,7 +93,7 @@ struct OnboardingFlowView: View {
         case .suggestions:
             OnboardingSuggestionsStep(viewModel: viewModel)
                 .transition(screenTransition)
-        case .fastNews, .aggregators:
+        case .aggregators:
             OnboardingAggregatorsStep(
                 viewModel: viewModel,
                 reduceMotion: reduceMotion

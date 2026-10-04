@@ -10,7 +10,7 @@ struct SettingsSectionStack: View {
     let isApprovingCLILink: Bool
     let isDeletingAccount: Bool
     let isFeedbackVisible: Bool
-    let xConnection: XConnectionResponse?
+    let xConnection: APIXConnectionResponse?
     let settings: AppSettings
     let isProcessingMarkAll: Bool
     let onLinkCLI: () -> Void

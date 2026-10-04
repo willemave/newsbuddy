@@ -192,19 +192,6 @@ struct EditorialKeyPoint: Codable, Identifiable {
     var id: String { point }
 }
 
-struct EditorialArchetypeReaction: Codable, Identifiable {
-    let archetype: String
-    let paragraphs: [String]
-
-    var id: String { archetype }
-
-    var displayParagraphs: [String] {
-        paragraphs
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-}
-
 struct EditorialDetailSection: Identifiable {
     let title: String
     let items: [String]
@@ -216,7 +203,6 @@ struct EditorialNarrativeSummary: Codable {
     let title: String?
     let editorialNarrative: String
     let quotes: [Quote]
-    let archetypeReactions: [EditorialArchetypeReaction]?
     let keyPoints: [EditorialKeyPoint]
     let sourceDetailsRaw: [String: AnyCodable]?
     let classification: String?
@@ -226,7 +212,6 @@ struct EditorialNarrativeSummary: Codable {
         case title
         case editorialNarrative = "editorial_narrative"
         case quotes
-        case archetypeReactions = "archetype_reactions"
         case keyPoints = "key_points"
         case sourceDetailsRaw = "source_details"
         case classification
@@ -338,10 +323,6 @@ extension EditorialNarrativeSummary {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         editorialNarrative = try container.decode(String.self, forKey: .editorialNarrative)
         quotes = try container.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
-        archetypeReactions = try container.decodeIfPresent(
-            [EditorialArchetypeReaction].self,
-            forKey: .archetypeReactions
-        )
         keyPoints = try container.decodeIfPresent([EditorialKeyPoint].self, forKey: .keyPoints) ?? []
         sourceDetailsRaw = try container.decodeIfPresent(
             [String: AnyCodable].self,

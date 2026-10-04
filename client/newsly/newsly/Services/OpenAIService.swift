@@ -25,17 +25,21 @@ enum OpenAIServiceError: LocalizedError {
 }
 
 final class OpenAIService {
-    static let shared = OpenAIService()
-
     private let apiClient: APIClient
     private let credentialSession: any CredentialSessionProviding
 
     init(
-        apiClient: APIClient = .shared,
-        credentialSession: any CredentialSessionProviding = CredentialSession.shared
+        apiClient: APIClient,
+        credentialSession: any CredentialSessionProviding
     ) {
         self.apiClient = apiClient
         self.credentialSession = credentialSession
+    }
+
+    @MainActor
+    var isTranscriptionAvailable: Bool {
+        credentialSession.hasStoredCredentialMaterial
+            && AppSettings.shared.backendTranscriptionAvailable
     }
 
     @discardableResult

@@ -5,29 +5,6 @@
 
 import Foundation
 
-enum ShareExtensionTransportError: LocalizedError {
-    case invalidURL
-    case notAuthenticated
-    case invalidResponse
-    case network(Error)
-    case server(statusCode: Int, detail: String?)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            "Invalid URL"
-        case .notAuthenticated:
-            "Not authenticated"
-        case .invalidResponse:
-            "Invalid server response"
-        case .network(let error):
-            error.localizedDescription
-        case .server(let statusCode, let detail):
-            nonEmptyDetail(detail) ?? "Request failed with status \(statusCode)"
-        }
-    }
-}
-
 enum ShareSubmissionFailure: Equatable {
     case invalidURL
     case authenticationRequired
@@ -37,6 +14,16 @@ enum ShareSubmissionFailure: Equatable {
 enum ShareSubmissionRecoveryAction: Equatable {
     case retry
     case openApp
+}
+
+struct ShareActionAcceptance: Decodable, Equatable {
+    let taskId: Int
+    let mode: APILlmTaskMode
+
+    private enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case mode
+    }
 }
 
 /// Pure presentation state shared by the extension controller and native tests.
@@ -126,7 +113,7 @@ final class ShareExtensionTransport {
     ) {
         let transport = HTTPTransport(session: session)
         let credentialSession = credentialSession ?? CredentialSession(
-            storage: CredentialStorageFactory.make(tokenStore: tokenStore),
+            storage: KeychainCredentialStorage(keychain: tokenStore),
             exchange: RefreshTokenExchange(
                 transport: transport,
                 baseURLProvider: baseURLProvider,
@@ -148,16 +135,12 @@ final class ShareExtensionTransport {
         method: HTTPMethod = .post,
         body: Data? = nil
     ) async throws {
-        do {
-            try await client.requestVoid(
-                endpoint,
-                method: method,
-                body: body,
-                authentication: .required
-            )
-        } catch {
-            throw mapClientFailure(error)
-        }
+        try await client.requestVoid(
+            endpoint,
+            method: method,
+            body: body,
+            authentication: .required
+        )
     }
 
     func request<Response: Decodable>(
@@ -165,33 +148,25 @@ final class ShareExtensionTransport {
         method: HTTPMethod = .post,
         body: Data? = nil
     ) async throws -> Response {
-        do {
-            return try await client.request(
-                endpoint,
-                method: method,
-                body: body,
-                authentication: .required
-            )
-        } catch {
-            throw mapClientFailure(error)
-        }
+        try await client.request(
+            endpoint,
+            method: method,
+            body: body,
+            authentication: .required
+        )
     }
 
-    private func mapClientFailure(_ error: Error) -> ShareExtensionTransportError {
-        switch ClientFailure.classify(error) {
-        case .authenticationRequired, .authenticationExpired:
-            return .notAuthenticated
-        case .invalidRequest:
-            return .invalidURL
-        case .invalidResponse, .decoding:
-            return .invalidResponse
-        case .server(let statusCode, let error):
-            return .server(statusCode: statusCode, detail: error.message)
-        case .http(let statusCode, let detail):
-            return .server(statusCode: statusCode, detail: detail)
-        case .cancelled, .connectivity, .unexpected:
-            return .network(error)
-        }
+    /// A successful POST has already committed the share action. Decode only
+    /// the fields the extension uses, and treat an unfamiliar success body as
+    /// accepted so presentation-only schema drift cannot invite a duplicate retry.
+    func submitShareAction(body: Data) async throws -> ShareActionAcceptance? {
+        let (data, _) = try await client.requestHTTP(
+            "/api/share-actions",
+            method: .post,
+            body: body,
+            authentication: .required
+        )
+        return try? JSONDecoder().decode(ShareActionAcceptance.self, from: data)
     }
 
     private static func makeSession() -> URLSession {
@@ -217,10 +192,4 @@ private final class UnavailableRefreshAttemptStore: RefreshAttemptStoring {
     }
 
     func clearAttempt(for _: String) {}
-}
-
-private func nonEmptyDetail(_ value: String?) -> String? {
-    guard let value else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
 }

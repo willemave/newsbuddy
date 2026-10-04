@@ -82,7 +82,7 @@ final class BriefingFigureLayoutPolicyTests: XCTestCase {
                 insightId: nil
             )
         ])
-        let content = BriefingAttributedTextBuilder().build(paragraphs: [paragraph], weight: nil)
+        let content = BriefingAttributedTextBuilder().build(paragraphs: [paragraph])
         let metrics = BriefingFigureLayoutPolicy.metrics(
             for: .compact,
             lineStep: BriefingPassageView.lineStep(for: .xxLarge)

@@ -23,18 +23,27 @@ protocol KnowledgeChatServicing: AnyObject {
 
     func deleteSession(sessionId: Int) async throws
 
-    func startArticleChat(
-        contentId: Int,
-        provider: ChatModelProvider
-    ) async throws -> ChatSessionSummary
+    /// The source's latest Knowledge chat, if any.
+    func existingSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary?
 
-    func startNewsChat(
-        newsItemId: Int,
-        provider: ChatModelProvider
-    ) async throws -> ChatSessionSummary
+    func startSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary
 }
 
-extension ChatService: KnowledgeChatServicing {}
+extension ChatService: KnowledgeChatServicing {
+    func existingSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary? {
+        switch source {
+        case .content(let id): try await getSessionForContent(contentId: id)
+        case .news(let id): try await getSessionForNewsItem(newsItemId: id)
+        }
+    }
+
+    func startSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary {
+        switch source {
+        case .content(let id): try await startArticleChat(contentId: id)
+        case .news(let id): try await startNewsChat(newsItemId: id)
+        }
+    }
+}
 
 @MainActor
 @Observable
@@ -64,25 +73,21 @@ final class KnowledgeChatViewModel {
     private(set) var loadErrorMessage: String?
     var errorMessage: String?
     var hasLoadMoreError = false
-    private(set) var voiceDictationAvailable = false
-    private(set) var isVoiceRecording = false
-    private(set) var isVoiceTranscribing = false
-    private(set) var isVoiceActionInFlight = false
-    private(set) var voiceState: SpeechTranscriptionState = .idle
     private(set) var completedVoiceRoute: ChatSessionRoute?
+
+    var voiceDictationAvailable: Bool { voiceInput.isAvailable }
+    var isVoiceRecording: Bool { voiceInput.isRecording }
+    var isVoiceTranscribing: Bool { voiceInput.isTranscribing }
+    var isVoiceActionInFlight: Bool { voiceInput.isActionInFlight }
 
     @ObservationIgnored
     private let chatService: any KnowledgeChatServicing
     @ObservationIgnored
-    private let voiceCoordinator: VoiceDictationCoordinator
-    @ObservationIgnored
-    private let refreshTranscriptionAvailability: () async -> Bool
+    private let voiceInput: ChatVoiceInputController
     @ObservationIgnored
     private var feed: PaginatedFeed<ChatSessionSummary>!
     @ObservationIgnored
     private let historyPageLimit = 20
-    @ObservationIgnored
-    private var pendingVoiceTranscript: String?
     @ObservationIgnored
     private var deletingSessionIDs: Set<Int> = []
     @ObservationIgnored
@@ -102,16 +107,17 @@ final class KnowledgeChatViewModel {
 
     init(
         chatService: any KnowledgeChatServicing,
-        transcriptionService: (any SpeechTranscribing)? = nil,
+        transcriptionService: any SpeechTranscribing,
         refreshTranscriptionAvailability: @escaping () async -> Bool = { false },
         initialVoiceDictationAvailable: Bool = false,
         activeChatPollIntervalNanoseconds: UInt64 = 3_000_000_000
     ) {
-        let resolvedTranscriptionService = transcriptionService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
         self.chatService = chatService
-        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedTranscriptionService)
-        self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
-        self.voiceDictationAvailable = initialVoiceDictationAvailable
+        self.voiceInput = ChatVoiceInputController(
+            transcriptionService: transcriptionService,
+            refreshAvailability: refreshTranscriptionAvailability,
+            initiallyAvailable: initialVoiceDictationAvailable
+        )
         self.activeChatPollIntervalNanoseconds = activeChatPollIntervalNanoseconds
         feed = PaginatedFeed(loadPageWithGeneration: { [weak self] cursor, generation in
             guard let self else {
@@ -119,6 +125,15 @@ final class KnowledgeChatViewModel {
             }
             return try await self.loadHistoryPage(cursor: cursor, generation: generation)
         })
+        voiceInput.configure(
+            onTranscriptReady: { [weak self] transcript in
+                guard let self else { return }
+                completedVoiceRoute = await startAssistantTurn(message: transcript)
+            },
+            onError: { [weak self] message in
+                self?.errorMessage = message
+            }
+        )
     }
 
     func loadChats() async {
@@ -166,13 +181,10 @@ final class KnowledgeChatViewModel {
         await startAssistantTurn(message: message)
     }
 
-    /// Resumes the latest Knowledge chat about a saved source, or starts one.
-    func openSourceChat(for content: ContentSummary) async -> ChatSessionRoute? {
-        if let existing = existingSourceChat(for: content) {
-            return ChatSessionRoute(session: existing)
-        }
-        guard let session = await startSourceSession(for: content) else { return nil }
-        return ChatSessionRoute(session: session, focusComposerOnAppear: true)
+    /// Resumes the source's latest Knowledge chat, or starts one with the composer focused.
+    func openSourceChat(for source: KnowledgeSource) async -> ChatSessionRoute? {
+        guard let resolved = await resolveSourceChat(for: source) else { return nil }
+        return ChatSessionRoute(session: resolved.session, focusComposerOnAppear: resolved.isNew)
     }
 
     func deleteSession(_ session: ChatSessionSummary) async {
@@ -197,22 +209,13 @@ final class KnowledgeChatViewModel {
     }
 
     func checkAndRefreshVoiceDictation() async {
-        if voiceCoordinator.isAvailable {
-            voiceDictationAvailable = true
-            return
-        }
-
-        voiceDictationAvailable = await refreshTranscriptionAvailability()
+        await voiceInput.checkAndRefreshAvailability()
     }
 
-    func toggleVoiceRecording() async -> ChatSessionRoute? {
-        guard !isCreatingSession else { return nil }
-        if isVoiceRecording {
-            return await stopVoiceRecordingAndStartChat()
-        }
-        guard !isVoiceActionInFlight, !isVoiceTranscribing else { return nil }
-        await startVoiceRecording()
-        return nil
+    func toggleVoiceRecording() async {
+        guard !isCreatingSession else { return }
+        errorMessage = nil
+        await voiceInput.toggle()
     }
 
     func clearCompletedVoiceRoute() {
@@ -220,15 +223,7 @@ final class KnowledgeChatViewModel {
     }
 
     func cancelVoiceRecording() {
-        guard voiceCoordinator.hasActiveSession || isVoiceRecording || isVoiceTranscribing || pendingVoiceTranscript != nil else {
-            return
-        }
-        voiceCoordinator.cancel()
-        pendingVoiceTranscript = nil
-        voiceState = .idle
-        isVoiceRecording = false
-        isVoiceTranscribing = false
-        isVoiceActionInFlight = false
+        voiceInput.reset()
     }
 
     private func startAssistantTurn(message: String) async -> ChatSessionRoute? {
@@ -258,29 +253,21 @@ final class KnowledgeChatViewModel {
         }
     }
 
-    private func existingSourceChat(for content: ContentSummary) -> ChatSessionSummary? {
-        let source = KnowledgeSourceKey(content)
-        return sessions.first { session in
-            let sessionSourceID = source.isNews ? session.newsItemId : session.contentId
-            return sessionSourceID == source.id
-                && session.isKnowledgeSession
-        }
-    }
-
-    private func startSourceSession(for content: ContentSummary) async -> ChatSessionSummary? {
+    private func resolveSourceChat(
+        for source: KnowledgeSource
+    ) async -> (session: ChatSessionSummary, isNew: Bool)? {
         guard !isCreatingSession else { return nil }
         isCreatingSession = true
         errorMessage = nil
         defer { isCreatingSession = false }
 
         do {
-            let session = if content.contentType == .news {
-                try await chatService.startNewsChat(newsItemId: content.id, provider: .openai)
-            } else {
-                try await chatService.startArticleChat(contentId: content.id, provider: .openai)
+            if let existing = try await chatService.existingSourceChat(for: source) {
+                return (existing, false)
             }
+            let session = try await chatService.startSourceChat(for: source)
             prependSession(session)
-            return session
+            return (session, true)
         } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {
@@ -386,125 +373,5 @@ final class KnowledgeChatViewModel {
         deletedSessionIDs.removeAll()
     }
 
-    private func startVoiceRecording() async {
-        if !voiceDictationAvailable {
-            await checkAndRefreshVoiceDictation()
-        }
-        guard voiceDictationAvailable else {
-            errorMessage = "Microphone is unavailable right now. Try again in a moment."
-            return
-        }
 
-        pendingVoiceTranscript = nil
-        errorMessage = nil
-        isVoiceActionInFlight = true
-        defer { isVoiceActionInFlight = false }
-
-        do {
-            try await voiceCoordinator.start(
-                onTranscriptFinal: { [weak self] transcript in
-                    self?.pendingVoiceTranscript = transcript
-                },
-                onError: { [weak self] message in
-                    self?.applyVoiceFailure(message)
-                },
-                onStateChange: { [weak self] state in
-                    self?.applyVoiceState(state)
-                },
-                onStopReason: { [weak self] reason in
-                    await self?.handleVoiceStopReason(reason)
-                }
-            )
-        } catch {
-            applyVoiceFailure(error.localizedDescription)
-        }
-    }
-
-    private func stopVoiceRecordingAndStartChat() async -> ChatSessionRoute? {
-        guard isVoiceRecording else { return nil }
-        isVoiceActionInFlight = true
-        defer { isVoiceActionInFlight = false }
-
-        do {
-            voiceState = .transcribing
-            isVoiceRecording = false
-            isVoiceTranscribing = true
-            let transcript = try await voiceCoordinator.stop()
-            pendingVoiceTranscript = nil
-            voiceState = .idle
-            isVoiceRecording = false
-            isVoiceTranscribing = false
-            return await submitVoiceTranscript(transcript)
-        } catch {
-            errorMessage = error.localizedDescription
-            isVoiceRecording = false
-            isVoiceTranscribing = false
-            return nil
-        }
-    }
-
-    private func submitVoiceTranscript(_ transcript: String) async -> ChatSessionRoute? {
-        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty else {
-            errorMessage = "I didn't catch that. Try again."
-            return nil
-        }
-
-        errorMessage = nil
-        return await startAssistantTurn(message: trimmedTranscript)
-    }
-
-    private func applyVoiceState(_ state: SpeechTranscriptionState) {
-        voiceState = state
-        switch state {
-        case .idle, .starting:
-            isVoiceRecording = false
-            isVoiceTranscribing = false
-        case .recording:
-            isVoiceRecording = true
-            isVoiceTranscribing = false
-        case .transcribing:
-            isVoiceRecording = false
-            isVoiceTranscribing = true
-        case .failed(let message):
-            applyVoiceFailure(message)
-        }
-    }
-
-    private func applyVoiceFailure(_ message: String) {
-        voiceState = .failed(message)
-        errorMessage = message
-        pendingVoiceTranscript = nil
-        isVoiceRecording = false
-        isVoiceTranscribing = false
-        isVoiceActionInFlight = false
-    }
-
-    private func handleVoiceStopReason(_ reason: SpeechStopReason) async {
-        switch reason {
-        case .manual:
-            return
-        case .silenceAutoStop, .maximumDuration:
-            let transcript = pendingVoiceTranscript ?? ""
-            pendingVoiceTranscript = nil
-            isVoiceRecording = false
-            isVoiceTranscribing = false
-            isVoiceActionInFlight = true
-            let route = await submitVoiceTranscript(transcript)
-            isVoiceActionInFlight = false
-            if let route {
-                completedVoiceRoute = route
-            }
-        case .noSpeechTimeout:
-            applyVoiceFailure("No speech detected. Try again.")
-        case .cancel:
-            pendingVoiceTranscript = nil
-            voiceState = .idle
-            isVoiceRecording = false
-            isVoiceTranscribing = false
-            isVoiceActionInFlight = false
-        case .failure:
-            isVoiceActionInFlight = false
-        }
-    }
 }

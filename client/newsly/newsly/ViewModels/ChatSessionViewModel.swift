@@ -76,7 +76,6 @@ final class ChatSessionViewModel {
         self.voiceInput = ChatVoiceInputController(
             transcriptionService: dependencies.transcriptionService,
             refreshAvailability: dependencies.refreshTranscriptionAvailability,
-            setBackendAvailability: dependencies.setBackendTranscriptionAvailable,
             initiallyAvailable: initialVoiceDictationAvailable
         )
         self.activeSessionManager = dependencies.activeSessionManager
@@ -619,18 +618,7 @@ final class ChatSessionViewModel {
         upsertTimelineItem(
             ChatTimelineItem(
                 id: existing.id,
-                message: ChatMessage(
-                    id: existing.message.id,
-                    sourceMessageId: existing.message.sourceMessageId,
-                    role: existing.message.role,
-                    timestamp: existing.message.timestamp,
-                    content: existing.message.content,
-                    displayType: existing.message.displayType,
-                    processLabel: existing.message.processLabel,
-                    status: .failed,
-                    error: error,
-                    feedOptions: existing.message.feedOptions
-                ),
+                message: existing.message.failed(error: error),
                 pendingMessageId: existing.pendingMessageId,
                 retryText: existing.retryText ?? existing.message.content
             )

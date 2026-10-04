@@ -17,6 +17,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
     let adjustsFontForContentSizeCategory: Bool
     let scalingTextStyle: UIFont.TextStyle
     var onDigDeeper: ((String) -> Void)?
+    var linkAction: ((URL) -> UIAction?)?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -26,7 +27,8 @@ struct SelectableMarkdownView: UIViewRepresentable {
         baseFont: UIFont = .appReaderBody,
         adjustsFontForContentSizeCategory: Bool = false,
         scalingTextStyle: UIFont.TextStyle = .body,
-        onDigDeeper: ((String) -> Void)? = nil
+        onDigDeeper: ((String) -> Void)? = nil,
+        linkAction: ((URL) -> UIAction?)? = nil
     ) {
         self.markdown = markdown
         self.textColor = textColor
@@ -34,6 +36,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
         self.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         self.scalingTextStyle = scalingTextStyle
         self.onDigDeeper = onDigDeeper
+        self.linkAction = linkAction
     }
 
     func makeCoordinator() -> Coordinator {
@@ -55,11 +58,14 @@ struct SelectableMarkdownView: UIViewRepresentable {
         textView.tintColor = UIColor.appAccent.resolvedColor(with: textView.traitCollection)
         textView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
         textView.onDigDeeper = onDigDeeper
+        context.coordinator.linkAction = linkAction
+        textView.delegate = context.coordinator
         return textView
     }
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         uiView.onDigDeeper = onDigDeeper
+        context.coordinator.linkAction = linkAction
         uiView.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
         let resolvedLinkColor = UIColor.appAccent.resolvedColor(with: uiView.traitCollection)
@@ -179,7 +185,22 @@ struct SelectableMarkdownView: UIViewRepresentable {
         let height: CGFloat
     }
 
-    class Coordinator {
+    class Coordinator: NSObject, UITextViewDelegate {
+        var linkAction: ((URL) -> UIAction?)?
+
+        func textView(
+            _ textView: UITextView,
+            primaryActionFor textItem: UITextItem,
+            defaultAction: UIAction
+        ) -> UIAction? {
+            guard case .link(let url) = textItem.content else { return defaultAction }
+            return action(for: url, defaultAction: defaultAction)
+        }
+
+        func action(for url: URL, defaultAction: UIAction) -> UIAction {
+            linkAction?(url) ?? defaultAction
+        }
+
         private final class RenderCancellation {
             private let lock = NSLock()
             private var cancelled = false
@@ -298,9 +319,6 @@ final class SelectableMarkdownRenderCache {
         cache.setObject(value, forKey: CacheKey(key), cost: max(value.length * 64, 1))
     }
 
-    func removeAll() {
-        cache.removeAllObjects()
-    }
 }
 
 // MARK: - Markdown → NSAttributedString Renderer

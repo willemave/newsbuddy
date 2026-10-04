@@ -24,7 +24,6 @@ protocol ContentSummaryListServicing: AnyObject {
     func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse
     func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse
-    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse
     func markContentAsUnread(id: Int) async throws
 }
 
@@ -91,10 +90,6 @@ final class ContentListViewModel {
     private(set) var initialLoadErrorMessage: String?
     private(set) var loadMoreErrorMessage: String?
 
-    var hasActionError: Bool {
-        actionErrorMessage != nil
-    }
-
     var selectedContentType: String = "all" {
         didSet {
             Task { await reloadForCurrentFilters() }
@@ -127,10 +122,10 @@ final class ContentListViewModel {
 
     init(
         contentService: any ContentSummaryListServicing,
-        readStateCache: ReadStateCache? = nil
+        readStateCache: ReadStateCache
     ) {
         self.contentService = contentService
-        self.readStateCache = readStateCache ?? ReadStateCache()
+        self.readStateCache = readStateCache
         feed = PaginatedFeed { [weak self] cursor, generation in
             guard let self else {
                 return Page(items: [], nextCursor: nil, hasMore: false)

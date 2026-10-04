@@ -18,7 +18,7 @@ struct SettingsAccountSection: View {
         // than leaving a label hanging over empty space.
         if case .authenticated(let user) = authState {
             VStack(alignment: .leading, spacing: 0) {
-                SectionHeader(title: "Account")
+                SectionHeader(title: "Account", font: .modalSupporting.weight(.semibold))
 
                 VStack(spacing: 0) {
                     AccountCard(user: user)
@@ -88,12 +88,12 @@ private struct AccountCard: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.fullName ?? user.email)
-                    .font(.listTitle.weight(.medium))
+                    .font(.modalBody.weight(.medium))
                     .foregroundStyle(Color.onSurface)
 
                 if user.fullName != nil {
                     Text(user.email)
-                        .font(.listCaption)
+                        .font(.modalSupporting)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }

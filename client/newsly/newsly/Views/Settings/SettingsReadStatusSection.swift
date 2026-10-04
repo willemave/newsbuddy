@@ -11,7 +11,7 @@ struct SettingsReadStatusSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Actions")
+            SectionHeader(title: "Actions", font: .modalSupporting.weight(.semibold))
 
             Button(action: onMarkAll) {
                 SettingsRow(

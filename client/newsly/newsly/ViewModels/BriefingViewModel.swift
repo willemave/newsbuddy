@@ -132,10 +132,6 @@ final class BriefingViewModel {
         )
     }
 
-    var isRefreshing: Bool {
-        refreshPhase == .requesting || refreshPhase == .waitingForCompletion
-    }
-
     var selectedLensKey: String? {
         guard case .lens(let key) = destination else { return nil }
         return key
@@ -425,10 +421,7 @@ final class BriefingViewModel {
             lensStates = lensStates.filter { validKeys.contains($0.key) }
             rebuildSourceIndex()
         }
-        index = response
-        orderedLenses = firstRun == nil
-            ? Self.sortedLenses(response.lenses)
-            : response.lenses
+        publishIndex(response)
         state = response.lenses.isEmpty && firstRun == nil ? .empty : .loaded
         if firstRun != nil && destination == nil {
             destination = .startHere
@@ -502,23 +495,13 @@ final class BriefingViewModel {
         }
     }
 
-    private func cancelLensLoads() {
-        for key in Set(orderedLenses.map(\.key)).union(lensStates.keys) {
-            tasks.cancel(.lens(key))
-            mutateLensState(key) { $0.loadPhase = .idle }
-        }
-    }
-
     /// Applies the persisted briefing so the tab renders without waiting on
     /// the network. Returns false when there is nothing usable to restore.
     private func restoreFromSnapshot() async -> Bool {
         guard let snapshot = await snapshotStore?.load(),
               !snapshot.index.lenses.isEmpty || snapshot.index.firstRun != nil
         else { return false }
-        index = snapshot.index
-        orderedLenses = firstRun == nil
-            ? Self.sortedLenses(snapshot.index.lenses)
-            : snapshot.index.lenses
+        publishIndex(snapshot.index)
         lensStates = snapshot.lenses.mapValues { BriefingLensState(document: $0) }
         rebuildSourceIndex()
         indexSynchronizer.restore(etag: snapshot.etag)
@@ -576,14 +559,7 @@ final class BriefingViewModel {
         guard currentIndex.firstRun?.runId == dismissedFirstRunID else {
             return currentIndex
         }
-        return APIBriefingIndexResponse(
-            version: currentIndex.version,
-            mastheadTitle: currentIndex.mastheadTitle,
-            mastheadDeck: currentIndex.mastheadDeck,
-            generatedAt: currentIndex.generatedAt,
-            lenses: currentIndex.lenses,
-            firstRun: nil
-        )
+        return currentIndex.withoutFirstRun()
     }
 
     private func markLensesStale(validLensKeys: Set<String>) {
@@ -674,18 +650,8 @@ final class BriefingViewModel {
         readVersionCompatibility = nil
         markCachedLensesStale(containing: keys)
         if var currentIndex = index {
-            currentIndex = APIBriefingIndexResponse(
-                version: response.version,
-                mastheadTitle: currentIndex.mastheadTitle,
-                mastheadDeck: currentIndex.mastheadDeck,
-                generatedAt: currentIndex.generatedAt,
-                lenses: currentIndex.lenses,
-                firstRun: currentIndex.firstRun
-            )
-            index = currentIndex
-            orderedLenses = firstRun == nil
-                ? Self.sortedLenses(currentIndex.lenses)
-                : currentIndex.lenses
+            currentIndex = currentIndex.with(version: response.version)
+            publishIndex(currentIndex)
         }
         scheduleSnapshotSave()
         if let acceptedVersion, acceptedVersion < response.version {
@@ -697,30 +663,13 @@ final class BriefingViewModel {
 
     private func fastForwardLoadedBriefing(to version: Int) {
         if let currentIndex = index {
-            let updatedIndex = APIBriefingIndexResponse(
-                version: version,
-                mastheadTitle: currentIndex.mastheadTitle,
-                mastheadDeck: currentIndex.mastheadDeck,
-                generatedAt: currentIndex.generatedAt,
-                lenses: currentIndex.lenses,
-                firstRun: currentIndex.firstRun
-            )
-            index = updatedIndex
-            orderedLenses = firstRun == nil
-                ? Self.sortedLenses(updatedIndex.lenses)
-                : updatedIndex.lenses
+            let updatedIndex = currentIndex.with(version: version)
+            publishIndex(updatedIndex)
         }
         lensStates = lensStates.mapValues { state in
             guard let lens = state.document else { return state }
             var updated = state
-            updated.document = APIBriefingLensResponse(
-                    version: version,
-                    lens: lens.lens,
-                    segments: lens.segments,
-                    sources: lens.sources,
-                    nextCursor: lens.nextCursor,
-                    hasMore: lens.hasMore
-                )
+            updated.document = lens.with(version: version)
             return updated
         }
     }
@@ -761,42 +710,12 @@ final class BriefingViewModel {
             })
             let updatedSources = lens.sources.map { source in
                 guard keySet.contains(source.sourceKey) else { return source }
-                return APIBriefingSource(
-                    sourceKey: source.sourceKey,
-                    kind: source.kind,
-                    id: source.id,
-                    title: source.title,
-                    publisher: source.publisher,
-                    summary: source.summary,
-                    keyPoints: source.keyPoints,
-                    url: source.url,
-                    imageUrl: source.imageUrl,
-                    thumbnailUrl: source.thumbnailUrl,
-                    publishedAt: source.publishedAt,
-                    contentType: source.contentType,
-                    durationSeconds: source.durationSeconds,
-                    readingMinutes: source.readingMinutes,
-                    read: true,
-                    discussion: source.discussion
-                )
+                return source.markedRead()
             }
-            let updatedSummary = APIBriefingLensSummary(
-                key: lens.lens.key,
-                tier: lens.lens.tier,
-                title: lens.lens.title,
-                deck: lens.lens.deck,
-                position: lens.lens.position,
-                segmentCount: lens.lens.segmentCount,
+            let updatedSummary = lens.lens.with(
                 unreadSourceCount: max(lens.lens.unreadSourceCount - newlyReadCount, 0)
             )
-            let updatedLens = APIBriefingLensResponse(
-                version: lens.version,
-                lens: updatedSummary,
-                segments: lens.segments,
-                sources: updatedSources,
-                nextCursor: lens.nextCursor,
-                hasMore: lens.hasMore
-            )
+            let updatedLens = lens.with(lens: updatedSummary, sources: updatedSources)
             state.document = updatedLens
             if lensKey == selectedLensKey {
                 state.renderModel = makeRenderModel(
@@ -812,18 +731,10 @@ final class BriefingViewModel {
             updatedSummaries[lensKey] = updatedSummary
         }
         if var currentIndex = index {
-            currentIndex = APIBriefingIndexResponse(
-                version: currentIndex.version,
-                mastheadTitle: currentIndex.mastheadTitle,
-                mastheadDeck: currentIndex.mastheadDeck,
-                generatedAt: currentIndex.generatedAt,
-                lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 },
-                firstRun: currentIndex.firstRun
+            currentIndex = currentIndex.with(
+                lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 }
             )
-            index = currentIndex
-            orderedLenses = firstRun == nil
-                ? Self.sortedLenses(currentIndex.lenses)
-                : currentIndex.lenses
+            publishIndex(currentIndex)
         }
         briefingRefreshLogger.info(
             "Optimistic read state published | source_count=\(keySet.count, privacy: .public) affected_lenses=\(affectedLensKeys.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
@@ -836,29 +747,13 @@ final class BriefingViewModel {
               currentIndex.lenses.contains(where: {
                   $0.key == lensKey && $0.unreadSourceCount != count
               }) else { return }
-        let updatedIndex = APIBriefingIndexResponse(
-            version: currentIndex.version,
-            mastheadTitle: currentIndex.mastheadTitle,
-            mastheadDeck: currentIndex.mastheadDeck,
-            generatedAt: currentIndex.generatedAt,
+        let updatedIndex = currentIndex.with(
             lenses: currentIndex.lenses.map { lens in
                 guard lens.key == lensKey else { return lens }
-                return APIBriefingLensSummary(
-                    key: lens.key,
-                    tier: lens.tier,
-                    title: lens.title,
-                    deck: lens.deck,
-                    position: lens.position,
-                    segmentCount: lens.segmentCount,
-                    unreadSourceCount: count
-                )
-            },
-            firstRun: currentIndex.firstRun
+                return lens.with(unreadSourceCount: count)
+            }
         )
-        index = updatedIndex
-        orderedLenses = firstRun == nil
-            ? Self.sortedLenses(updatedIndex.lenses)
-            : updatedIndex.lenses
+        publishIndex(updatedIndex)
         scheduleSnapshotSave()
     }
 
@@ -897,6 +792,13 @@ final class BriefingViewModel {
         }
     }
 
+    private func publishIndex(_ response: APIBriefingIndexResponse) {
+        index = response
+        orderedLenses = firstRun == nil
+            ? Self.sortedLenses(response.lenses)
+            : response.lenses
+    }
+
     private static func sortedLenses(_ lenses: [APIBriefingLensSummary]) -> [APIBriefingLensSummary] {
         lenses.sorted { left, right in
             if left.position == right.position {
@@ -915,7 +817,7 @@ final class BriefingViewModel {
     private func dismissFirstRun() {
         guard let progress = firstRun, let currentIndex = index else { return }
         dismissedFirstRunID = progress.runId
-        orderedLenses = Self.sortedLenses(currentIndex.lenses)
+        publishIndex(currentIndex)
         firstRunCoordinator.stopPolling()
         scheduleSnapshotSave()
         firstRunCoordinator.complete()

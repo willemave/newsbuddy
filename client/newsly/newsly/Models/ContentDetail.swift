@@ -110,7 +110,7 @@ private struct ContentDetailDecodedPayloads {
     }
 }
 
-struct ContentDetail: Codable, Identifiable {
+struct ContentDetail: Identifiable {
     let id: Int
     let contentType: APIContentType
     let url: String
@@ -135,7 +135,6 @@ struct ContentDetail: Codable, Identifiable {
     let summaryVersion: Int?
     let structuredSummaryRaw: [String: AnyCodable]?
     let longformArtifactRaw: [String: AnyCodable]?
-    let feedPreview: LongformFeedPreview?
     let artifactType: String?
     let previewBullets: [String]?
     let reasonToRead: String?
@@ -157,53 +156,7 @@ struct ContentDetail: Codable, Identifiable {
 
     private let decodedPayloads: ContentDetailDecodedPayloads
 
-    enum CodingKeys: String, CodingKey {
-        case id
-        case contentType = "content_type"
-        case url
-        case title
-        case displayTitle = "display_title"
-        case source
-        case status
-        case errorMessage = "error_message"
-        case retryCount = "retry_count"
-        case metadata
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case processedAt = "processed_at"
-        case checkedOutBy = "checked_out_by"
-        case checkedOutAt = "checked_out_at"
-        case publicationDate = "publication_date"
-        case isRead = "is_read"
-        case isSavedToKnowledge = "is_saved_to_knowledge"
-        case summary
-        case shortSummary = "short_summary"
-        case summaryKind = "summary_kind"
-        case summaryVersion = "summary_version"
-        case structuredSummaryRaw = "structured_summary"
-        case longformArtifactRaw = "longform_artifact"
-        case feedPreview = "feed_preview"
-        case artifactType = "artifact_type"
-        case previewBullets = "preview_bullets"
-        case reasonToRead = "reason_to_read"
-        case bulletPoints = "bullet_points"
-        case quotes
-        case topics
-        case fullMarkdown = "full_markdown"
-        case bodyAvailable = "body_available"
-        case bodyKind = "body_kind"
-        case bodyFormat = "body_format"
-        case imageUrl = "image_url"
-        case thumbnailUrl = "thumbnail_url"
-        case newsArticleURL = "news_article_url"
-        case newsDiscussionURL = "news_discussion_url"
-        case newsKeyPoints = "news_key_points"
-        case newsSummary = "news_summary"
-        case detectedFeed = "detected_feed"
-        case canSubscribe = "can_subscribe"
-    }
-
-    init(api response: APIContentDetailResponse) throws {
+    init(api response: APIContentDetailResponse) {
         id = response.id
         contentType = response.contentType
         url = response.url
@@ -232,7 +185,6 @@ struct ContentDetail: Codable, Identifiable {
         summaryVersion = response.summaryVersion?.rawValue
         structuredSummaryRaw = response.structuredSummary
         longformArtifactRaw = response.longformArtifact
-        feedPreview = try Self.decode(LongformFeedPreview.self, from: response.feedPreview)
         artifactType = response.artifactType
         previewBullets = response.previewBullets
         reasonToRead = response.reasonToRead
@@ -253,9 +205,7 @@ struct ContentDetail: Codable, Identifiable {
         newsDiscussionURL = response.newsDiscussionUrl
         newsKeyPoints = response.newsKeyPoints
         newsSummary = response.newsSummary
-        detectedFeed = response.detectedFeed.map {
-            DetectedFeed(url: $0.url, type: $0.type, title: $0.title, format: $0.format)
-        }
+        detectedFeed = response.detectedFeed
         canSubscribe = response.canSubscribe
 
         decodedPayloads = ContentDetailDecodedPayloads(
@@ -297,7 +247,6 @@ struct ContentDetail: Codable, Identifiable {
         summaryVersion = nil
         structuredSummaryRaw = nil
         longformArtifactRaw = nil
-        feedPreview = nil
         artifactType = nil
         previewBullets = nil
         reasonToRead = nil
@@ -327,79 +276,6 @@ struct ContentDetail: Codable, Identifiable {
         )
     }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        id = try container.decode(Int.self, forKey: .id)
-        contentType = try container.decode(APIContentType.self, forKey: .contentType)
-        url = try container.decode(String.self, forKey: .url)
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-        displayTitle = Self.resolveDisplayTitle(
-            try container.decodeIfPresent(String.self, forKey: .displayTitle) ?? "",
-            title: title,
-            url: url
-        )
-        source = try container.decodeIfPresent(String.self, forKey: .source)
-        status = try container.decode(APIContentStatus.self, forKey: .status)
-        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
-        retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
-        metadata = try container.decodeIfPresent(
-            [String: AnyCodable].self,
-            forKey: .metadata
-        ) ?? [:]
-        createdAt = try container.decode(String.self, forKey: .createdAt)
-        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
-        processedAt = try container.decodeIfPresent(String.self, forKey: .processedAt)
-        checkedOutBy = try container.decodeIfPresent(String.self, forKey: .checkedOutBy)
-        checkedOutAt = try container.decodeIfPresent(String.self, forKey: .checkedOutAt)
-        publicationDate = try container.decodeIfPresent(String.self, forKey: .publicationDate)
-        isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead) ?? false
-        isSavedToKnowledge = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .isSavedToKnowledge
-        ) ?? false
-        summary = try container.decodeIfPresent(String.self, forKey: .summary)
-        shortSummary = try container.decodeIfPresent(String.self, forKey: .shortSummary)
-        summaryKind = try container.decodeIfPresent(String.self, forKey: .summaryKind)
-        summaryVersion = try container.decodeIfPresent(Int.self, forKey: .summaryVersion)
-        structuredSummaryRaw = try container.decodeIfPresent(
-            [String: AnyCodable].self,
-            forKey: .structuredSummaryRaw
-        )
-        longformArtifactRaw = try container.decodeIfPresent(
-            [String: AnyCodable].self,
-            forKey: .longformArtifactRaw
-        )
-        feedPreview = try container.decodeIfPresent(LongformFeedPreview.self, forKey: .feedPreview)
-        artifactType = try container.decodeIfPresent(String.self, forKey: .artifactType)
-        previewBullets = try container.decodeIfPresent([String].self, forKey: .previewBullets)
-        reasonToRead = try container.decodeIfPresent(String.self, forKey: .reasonToRead)
-        bulletPoints = try container.decodeIfPresent([BulletPoint].self, forKey: .bulletPoints) ?? []
-        quotes = try container.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
-        topics = try container.decodeIfPresent([String].self, forKey: .topics) ?? []
-        fullMarkdown = try container.decodeIfPresent(String.self, forKey: .fullMarkdown)
-        bodyAvailable = try container.decodeIfPresent(Bool.self, forKey: .bodyAvailable) ?? false
-        bodyKind = try container.decodeIfPresent(String.self, forKey: .bodyKind)
-        bodyFormat = try container.decodeIfPresent(String.self, forKey: .bodyFormat)
-        imageUrl = try container.decodeIfPresent(String.self, forKey: .imageUrl)
-        thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
-        newsArticleURL = try container.decodeIfPresent(String.self, forKey: .newsArticleURL)
-        newsDiscussionURL = try container.decodeIfPresent(String.self, forKey: .newsDiscussionURL)
-        newsKeyPoints = try container.decodeIfPresent([String].self, forKey: .newsKeyPoints)
-        newsSummary = try container.decodeIfPresent(String.self, forKey: .newsSummary)
-        detectedFeed = try container.decodeIfPresent(DetectedFeed.self, forKey: .detectedFeed)
-        canSubscribe = try container.decodeIfPresent(Bool.self, forKey: .canSubscribe)
-
-        decodedPayloads = ContentDetailDecodedPayloads(
-            contentType: contentType,
-            metadata: metadata,
-            summaryKind: summaryKind,
-            summaryVersion: summaryVersion,
-            structuredSummaryRaw: structuredSummaryRaw,
-            longformArtifactRaw: longformArtifactRaw
-        )
-    }
-
     private static func resolveDisplayTitle(
         _ displayTitle: String,
         title: String?,
@@ -412,22 +288,6 @@ struct ContentDetail: Codable, Identifiable {
             return title
         }
         return url
-    }
-
-    private static func decode<T: Decodable>(
-        _ type: T.Type,
-        from raw: [String: AnyCodable]?
-    ) throws -> T? {
-        try AnyCodableDecoding.decode(type, from: raw)
-    }
-
-    var apiSummaryKind: APISummaryKind? {
-        APISummaryKind(rawValue: resolvedSummaryKind ?? "")
-    }
-
-    var apiSummaryVersion: APISummaryVersion? {
-        guard let resolvedSummaryVersion else { return nil }
-        return APISummaryVersion(rawValue: resolvedSummaryVersion)
     }
 
     var primaryTimestamp: String {
@@ -570,11 +430,6 @@ struct ContentDetail: Codable, Identifiable {
             return Int(version)
         }
         return nil
-    }
-
-    /// Check if this content has an interleaved summary format
-    var hasInterleavedSummary: Bool {
-        resolvedSummaryKind == "long_interleaved"
     }
 
     var longformArtifact: LongformArtifactEnvelope? {

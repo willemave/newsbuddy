@@ -69,21 +69,11 @@ private extension CredentialStoreRead {
 /// self-healing fallback. This is what prevents a stale plaintext mirror from
 /// becoming authoritative again after the envelope exists.
 final class KeychainCredentialStorage: CredentialMaterialStoring {
-    private enum LegacyTokenSource: Equatable {
-        case accessGroup
-        case legacyKeychain
-    }
-
-    private struct SourcedLegacyToken {
-        let value: String
-        let source: LegacyTokenSource
-    }
-
-    private let keychain: KeychainManager
+    private let keychain: any AuthTokenStore
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(keychain: KeychainManager) {
+    init(keychain: any AuthTokenStore) {
         self.keychain = keychain
     }
 
@@ -145,10 +135,10 @@ final class KeychainCredentialStorage: CredentialMaterialStoring {
             }
 
             let mirrorAccess = nonEmpty(
-                keychain.mirroredTokenFromSharedDefaults(key: .accessToken)
+                keychain.mirroredCredentialToken(key: .accessToken)
             )
             let mirrorRefresh = nonEmpty(
-                keychain.mirroredTokenFromSharedDefaults(key: .refreshToken)
+                keychain.mirroredCredentialToken(key: .refreshToken)
             )
             let material = LegacyCredentialMaterial(
                 accessToken: mirrorAccess,
@@ -159,10 +149,10 @@ final class KeychainCredentialStorage: CredentialMaterialStoring {
         }
 
         let mirrorAccess = nonEmpty(
-            keychain.mirroredTokenFromSharedDefaults(key: .accessToken)
+            keychain.mirroredCredentialToken(key: .accessToken)
         )
         let mirrorRefresh = nonEmpty(
-            keychain.mirroredTokenFromSharedDefaults(key: .refreshToken)
+            keychain.mirroredCredentialToken(key: .refreshToken)
         )
         return .value(
             LegacyCredentialMaterial(
@@ -308,59 +298,25 @@ final class KeychainCredentialStorage: CredentialMaterialStoring {
 
     private func sourcedLegacyToken(
         for key: KeychainManager.KeychainKey
-    ) -> CredentialStoreRead<SourcedLegacyToken> {
-        if let accessGroup = keychain.currentAccessGroup() {
-            switch keychain.rawToken(account: key.rawValue, accessGroup: accessGroup) {
-            case .value(let value):
-                return .value(SourcedLegacyToken(value: value, source: .accessGroup))
-            case .unavailable:
-                return .unavailable
-            case .missing:
-                break
-            }
-        }
-        switch keychain.rawToken(account: key.rawValue, accessGroup: nil) {
-        case .value(let value):
-            return .value(SourcedLegacyToken(value: value, source: .legacyKeychain))
-        case .missing:
-            return .missing
-        case .unavailable:
-            return .unavailable
-        }
+    ) -> CredentialStoreRead<RawCredentialToken> {
+        keychain.rawCredentialToken(key: key)
     }
 
-    private func envelopeSource() -> LegacyTokenSource? {
-        let key = KeychainManager.KeychainKey.credentialEnvelope
-        if let accessGroup = keychain.currentAccessGroup() {
-            switch keychain.rawToken(account: key.rawValue, accessGroup: accessGroup) {
-            case .value:
-                return .accessGroup
-            case .missing:
-                break
-            case .unavailable:
-                return nil
-            }
-        }
-        if case .value = keychain.rawToken(account: key.rawValue, accessGroup: nil) {
-            return .legacyKeychain
-        }
-        return nil
+    private func envelopeSource() -> CredentialTokenSource? {
+        keychain.rawCredentialToken(key: .credentialEnvelope).value?.source
     }
 
     private func rawKeychainValue(
         for key: KeychainManager.KeychainKey
     ) -> KeychainManager.RawTokenRead {
-        if let accessGroup = keychain.currentAccessGroup() {
-            switch keychain.rawToken(account: key.rawValue, accessGroup: accessGroup) {
-            case .value(let value):
-                return .value(value)
-            case .unavailable:
-                return .unavailable
-            case .missing:
-                break
-            }
+        switch keychain.rawCredentialToken(key: key) {
+        case .value(let token):
+            return .value(token.value)
+        case .missing:
+            return .missing
+        case .unavailable:
+            return .unavailable
         }
-        return keychain.rawToken(account: key.rawValue, accessGroup: nil)
     }
 
     private func nonEmpty(_ value: String?) -> String? {
@@ -378,170 +334,5 @@ private extension KeychainManager.RawTokenRead {
     var isUnavailable: Bool {
         if case .unavailable = self { return true }
         return false
-    }
-}
-
-/// Transitional adapter for injected token stores. Production Keychain storage
-/// adds raw-keychain/mirror reconciliation; tests and older adapters still get
-/// the same envelope and refresh-token-first publication contract.
-final class TokenStoreCredentialStorage: CredentialMaterialStoring {
-    private let tokenStore: any AuthTokenStore
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-
-    init(tokenStore: any AuthTokenStore) {
-        self.tokenStore = tokenStore
-    }
-
-    func readEnvelope() -> CredentialStoreRead<CredentialEnvelope> {
-        guard let encoded = tokenStore.getToken(key: .credentialEnvelope) else {
-            return .missing
-        }
-        guard let data = Data(base64Encoded: encoded),
-              let envelope = try? decoder.decode(CredentialEnvelope.self, from: data),
-              envelope.tokens.isComplete else {
-            return .unavailable
-        }
-        return .value(envelope)
-    }
-
-    func readPendingPublication() -> CredentialStoreRead<CredentialPublication> {
-        guard let encoded = tokenStore.getToken(key: .credentialPublication) else {
-            return .missing
-        }
-        guard let data = Data(base64Encoded: encoded),
-              let publication = try? decoder.decode(
-                  CredentialPublication.self,
-                  from: data
-              ),
-              publication.target.tokens.isComplete else {
-            return .unavailable
-        }
-        return .value(publication)
-    }
-
-    func readLegacyMaterial() -> CredentialStoreRead<LegacyCredentialMaterial> {
-        let material = LegacyCredentialMaterial(
-            accessToken: nonEmpty(tokenStore.getToken(key: .accessToken)),
-            refreshToken: nonEmpty(tokenStore.getToken(key: .refreshToken))
-        )
-        return material.hasAnyToken ? .value(material) : .missing
-    }
-
-    func publishEnvelopeAndLegacy(_ envelope: CredentialEnvelope) throws {
-        guard envelope.tokens.isComplete else {
-            throw CredentialStorageError.writeFailed
-        }
-        guard case .missing = readPendingPublication() else {
-            throw CredentialStorageError.unavailable
-        }
-        let baseline = try credentialSnapshot()
-        let publication = CredentialPublication(
-            target: envelope,
-            baselineEnvelope: baseline.envelope,
-            baselineAccessToken: baseline.accessToken,
-            baselineRefreshToken: baseline.refreshToken,
-            baselineUserID: baseline.userID
-        )
-        guard let data = try? encoder.encode(publication),
-              tokenStore.saveTokenReportingStatus(
-                  data.base64EncodedString(),
-                  key: .credentialPublication
-              ) else {
-            throw CredentialStorageError.writeFailed
-        }
-        try completePendingPublication(publication)
-    }
-
-    func completePendingPublication(_ publication: CredentialPublication) throws {
-        guard case .value(let stagedPublication) = readPendingPublication(),
-              stagedPublication == publication else {
-            throw CredentialStorageError.unavailable
-        }
-        let snapshot = try credentialSnapshot()
-        if !publication.permits(snapshot) {
-            guard publication.isClearlySuperseded(by: snapshot),
-                  tokenStore.deleteTokenReportingStatus(
-                      key: .credentialPublication
-                  ) else {
-                throw CredentialStorageError.unavailable
-            }
-            return
-        }
-        guard let envelopeData = try? encoder.encode(publication.target) else {
-            throw CredentialStorageError.writeFailed
-        }
-
-        // Existing builds can observe these split values. Publish the one-time
-        // refresh credential first, then access, and make the envelope visible
-        // last as the atomic commit marker for new builds.
-        guard tokenStore.saveTokenReportingStatus(
-            publication.target.tokens.refreshToken,
-            key: .refreshToken
-        ), tokenStore.saveTokenReportingStatus(
-            publication.target.tokens.accessToken,
-            key: .accessToken
-        ), tokenStore.saveTokenReportingStatus(
-            String(publication.target.userID),
-            key: .userId
-        ), tokenStore.saveTokenReportingStatus(
-            envelopeData.base64EncodedString(),
-            key: .credentialEnvelope
-        ), tokenStore.deleteTokenReportingStatus(key: .credentialPublication) else {
-            throw CredentialStorageError.writeFailed
-        }
-    }
-
-    func publishLegacy(_ tokens: CredentialTokens) throws {
-        guard tokens.isComplete else {
-            throw CredentialStorageError.writeFailed
-        }
-        guard tokenStore.saveTokenReportingStatus(tokens.refreshToken, key: .refreshToken),
-              tokenStore.saveTokenReportingStatus(tokens.accessToken, key: .accessToken) else {
-            throw CredentialStorageError.writeFailed
-        }
-    }
-
-    func deleteCredentialMaterial() throws {
-        let keys: [KeychainManager.KeychainKey] = [
-            .credentialPublication,
-            .credentialEnvelope,
-            .accessToken,
-            .refreshToken,
-            .userId,
-            .refreshAttempt,
-        ]
-        let outcomes = keys.map { tokenStore.deleteTokenReportingStatus(key: $0) }
-        guard outcomes.allSatisfy({ $0 }) else {
-            throw CredentialStorageError.deleteFailed
-        }
-    }
-
-    private func nonEmpty(_ value: String?) -> String? {
-        guard let value, !value.isEmpty else { return nil }
-        return value
-    }
-
-    private func credentialSnapshot() throws -> CredentialPublicationSnapshot {
-        let envelopeRead = readEnvelope()
-        let legacyRead = readLegacyMaterial()
-        guard !envelopeRead.isUnavailable, !legacyRead.isUnavailable else {
-            throw CredentialStorageError.unavailable
-        }
-        return CredentialPublicationSnapshot(
-            envelope: envelopeRead.value,
-            accessToken: legacyRead.value?.accessToken,
-            refreshToken: legacyRead.value?.refreshToken,
-            userID: nonEmpty(tokenStore.getToken(key: .userId))
-        )
-    }
-}
-
-enum CredentialStorageFactory {
-    static func make(tokenStore: any AuthTokenStore) -> any CredentialMaterialStoring {
-        if let keychain = tokenStore as? KeychainManager {
-            return KeychainCredentialStorage(keychain: keychain)
-        }
-        return TokenStoreCredentialStorage(tokenStore: tokenStore)
     }
 }

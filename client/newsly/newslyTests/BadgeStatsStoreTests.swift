@@ -8,8 +8,7 @@ final class BadgeStatsStoreTests: XCTestCase {
         let scheduler = RecordingBadgeStatsRefreshScheduler()
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
-            scheduler: scheduler,
-            notificationCenter: NotificationCenter()
+            scheduler: scheduler
         )
 
         store.activate()
@@ -35,7 +34,6 @@ final class BadgeStatsStoreTests: XCTestCase {
     }
 
     func testSuspendStopsRefreshesAndActivateRefreshes() async {
-        let notificationCenter = NotificationCenter()
         let scheduler = RecordingBadgeStatsRefreshScheduler()
         let source = SequencedBadgeStatsSource(responses: [
             makeBadgeStats(article: 2, processing: 1),
@@ -43,8 +41,7 @@ final class BadgeStatsStoreTests: XCTestCase {
         ])
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
-            scheduler: scheduler,
-            notificationCenter: notificationCenter
+            scheduler: scheduler
         )
 
         store.activate()
@@ -70,8 +67,7 @@ final class BadgeStatsStoreTests: XCTestCase {
         let source = SequencedBadgeStatsSource(responses: [makeBadgeStats(article: 6)])
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
-            scheduler: RecordingBadgeStatsRefreshScheduler(),
-            notificationCenter: NotificationCenter()
+            scheduler: RecordingBadgeStatsRefreshScheduler()
         )
 
         await store.refreshStats()
@@ -82,33 +78,6 @@ final class BadgeStatsStoreTests: XCTestCase {
 
         XCTAssertTrue(didRefresh)
         XCTAssertEqual(store.longFormCount, 6)
-    }
-
-    func testAuthenticationResetClearsCountsAndScheduledRefresh() async {
-        let notificationCenter = NotificationCenter()
-        let scheduler = RecordingBadgeStatsRefreshScheduler()
-        let source = SequencedBadgeStatsSource(
-            responses: [makeBadgeStats(article: 3, podcast: 2, processing: 1)]
-        )
-        let store = BadgeStatsStore(
-            fetchStats: { try await source.fetch() },
-            scheduler: scheduler,
-            notificationCenter: notificationCenter
-        )
-
-        store.activate()
-        await store.refreshStats()
-        XCTAssertEqual(store.longFormCount, 5)
-        XCTAssertEqual(store.processingCount, 1)
-        XCTAssertTrue(scheduler.hasScheduledRefresh)
-
-        notificationCenter.post(name: .authDidLogOut, object: nil)
-        let didResetCounts = await waitForBadgeCondition {
-            store.longFormCount == 0 && store.processingCount == 0
-        }
-        XCTAssertTrue(didResetCounts)
-        XCTAssertEqual(store.longFormProcessingCount, 0)
-        XCTAssertFalse(scheduler.hasScheduledRefresh)
     }
 
     func testTransientFailureKeepsPollingWhileProcessingIsKnownActive() async {
@@ -122,8 +91,7 @@ final class BadgeStatsStoreTests: XCTestCase {
             fetchStats: {
                 try responses.removeFirst().get()
             },
-            scheduler: scheduler,
-            notificationCenter: NotificationCenter()
+            scheduler: scheduler
         )
 
         store.activate()
@@ -143,8 +111,7 @@ final class BadgeStatsStoreTests: XCTestCase {
     func testUnreadMutationHelpersClampAtZero() async {
         let store = BadgeStatsStore(
             fetchStats: { makeBadgeStats(article: 1, podcast: 1) },
-            scheduler: RecordingBadgeStatsRefreshScheduler(),
-            notificationCenter: NotificationCenter()
+            scheduler: RecordingBadgeStatsRefreshScheduler()
         )
         store.activate()
         await store.refreshStats()

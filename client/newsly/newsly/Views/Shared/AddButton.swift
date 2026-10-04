@@ -19,20 +19,7 @@ struct AddButton: View {
                 .background(Color.brandPrimary, in: Circle())
                 .appShadow(.floating)
         }
-        .glassButtonIfAvailable()
-    }
-}
-
-// MARK: - Glass Button Modifier
-
-extension View {
-    @ViewBuilder
-    func glassButtonIfAvailable() -> some View {
-        if #available(iOS 26, *) {
-            self.buttonStyle(.glassProminent)
-        } else {
-            self
-        }
+        .buttonStyle(.glassProminent)
     }
 }
 

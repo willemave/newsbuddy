@@ -69,7 +69,7 @@ struct CommunityDiscussionSummarySection: View {
     }
 
     private func discussionSummaryURL(summary: DiscussionSummary) -> URL? {
-        let rawURL = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL
+        let rawURL = summary.externalDiscussionUrl ?? discussion.discussionUrl ?? discussion.sourceUrl
         guard let rawURL else { return nil }
         return URL(string: rawURL)
     }

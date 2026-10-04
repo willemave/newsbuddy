@@ -11,13 +11,13 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
 
         coordinator.open(firstRoute)
 
-        XCTAssertEqual(coordinator.pendingRoute, firstRoute)
+        XCTAssertEqual(coordinator.queuedRoute, firstRoute)
 
         coordinator.clear(route: secondRoute)
-        XCTAssertEqual(coordinator.pendingRoute, firstRoute)
+        XCTAssertEqual(coordinator.queuedRoute, firstRoute)
 
         coordinator.clear(route: firstRoute)
-        XCTAssertNil(coordinator.pendingRoute)
+        XCTAssertNil(coordinator.queuedRoute)
     }
 
     func testConsecutiveRoutesAreDeliveredInOrderInsteadOfOverwritten() {
@@ -28,15 +28,17 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
         coordinator.open(firstRoute)
         coordinator.open(secondRoute)
 
-        XCTAssertEqual(coordinator.pendingRoute, firstRoute)
+        XCTAssertEqual(coordinator.queuedRoute, firstRoute)
         XCTAssertTrue(coordinator.beginPresentation(firstRoute))
         XCTAssertEqual(coordinator.presentedRoute, firstRoute)
-        XCTAssertNil(coordinator.pendingRoute)
+        XCTAssertEqual(coordinator.queuedRoute, secondRoute)
         XCTAssertTrue(coordinator.acknowledgePresented(firstRoute))
-        XCTAssertEqual(coordinator.pendingRoute, secondRoute)
+        XCTAssertNil(coordinator.presentedRoute)
+        XCTAssertEqual(coordinator.queuedRoute, secondRoute)
         XCTAssertTrue(coordinator.beginPresentation(secondRoute))
         XCTAssertTrue(coordinator.acknowledgePresented(secondRoute))
-        XCTAssertNil(coordinator.pendingRoute)
+        XCTAssertNil(coordinator.presentedRoute)
+        XCTAssertNil(coordinator.queuedRoute)
     }
 
     func testDuplicatePendingRouteIsCoalesced() {
@@ -47,7 +49,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
         coordinator.open(route)
         coordinator.clear(route: route)
 
-        XCTAssertNil(coordinator.pendingRoute)
+        XCTAssertNil(coordinator.queuedRoute)
     }
 
     func testAcknowledgementOnlyRemovesThePresentedHeadRoute() {
@@ -58,12 +60,15 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
         coordinator.open(secondRoute)
 
         XCTAssertFalse(coordinator.acknowledgePresented(secondRoute))
-        XCTAssertEqual(coordinator.pendingRoute, firstRoute)
+        XCTAssertEqual(coordinator.queuedRoute, firstRoute)
         XCTAssertTrue(coordinator.beginPresentation(firstRoute))
-        XCTAssertNil(coordinator.pendingRoute)
+        XCTAssertEqual(coordinator.presentedRoute, firstRoute)
+        XCTAssertEqual(coordinator.queuedRoute, secondRoute)
         XCTAssertFalse(coordinator.acknowledgePresented(secondRoute))
+        XCTAssertEqual(coordinator.presentedRoute, firstRoute)
         XCTAssertTrue(coordinator.acknowledgePresented(firstRoute))
-        XCTAssertEqual(coordinator.pendingRoute, secondRoute)
+        XCTAssertNil(coordinator.presentedRoute)
+        XCTAssertEqual(coordinator.queuedRoute, secondRoute)
     }
 
     func testOpeningRouteWhileAnotherIsPresentedQueuesWithoutReplacingIt() {
@@ -76,11 +81,11 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
         coordinator.open(queuedRoute)
 
         XCTAssertEqual(coordinator.presentedRoute, visibleRoute)
-        XCTAssertNil(coordinator.pendingRoute)
         XCTAssertEqual(coordinator.queuedRoute, queuedRoute)
 
         XCTAssertTrue(coordinator.acknowledgePresented(visibleRoute))
-        XCTAssertEqual(coordinator.pendingRoute, queuedRoute)
+        XCTAssertNil(coordinator.presentedRoute)
+        XCTAssertEqual(coordinator.queuedRoute, queuedRoute)
     }
 
     func testQueuedRouteCanExplicitlyReplaceABackgroundPresentation() {

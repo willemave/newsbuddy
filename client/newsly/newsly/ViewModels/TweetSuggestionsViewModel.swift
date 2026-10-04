@@ -48,8 +48,8 @@ final class TweetSuggestionsViewModel {
     var selectedProvider: ChatModelProvider = .openai
 
     // Voice dictation state
-    private(set) var voiceDictationAvailable = false
-    private(set) var voiceState: SpeechTranscriptionState = .idle
+    var voiceDictationAvailable: Bool { voiceInput.isAvailable }
+    var voiceState: SpeechTranscriptionState { voiceInput.state }
 
     var isRecording: Bool { voiceState == .recording }
     var isTranscribing: Bool { voiceState == .transcribing }
@@ -66,21 +66,13 @@ final class TweetSuggestionsViewModel {
     @ObservationIgnored
     private let twitterService: any TweetSharing
     @ObservationIgnored
-    private let voiceCoordinator: VoiceDictationCoordinator
-    @ObservationIgnored
-    private let refreshTranscriptionAvailability: () async -> Bool
-    @ObservationIgnored
-    private let setBackendTranscriptionAvailable: (Bool) -> Void
+    private let voiceInput: ChatVoiceInputController
     @ObservationIgnored
     private var contentId: Int?
     @ObservationIgnored
     private let tasks = TaskBag<TaskKey>()
     @ObservationIgnored
     private var lastCreativity: Int = 5
-    @ObservationIgnored
-    private var voiceRecordingStartedAt: Date?
-    @ObservationIgnored
-    private var pendingVoiceTranscript: String?
     @ObservationIgnored
     private var suggestionRequestGeneration = 0
 
@@ -90,22 +82,18 @@ final class TweetSuggestionsViewModel {
         contentService: any TweetSuggestionContentServicing,
         twitterService: any TweetSharing,
         transcriptionService: any SpeechTranscribing,
-        refreshTranscriptionAvailability: @escaping () async -> Bool,
-        setBackendTranscriptionAvailable: @escaping (Bool) -> Void
+        refreshTranscriptionAvailability: @escaping () async -> Bool
     ) {
         self.contentService = contentService
         self.twitterService = twitterService
-        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: transcriptionService)
-        self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
-        self.setBackendTranscriptionAvailable = setBackendTranscriptionAvailable
+        self.voiceInput = ChatVoiceInputController(
+            transcriptionService: transcriptionService,
+            refreshAvailability: refreshTranscriptionAvailability,
+            initiallyAvailable: false
+        )
     }
 
-    deinit {
-        tasks.cancelAll()
-        MainActor.assumeIsolated {
-            voiceCoordinator.cancel()
-        }
-    }
+    deinit { tasks.cancelAll() }
 
     /// Initialize with content ID and generate suggestions.
     func initialize(contentId: Int) async {
@@ -126,18 +114,12 @@ final class TweetSuggestionsViewModel {
     /// Check voice dictation availability. The shared credential session acquires
     /// or refreshes credentials as part of the availability request.
     private func checkAndRefreshVoiceDictation() async {
-        voiceDictationAvailable = await refreshTranscriptionAvailability()
+        await voiceInput.checkAndRefreshAvailability()
         if voiceDictationAvailable {
             logger.info("🎤 Voice dictation available")
         } else {
             logger.warning("🎤 Voice dictation unavailable because backend transcription is disabled")
-            setBackendTranscriptionAvailable(false)
         }
-    }
-
-    /// Check and update voice dictation availability (synchronous, for manual refresh).
-    func checkVoiceDictationAvailability() {
-        voiceDictationAvailable = isVoiceDictationAvailable
     }
 
     /// Called when creativity slider changes - debounces and auto-regenerates.
@@ -177,22 +159,6 @@ final class TweetSuggestionsViewModel {
         selectedSuggestionId = suggestion.id
     }
 
-    /// Share selected suggestion to Twitter.
-    func shareToTwitter() {
-        guard let selectedId = selectedSuggestionId,
-              let suggestion = suggestions.first(where: { $0.id == selectedId }) else {
-            return
-        }
-
-        twitterService.share(tweet: suggestion.text) { success in
-            if success {
-                logger.info("Successfully shared tweet")
-            } else {
-                logger.error("Failed to share tweet")
-            }
-        }
-    }
-
     /// Share a specific suggestion to Twitter.
     func shareToTwitter(suggestion: TweetSuggestion) {
         twitterService.share(tweet: suggestion.text) { success in
@@ -216,33 +182,16 @@ final class TweetSuggestionsViewModel {
     func startVoiceRecording() async {
         guard voiceState != .starting, !isRecording, !isTranscribing else { return }
         errorMessage = nil
-        let startedAt = Date()
-        voiceRecordingStartedAt = startedAt
         logger.info("Tweet suggestion voice recording start requested")
-        do {
-            try await voiceCoordinator.start(
-                onTranscriptFinal: { [weak self] transcript in
-                    self?.pendingVoiceTranscript = transcript
-                },
-                onError: { [weak self] message in
-                    self?.applyVoiceFailure(message)
-                },
-                onStateChange: { [weak self] state in
-                    self?.applyVoiceState(state)
-                },
-                onStopReason: { [weak self] reason in
-                    await self?.handleVoiceStopReason(reason)
-                }
-            )
-            logger.info(
-                "Tweet suggestion voice recording started | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
-            )
-        } catch {
-            logger.error(
-                "Failed to start recording | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
-            )
-            applyVoiceFailure(error.localizedDescription)
-        }
+        voiceInput.configure(
+            onTranscriptReady: { [weak self] transcript in
+                await self?.applyVoiceTranscriptAndRegenerate(transcript)
+            },
+            onError: { [weak self] message in
+                self?.errorMessage = message
+            }
+        )
+        await voiceInput.start()
     }
 
     func retryVoiceRecording() async {
@@ -253,42 +202,12 @@ final class TweetSuggestionsViewModel {
     /// Stop recording, transcribe, and auto-regenerate suggestions.
     func stopVoiceRecording() async {
         guard isRecording else { return }
-
-        let startedAt = Date()
-        applyVoiceState(.transcribing)
-        logger.info(
-            "Tweet suggestion voice recording stop requested | captureElapsedMs=\(self.voiceRecordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0)"
-        )
-
-        do {
-            let transcription = try await voiceCoordinator.stop()
-            pendingVoiceTranscript = nil
-            applyVoiceState(.idle)
-            logger.info(
-                "Tweet suggestion voice transcription completed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) transcriptChars=\(transcription.count)"
-            )
-
-            await applyVoiceTranscriptAndRegenerate(transcription)
-        } catch {
-            logger.error(
-                "Failed to transcribe | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
-            )
-            applyVoiceFailure(error.localizedDescription)
-        }
-        voiceRecordingStartedAt = nil
+        await voiceInput.stop()
     }
 
     /// Cancel voice recording.
     func cancelVoiceRecording() {
-        voiceCoordinator.cancel()
-        pendingVoiceTranscript = nil
-        applyVoiceState(.idle)
-        if let voiceRecordingStartedAt {
-            logger.info(
-                "Tweet suggestion voice recording cancelled | captureElapsedMs=\(Int(Date().timeIntervalSince(voiceRecordingStartedAt) * 1000))"
-            )
-        }
-        voiceRecordingStartedAt = nil
+        voiceInput.reset()
     }
 
     // MARK: - Helpers
@@ -307,49 +226,10 @@ final class TweetSuggestionsViewModel {
         }
     }
 
-    /// Check if voice dictation is available.
-    var isVoiceDictationAvailable: Bool {
-        voiceCoordinator.isAvailable
-    }
-
-    private func applyVoiceState(_ state: SpeechTranscriptionState) {
-        if case .failed(let message) = state {
-            applyVoiceFailure(message)
-        } else {
-            voiceState = state
-        }
-    }
-
-    private func applyVoiceFailure(_ message: String) {
-        voiceState = .failed(message)
-        errorMessage = message
-        pendingVoiceTranscript = nil
-        voiceRecordingStartedAt = nil
-    }
-
-    private func handleVoiceStopReason(_ reason: SpeechStopReason) async {
-        switch reason {
-        case .manual:
-            return
-        case .silenceAutoStop, .maximumDuration:
-            let transcript = pendingVoiceTranscript ?? ""
-            pendingVoiceTranscript = nil
-            applyVoiceState(.idle)
-            await applyVoiceTranscriptAndRegenerate(transcript)
-        case .noSpeechTimeout:
-            applyVoiceFailure("No speech detected. Try again.")
-        case .cancel:
-            pendingVoiceTranscript = nil
-            applyVoiceState(.idle)
-        case .failure:
-            break
-        }
-    }
-
     private func applyVoiceTranscriptAndRegenerate(_ transcript: String) async {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            applyVoiceFailure("I didn't catch that. Try again.")
+            errorMessage = "I didn't catch that. Try again."
             return
         }
         if tweakMessage.isEmpty {

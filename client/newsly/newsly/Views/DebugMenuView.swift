@@ -11,7 +11,7 @@ import UIKit
 #if DEBUG
 struct DebugMenuView: View {
     @Environment(\.dismiss) var dismiss
-    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(AuthenticationController.self) private var authViewModel
     @Environment(RootDependencyFactory.self) private var dependencyFactory
     @State private var showingTokenInput = false
     @State private var forceOnboardingAfterTokenSave = false
@@ -255,14 +255,10 @@ struct DebugMenuView: View {
         // Validate token with backend
         Task {
             do {
-                authViewModel.authState = .loading
-                let user = try await dependencyFactory.authenticationService.getCurrentUser()
-                await MainActor.run {
-                    authViewModel.authState = .authenticated(user)
-                }
+                try await authViewModel.signInWithStoredCredentials()
             } catch {
                 await MainActor.run {
-                    authViewModel.authState = .unauthenticated
+                    authViewModel.logout()
                     alertMessage = "Token is invalid or expired: \(error.localizedDescription)"
                     showingAlert = true
                 }
@@ -292,14 +288,12 @@ struct DebugMenuView: View {
         // Validate token with backend
         Task {
             do {
-                authViewModel.authState = .loading
-                try await CredentialSession.shared.publishLegacyCandidate(
-                    tokens: CredentialTokens(
+                let user = try await authViewModel.validateDebugTokens(
+                    CredentialTokens(
                         accessToken: normalizedAccessToken,
                         refreshToken: normalizedRefreshToken
                     )
                 )
-                let user = try await dependencyFactory.authenticationService.getCurrentUser()
 
                 if shouldResetOnboarding {
                     do {
@@ -320,15 +314,13 @@ struct DebugMenuView: View {
                     }
                 } else {
                     await MainActor.run {
-                        authViewModel.authState = .authenticated(user)
+                            authViewModel.commitDebugUser(user)
                         forceOnboardingAfterTokenSave = false
                     }
                 }
             } catch {
                 await MainActor.run {
-                    // Clear invalid token
-                    KeychainManager.shared.clearAll()
-                    authViewModel.authState = .unauthenticated
+                    authViewModel.logout()
                     alertMessage = "Token is invalid or expired. Please generate a new one."
                     showingAlert = true
                     forceOnboardingAfterTokenSave = false
@@ -373,7 +365,7 @@ struct DebugMenuView: View {
                     hasCompletedNewUserTutorial: false
                 )
                 if let previousUser {
-                    OnboardingStateStore.shared.clearProgress(userId: previousUser.id)
+                    dependencyFactory.onboardingStateStore.clearProgress(userId: previousUser.id)
                 }
                 await MainActor.run {
                     applyOnboardingDebugSession(user: session.user)
@@ -430,8 +422,8 @@ struct DebugMenuView: View {
 
     @MainActor
     private func applyOnboardingDebugSession(user: User) {
-        OnboardingStateStore.shared.clearProgress(userId: user.id)
-        authViewModel.authState = .authenticated(user)
+        dependencyFactory.onboardingStateStore.clearProgress(userId: user.id)
+        authViewModel.commitDebugUser(user)
     }
 
     @MainActor
@@ -445,15 +437,15 @@ struct DebugMenuView: View {
             if authViewModel.authState != fallbackState {
                 suppressNextAuthenticatedDismiss = true
             }
-            authViewModel.authState = .authenticated(fallbackUser)
+            authViewModel.commitDebugUser(fallbackUser)
         } else {
-            authViewModel.authState = .unauthenticated
+            authViewModel.logout()
         }
 
         if let authError = error as? AuthError {
             switch authError {
             case .serverError(let statusCode, _) where statusCode == 404:
-                alertMessage = "Debug onboarding is disabled on this server. Enable DEBUG=true or run with ENVIRONMENT=development."
+                alertMessage = "Debug onboarding is disabled on this server. Enable DEBUG=true."
             default:
                 alertMessage = "Failed to \(action): \(authError.localizedDescription)"
             }
@@ -464,17 +456,11 @@ struct DebugMenuView: View {
     }
 
     private func resetAuth() {
-        KeychainManager.shared.clearAll()
-        SharedContainer.userDefaults.removeObject(forKey: "accessToken")
-        SharedContainer.userDefaults.removeObject(forKey: "refreshToken")
         authViewModel.logout()
-        authViewModel.authState = .unauthenticated
         alertMessage = "Cleared tokens and signed out"
         showingAlert = true
     }
 }
-#endif
-
 struct TokenInputView: View {
     @Environment(\.dismiss) var dismiss
     @Binding var accessToken: String
@@ -488,14 +474,14 @@ struct TokenInputView: View {
                 Section(header: Text("Access Token (Required)")) {
                     TextEditor(text: $accessToken)
                         .frame(height: 100)
-                        .font(.listValue)
+                        .font(.modalSupporting.monospacedDigit())
                         .accessibilityLabel("Access token")
                 }
 
-                Section(header: Text("Refresh Token (Optional)")) {
+                Section(header: Text("Refresh Token (Required)")) {
                     TextEditor(text: $refreshToken)
                         .frame(height: 100)
-                        .font(.listValue)
+                        .font(.modalSupporting.monospacedDigit())
                         .accessibilityLabel("Refresh token")
                 }
 
@@ -508,9 +494,13 @@ struct TokenInputView: View {
                         onSave()
                     }
                     .frame(maxWidth: .infinity)
-                    .disabled(accessToken.isEmpty)
+                    .disabled(
+                        accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                 }
             }
+            .font(.modalBody)
             .navigationTitle("Enter Tokens")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -523,3 +513,4 @@ struct TokenInputView: View {
         }
     }
 }
+#endif

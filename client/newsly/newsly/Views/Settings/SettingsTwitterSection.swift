@@ -7,12 +7,12 @@ import SwiftUI
 
 struct SettingsTwitterSection: View {
     let authState: AuthState
-    let xConnection: XConnectionResponse?
+    let xConnection: APIXConnectionResponse?
 
     var body: some View {
         if case .authenticated = authState {
             VStack(alignment: .leading, spacing: 0) {
-                SectionHeader(title: "Connections")
+                SectionHeader(title: "Connections", font: .modalSupporting.weight(.semibold))
 
                 NavigationLink {
                     TwitterSettingsView()
@@ -49,7 +49,7 @@ struct SettingsTwitterSection: View {
 /// Sits at the top of Settings because the Connections section is below the fold.
 /// Only rendered while the X connection needs attention; there is nothing to dismiss.
 struct XConnectionAttentionBanner: View {
-    let connection: XConnectionResponse
+    let connection: APIXConnectionResponse
 
     var body: some View {
         NavigationLink {
@@ -64,16 +64,16 @@ struct XConnectionAttentionBanner: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("X bookmark sync paused")
-                        .font(.listTitle.weight(.semibold))
+                        .font(.modalBody.weight(.semibold))
                         .foregroundStyle(Color.onSurface)
 
                     Text(message)
-                        .font(.listCaption)
+                        .font(.modalSupporting)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text("\(connection.connectActionTitle) ›")
-                        .font(.listCaption.weight(.semibold))
+                        .font(.modalSupporting.weight(.semibold))
                         .foregroundStyle(Color.brandPrimary)
                         .padding(.top, 2)
                 }
@@ -97,9 +97,10 @@ struct XConnectionAttentionBanner: View {
 
     private var message: String {
         let action = "Reconnect X to bring in new bookmarks."
-        guard let lastSynced = ContentTimestampFormatter.detailMetaText(from: connection.lastSyncedAt) else {
+        guard let lastSyncedAt = connection.lastSyncedAt else {
             return action
         }
+        let lastSynced = ContentTimestampFormatter.detailMetaText(from: lastSyncedAt)
         return "Last synced \(lastSynced). \(action)"
     }
 }

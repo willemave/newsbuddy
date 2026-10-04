@@ -82,7 +82,7 @@ final class KnowledgeTimelineViewModel {
     let narrations: CustomNarrationLibraryViewModel
     private(set) var timeline: [KnowledgeTimelineItem] = []
     private(set) var groupedTimeline: [KnowledgeTimelineDayGroup] = []
-    private(set) var sourceDerivatives: [KnowledgeSourceKey: KnowledgeSourceDerivatives] = [:]
+    private(set) var sourceDerivatives: [KnowledgeSource: KnowledgeSourceDerivatives] = [:]
     private(set) var automaticReadsEnabled = false
     private(set) var lastValidatedAt: Date?
     private(set) var lastHandledActivationGeneration: UInt64?
@@ -251,7 +251,7 @@ final class KnowledgeTimelineViewModel {
             ? savedContent.contents.last?.knowledgeActivityDate
             : nil
         let chatOldest = chats.hasMoreSessions
-            ? chats.sessions.last.map { $0.lastActivityDate ?? $0.createdAt }
+            ? chats.sessions.last.map(\.lastActivityDate)
             : nil
         switch KnowledgePaginationSource.next(
             savedOldest: savedOldest,

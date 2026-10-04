@@ -8,15 +8,12 @@
 import SwiftUI
 
 struct SearchView: View {
-    private let readStateCache: ReadStateCache
     @State private var viewModel: SearchViewModel
     @State private var browserDestination: BrowserDestination?
 
     init(
-        readStateCache: ReadStateCache,
         viewModel: SearchViewModel
     ) {
-        self.readStateCache = readStateCache
         self._viewModel = State(initialValue: viewModel)
     }
 
@@ -176,7 +173,7 @@ struct SearchView: View {
 
     @ViewBuilder
     private var externalSectionPrompt: some View {
-        if viewModel.hasQuery && !viewModel.hasSubmittedSearch && !viewModel.isLoadingMixed {
+        if !viewModel.hasSubmittedSearch && !viewModel.isLoadingMixed {
             Section {
                 Button {
                     viewModel.submitSearch()
@@ -208,6 +205,7 @@ struct SearchView: View {
                     .foregroundStyle(Color.onSurfaceSecondary)
             } else {
                 ForEach(viewModel.feedResults) { result in
+                    let actionState = viewModel.actionState(for: .feed(result.id))
                     VStack(alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(result.title)
@@ -229,9 +227,9 @@ struct SearchView: View {
                             Button {
                                 Task { await viewModel.subscribeToFeed(result) }
                             } label: {
-                                if let completedLabel = viewModel.completedActionLabels["feed:\(result.id)"] {
+                                if let completedLabel = actionState.completedLabel {
                                     Label(completedLabel, systemImage: "checkmark")
-                                } else if viewModel.actionInFlightIds.contains("feed:\(result.id)") {
+                                } else if actionState.isInFlight {
                                     ProgressView()
                                 } else {
                                     Text("Subscribe")
@@ -240,13 +238,13 @@ struct SearchView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(
                                 result.isSubscribed
-                                    || viewModel.completedActionLabels["feed:\(result.id)"] != nil
-                                    || viewModel.actionInFlightIds.contains("feed:\(result.id)")
+                                    || actionState.completedLabel != nil
+                                    || actionState.isInFlight
                             )
                             .accessibilityIdentifier("search.feed.\(result.id).subscribe")
                         }
 
-                        if let actionError = viewModel.actionErrorMessages["feed:\(result.id)"] {
+                        if let actionError = actionState.errorMessage {
                             Text(actionError)
                                 .font(.listCaption)
                                 .foregroundStyle(Color.onSurfaceSecondary)
@@ -275,6 +273,10 @@ struct SearchView: View {
                     .foregroundStyle(Color.onSurfaceSecondary)
             } else {
                 ForEach(viewModel.podcastResults) { result in
+                    let episodeAction = viewModel.actionState(for: .episode(result.id))
+                    let feedAction = result.feedURL.map {
+                        viewModel.actionState(for: .podcastFeed($0))
+                    }
                     VStack(alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(result.title)
@@ -301,9 +303,9 @@ struct SearchView: View {
                             Button {
                                 Task { await viewModel.addPodcastEpisode(result) }
                             } label: {
-                                if let completedLabel = viewModel.completedActionLabels["episode:\(result.id)"] {
+                                if let completedLabel = episodeAction.completedLabel {
                                     Label(completedLabel, systemImage: "checkmark")
-                                } else if viewModel.actionInFlightIds.contains("episode:\(result.id)") {
+                                } else if episodeAction.isInFlight {
                                     ProgressView()
                                 } else {
                                     Text("Add Item")
@@ -311,8 +313,7 @@ struct SearchView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(
-                                viewModel.completedActionLabels["episode:\(result.id)"] != nil
-                                    || viewModel.actionInFlightIds.contains("episode:\(result.id)")
+                                episodeAction.completedLabel != nil || episodeAction.isInFlight
                             )
                             .accessibilityIdentifier("search.podcast.\(result.id).add")
 
@@ -320,11 +321,9 @@ struct SearchView: View {
                                 Button {
                                     Task { await viewModel.subscribeToPodcast(result) }
                                 } label: {
-                                    if let completedLabel = viewModel.completedActionLabels[
-                                        "podcast-feed:\(result.feedURL ?? "")"
-                                    ] {
+                                    if let completedLabel = feedAction?.completedLabel {
                                         Label(completedLabel, systemImage: "checkmark")
-                                    } else if viewModel.actionInFlightIds.contains("podcast-feed:\(result.feedURL ?? "")") {
+                                    } else if feedAction?.isInFlight == true {
                                         ProgressView()
                                     } else {
                                         Text("Subscribe")
@@ -332,21 +331,13 @@ struct SearchView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .disabled(
-                                    viewModel.completedActionLabels[
-                                        "podcast-feed:\(result.feedURL ?? "")"
-                                    ] != nil
-                                        || viewModel.actionInFlightIds.contains(
-                                            "podcast-feed:\(result.feedURL ?? "")"
-                                        )
+                                    feedAction?.completedLabel != nil || feedAction?.isInFlight == true
                                 )
                                 .accessibilityIdentifier("search.podcast.\(result.id).subscribe")
                             }
                         }
 
-                        if let actionError = viewModel.actionErrorMessages["episode:\(result.id)"]
-                            ?? result.feedURL.flatMap({
-                                viewModel.actionErrorMessages["podcast-feed:\($0)"]
-                            }) {
+                        if let actionError = episodeAction.errorMessage ?? feedAction?.errorMessage {
                             Text(actionError)
                                 .font(.listCaption)
                                 .foregroundStyle(Color.onSurfaceSecondary)

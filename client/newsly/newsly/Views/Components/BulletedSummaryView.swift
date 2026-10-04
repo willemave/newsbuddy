@@ -15,7 +15,6 @@ private enum BulletedSummaryDesign {
 
 struct BulletedSummaryView: View {
     let summary: BulletedSummary
-    var contentId: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: BulletedSummaryDesign.sectionSpacing) {

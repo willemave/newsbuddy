@@ -33,8 +33,7 @@ final class RootDependencyFactory {
         let cliLinkService: CLILinkService
         let localNotificationService: LocalNotificationService
         let sharedDefaults: UserDefaults
-        let makeVoiceDictationTranscriber: @MainActor () -> any SpeechTranscribing
-        let makeChatNavigationCoordinator: @MainActor () -> ChatNavigationCoordinator
+        let speechTranscriber: any SpeechTranscribing
     }
 
     @ObservationIgnored
@@ -45,7 +44,9 @@ final class RootDependencyFactory {
     }
 
     var authenticationService: AuthenticationService { dependencies.authenticationService }
+    var onboardingStateStore: OnboardingStateStore { dependencies.onboardingStateStore }
     var contentService: ContentService { dependencies.contentService }
+    var scraperConfigService: ScraperConfigService { dependencies.scraperConfigService }
     var xIntegrationService: XIntegrationService { dependencies.xIntegrationService }
     var feedbackService: FeedbackService { dependencies.feedbackService }
     var cliLinkService: CLILinkService { dependencies.cliLinkService }
@@ -55,8 +56,8 @@ final class RootDependencyFactory {
     var appSettings: AppSettings { dependencies.appSettings }
     var toastService: ToastService { dependencies.toastService }
 
-    func makeAuthenticationViewModel() -> AuthenticationViewModel {
-        AuthenticationViewModel(
+    func makeAuthenticationController() -> AuthenticationController {
+        AuthenticationController(
             authService: dependencies.authenticationService,
             tokenStore: dependencies.tokenStore,
             credentialSession: dependencies.credentialSession
@@ -67,16 +68,14 @@ final class RootDependencyFactory {
         let badgeStatsStore = BadgeStatsStore(
             fetchStats: { [apiClient = dependencies.apiClient] in
                 try await apiClient.request(APIEndpoints.badgeStats)
-            },
-            notificationCenter: NotificationCenter()
+            }
         )
         let completionRegistry = ChatMessageCompletionRegistry(
             statusService: dependencies.chatService
         )
         let activeChatSessionManager = ActiveChatSessionManager(
             messageCompletionRegistry: completionRegistry,
-            notificationService: dependencies.localNotificationService,
-            observesAuthenticationNotifications: false
+            notificationService: dependencies.localNotificationService
         )
         let readStateCache = ReadStateCache(
             contentReadRepository: ReadStatusRepository(client: dependencies.apiClient),
@@ -86,7 +85,7 @@ final class RootDependencyFactory {
             ),
             badgeStatsStore: badgeStatsStore
         )
-        let chatNavigation = dependencies.makeChatNavigationCoordinator()
+        let chatNavigation = ChatNavigationCoordinator()
         dependencies.localNotificationService.setChatRouteHandler {
             [weak chatNavigation] sessionID in
             chatNavigation?.open(ChatSessionRoute(sessionId: sessionID))
@@ -103,10 +102,6 @@ final class RootDependencyFactory {
             ),
             activeChatSessionManager: activeChatSessionManager,
             chatNavigation: chatNavigation,
-            readingStateStore: ReadingStateStore(
-                userId: user.id,
-                defaults: dependencies.sharedDefaults
-            ),
             readStateCache: readStateCache,
             tabCoordinator: makeTabCoordinator(userID: user.id),
             knowledgeViewModel: makeKnowledgeTimelineViewModel(
@@ -149,7 +144,7 @@ final class RootDependencyFactory {
 
     func makeDetailChatCoordinator(
         chatSessionManager: ActiveChatSessionManager,
-        chatRouter: any ChatRouteOpening
+        chatRouter: ChatNavigationCoordinator
     ) -> DetailChatCoordinator {
         DetailChatCoordinator(
             chatSessionManager: chatSessionManager,
@@ -181,7 +176,7 @@ final class RootDependencyFactory {
         OnboardingViewModel(
             user: user,
             service: dependencies.onboardingService,
-            dictationService: dependencies.makeVoiceDictationTranscriber(),
+            dictationService: dependencies.speechTranscriber,
             onboardingStateStore: dependencies.onboardingStateStore
         )
     }
@@ -189,18 +184,13 @@ final class RootDependencyFactory {
     func makeLearningDeckReaderViewModel(
         deck: LearningDeck,
         lifecycle: AppLifecycle,
-        activeSessionManager: ActiveChatSessionManager,
-        chatService: (any LearningDeckReaderChatServicing)? = nil
+        activeSessionManager: ActiveChatSessionManager
     ) -> LearningDeckReaderViewModel {
-        let resolvedChatService = chatService ?? dependencies.chatService
-        let messageCompletionRegistry = chatService.map {
-            ChatMessageCompletionRegistry(statusService: $0)
-        } ?? activeSessionManager.messageCompletionRegistry
         return LearningDeckReaderViewModel(
             lifecycle: lifecycle,
             deck: deck,
-            chatService: resolvedChatService,
-            messageCompletionRegistry: messageCompletionRegistry,
+            chatService: dependencies.chatService,
+            messageCompletionRegistry: activeSessionManager.messageCompletionRegistry,
             deckService: dependencies.learningDeckService,
             deckStatusRegistry: dependencies.learningDeckStatusRegistry
         )
@@ -208,7 +198,7 @@ final class RootDependencyFactory {
 
     func makeLearningDeckFocusRecorder() -> LearningDeckFocusRecorder {
         LearningDeckFocusRecorder(
-            transcriptionService: dependencies.makeVoiceDictationTranscriber(),
+            transcriptionService: dependencies.speechTranscriber,
             refreshTranscriptionAvailability: {
                 [openAIService = dependencies.openAIService] in
                 await openAIService.refreshTranscriptionAvailability()
@@ -220,14 +210,10 @@ final class RootDependencyFactory {
         TweetSuggestionsViewModel(
             contentService: dependencies.contentService,
             twitterService: dependencies.twitterShareService,
-            transcriptionService: dependencies.makeVoiceDictationTranscriber(),
+            transcriptionService: dependencies.speechTranscriber,
             refreshTranscriptionAvailability: {
                 [openAIService = dependencies.openAIService] in
                 await openAIService.refreshTranscriptionAvailability()
-            },
-            setBackendTranscriptionAvailable: {
-                [appSettings = dependencies.appSettings] isAvailable in
-                appSettings.setBackendTranscriptionAvailable(isAvailable)
             }
         )
     }
@@ -261,15 +247,11 @@ final class RootDependencyFactory {
         ChatDependencies(
             chatService: dependencies.chatService,
             messageCompletionRegistry: activeSessionManager.messageCompletionRegistry,
-            transcriptionService: dependencies.makeVoiceDictationTranscriber(),
+            transcriptionService: dependencies.speechTranscriber,
             activeSessionManager: activeSessionManager,
             refreshTranscriptionAvailability: {
                 [openAIService = dependencies.openAIService] in
                 await openAIService.refreshTranscriptionAvailability()
-            },
-            setBackendTranscriptionAvailable: {
-                [appSettings = dependencies.appSettings] isAvailable in
-                appSettings.setBackendTranscriptionAvailable(isAvailable)
             }
         )
     }
@@ -295,7 +277,7 @@ final class RootDependencyFactory {
             savedContent: makeContentListViewModel(readStateCache: readStateCache),
             chats: KnowledgeChatViewModel(
                 chatService: dependencies.chatService,
-                transcriptionService: dependencies.makeVoiceDictationTranscriber(),
+                transcriptionService: dependencies.speechTranscriber,
                 refreshTranscriptionAvailability: {
                     [openAIService = dependencies.openAIService] in
                     await openAIService.refreshTranscriptionAvailability()
@@ -309,7 +291,6 @@ final class RootDependencyFactory {
                 playbackService: dependencies.narrationPlaybackService,
                 audioService: dependencies.audioEpisodeService,
                 badgeStatsStore: badgeStatsStore,
-                toastPresenter: dependencies.toastService,
                 readStateCache: readStateCache
             )
         )

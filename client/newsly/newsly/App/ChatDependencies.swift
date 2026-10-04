@@ -11,6 +11,4 @@ struct ChatDependencies {
     var transcriptionService: any SpeechTranscribing
     var activeSessionManager: ActiveChatSessionManager
     var refreshTranscriptionAvailability: () async -> Bool
-    var setBackendTranscriptionAvailable: (Bool) -> Void
-
 }

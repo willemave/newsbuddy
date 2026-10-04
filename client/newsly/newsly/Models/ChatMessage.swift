@@ -7,80 +7,24 @@
 
 import Foundation
 
-extension APIChatMessageDisplayType {
-    var sortOrder: Int {
-        switch self {
-        case .process_summary: 0
-        case .message: 1
-        case .unknown(_): 2
-        }
-    }
-}
+typealias AssistantFeedOption = APIAssistantFeedOption
 
-struct AssistantFeedOption: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let siteURL: String
-    let feedURL: String
-    let feedType: String
-    let feedFormat: String
-    let description: String?
-    let rationale: String?
-    let evidenceURL: String?
-    let isSubscribed: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case title
-        case siteURL = "site_url"
-        case feedURL = "feed_url"
-        case feedType = "feed_type"
-        case feedFormat = "feed_format"
-        case description
-        case rationale
-        case evidenceURL = "evidence_url"
-        case isSubscribed = "is_subscribed"
-    }
-
-    init(
-        id: String,
-        title: String,
-        siteURL: String,
-        feedURL: String,
-        feedType: String,
-        feedFormat: String,
-        description: String? = nil,
-        rationale: String? = nil,
-        evidenceURL: String? = nil,
-        isSubscribed: Bool = false
-    ) {
-        self.id = id
-        self.title = title
-        self.siteURL = siteURL
-        self.feedURL = feedURL
-        self.feedType = feedType
-        self.feedFormat = feedFormat
-        self.description = description
-        self.rationale = rationale
-        self.evidenceURL = evidenceURL
-        self.isSubscribed = isSubscribed
-    }
-
-    init(api response: APIAssistantFeedOption) {
-        id = response.id
-        title = response.title
-        siteURL = response.siteUrl
-        feedURL = response.feedUrl
-        feedType = response.feedType.rawValue
-        feedFormat = response.feedFormat.rawValue
-        description = response.description
-        rationale = response.rationale
-        evidenceURL = response.evidenceUrl
-        isSubscribed = response.isSubscribed
+extension APIAssistantFeedOption: Identifiable, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.title == rhs.title
+            && lhs.siteUrl == rhs.siteUrl
+            && lhs.feedUrl == rhs.feedUrl
+            && lhs.feedType == rhs.feedType
+            && lhs.feedFormat == rhs.feedFormat
+            && lhs.description == rhs.description
+            && lhs.rationale == rhs.rationale
+            && lhs.evidenceUrl == rhs.evidenceUrl
+            && lhs.isSubscribed == rhs.isSubscribed
     }
 
     var previewURLString: String {
-        evidenceURL ?? siteURL
+        evidenceUrl ?? siteUrl
     }
 
     var subtitleText: String? {
@@ -94,20 +38,22 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
     }
 
     var hostLabel: String {
-        guard let url = URL(string: siteURL), let host = url.host else {
-            return siteURL
+        guard let url = URL(string: siteUrl), let host = url.host else {
+            return siteUrl
         }
         return host.replacingOccurrences(of: "www.", with: "")
     }
 
     var feedTypeLabel: String {
         switch feedType {
-        case "substack":
+        case .substack:
             return "Substack"
-        case "podcast_rss":
+        case .podcast_rss:
             return "Podcast"
-        case "atom":
-            return feedFormat == "atom" ? "Atom" : "RSS"
+        case .aggregator:
+            return "Aggregator"
+        case .atom:
+            return feedFormat == .atom ? "Atom" : "RSS"
         default:
             return "Feed"
         }
@@ -115,10 +61,14 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
 
     var systemIcon: String {
         switch feedType {
-        case "substack":
+        case .substack:
             return "newspaper"
-        case "podcast_rss":
+        case .podcast_rss:
             return "waveform"
+        case .aggregator:
+            return onboardingAggregatorOptions
+                .first { "aggregator://\($0.key)" == feedUrl }?
+                .icon ?? "square.stack.3d.up"
         default:
             return "dot.radiowaves.left.and.right"
         }
@@ -126,7 +76,7 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
 }
 
 /// Individual message in a chat session
-struct ChatMessage: Codable, Identifiable, Equatable {
+struct ChatMessage: Identifiable, Equatable {
     let id: Int
     let sourceMessageId: Int?
     let displayKey: String?
@@ -177,39 +127,8 @@ struct ChatMessage: Codable, Identifiable, Equatable {
             processLabel: response.processLabel,
             status: response.status,
             error: response.error,
-            feedOptions: response.feedOptions.map(AssistantFeedOption.init(api:))
+            feedOptions: response.feedOptions
         )
-    }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIChatMessage(from: decoder))
-    }
-
-    // Decoding goes through the generated APIChatMessage, which parses the wire
-    // timestamp string into Date. Encode must stay symmetric (Date back to the
-    // canonical string) — synthesized Encodable would emit a numeric timestamp.
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encodeIfPresent(sourceMessageId, forKey: .sourceMessageId)
-        try container.encodeIfPresent(displayKey, forKey: .displayKey)
-        try container.encode(role, forKey: .role)
-        try container.encode(ServerDate.format(timestamp), forKey: .timestamp)
-        try container.encode(content, forKey: .content)
-        try container.encode(displayType, forKey: .displayType)
-        try container.encodeIfPresent(processLabel, forKey: .processLabel)
-        try container.encodeIfPresent(status, forKey: .status)
-        try container.encodeIfPresent(error, forKey: .error)
-        try container.encode(feedOptions, forKey: .feedOptions)
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id, role, timestamp, content, status, error
-        case sourceMessageId = "source_message_id"
-        case displayKey = "display_key"
-        case displayType = "display_type"
-        case processLabel = "process_label"
-        case feedOptions = "feed_options"
     }
 
     var isProcessing: Bool {
@@ -218,6 +137,22 @@ struct ChatMessage: Codable, Identifiable, Equatable {
 
     var hasFailed: Bool {
         status == .failed
+    }
+
+    func failed(error: String) -> Self {
+        Self(
+            id: id,
+            sourceMessageId: sourceMessageId,
+            displayKey: displayKey,
+            role: role,
+            timestamp: timestamp,
+            content: content,
+            displayType: displayType,
+            processLabel: processLabel,
+            status: .failed,
+            error: error,
+            feedOptions: feedOptions
+        )
     }
 
     var formattedTime: String {

@@ -11,11 +11,12 @@ struct SectionHeader: View {
     let title: String
     var action: (() -> Void)? = nil
     var actionLabel: String? = nil
+    var font: Font = .sectionHeader
 
     var body: some View {
         HStack {
             Text(title.uppercased())
-                .font(.sectionHeader)
+                .font(font)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .tracking(0.5)
 

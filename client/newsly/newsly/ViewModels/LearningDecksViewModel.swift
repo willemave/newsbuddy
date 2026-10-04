@@ -10,16 +10,6 @@ private enum LearningDecksTaskKey: Hashable {
     case deckPolling(Int)
 }
 
-private enum LearningDeckMutation {
-    case upsert(LearningDeck)
-    case remove
-}
-
-private struct VersionedLearningDeckMutation {
-    let revision: Int
-    let mutation: LearningDeckMutation
-}
-
 @MainActor
 @Observable
 final class LearningDecksViewModel {
@@ -37,9 +27,7 @@ final class LearningDecksViewModel {
     @ObservationIgnored
     private let statusRegistry: LearningDeckStatusRegistry
     @ObservationIgnored
-    private var mutationRevision = 0
-    @ObservationIgnored
-    private var deckMutations: [Int: VersionedLearningDeckMutation] = [:]
+    private var mutationLog = AuthoritativeMutationLog<Int, LearningDeck>()
     @ObservationIgnored
     private var activeLoadRequestID: UUID?
 
@@ -66,7 +54,7 @@ final class LearningDecksViewModel {
     func load() async {
         guard activeLoadRequestID == nil else { return }
         let requestID = UUID()
-        let requestStartRevision = mutationRevision
+        let requestStartRevision = mutationLog.currentRevision
         activeLoadRequestID = requestID
         isLoading = true
         loadErrorMessage = nil
@@ -178,25 +166,6 @@ final class LearningDecksViewModel {
         }
     }
 
-    func toggleShare(for deck: LearningDeck) async -> String? {
-        await withDeckBusy(deck.id) {
-            do {
-                let shareResponse = deck.shareEnabled
-                    ? try await service.disableShare(deckId: deck.id)
-                    : try await service.enableShare(deckId: deck.id)
-                let latest = try await service.fetchDeck(id: deck.id)
-                upsert(latest)
-                errorMessage = nil
-                return shareResponse.shareURL
-            } catch where ClientFailure.classify(error) == .cancelled {
-                return nil
-            } catch {
-                errorMessage = error.localizedDescription
-                return nil
-            }
-        }
-    }
-
     /// Re-runs a deck from its original source and existing focus.
     func regenerate(_ deck: LearningDeck) async -> LearningDeck? {
         await withDeckBusy(deck.id) {
@@ -253,7 +222,7 @@ final class LearningDecksViewModel {
     }
 
     private func upsert(_ deck: LearningDeck, startsPolling: Bool = true) {
-        recordMutation(.upsert(deck), for: deck.id)
+        mutationLog.recordUpsert(deck, id: deck.id)
         if let index = decks.firstIndex(where: { $0.id == deck.id }) {
             decks[index] = deck
         } else {
@@ -265,46 +234,20 @@ final class LearningDecksViewModel {
     }
 
     private func removeDeck(id: Int) {
-        recordMutation(.remove, for: id)
+        mutationLog.recordRemoval(id: id)
         tasks.cancel(.deckPolling(id))
         decks.removeAll { $0.id == id }
-    }
-
-    private func recordMutation(_ mutation: LearningDeckMutation, for deckID: Int) {
-        mutationRevision &+= 1
-        deckMutations[deckID] = VersionedLearningDeckMutation(
-            revision: mutationRevision,
-            mutation: mutation
-        )
     }
 
     private func reconcileLoadedDecks(
         _ loadedDecks: [LearningDeck],
         requestStartRevision: Int
     ) -> [LearningDeck] {
-        var reconciled = loadedDecks
-        let loadedDeckIDs = Set(loadedDecks.map(\.id))
-        let mutations = deckMutations.sorted { $0.value.revision < $1.value.revision }
-
-        for (deckID, versionedMutation) in mutations {
-            switch versionedMutation.mutation {
-            case .upsert(let deck):
-                if versionedMutation.revision <= requestStartRevision,
-                   loadedDeckIDs.contains(deckID) {
-                    deckMutations.removeValue(forKey: deckID)
-                    continue
-                }
-                reconciled.removeAll { $0.id == deckID }
-                reconciled.insert(deck, at: 0)
-            case .remove:
-                reconciled.removeAll { $0.id == deckID }
-                if versionedMutation.revision <= requestStartRevision,
-                   !loadedDeckIDs.contains(deckID) {
-                    deckMutations.removeValue(forKey: deckID)
-                }
-            }
-        }
-        return reconciled
+        mutationLog.reconcile(
+            authoritative: loadedDecks,
+            requestStartRevision: requestStartRevision,
+            id: \.id
+        )
     }
 
     private func withDeckBusy<T>(

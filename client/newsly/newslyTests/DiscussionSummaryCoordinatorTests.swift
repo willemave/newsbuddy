@@ -57,7 +57,7 @@ final class DiscussionSummaryCoordinatorTests: XCTestCase {
         ],
         notableLinks: [],
         representativeComments: [],
-        externalDiscussionURL: nil,
+        externalDiscussionUrl: nil,
         generatedAt: nil
     )
 
@@ -65,16 +65,17 @@ final class DiscussionSummaryCoordinatorTests: XCTestCase {
         ContentDiscussion(
             contentId: 1,
             status: "completed",
-            mode: "comments",
+            mode: .comments,
             platform: "hackernews",
-            sourceURL: nil,
-            discussionURL: "https://news.ycombinator.com/item?id=1",
+            sourceUrl: nil,
+            discussionUrl: "https://news.ycombinator.com/item?id=1",
             fetchedAt: nil,
             errorMessage: nil,
             comments: [],
             discussionGroups: [],
             links: [],
             summary: summary,
+            commentCount: nil,
             stats: [:]
         )
     }
@@ -127,7 +128,8 @@ final class DiscussionSummaryCoordinatorTests: XCTestCase {
           "can_subscribe": false
         }
         """
-        return try JSONDecoder().decode(ContentDetail.self, from: Data(json.utf8))
+        let response = try decodeAPIContentDetailFixture(from: Data(json.utf8))
+        return ContentDetail(api: response)
     }
 }
 

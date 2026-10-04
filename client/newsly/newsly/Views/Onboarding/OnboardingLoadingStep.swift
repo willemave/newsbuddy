@@ -51,7 +51,7 @@ struct OnboardingLoadingStep: View {
                         }
                     }
                     .padding(20)
-                    .background(cardSurface(cornerRadius: 24))
+                    .background(cardSurface())
                     .animation(
                         AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel),
                         value: isFinalizingLanes

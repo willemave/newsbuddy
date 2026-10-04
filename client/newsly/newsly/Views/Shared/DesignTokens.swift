@@ -106,9 +106,6 @@ extension Color {
     // Adaptive accent (topic badges, knowledge saves) — neutral metadata, not a hue
     static var topicAccent: Color { Color.onSurfaceSecondary }
 
-    // Platform label color (news feed metadata)
-    static var platformLabel: Color { Color.onSurfaceSecondary }
-
     // Day section delimiter text (quiet grey)
     static var sectionDelimiter: Color { Color.onSurfaceTertiary }
 
@@ -181,6 +178,12 @@ extension Font {
     static let appCaption = Font.appSans(size: 12, relativeTo: .caption)
     static let appCaption2 = Font.appSans(size: 11, relativeTo: .caption2)
 
+    // Modal forms and actions need readable text without relying on reader scaling.
+    static let modalTitle = Font.appSerif(size: 22, relativeTo: .title2, weight: .semibold)
+    static let modalBody = Font.appSans(size: 17, relativeTo: .body)
+    static let modalSupporting = Font.appSans(size: 15, relativeTo: .subheadline)
+    static let modalCaption = Font.appSans(size: 13, relativeTo: .footnote)
+
     static let listTitle = Font.appSans(size: 17, relativeTo: .body)
     static let listSubtitle = Font.appSans(size: 15, relativeTo: .subheadline)
     static let listCaption = Font.appSans(size: 12, relativeTo: .caption)
@@ -198,7 +201,6 @@ extension Font {
 
     // Terracotta typography - title aliases use the serif family, body/labels use the sans family.
     static let terracottaDisplayLarge = Font.appSerif(size: 44, relativeTo: .largeTitle, weight: .semibold)
-    static let terracottaHeadlineLarge = Font.appSerif(size: 28, relativeTo: .title, weight: .semibold)
     static let terracottaHeadlineMedium = Font.appSerif(size: 22, relativeTo: .title2, weight: .semibold)
     static let terracottaHeadlineSmall = Font.appSerif(size: 18, relativeTo: .headline, weight: .semibold)
 
@@ -214,11 +216,6 @@ extension Font {
 
     // Reader typography — regular body copy.
     static let readerBody = Font.appSans(size: ReaderContentStyle.bodyFontSize, relativeTo: .body)
-        .weight(ReaderContentStyle.bodyFontWeight)
-    static let readerSummaryBody = Font.appSans(
-        size: ReaderContentStyle.summaryBodyFontSize,
-        relativeTo: .subheadline
-    )
         .weight(ReaderContentStyle.bodyFontWeight)
 }
 
@@ -243,18 +240,6 @@ extension UIFont {
         return UIFont(descriptor: descriptor, size: size)
     }
 
-    static func appSans(
-        textStyle: UIFont.TextStyle,
-        weight: UIFont.Weight = .regular,
-        compatibleWith traitCollection: UITraitCollection? = nil
-    ) -> UIFont {
-        let baseFont = appSans(size: basePointSize(for: textStyle), weight: weight)
-        return UIFontMetrics(forTextStyle: textStyle).scaledFont(
-            for: baseFont,
-            compatibleWith: traitCollection
-        )
-    }
-
     static var appReaderBody: UIFont {
         UIFont.appSans(
             size: ReaderContentStyle.bodyFontSize,
@@ -262,28 +247,12 @@ extension UIFont {
         )
     }
 
-    private static func basePointSize(for textStyle: UIFont.TextStyle) -> CGFloat {
-        switch textStyle {
-        case .largeTitle: return 34
-        case .title1: return 28
-        case .title2: return 22
-        case .title3: return 20
-        case .headline, .body: return 17
-        case .callout: return 16
-        case .subheadline: return 15
-        case .footnote: return 13
-        case .caption1: return 12
-        case .caption2: return 11
-        default: return 17
-        }
-    }
 }
 
 enum ReaderContentStyle {
     static let bodyFontWeight: Font.Weight = .regular
     static let uiBodyFontWeight: UIFont.Weight = .regular
     static let bodyFontSize: CGFloat = 15
-    static let summaryBodyFontSize: CGFloat = 14
 }
 
 // MARK: - Corner Radius
@@ -365,20 +334,11 @@ enum ContentTextSize: Int, CaseIterable {
 enum Spacing {
     /// Single horizontal content margin used for screen-level gutters.
     static let appHorizontalMargin: CGFloat = 20
-    /// Backward-compatible screen gutter alias. Prefer `appHorizontalMargin` in new code.
-    static let screenHorizontal: CGFloat = appHorizontalMargin
-    /// Backward-compatible Fast Read gutter alias. Prefer `appHorizontalMargin` in new code.
-    static let fastReadHorizontal: CGFloat = appHorizontalMargin
-    /// Backward-compatible reader gutter alias. Prefer `appHorizontalMargin` in new code.
-    static let readerHorizontal: CGFloat = appHorizontalMargin
-    /// Backward-compatible chat gutter alias. Prefer `appHorizontalMargin` in new code.
-    static let chatHorizontal: CGFloat = appHorizontalMargin
     static let rowHorizontal: CGFloat = 12
     static let rowVertical: CGFloat = 12
     static let sectionTop: CGFloat = 24
     static let sectionBottom: CGFloat = 8
     static let iconSize: CGFloat = 28
-    static let smallIcon: CGFloat = 20
 
     /// Leading inset for row dividers (aligns with text after icon + spacing).
     static let rowDividerInset: CGFloat = rowHorizontal + iconSize + 12
@@ -412,8 +372,6 @@ enum AppMotion {
     static let voiceLevelPulse = Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true)
     static let typingDotPulse = Animation.easeInOut(duration: 0.4).repeatForever(autoreverses: true)
     static let chatStatusPulse = Animation.easeInOut(duration: 1.5).repeatForever(autoreverses: true)
-    static let landingFloat = Animation.easeInOut(duration: 6).repeatForever(autoreverses: true)
-    static let laneShimmer = Animation.linear(duration: 1.6).repeatForever(autoreverses: false)
     static let lanePulse = Animation.easeOut(duration: 1.4).repeatForever(autoreverses: false)
 
     static func respectingReduceMotion(_ reduceMotion: Bool, _ animation: Animation) -> Animation {
@@ -452,16 +410,10 @@ struct ShadowStyle {
 
     static let subtle = ShadowStyle(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
     static let card = ShadowStyle(color: .black.opacity(0.05), radius: 16, x: 0, y: 10)
-    static let elevated = ShadowStyle(color: .black.opacity(0.10), radius: 18, x: 0, y: 12)
     static let floating = ShadowStyle(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
     static let none = ShadowStyle(color: .clear, radius: 0)
     static let overlayText = ShadowStyle(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
     static let strongOverlayText = ShadowStyle(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
-
-    static let editorialCard = ShadowStyle(
-        primary: ShadowLayer(color: .black.opacity(0.04), radius: 2, x: 0, y: 1),
-        secondary: ShadowLayer(color: .black.opacity(0.06), radius: 24, x: 0, y: 8)
-    )
 
     static let onboardingMic = ShadowStyle(
         primary: ShadowLayer(color: Color.onboardingText.opacity(0.14), radius: 12, x: 10, y: 10),

@@ -53,8 +53,6 @@ private final class BadgeStatsRefreshScheduler: BadgeStatsRefreshScheduling {
 final class BadgeStatsStore {
     typealias FetchStats = @MainActor () async throws -> APIBadgeStatsResponse
 
-    static let shared = BadgeStatsStore()
-
     private var articleCount = 0
     private var podcastCount = 0
     private(set) var processingCount = 0
@@ -69,41 +67,23 @@ final class BadgeStatsStore {
     @ObservationIgnored
     private let scheduler: any BadgeStatsRefreshScheduling
     @ObservationIgnored
-    private let notificationCenter: NotificationCenter
-    @ObservationIgnored
     private let refreshInterval: TimeInterval
     @ObservationIgnored
     private var refreshTask: Task<Void, Never>?
     @ObservationIgnored
     private var refreshGeneration = 0
     @ObservationIgnored
-    private var authenticationObservers: [NSObjectProtocol] = []
-    @ObservationIgnored
     private var isRefreshSuspended: Bool
 
     init(
-        fetchStats: @escaping FetchStats = {
-            let response: APIBadgeStatsResponse = try await APIClient.shared.request(
-                APIEndpoints.badgeStats
-            )
-            return response
-        },
+        fetchStats: @escaping FetchStats,
         scheduler: (any BadgeStatsRefreshScheduling)? = nil,
-        notificationCenter: NotificationCenter = .default,
         refreshInterval: TimeInterval = 5
     ) {
         self.fetchStats = fetchStats
         self.scheduler = scheduler ?? BadgeStatsRefreshScheduler()
-        self.notificationCenter = notificationCenter
         self.refreshInterval = refreshInterval
         self.isRefreshSuspended = true
-        installAuthenticationObservers()
-    }
-
-    deinit {
-        for observer in authenticationObservers {
-            notificationCenter.removeObserver(observer)
-        }
     }
 
     func activate() {
@@ -146,15 +126,6 @@ final class BadgeStatsStore {
             scheduler.cancelRefresh()
             cancelRefreshTask()
         }
-    }
-
-    private func stopAndReset() {
-        scheduler.cancelRefresh()
-        cancelRefreshTask()
-        if articleCount != 0 { articleCount = 0 }
-        if podcastCount != 0 { podcastCount = 0 }
-        if processingCount != 0 { processingCount = 0 }
-        if longFormProcessingCount != 0 { longFormProcessingCount = 0 }
     }
 
     private func applyUnreadCounts(_ response: APIUnreadCountsResponse) {
@@ -219,18 +190,6 @@ final class BadgeStatsStore {
         scheduler.scheduleRefresh(after: refreshInterval) { [weak self] in
             await self?.refreshStats()
         }
-    }
-
-    private func installAuthenticationObservers() {
-        authenticationObservers.append(notificationCenter.addObserver(
-            forName: .authDidLogOut,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.stopAndReset()
-            }
-        })
     }
 
     private func cancelRefreshTask() {

@@ -5,7 +5,7 @@ import SwiftUI
 /// It is reachable only from an explicit DEBUG E2E launch argument.
 struct E2EVisualStateView: View {
     let state: String
-    let authViewModel: AuthenticationViewModel
+    let authViewModel: AuthenticationController
 
     var body: some View {
         switch state {
@@ -20,6 +20,8 @@ struct E2EVisualStateView: View {
             OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .audio)) { _ in }
         case "onboarding-loading":
             OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .loading)) { _ in }
+        case "briefing-dig-markdown":
+            E2EBriefingDigMarkdownVisualState()
         case "briefing-loading":
             BriefingLoadingView()
         case "briefing-header":
@@ -44,6 +46,12 @@ struct E2EVisualStateView: View {
             E2EBriefingPlayerVisualState()
         case "knowledge-processing":
             E2EKnowledgeProcessingVisualState()
+        case "knowledge-source-activity":
+            E2EKnowledgeSourceActivityVisualState()
+        case "learning-deck-create":
+            E2ELearningDeckCreateVisualState()
+        case "modal-share", "modal-download", "modal-knowledge-actions", "modal-feedback", "modal-filters":
+            E2EMiniSheetVisualState(state: state)
         case "briefing-tier-error":
             E2EBriefingTierErrorVisualState()
         case "briefing-tier-empty":
@@ -123,6 +131,7 @@ struct E2EVisualStateView: View {
         let viewModel = OnboardingViewModel(
             user: user,
             service: E2EVisualOnboardingService(),
+            dictationService: E2EScriptedSpeechTranscriber.shared,
             onboardingStateStore: OnboardingStateStore(defaults: defaults)
         )
         viewModel.step = step
@@ -132,6 +141,88 @@ struct E2EVisualStateView: View {
             viewModel.audioDurationSeconds = 2
         }
         return viewModel
+    }
+}
+
+private struct E2ELearningDeckCreateVisualState: View {
+    @State private var isPresented = true
+    @State private var focusRecorder = LearningDeckFocusRecorder(
+        transcriptionService: E2EScriptedSpeechTranscriber(
+            scenario: .success,
+            transcript: "Focus on the practical tradeoffs"
+        ),
+        refreshTranscriptionAvailability: { true }
+    )
+
+    var body: some View {
+        VStack {
+            EditorialMastheadHeader(
+                title: "Knowledge",
+                titleAccessibilityIdentifier: "knowledge.screen"
+            )
+            Button("Create Learning Deck") { isPresented = true }
+            Spacer()
+        }
+        .background(Color.surfacePrimary)
+        .sheet(isPresented: $isPresented) {
+            LearningDeckCreateSheet(
+                sourceTitle: "Jev’s case: useful bounded decisions, not a universal AI foundation",
+                isSubmitting: false,
+                focusRecorder: focusRecorder,
+                onCreate: { _ in true }
+            )
+        }
+    }
+}
+
+private struct E2EMiniSheetVisualState: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let state: String
+    @State private var isPresented = true
+    @State private var selectedContentType = "all"
+    @State private var selectedDate = ""
+
+    var body: some View {
+        Button("Open modal") { isPresented = true }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.surfacePrimary)
+            .sheet(isPresented: $isPresented) {
+                Group {
+                    switch state {
+                    case "modal-share":
+                        DetailShareSheet(
+                            onClose: { isPresented = false },
+                            onQueueShare: { _ in },
+                            onOpenTweetSuggestions: {}
+                        )
+                    case "modal-download":
+                        DetailDownloadSheet(
+                            onClose: { isPresented = false },
+                            onDownload: { _ in }
+                        )
+                    case "modal-feedback":
+                        SettingsFeedbackSheet(onSubmit: { _ in })
+                    case "modal-filters":
+                        FilterSheet(
+                            selectedContentType: $selectedContentType,
+                            selectedDate: $selectedDate,
+                            contentTypes: ["article", "podcast"],
+                            availableDates: ["2026-10-04", "2026-10-03"]
+                        )
+                    default:
+                        DetailKnowledgeActionsSheet(
+                            actionError: nil,
+                            isStartingAction: false,
+                            onClose: { isPresented = false },
+                            onStartChat: {},
+                            onCreateLearningDeck: {}
+                        )
+                    }
+                }
+                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.hidden)
+            }
     }
 }
 
@@ -171,7 +262,7 @@ private struct E2EKnowledgeProcessingVisualState: View {
 }
 
 private struct E2EDetailActionBarVisualState: View {
-    private static let content = try! ContentDetail(
+    private static let content = ContentDetail(
         api: APIContentDetailResponse(
             id: 999_902,
             contentType: .podcast,
@@ -472,4 +563,37 @@ private struct E2EBriefingTierErrorVisualState: View {
     }
 }
 
+
+/// Uses the same native renderer and citation transport as the Dig sheet without provider calls.
+private struct E2EBriefingDigMarkdownVisualState: View {
+    @State private var citationOpened = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    SelectableMarkdownView(
+                        markdown: BriefingDigViewModel.citationLinkedMarkdown(
+                            "**A useful finding** has a selectable explanation and a source [1].\n\nAn [ordinary web link](https://example.com) keeps its native action.\n\n- First detail\n- Second detail"
+                        ),
+                        adjustsFontForContentSizeCategory: true,
+                        linkAction: { url in
+                            guard url.scheme == "digsource" else { return nil }
+                            return UIAction { _ in citationOpened = true }
+                        }
+                    )
+                    .accessibilityIdentifier("briefing.dig_summary")
+                    if citationOpened {
+                        Text("Source 1 opened")
+                            .accessibilityIdentifier("briefing.dig_source_opened")
+                    }
+                }
+                .padding(Spacing.appHorizontalMargin)
+            }
+            .background(Color.surfacePrimary)
+            .navigationTitle("Dig Deeper")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
 #endif

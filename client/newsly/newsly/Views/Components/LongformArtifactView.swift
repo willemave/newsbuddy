@@ -9,12 +9,10 @@ import SwiftUI
 
 private enum ArtifactDesign {
     static let sectionSpacing: CGFloat = 20
-    static let rowSpacing: CGFloat = 10
 }
 
 struct LongformArtifactView: View {
     let artifact: LongformArtifactEnvelope
-    var contentId: Int?
 
     private var accent: Color {
         artifact.detailAccent

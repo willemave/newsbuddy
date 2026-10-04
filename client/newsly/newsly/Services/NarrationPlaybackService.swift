@@ -56,7 +56,6 @@ final class NarrationPlaybackProgress {
 @MainActor
 @Observable
 final class NarrationPlaybackService {
-    static let shared = NarrationPlaybackService(nowPlayingController: .shared)
     nonisolated static let defaultPlaybackRate: Float = 1.0
     nonisolated static let longPressPlaybackRate: Float = 1.5
 
@@ -72,6 +71,9 @@ final class NarrationPlaybackService {
 
     @ObservationIgnored
     private let nowPlayingController: NarrationNowPlayingController?
+
+    @ObservationIgnored
+    private let markPlaybackFinished: @MainActor (Int) async throws -> Void
 
     @ObservationIgnored
     private var streamPlayer: AVPlayer?
@@ -134,10 +136,12 @@ final class NarrationPlaybackService {
 
     init(
         preferenceStore: NarrationPlaybackPreferenceStore = .shared,
-        nowPlayingController: NarrationNowPlayingController? = nil
+        nowPlayingController: NarrationNowPlayingController? = nil,
+        markPlaybackFinished: @escaping @MainActor (Int) async throws -> Void = { _ in }
     ) {
         self.preferenceStore = preferenceStore
         self.nowPlayingController = nowPlayingController
+        self.markPlaybackFinished = markPlaybackFinished
         self.playbackRate = preferenceStore.preferredPlaybackRate()
         if nowPlayingController != nil {
             observeAudioSession()
@@ -667,7 +671,7 @@ final class NarrationPlaybackService {
     private func recordPlaybackFinished(for target: NarrationTarget?) async {
         guard let target, case let .audioEpisode(episodeID) = target else { return }
         do {
-            try await AudioEpisodeService.shared.markPlaybackFinished(id: episodeID)
+            try await markPlaybackFinished(episodeID)
         } catch {
             narrationPlaybackLogger.error(
                 "Playback completion failed | episodeId=\(episodeID) error=\(error.localizedDescription, privacy: .private)"

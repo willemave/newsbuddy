@@ -183,8 +183,7 @@ final class TweetSuggestionsVoiceTests: XCTestCase {
             contentService: content,
             twitterService: TweetSharingStub(),
             transcriptionService: speech,
-            refreshTranscriptionAvailability: { true },
-            setBackendTranscriptionAvailable: { _ in }
+            refreshTranscriptionAvailability: { true }
         )
     }
 
@@ -206,16 +205,6 @@ final class TweetSuggestionsVoiceTests: XCTestCase {
         XCTAssertFalse(speech.hasActiveSession)
     }
 
-    private func waitUntil(
-        attempts: Int = 100,
-        condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        for _ in 0..<attempts {
-            if condition() { return true }
-            await Task.yield()
-        }
-        return condition()
-    }
 }
 
 private final class DeferredTweetContentService: TweetSuggestionContentServicing {
@@ -234,9 +223,9 @@ private final class DeferredTweetContentService: TweetSuggestionContentServicing
     ) async throws -> TweetSuggestionsResponse {
         _ = provider
         let requestIndex = messages.count
-        messages.append(message)
         return try await withCheckedThrowingContinuation { continuation in
             continuations[requestIndex] = continuation
+            messages.append(message)
         }
     }
 

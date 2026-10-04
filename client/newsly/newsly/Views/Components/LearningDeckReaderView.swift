@@ -20,19 +20,16 @@ struct LearningDeckReaderView: View {
     private let deck: LearningDeck
     private let viewerURL: URL?
     private let onClose: (() -> Void)?
-    private let chatService: (any LearningDeckReaderChatServicing)?
 
     @MainActor
     init(
         deck: LearningDeck,
         viewerURL: URL?,
-        onClose: (() -> Void)? = nil,
-        chatService: (any LearningDeckReaderChatServicing)? = nil
+        onClose: (() -> Void)? = nil
     ) {
         self.deck = deck
         self.viewerURL = viewerURL
         self.onClose = onClose
-        self.chatService = chatService
     }
 
     var body: some View {
@@ -42,8 +39,7 @@ struct LearningDeckReaderView: View {
             lifecycle: lifecycle,
             activeSessionManager: activeSessionManager,
             dependencyFactory: dependencyFactory,
-            onClose: onClose,
-            chatService: chatService
+            onClose: onClose
         )
     }
 }
@@ -71,8 +67,7 @@ private struct LearningDeckReaderContent: View {
         lifecycle: AppLifecycle,
         activeSessionManager: ActiveChatSessionManager,
         dependencyFactory: RootDependencyFactory,
-        onClose: (() -> Void)? = nil,
-        chatService: (any LearningDeckReaderChatServicing)? = nil
+        onClose: (() -> Void)? = nil
     ) {
         self.deck = deck
         self.viewerURL = viewerURL
@@ -83,8 +78,7 @@ private struct LearningDeckReaderContent: View {
             initialValue: dependencyFactory.makeLearningDeckReaderViewModel(
                 deck: deck,
                 lifecycle: lifecycle,
-                activeSessionManager: activeSessionManager,
-                chatService: chatService
+                activeSessionManager: activeSessionManager
             )
         )
         _feedOptionActionModel = State(

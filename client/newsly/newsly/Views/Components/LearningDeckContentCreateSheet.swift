@@ -17,7 +17,6 @@ struct LearningDeckContentCreateSheet: View {
     var body: some View {
         LearningDeckCreateSheet(
             sourceTitle: content.displayTitle,
-            requiresURL: false,
             isSubmitting: isSubmitting,
             focusRecorder: focusRecorder,
             onCreate: createDeck
@@ -25,7 +24,7 @@ struct LearningDeckContentCreateSheet: View {
     }
 
     @MainActor
-    private func createDeck(url _: String?, interestsPrompt: String?) async -> Bool {
+    private func createDeck(interestsPrompt: String?) async -> Bool {
         guard !isSubmitting else { return false }
 
         isSubmitting = true

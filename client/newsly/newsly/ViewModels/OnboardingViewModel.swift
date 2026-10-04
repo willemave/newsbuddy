@@ -34,9 +34,28 @@ enum OnboardingStep: Int, Codable {
     case audio = 2
     case loading = 3
     case suggestions = 4
-    case fastNews = 5
     case aggregators = 6
     case reddit = 7
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(Int.self)
+        if rawValue == 5 {
+            self = .aggregators
+        } else if let step = Self(rawValue: rawValue) {
+            self = step
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown onboarding step \(rawValue)"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 struct OnboardingTopicOption: Hashable, Identifiable {
@@ -178,8 +197,6 @@ final class OnboardingViewModel {
 
     var audioState: OnboardingAudioState = .idle
     var audioDurationSeconds: Int = 0
-    var hasMicPermissionDenied = false
-    var hasDictationError = false
 
     var discoveryLanes: [OnboardingDiscoveryLaneStatus] = []
     var discoveryRunId: Int?
@@ -216,14 +233,13 @@ final class OnboardingViewModel {
     init(
         user: User,
         service: any OnboardingServicing,
-        dictationService: (any SpeechTranscribing)? = nil,
+        dictationService: any SpeechTranscribing,
         onboardingStateStore: OnboardingStateStore
     ) {
         self.user = user
         self.service = service
-        let resolvedDictationService = dictationService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
         self.voiceCoordinator = VoiceDictationCoordinator(
-            transcriber: resolvedDictationService,
+            transcriber: dictationService,
             deadlines: Self.voiceRecordingDeadlines
         )
         self.onboardingStateStore = onboardingStateStore
@@ -352,8 +368,6 @@ final class OnboardingViewModel {
         guard audioState == .idle || audioState == .failed else { return }
         let startedAt = Date()
         errorMessage = nil
-        hasMicPermissionDenied = false
-        hasDictationError = false
         audioState = .starting
         audioCaptureStartedAt = startedAt
         onboardingVoiceLogger.info("Onboarding audio capture start requested")
@@ -415,8 +429,6 @@ final class OnboardingViewModel {
         voiceCoordinator.cancel()
         audioState = .idle
         audioDurationSeconds = 0
-        hasMicPermissionDenied = false
-        hasDictationError = false
         errorMessage = nil
         didAutoStartRecording = false
         stopAudioTimer()
@@ -561,7 +573,6 @@ final class OnboardingViewModel {
             guard generation == discoveryGeneration, step == .audio else { return }
             errorMessage = error.localizedDescription
             audioState = .failed
-            hasDictationError = true
         }
     }
 
@@ -679,14 +690,11 @@ final class OnboardingViewModel {
         if let dictationError = error as? VoiceDictationError {
             switch dictationError {
             case .noMicrophoneAccess:
-                hasMicPermissionDenied = true
                 audioState = .failed
             default:
-                hasDictationError = true
                 audioState = .failed
             }
         } else {
-            hasDictationError = true
             audioState = .failed
         }
         stopAudioTimer()
@@ -748,7 +756,6 @@ final class OnboardingViewModel {
     private func handleAudioErrorMessage(_ message: String) {
         guard step == .audio else { return }
         errorMessage = message
-        hasDictationError = true
         audioState = .failed
         stopAudioTimer()
     }
@@ -787,7 +794,6 @@ final class OnboardingViewModel {
             audioState = .idle
             stopAudioTimer()
         case .failure:
-            hasDictationError = true
             audioState = .failed
             stopAudioTimer()
         }
@@ -831,7 +837,7 @@ final class OnboardingViewModel {
     }
 
     private func restoreProgress(_ snapshot: OnboardingProgressSnapshot) {
-        step = snapshot.step == .fastNews ? .aggregators : snapshot.step
+        step = snapshot.step
         isPersonalized = snapshot.isPersonalized
         suggestions = snapshot.suggestions
         selectedSuggestionIDs = Set(snapshot.selectedSuggestionIds)
@@ -859,7 +865,6 @@ final class OnboardingViewModel {
 
         guard step == .loading
             || step == .suggestions
-            || step == .fastNews
             || step == .aggregators
             || step == .reddit
         else {

@@ -5,6 +5,15 @@
 
 import Foundation
 
+@MainActor
+protocol FeedSubscribing: AnyObject {
+    func subscribeFeed(
+        feedURL: String,
+        feedType: String,
+        displayName: String?
+    ) async throws -> ScraperConfig
+}
+
 enum ScraperConfigServiceError: LocalizedError {
     case unsupportedScraperType(String)
 
@@ -17,10 +26,11 @@ enum ScraperConfigServiceError: LocalizedError {
 }
 
 class ScraperConfigService {
-    static let shared = ScraperConfigService()
-    private let client = APIClient.shared
+    private let client: APIClient
 
-    private init() {}
+    init(client: APIClient) {
+        self.client = client
+    }
 
     func listConfigs(types: [String]? = nil, includeStats: Bool = true) async throws -> [ScraperConfig] {
         var queryItems: [URLQueryItem] = []

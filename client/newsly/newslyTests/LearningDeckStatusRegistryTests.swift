@@ -247,7 +247,7 @@ private actor TerminalAuthLearningDeckStatusSource {
 
     func fetch(deckId _: Int) throws -> LearningDeck {
         callCount += 1
-        throw AuthError.refreshTokenExpired
+        throw ClientFailure.authenticationExpired
     }
 }
 
@@ -312,7 +312,6 @@ private func makeRegistryDeck(
         status: status,
         shareEnabled: false,
         viewerAvailable: viewerAvailable,
-        sourceNotesAvailable: false,
         latestSuccessfulRunId: viewerAvailable ? 2 : nil,
         latestRun: LearningDeckRun(
             id: 2,

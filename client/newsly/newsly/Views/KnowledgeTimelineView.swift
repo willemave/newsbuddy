@@ -19,30 +19,25 @@ struct KnowledgeView: View {
     let onSearch: () -> Void
     let chatTransitionNamespace: Namespace.ID?
     let contentTextSize: DynamicTypeSize
-    var onOpenSettings: (() -> Void)?
+    let onOpenSettings: () -> Void
 
     @State private var viewModel: KnowledgeTimelineViewModel
-    @State private var settings: AppSettings
     @State private var composerText = ""
     @State private var deckReaderDestination: LearningDeckReaderDestination?
     @State private var deckSource: ContentSummary?
     @State private var showsInitialLoadingIndicator = false
     @FocusState private var isComposerFocused: Bool
 
-    private let toastPresenter: any ToastPresenting
-
     private static let topAnchor = "knowledge.top"
 
     init(
-        scrollToTopRequest: Int = 0,
-        isVisible: Bool = true,
+        scrollToTopRequest: Int,
+        isVisible: Bool,
         onSelectContent: @escaping (ContentDetailRoute) -> Void,
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
         onSearch: @escaping () -> Void,
-        onOpenSettings: (() -> Void)? = nil,
+        onOpenSettings: @escaping () -> Void,
         viewModel: KnowledgeTimelineViewModel,
-        settings: AppSettings,
-        toastPresenter: any ToastPresenting,
         contentTextSize: DynamicTypeSize,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
@@ -53,18 +48,17 @@ struct KnowledgeView: View {
         self.onSearch = onSearch
         self.onOpenSettings = onOpenSettings
         self.viewModel = viewModel
-        _settings = State(initialValue: settings)
-        self.toastPresenter = toastPresenter
         self.contentTextSize = contentTextSize
         self.chatTransitionNamespace = chatTransitionNamespace
     }
 
-    private var appTextSize: DynamicTypeSize {
-        AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize
-    }
-
     private var trimmedComposerText: String {
         composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// E2E launches hold the first prompt so visual baselines never capture a mid-roll frame.
+    private var rotatesComposerPlaceholder: Bool {
+        isVisible && !isComposerFocused && !E2ETestLaunch.isEnabled
     }
 
     private var isWaitingForInitialTimeline: Bool {
@@ -106,16 +100,14 @@ struct KnowledgeView: View {
                 using: proxy
             )
         }
-        .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $deckSource) { content in
             LearningDeckCreateSheet(
                 sourceTitle: content.displayTitle,
-                requiresURL: false,
                 isSubmitting: viewModel.decks.isCreating,
                 focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
-                onCreate: { _, interestsPrompt in
+                onCreate: { interestsPrompt in
                     await createDeck(from: content, interestsPrompt: interestsPrompt)
                 }
             )
@@ -202,8 +194,7 @@ struct KnowledgeView: View {
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
 
-            TextField("Ask anything…", text: $composerText, axis: .vertical)
-                .font(.terracottaBodyLarge)
+            TextField("", text: $composerText, axis: .vertical)
                 .focused($isComposerFocused)
                 .lineLimit(1...4)
                 .submitLabel(.send)
@@ -211,6 +202,12 @@ struct KnowledgeView: View {
                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .accessibilityLabel("Ask Knowledge")
                 .accessibilityIdentifier("knowledge.chat.input")
+                .overlay(alignment: .leading) {
+                    if composerText.isEmpty {
+                        KnowledgeComposerPlaceholder(isRotating: rotatesComposerPlaceholder)
+                    }
+                }
+                .font(.terracottaBodyLarge)
 
             if !trimmedComposerText.isEmpty && !viewModel.chats.isVoiceRecording {
                 Button(action: sendComposerMessage) {
@@ -235,9 +232,7 @@ struct KnowledgeView: View {
                     size: 36,
                     action: {
                         Task {
-                            if let route = await viewModel.chats.toggleVoiceRecording() {
-                                onSelectSession(route)
-                            }
+                            await viewModel.chats.toggleVoiceRecording()
                         }
                     }
                 )
@@ -294,11 +289,12 @@ struct KnowledgeView: View {
             .padding(.vertical, 28)
             .appListRow()
         } else {
+            let swipeHintContentID = sourceSwipeHintContentID
             ForEach(viewModel.groupedTimeline) { group in
                 KnowledgeDayDelimiter(title: group.title)
                     .appListRow()
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
-                    timelineRow(item)
+                    timelineRow(item, swipeHintContentID: swipeHintContentID)
                     if index < group.items.count - 1 {
                         KnowledgeTimelineRowDivider()
                             .appListRow()
@@ -339,11 +335,15 @@ struct KnowledgeView: View {
     }
 
     @ViewBuilder
-    private func timelineRow(_ item: KnowledgeTimelineItem) -> some View {
+    private func timelineRow(
+        _ item: KnowledgeTimelineItem,
+        swipeHintContentID: Int?
+    ) -> some View {
         switch item {
-        case .saved(let content):
+        case .saved(let activity):
+            let content = activity.content
             KnowledgeSavedContentButton(
-                content: content,
+                entry: activity,
                 accessibilityIdentifier: "knowledge.saved.\(content.id)",
                 onOpen: {
                     onSelectContent(
@@ -357,25 +357,30 @@ struct KnowledgeView: View {
                 onRefresh: { Task { await viewModel.savedContent.loadKnowledgeLibrary() } },
                 onReprocess: { await viewModel.savedContent.reprocessKnowledgeItem(content.id) },
                 onRemove: { removeSaved(content) },
-                derivatives: viewModel.sourceDerivatives[KnowledgeSourceKey(content)] ?? [],
-                showsSwipeHint: content.id == sourceSwipeHintContentID,
-                onSwipeHintFinished: { hasSeenSourceSwipeHint = true }
+                derivatives: viewModel.sourceDerivatives[KnowledgeSource(content)] ?? []
             )
-            .appListRow()
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if content.savedLibraryItemState == .ready {
-                    ForEach(KnowledgeSourceAction.leading, id: \.self) { action in
-                        sourceActionButton(action, for: content)
-                    }
-                }
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            .contextMenu {
+                KnowledgeSourceActivityMenu(
+                    entry: activity,
+                    busyDeckIDs: viewModel.decks.busyDeckIDs,
+                    perform: perform
+                )
                 Button(role: .destructive) {
                     removeSaved(content)
                 } label: {
-                    Label("Remove", systemImage: "bookmark.slash")
+                    Label("Remove from Knowledge", systemImage: "bookmark.slash")
                 }
             }
+            .knowledgeSwipeHint(
+                isActive: content.id == swipeHintContentID,
+                onFinished: { hasSeenSourceSwipeHint = true }
+            )
+            .appListRow()
+            .knowledgeSourceSwipeActions(
+                for: content,
+                onRemove: { removeSaved(content) },
+                perform: { perform($0, for: content) }
+            )
         case .chat(let session, let preview):
             Button {
                 onSelectSession(ChatSessionRoute(session: session))
@@ -468,27 +473,25 @@ struct KnowledgeView: View {
             .accessibilityLabel("Search saved knowledge")
             .accessibilityIdentifier("knowledge.search")
 
-            if let onOpenSettings {
-                Button(action: onOpenSettings) {
-                    Image(systemName: "gearshape")
-                        .font(.appSymbol(size: 19, weight: .semibold))
-                        .overlay(alignment: .topTrailing) {
-                            if xConnectionStore.needsAttention {
-                                Circle()
-                                    .fill(Color.statusDestructive)
-                                    .frame(width: 9, height: 9)
-                                    .overlay(Circle().stroke(Color.surfacePrimary, lineWidth: 2))
-                                    .offset(x: 3, y: -2)
-                                    .accessibilityIdentifier("knowledge.settings.attention")
-                            }
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .font(.appSymbol(size: 19, weight: .semibold))
+                    .overlay(alignment: .topTrailing) {
+                        if xConnectionStore.needsAttention {
+                            Circle()
+                                .fill(Color.statusDestructive)
+                                .frame(width: 9, height: 9)
+                                .overlay(Circle().stroke(Color.surfacePrimary, lineWidth: 2))
+                                .offset(x: 3, y: -2)
+                                .accessibilityIdentifier("knowledge.settings.attention")
                         }
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Settings")
-                .accessibilityValue(xConnectionStore.needsAttention ? "Needs attention" : "")
-                .accessibilityIdentifier("knowledge.settings")
+                    }
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+            .accessibilityValue(xConnectionStore.needsAttention ? "Needs attention" : "")
+            .accessibilityIdentifier("knowledge.settings")
         }
         .foregroundStyle(Color.onSurface)
     }
@@ -515,8 +518,8 @@ struct KnowledgeView: View {
               isVisible,
               !viewModel.isLoading else { return nil }
         for item in viewModel.timeline {
-            if case .saved(let content) = item, content.savedLibraryItemState == .ready {
-                return content.id
+            if case .saved(let activity) = item, activity.content.savedLibraryItemState == .ready {
+                return activity.content.id
             }
         }
         return nil
@@ -526,48 +529,55 @@ struct KnowledgeView: View {
         Task { await viewModel.savedContent.toggleKnowledgeSave(content.id) }
     }
 
-    private func sourceActionButton(
-        _ action: KnowledgeSourceAction,
-        for content: ContentSummary
-    ) -> some View {
-        Button {
-            perform(action, for: content)
-        } label: {
-            Label(action.title, systemImage: action.systemImage)
-        }
-        .tint(action.tint)
-        .accessibilityIdentifier("knowledge.saved.\(content.id).\(action.title.lowercased())")
-    }
-
     private func perform(_ action: KnowledgeSourceAction, for content: ContentSummary) {
         hasSeenSourceSwipeHint = true
+        let source = KnowledgeSource(content)
         switch action {
         case .chat:
             Task {
-                if let route = await viewModel.chats.openSourceChat(for: content) {
+                if let route = await viewModel.chats.openSourceChat(for: source) {
                     onSelectSession(route)
                 }
             }
         case .deck:
-            deckSource = content
+            if let deck = viewModel.decks.decks.first(where: { $0.knowledgeSource == source }) {
+                Task { await openDeck(deck) }
+            } else {
+                deckSource = content
+            }
         case .listen:
             Task {
-                guard await viewModel.narrations.narrate(content) else { return }
-                toastPresenter.show("Narration started", type: .info, duration: 2)
+                guard await viewModel.narrations.narrate(source) else { return }
+                dependencyFactory.toastService.show("Narration started", type: .info, duration: 2)
             }
+        }
+    }
+
+    private func perform(_ action: KnowledgeRelatedAction) {
+        switch action {
+        case .openChat(let session):
+            onSelectSession(ChatSessionRoute(session: session))
+        case .deleteChat(let session):
+            Task { await viewModel.chats.deleteSession(session) }
+        case .openDeck(let deck):
+            Task { await openDeck(deck) }
+        case .regenerateDeck(let deck):
+            Task { await regenerateDeck(deck) }
+        case .deleteDeck(let deck):
+            Task { await viewModel.decks.delete(deck) }
         }
     }
 
     @MainActor
     private func createDeck(from content: ContentSummary, interestsPrompt: String?) async -> Bool {
-        let isNews = content.contentType == .news
+        let source = KnowledgeSource(content)
         let deck = await viewModel.decks.createDeck(
-            contentId: isNews ? nil : content.id,
-            newsItemId: isNews ? content.id : nil,
+            contentId: source.contentId,
+            newsItemId: source.newsItemId,
             interestsPrompt: interestsPrompt
         )
         guard deck != nil else { return false }
-        toastPresenter.show("Deck started", type: .info, duration: 2)
+        dependencyFactory.toastService.show("Deck started", type: .info, duration: 2)
         return true
     }
 
@@ -579,7 +589,8 @@ struct KnowledgeView: View {
 
     @MainActor
     private func regenerateDeck(_ deck: LearningDeck) async {
+        guard !deck.hasActiveLatestRun, !viewModel.decks.busyDeckIDs.contains(deck.id) else { return }
         guard await viewModel.decks.regenerate(deck) != nil else { return }
-        toastPresenter.show("Regenerating your deck", type: .info, duration: 3)
+        dependencyFactory.toastService.show("Regenerating your deck", type: .info, duration: 3)
     }
 }

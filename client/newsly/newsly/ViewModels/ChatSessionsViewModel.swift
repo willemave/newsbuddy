@@ -9,27 +9,6 @@ import Foundation
 import Observation
 import SwiftUI
 
-protocol ChatSessionsServicing: AnyObject {
-    func listSessions(
-        contentId: Int?,
-        newsItemId: Int?,
-        limit: Int
-    ) async throws -> [ChatSessionSummary]
-
-    func createSession(
-        contentId: Int?,
-        newsItemId: Int?,
-        topic: String?,
-        provider: ChatModelProvider?,
-        modelHint: String?,
-        initialMessage: String?
-    ) async throws -> ChatSessionSummary
-
-    func deleteSession(sessionId: Int) async throws
-}
-
-extension ChatService: ChatSessionsServicing {}
-
 @MainActor
 @Observable
 final class ChatSessionsViewModel {
@@ -38,9 +17,9 @@ final class ChatSessionsViewModel {
     var errorMessage: String?
 
     @ObservationIgnored
-    private let chatService: any ChatSessionsServicing
+    private let chatService: ChatService
 
-    init(chatService: any ChatSessionsServicing) {
+    init(chatService: ChatService) {
         self.chatService = chatService
     }
 
@@ -59,29 +38,6 @@ final class ChatSessionsViewModel {
         }
 
         isLoading = false
-    }
-
-    func createSession(
-        contentId: Int? = nil,
-        topic: String? = nil,
-        provider: ChatModelProvider = .openai
-    ) async -> ChatSessionSummary? {
-        do {
-            let session = try await chatService.createSession(
-                contentId: contentId,
-                newsItemId: nil,
-                topic: topic,
-                provider: provider,
-                modelHint: nil,
-                initialMessage: nil
-            )
-            // Prepend to list
-            sessions.insert(session, at: 0)
-            return session
-        } catch {
-            errorMessage = error.localizedDescription
-            return nil
-        }
     }
 
     func deleteSessions(ids: [Int]) async {

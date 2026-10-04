@@ -5,7 +5,13 @@
 //  Created by Assistant on 1/17/26.
 //
 
+import OSLog
 import SwiftUI
+
+private let authenticatedRootLogger = Logger(
+    subsystem: "com.newsly",
+    category: "AuthenticatedRootView"
+)
 
 private enum AuthenticatedPresentationState {
     case deciding
@@ -14,7 +20,7 @@ private enum AuthenticatedPresentationState {
 }
 
 struct AuthenticatedRootView: View {
-    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(AuthenticationController.self) private var authViewModel
     let session: AuthenticatedSession
 
     @State private var presentationState: AuthenticatedPresentationState = .deciding
@@ -32,13 +38,16 @@ struct AuthenticatedRootView: View {
                 OnboardingFlowView(
                     viewModel: session.dependencyFactory.makeOnboardingViewModel(user: user)
                 ) { response in
-                    // Refresh user from server to pick up updated has_completed_onboarding
+                    authViewModel.updateUser(updatedUser(from: response))
                     Task {
-                        if let updatedUser = try? await session.dependencyFactory
-                            .authenticationService.getCurrentUser() {
+                        do {
+                            let updatedUser = try await session.dependencyFactory
+                                .authenticationService.getCurrentUser()
                             authViewModel.updateUser(updatedUser)
-                        } else {
-                            authViewModel.updateUser(updatedUserOnboardingFlag(true))
+                        } catch {
+                            authenticatedRootLogger.error(
+                                "Failed to refresh user after onboarding: \(error.localizedDescription, privacy: .public)"
+                            )
                         }
                     }
                     presentationState = .content
@@ -64,9 +73,6 @@ struct AuthenticatedRootView: View {
         .onChange(of: user.hasCompletedOnboarding) { _, _ in
             updatePresentation()
         }
-        .onChange(of: user.hasCompletedNewUserTutorial) { _, _ in
-            updatePresentation()
-        }
     }
 
     private func updatePresentation() {
@@ -78,7 +84,7 @@ struct AuthenticatedRootView: View {
         presentationState = .content
     }
 
-    private func updatedUserOnboardingFlag(_ completed: Bool) -> User {
+    private func updatedUser(from response: OnboardingCompleteResponse) -> User {
         User(
             id: user.id,
             appleId: user.appleId,
@@ -88,9 +94,11 @@ struct AuthenticatedRootView: View {
             hasXBookmarkSync: user.hasXBookmarkSync,
             isAdmin: user.isAdmin,
             isActive: user.isActive,
-            hasCompletedOnboarding: completed,
-            hasCompletedNewUserTutorial: user.hasCompletedNewUserTutorial,
+            hasCompletedOnboarding: response.hasCompletedOnboarding,
+            hasCompletedNewUserTutorial: response.hasCompletedNewUserTutorial,
             readingExperience: user.readingExperience,
+            timezone: user.timezone,
+            timezoneRevision: user.timezoneRevision,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt
         )

@@ -8,6 +8,18 @@
 import Foundation
 import Observation
 
+enum SearchActionTarget: Hashable {
+    case feed(String)
+    case episode(String)
+    case podcastFeed(String)
+}
+
+struct SearchActionState: Equatable {
+    let isInFlight: Bool
+    let completedLabel: String?
+    let errorMessage: String?
+}
+
 @MainActor
 protocol SearchContentServicing: AnyObject {
     func searchContent(
@@ -21,7 +33,6 @@ protocol SearchContentServicing: AnyObject {
 
     func submitContent(
         url: URL,
-        contentType: String?,
         title: String?,
         platform: String?
     ) async throws -> SubmitContentResponse
@@ -29,16 +40,7 @@ protocol SearchContentServicing: AnyObject {
 
 extension ContentService: SearchContentServicing {}
 
-@MainActor
-protocol SearchFeedSubscribing: AnyObject {
-    func subscribeFeed(
-        feedURL: String,
-        feedType: String,
-        displayName: String?
-    ) async throws -> ScraperConfig
-}
-
-extension ScraperConfigService: SearchFeedSubscribing {}
+extension ScraperConfigService: FeedSubscribing {}
 
 @MainActor
 @Observable
@@ -57,11 +59,11 @@ final class SearchViewModel {
     var podcastResults: [PodcastSearchResult] = []
     var isLoadingLocal: Bool = false
     var isLoadingMixed: Bool = false
-    var actionInFlightIds: Set<String> = []
-    var completedActionLabels: [String: String] = [:]
+    private var actionTargetsInFlight: Set<SearchActionTarget> = []
+    private var completedActionLabels: [SearchActionTarget: String] = [:]
     var localErrorMessage: String?
     var mixedErrorMessage: String?
-    var actionErrorMessages: [String: String] = [:]
+    private var actionErrorMessages: [SearchActionTarget: String] = [:]
     var hasLocalSearch: Bool = false
     var hasSubmittedSearch: Bool = false
 
@@ -69,7 +71,7 @@ final class SearchViewModel {
     private let contentService: any SearchContentServicing
 
     @ObservationIgnored
-    private let scraperConfigService: any SearchFeedSubscribing
+    private let scraperConfigService: any FeedSubscribing
 
     @ObservationIgnored
     private let tasks = TaskBag<TaskKey>()
@@ -79,7 +81,7 @@ final class SearchViewModel {
 
     init(
         contentService: any SearchContentServicing,
-        scraperConfigService: any SearchFeedSubscribing
+        scraperConfigService: any FeedSubscribing
     ) {
         self.contentService = contentService
         self.scraperConfigService = scraperConfigService
@@ -95,6 +97,14 @@ final class SearchViewModel {
 
     var hasQuery: Bool {
         trimmedQuery.count >= 2
+    }
+
+    func actionState(for target: SearchActionTarget) -> SearchActionState {
+        SearchActionState(
+            isInFlight: actionTargetsInFlight.contains(target),
+            completedLabel: completedActionLabels[target],
+            errorMessage: actionErrorMessages[target]
+        )
     }
 
     func retrySearch() {
@@ -120,9 +130,9 @@ final class SearchViewModel {
     }
 
     func subscribeToFeed(_ result: MixedSearchFeedResult) async {
-        let actionId = "feed:\(result.id)"
-        guard !result.isSubscribed, completedActionLabels[actionId] == nil else { return }
-        await runAction(id: actionId) {
+        let target = SearchActionTarget.feed(result.id)
+        guard !result.isSubscribed, completedActionLabels[target] == nil else { return }
+        await runAction(target: target) {
             let config = try await self.scraperConfigService.subscribeFeed(
                 feedURL: result.feedURL,
                 feedType: result.feedType,
@@ -135,15 +145,14 @@ final class SearchViewModel {
     }
 
     func addPodcastEpisode(_ result: PodcastSearchResult) async {
-        let actionId = "episode:\(result.id)"
+        let target = SearchActionTarget.episode(result.id)
         guard let url = URL(string: result.episodeURL) else {
-            actionErrorMessages[actionId] = "This episode link is invalid."
+            actionErrorMessages[target] = "This episode link is invalid."
             return
         }
-        await runAction(id: actionId) {
+        await runAction(target: target) {
             _ = try await self.contentService.submitContent(
                 url: url,
-                contentType: nil,
                 title: result.title,
                 platform: nil
             )
@@ -153,8 +162,8 @@ final class SearchViewModel {
 
     func subscribeToPodcast(_ result: PodcastSearchResult) async {
         guard let feedURL = result.feedURL else { return }
-        let actionId = "podcast-feed:\(feedURL)"
-        await runAction(id: actionId) {
+        let target = SearchActionTarget.podcastFeed(feedURL)
+        await runAction(target: target) {
             let config = try await self.scraperConfigService.subscribeFeed(
                 feedURL: feedURL,
                 feedType: "podcast_rss",
@@ -258,7 +267,7 @@ final class SearchViewModel {
             feedResults = response.feeds
             podcastResults = response.podcasts
             for result in response.feeds where result.isSubscribed {
-                completedActionLabels["feed:\(result.id)"] = "Subscribed"
+                completedActionLabels[.feed(result.id)] = "Subscribed"
             }
             hasLocalSearch = true
             hasSubmittedSearch = true
@@ -274,18 +283,19 @@ final class SearchViewModel {
     }
 
     private func runAction(
-        id: String,
+        target: SearchActionTarget,
         action: @escaping () async throws -> String
     ) async {
-        guard completedActionLabels[id] == nil, !actionInFlightIds.contains(id) else { return }
-        actionInFlightIds.insert(id)
-        actionErrorMessages[id] = nil
-        defer { actionInFlightIds.remove(id) }
+        guard completedActionLabels[target] == nil,
+              !actionTargetsInFlight.contains(target) else { return }
+        actionTargetsInFlight.insert(target)
+        actionErrorMessages[target] = nil
+        defer { actionTargetsInFlight.remove(target) }
 
         do {
-            completedActionLabels[id] = try await action()
+            completedActionLabels[target] = try await action()
         } catch {
-            actionErrorMessages[id] = "That action didn't finish. Please try again."
+            actionErrorMessages[target] = "That action didn't finish. Please try again."
         }
     }
 }

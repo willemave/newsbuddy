@@ -26,8 +26,16 @@ appId: "${APP_ID}"
     centerElement: true
 - assertVisible:
     id: content.comments.topic
-- assertNotVisible:
-    id: content.discussion.sheet
-- assertScreenshot:
-    path: "${BASELINE_DIR}/comments-summary.png"
-    thresholdPercentage: 97
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS == true}
+    commands:
+      - takeScreenshot:
+          path: "${BASELINE_DIR}/comments-summary"
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS != true}
+    commands:
+      - assertScreenshot:
+          path: "${BASELINE_DIR}/comments-summary.png"
+          thresholdPercentage: 97

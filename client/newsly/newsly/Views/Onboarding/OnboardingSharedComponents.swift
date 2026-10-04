@@ -146,17 +146,16 @@ func topicPreviewCard(
         }
     }
     .padding(18)
-    .background(cardSurface(cornerRadius: 24))
+    .background(cardSurface())
 }
 
 /// Flat card on the paper ground with a hairline edge — the same treatment the rest of
-/// the app uses. Corner radius is accepted for call-site compatibility but clamped to the
-/// control radius so onboarding stops using its own oversized pill geometry.
-func cardSurface(cornerRadius: CGFloat) -> some View {
-    RoundedRectangle(cornerRadius: min(cornerRadius, CornerRadius.control), style: .continuous)
+/// the app uses.
+func cardSurface() -> some View {
+    RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
         .fill(Color.surfaceSecondary)
         .overlay(
-            RoundedRectangle(cornerRadius: min(cornerRadius, CornerRadius.control), style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
                 .stroke(Color.borderSubtle, lineWidth: 1)
         )
 }

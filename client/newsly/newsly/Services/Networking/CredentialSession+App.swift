@@ -1,16 +1,9 @@
 import Foundation
 
 extension CredentialSession {
-    static var shared: CredentialSession {
-        AppCredentialSession.shared
-    }
-}
-
-private enum AppCredentialSession {
-    static let shared: CredentialSession = {
-        let tokenStore = KeychainManager.shared
-        return CredentialSession(
-            storage: CredentialStorageFactory.make(tokenStore: tokenStore),
+    static func makeAppSession(tokenStore: KeychainManager) -> CredentialSession {
+        CredentialSession(
+            storage: KeychainCredentialStorage(keychain: tokenStore),
             exchange: RefreshTokenExchange(
                 transport: HTTPTransport(session: .newslyDefault),
                 baseURLProvider: { URL(string: AppSettings.shared.baseURL) }
@@ -18,5 +11,5 @@ private enum AppCredentialSession {
             processLock: .shared,
             attemptStore: KeychainRefreshAttemptStore(persistence: tokenStore)
         )
-    }()
+    }
 }

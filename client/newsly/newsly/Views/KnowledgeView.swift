@@ -73,7 +73,7 @@ struct KnowledgeSearchView: View {
                 } else {
                     ForEach(viewModel.contents) { content in
                         KnowledgeSavedContentButton(
-                            content: content,
+                            entry: KnowledgeSavedTimelineEntry(content: content),
                             accessibilityIdentifier: "knowledge.search.result.\(content.id)",
                             onOpen: {
                                 onSelectContent(
@@ -90,6 +90,13 @@ struct KnowledgeSearchView: View {
                             onReprocess: { await viewModel.reprocessKnowledgeItem(content.id) },
                             onRemove: { Task { await viewModel.toggleKnowledgeSave(content.id) } }
                         )
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                Task { await viewModel.toggleKnowledgeSave(content.id) }
+                            } label: {
+                                Label("Remove from Knowledge", systemImage: "bookmark.slash")
+                            }
+                        }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                     }
@@ -163,20 +170,17 @@ struct KnowledgeSearchView: View {
 }
 
 struct KnowledgeSavedContentButton: View {
-    let content: ContentSummary
+    let entry: KnowledgeSavedTimelineEntry
     let accessibilityIdentifier: String
     let onOpen: () -> Void
     let onRefresh: () -> Void
     let onReprocess: () async -> Bool
     let onRemove: () -> Void
     var derivatives: KnowledgeSourceDerivatives = []
-    var showsSwipeHint = false
-    var onSwipeHintFinished: () -> Void = {}
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsPreparationStatus = false
-    @State private var swipeHintOffset: CGFloat = 0
-    @State private var showsSwipeHintActions = false
+
+    private var content: ContentSummary { entry.content }
 
     var body: some View {
         Button {
@@ -186,25 +190,14 @@ struct KnowledgeSavedContentButton: View {
             }
             onOpen()
         } label: {
-            KnowledgeSavedRow(content: content, derivatives: derivatives)
+            KnowledgeSavedRow(entry: entry, derivatives: derivatives)
         }
         .buttonStyle(.plain)
-        .offset(x: swipeHintOffset)
-        .background(alignment: .leading) {
-            if showsSwipeHintActions {
-                KnowledgeSwipeHintActions()
-                    .frame(width: swipeHintOffset, alignment: .trailing)
-                    .clipped()
-                    .accessibilityHidden(true)
-            }
-        }
-        .task(id: showsSwipeHint) { await playSwipeHint() }
-        .contextMenu {
-            Button(role: .destructive, action: onRemove) {
-                Label("Remove from Knowledge", systemImage: "bookmark.slash")
-            }
-        }
         .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityValue(
+            [derivatives.accessibilitySummary, entry.statusText]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        )
         .accessibilityHint(
             content.savedLibraryItemState == .ready
                 ? "Opens this saved item"
@@ -219,93 +212,13 @@ struct KnowledgeSavedContentButton: View {
             )
         }
     }
-
-    /// Briefly slides the row open to reveal the leading swipe actions, then closes it.
-    private func playSwipeHint() async {
-        guard showsSwipeHint else { return }
-        let open = reduceMotion ? nil : Animation.spring(response: 0.45, dampingFraction: 0.82)
-        let close = reduceMotion ? nil : Animation.spring(response: 0.5, dampingFraction: 0.9)
-        do {
-            try await Task.sleep(for: .milliseconds(700))
-            showsSwipeHintActions = true
-            withAnimation(open) { swipeHintOffset = KnowledgeSwipeHintActions.width }
-            try await Task.sleep(for: .milliseconds(1_600))
-        } catch {
-            swipeHintOffset = 0
-            showsSwipeHintActions = false
-            return
-        }
-        withAnimation(close) {
-            swipeHintOffset = 0
-        } completion: {
-            showsSwipeHintActions = false
-        }
-        onSwipeHintFinished()
-    }
-}
-
-/// Static copy of the leading swipe actions, revealed by the one-time row hint.
-/// Mirrors the system's round swipe buttons with captions underneath.
-private struct KnowledgeSwipeHintActions: View {
-    private static let actionWidth: CGFloat = 70
-    static let width = actionWidth * CGFloat(KnowledgeSourceAction.leading.count)
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(KnowledgeSourceAction.leading, id: \.self) { action in
-                VStack(spacing: 5) {
-                    Image(systemName: action.systemImage)
-                        .font(.appSymbol(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 58, height: 40)
-                        .background(action.tint, in: Capsule())
-                    Text(action.title)
-                        .font(.appCaption2)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                }
-                .frame(width: Self.actionWidth)
-            }
-        }
-        .frame(width: Self.width)
-    }
-}
-
-/// Deep dives offered from a saved Knowledge row's swipe actions.
-enum KnowledgeSourceAction: Hashable {
-    case chat
-    case deck
-    case listen
-
-    static let leading: [Self] = [.chat, .deck, .listen]
-
-    var title: String {
-        switch self {
-        case .chat: "Chat"
-        case .deck: "Deck"
-        case .listen: "Listen"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .chat: "message"
-        case .deck: "rectangle.on.rectangle"
-        case .listen: "headphones"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .chat: Color.brandPrimary
-        case .deck: Color.onSurfaceSecondary
-        case .listen: Color.onSurfaceTertiary
-        }
-    }
 }
 
 struct KnowledgeSavedRow: View {
-    let content: ContentSummary
+    let entry: KnowledgeSavedTimelineEntry
     var derivatives: KnowledgeSourceDerivatives = []
+
+    private var content: ContentSummary { entry.content }
 
     private var hasStalled: Bool {
         content.hasStalledKnowledgePreparation
@@ -331,11 +244,14 @@ struct KnowledgeSavedRow: View {
             }
         }
         var parts = ["SAVED"]
+        if let status = entry.statusText {
+            parts.append(status.uppercased())
+        }
         if detail != "SAVED" {
             parts.append(detail)
         }
-        if let time = content.knowledgeRelativeTimeDisplay?.uppercased() {
-            parts.append(time)
+        if entry.activityDate != .distantPast {
+            parts.append(ContentTimestampFormatter.compactRelativeText(from: entry.activityDate).uppercased())
         }
         return parts.joined(separator: " · ")
     }
@@ -381,21 +297,13 @@ struct KnowledgeSavedRow: View {
         .contentShape(Rectangle())
     }
 
-    private static let derivativeMarkerOrder: [(KnowledgeSourceDerivatives, KnowledgeSourceAction)] = [
-        (.deck, .deck),
-        (.chat, .chat),
-        (.narration, .listen)
-    ]
-
     @ViewBuilder
     private var derivativeMarkers: some View {
-        let icons = Self.derivativeMarkerOrder
-            .filter { derivatives.contains($0.0) }
-            .map(\.1.systemImage)
-        if !icons.isEmpty {
+        let actions = derivatives.actions
+        if !actions.isEmpty {
             HStack(spacing: 5) {
-                ForEach(icons, id: \.self) { icon in
-                    Image(systemName: icon)
+                ForEach(actions, id: \.self) { action in
+                    Image(systemName: action.systemImage)
                         .font(.appSymbol(size: 9, weight: .semibold))
                 }
             }
@@ -409,7 +317,7 @@ struct KnowledgeSavedRow: View {
         KnowledgeTimelineArtwork(
             icon: hasStalled ? "exclamationmark.circle" : "photo",
             imageURL: artworkURL,
-            isBusy: content.savedLibraryItemState == .processing && !hasStalled,
+            isBusy: entry.isBusy,
             busyAccessibilityIdentifier: "knowledge.saved.\(content.id).preparing"
         )
     }
@@ -417,6 +325,7 @@ struct KnowledgeSavedRow: View {
 
 private struct KnowledgePreparationStatusSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let content: ContentSummary
     let onRefresh: () -> Void
@@ -426,7 +335,6 @@ private struct KnowledgePreparationStatusSheet: View {
     @State private var browserDestination: BrowserDestination?
     @State private var isReprocessing = false
     @State private var reprocessFailed = false
-    @State private var sheetHeight: CGFloat = 380
 
     private var isStalled: Bool {
         content.hasStalledKnowledgePreparation
@@ -477,61 +385,62 @@ private struct KnowledgePreparationStatusSheet: View {
                 dismiss: { dismiss() }
             )
 
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(content.displayTitle)
-                        .font(.terracottaHeadlineSmall)
-                        .foregroundStyle(Color.onSurface)
-                        .lineLimit(2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(content.displayTitle)
+                            .font(.modalBody.weight(.semibold))
+                            .foregroundStyle(Color.onSurface)
+                            .lineLimit(2)
 
-                    Text(message)
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(message)
+                            .font(.modalSupporting)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    if reprocessFailed {
-                        Text("Couldn't restart preparation. Try again.")
-                            .font(.appCaption)
-                            .foregroundStyle(Color.statusDestructive)
-                            .accessibilityIdentifier("knowledge.status.reprocess_error")
-                    }
-                }
-
-                VStack(spacing: 10) {
-                    primaryAction
-
-                    if let originalURL {
-                        MiniSheetOptionRow(
-                            icon: "safari",
-                            title: "Open original",
-                            subtitle: originalURL.host() ?? originalURL.absoluteString,
-                            accessibilityIdentifier: "knowledge.status.open_original"
-                        ) {
-                            browserDestination = BrowserDestination(url: originalURL)
+                        if reprocessFailed {
+                            Text("Couldn't restart preparation. Try again.")
+                                .font(.modalSupporting)
+                                .foregroundStyle(Color.statusDestructive)
+                                .accessibilityIdentifier("knowledge.status.reprocess_error")
                         }
                     }
 
-                    MiniSheetOptionRow(
-                        icon: "bookmark.slash",
-                        iconColor: .statusDestructive,
-                        title: "Remove from Knowledge",
-                        subtitle: "Delete this save",
-                        disabled: isReprocessing,
-                        accessibilityIdentifier: "knowledge.status.remove"
-                    ) {
-                        onRemove()
-                        dismiss()
+                    VStack(spacing: 10) {
+                        primaryAction
+
+                        if let originalURL {
+                            MiniSheetOptionRow(
+                                icon: "safari",
+                                title: "Open original",
+                                subtitle: originalURL.host() ?? originalURL.absoluteString,
+                                accessibilityIdentifier: "knowledge.status.open_original"
+                            ) {
+                                browserDestination = BrowserDestination(url: originalURL)
+                            }
+                        }
+
+                        MiniSheetOptionRow(
+                            icon: "bookmark.slash",
+                            iconColor: .statusDestructive,
+                            title: "Remove from Knowledge",
+                            subtitle: "Delete this save",
+                            disabled: isReprocessing,
+                            accessibilityIdentifier: "knowledge.status.remove"
+                        ) {
+                            onRemove()
+                            dismiss()
+                        }
                     }
                 }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.bottom, 24)
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sheetHeight = $0 }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary.ignoresSafeArea())
-        .presentationDetents([.height(sheetHeight)])
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(24)
         .sheet(item: $browserDestination) { destination in
@@ -574,14 +483,5 @@ private struct KnowledgePreparationStatusSheet: View {
         } else {
             reprocessFailed = true
         }
-    }
-}
-
-private extension ContentSummary {
-    var hasStalledKnowledgePreparation: Bool {
-        guard savedLibraryItemState == .processing,
-              let createdAt = ContentTimestampFormatter.parse(createdAt)
-        else { return false }
-        return AppClock.now.timeIntervalSince(createdAt) > 24 * 60 * 60
     }
 }

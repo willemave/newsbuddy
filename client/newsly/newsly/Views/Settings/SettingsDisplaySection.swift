@@ -10,7 +10,7 @@ struct SettingsDisplaySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Display")
+            SectionHeader(title: "Display", font: .modalSupporting.weight(.semibold))
 
             VStack(spacing: 0) {
                 textSizeRow
@@ -62,13 +62,13 @@ struct SettingsDisplaySection: View {
                 SettingsIcon(systemName: icon)
 
                 Text(title)
-                    .font(.listTitle)
+                    .font(.modalBody)
                     .foregroundStyle(Color.onSurface)
 
                 Spacer(minLength: 8)
 
                 Text(valueLabel)
-                    .font(.listCaption)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .accessibilityHidden(true)
             }

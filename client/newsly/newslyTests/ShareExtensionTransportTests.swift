@@ -42,6 +42,48 @@ final class ShareExtensionTransportTests: XCTestCase {
         XCTAssertEqual(ShareTransportURLProtocol.requestCount, 1)
     }
 
+    func testShareSubmissionDecodesOnlyAcceptanceFields() async throws {
+        let transport = makeTransport(
+            tokenStore: ShareTransportTokenStore(
+                accessToken: "access-token",
+                refreshToken: "refresh-token"
+            )
+        )
+        ShareTransportURLProtocol.requestHandler = { request in
+            Self.response(
+                for: request,
+                statusCode: 200,
+                data: Data(
+                    #"{"task_id":42,"mode":"chat","actions":{"future":"shape"},"created_at":false}"#.utf8
+                )
+            )
+        }
+
+        let acceptance = try await transport.submitShareAction(body: Data("{}".utf8))
+
+        XCTAssertEqual(acceptance, ShareActionAcceptance(taskId: 42, mode: .chat))
+    }
+
+    func testShareSubmissionTreatsUnfamiliarSuccessBodyAsAccepted() async throws {
+        let transport = makeTransport(
+            tokenStore: ShareTransportTokenStore(
+                accessToken: "access-token",
+                refreshToken: "refresh-token"
+            )
+        )
+        ShareTransportURLProtocol.requestHandler = { request in
+            Self.response(
+                for: request,
+                statusCode: 200,
+                data: Data(#"{"future_acceptance":"ok"}"#.utf8)
+            )
+        }
+
+        let acceptance = try await transport.submitShareAction(body: Data("{}".utf8))
+
+        XCTAssertNil(acceptance)
+    }
+
     func testUnauthorizedRequestRefreshesAndRetriesOnce() async throws {
         let tokenStore = ShareTransportTokenStore(
             accessToken: "expired-token",
@@ -243,11 +285,17 @@ final class ShareExtensionTransportTests: XCTestCase {
         do {
             try await transport.requestVoid("/api/share-actions")
             XCTFail("Expected permission failure")
-        } catch ShareExtensionTransportError.server(let statusCode, let detail) {
-            XCTAssertEqual(statusCode, 403)
-            XCTAssertEqual(detail, "sharing is disabled")
         } catch {
-            XCTFail("Unexpected error: \(error)")
+            switch ClientFailure.classify(error) {
+            case .http(let statusCode, let detail):
+                XCTAssertEqual(statusCode, 403)
+                XCTAssertEqual(detail, "sharing is disabled")
+            case .server(let statusCode, let metadata):
+                XCTAssertEqual(statusCode, 403)
+                XCTAssertEqual(metadata.message, "sharing is disabled")
+            default:
+                XCTFail("Unexpected error: \(error)")
+            }
         }
 
         XCTAssertEqual(ShareTransportURLProtocol.requestCount, 1)
@@ -259,10 +307,8 @@ final class ShareExtensionTransportTests: XCTestCase {
         do {
             try await transport.requestVoid("/api/share-actions")
             XCTFail("Expected authentication failure")
-        } catch ShareExtensionTransportError.notAuthenticated {
-            // Expected.
         } catch {
-            XCTFail("Unexpected error: \(error)")
+            XCTAssertEqual(ClientFailure.classify(error), .authenticationRequired)
         }
 
         XCTAssertEqual(ShareTransportURLProtocol.requestCount, 0)

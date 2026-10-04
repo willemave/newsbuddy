@@ -134,13 +134,11 @@ enum E2ETestLaunch {
     static let userIDKey = "newslyE2EUserId"
     static let completeOnboardingKey = "newslyE2ECompleteOnboarding"
     static let completeTutorialKey = "newslyE2ECompleteTutorial"
-    static let onboardingFixtureKey = "newslyE2EOnboardingFixture"
     static let openChatSessionIdKey = "newslyE2EOpenChatSessionId"
     static let openContentIdKey = "newslyE2EOpenContentId"
     static let openContentTypeKey = "newslyE2EOpenContentType"
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
-    static let fakeSpeechScenarioKey = "newslyE2EFakeSpeechScenario"
     static let audioFixtureKey = "newslyE2EAudioFixture"
     static let visualNowKey = "newslyE2EVisualNow"
     static let visualStateKey = "newslyE2EVisualState"
@@ -186,11 +184,6 @@ enum E2ETestLaunch {
         bool(for: completeTutorialKey)
     }
 
-    static var onboardingFixture: String? {
-        guard isEnabled else { return nil }
-        return string(for: onboardingFixtureKey)
-    }
-
     static var openChatSessionId: Int? {
         guard isEnabled else { return nil }
         return int(for: openChatSessionIdKey)
@@ -222,11 +215,6 @@ enum E2ETestLaunch {
         return string(for: audioFixtureKey)
     }
 
-    static var fakeSpeechScenario: String? {
-        guard fakeSpeechEnabled else { return nil }
-        return string(for: fakeSpeechScenarioKey)
-    }
-
     static var visualNow: Date? {
         guard isEnabled else { return nil }
         return date(for: visualNowKey)
@@ -245,13 +233,11 @@ enum E2ETestLaunch {
     static let userID: Int? = nil
     static let completeOnboarding = false
     static let completeTutorial = false
-    static let onboardingFixture: String? = nil
     static let openChatSessionId: Int? = nil
     static let openContentId: Int? = nil
     static let openContentType: String? = nil
     static let fakeSpeechEnabled = false
     static let fakeSpeechTranscript: String? = nil
-    static let fakeSpeechScenario: String? = nil
     static let visualNow: Date? = nil
     static let visualState: String? = nil
 #endif
@@ -399,27 +385,22 @@ enum ShareURLHandlerKind: String {
     case generic = "generic"
 }
 
-struct ShareURLHandlerMatch: Equatable {
-    let kind: ShareURLHandlerKind
-    let platform: String?
-}
-
 enum ShareURLRouting {
-    private static let podcastHostPlatforms: [String: String] = [
-        "open.spotify.com": "spotify",
-        "spotify.link": "spotify",
-        "spoti.fi": "spotify",
-        "on.spotify.com": "spotify",
-        "open.spotify.link": "spotify",
-        "podcasters.spotify.com": "spotify",
-        "podcasts.apple.com": "apple_podcasts",
-        "music.apple.com": "apple_music",
-        "overcast.fm": "overcast",
-        "pca.st": "pocket_casts",
-        "pocketcasts.com": "pocket_casts",
-        "rss.com": "rss",
-        "podcastaddict.com": "podcast_addict",
-        "castbox.fm": "castbox"
+    private static let podcastHosts: Set<String> = [
+        "open.spotify.com",
+        "spotify.link",
+        "spoti.fi",
+        "on.spotify.com",
+        "open.spotify.link",
+        "podcasters.spotify.com",
+        "podcasts.apple.com",
+        "music.apple.com",
+        "overcast.fm",
+        "pca.st",
+        "pocketcasts.com",
+        "rss.com",
+        "podcastaddict.com",
+        "castbox.fm"
     ]
 
     private static let applePodcastHosts: Set<String> = [
@@ -440,38 +421,35 @@ enum ShareURLRouting {
         "mobile.twitter.com"
     ]
 
-    static func handler(for url: URL) -> ShareURLHandlerMatch {
+    static func handler(for url: URL) -> ShareURLHandlerKind {
         guard
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
             let host = normalizedHost(components.host)
         else {
-            return ShareURLHandlerMatch(kind: .generic, platform: nil)
+            return .generic
         }
 
         if isXStatusURL(components: components, host: host) {
-            return ShareURLHandlerMatch(kind: .xShare, platform: "twitter")
+            return .xShare
         }
 
         if isYouTubeSingleVideo(components: components, host: host) {
-            return ShareURLHandlerMatch(kind: .youtubeSingleVideo, platform: "youtube")
+            return .youtubeSingleVideo
         }
 
         if youtubeHosts.contains(host) {
-            return ShareURLHandlerMatch(kind: .youtubeShare, platform: "youtube")
+            return .youtubeShare
         }
 
         if applePodcastHosts.contains(host) {
-            return ShareURLHandlerMatch(
-                kind: .applePodcastShare,
-                platform: podcastHostPlatforms[host]
-            )
+            return .applePodcastShare
         }
 
-        if let platform = podcastHostPlatforms[host] {
-            return ShareURLHandlerMatch(kind: .podcastPlatformShare, platform: platform)
+        if podcastHosts.contains(host) {
+            return .podcastPlatformShare
         }
 
-        return ShareURLHandlerMatch(kind: .generic, platform: nil)
+        return .generic
     }
 
     static func preferredURL(current: URL?, candidate: URL) -> URL {
@@ -515,8 +493,7 @@ enum ShareURLRouting {
     }
 
     static func rank(url: URL) -> Int {
-        let match = handler(for: url)
-        return handlerPriority(for: match.kind) + qualityScore(url)
+        handlerPriority(for: handler(for: url)) + qualityScore(url)
     }
 
     static func isWebURL(_ url: URL) -> Bool {

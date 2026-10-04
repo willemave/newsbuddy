@@ -82,17 +82,25 @@ enum ServerConfigurationDefaults {
 
     static func baseURL(in userDefaults: UserDefaults) -> URL? {
         let configuration = resolvedConfiguration(in: userDefaults)
-        var host = configuration.host
+        return URL(string: baseURLString(
+            host: configuration.host,
+            port: configuration.port,
+            useHTTPS: configuration.useHTTPS
+        ))
+    }
+
+    static func baseURLString(host: String, port: String, useHTTPS: Bool) -> String {
+        var host = host
 #if targetEnvironment(simulator)
         if host.caseInsensitiveCompare("localhost") == .orderedSame {
             host = "127.0.0.1"
         }
 #endif
-        let scheme = configuration.useHTTPS ? "https" : "http"
-        let isDefaultPort = (scheme == "https" && configuration.port == "443")
-            || (scheme == "http" && configuration.port == "80")
-        let portSuffix = isDefaultPort ? "" : ":\(configuration.port)"
-        return URL(string: "\(scheme)://\(host)\(portSuffix)")
+        let scheme = useHTTPS ? "https" : "http"
+        let isDefaultPort = (scheme == "https" && port == "443")
+            || (scheme == "http" && port == "80")
+        let portSuffix = isDefaultPort ? "" : ":\(port)"
+        return "\(scheme)://\(host)\(portSuffix)"
     }
 
     private static func persistedString(forKey key: String, in userDefaults: UserDefaults) -> String? {

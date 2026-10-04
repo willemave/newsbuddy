@@ -21,9 +21,19 @@ appId: "${APP_ID}"
     id: briefing.lens_page.articles
 - assertVisible:
     id: briefing.segment.${ARTICLE_SEGMENT_ID}
-- assertScreenshot:
-    path: "${BASELINE_DIR}/briefing-articles.png"
-    thresholdPercentage: 94
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS == true}
+    commands:
+      - takeScreenshot:
+          path: "${BASELINE_DIR}/briefing-articles"
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS != true}
+    commands:
+      - assertScreenshot:
+          path: "${BASELINE_DIR}/briefing-articles.png"
+          thresholdPercentage: 94
 - tapOn:
     id: briefing.tier.news
 - extendedWaitUntil:
@@ -32,9 +42,19 @@ appId: "${APP_ID}"
     timeout: 10000
 - assertVisible:
     id: briefing.segment.${NEWS_SEGMENT_ID}
-- assertScreenshot:
-    path: "${BASELINE_DIR}/briefing-news.png"
-    thresholdPercentage: 94
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS == true}
+    commands:
+      - takeScreenshot:
+          path: "${BASELINE_DIR}/briefing-news"
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS != true}
+    commands:
+      - assertScreenshot:
+          path: "${BASELINE_DIR}/briefing-news.png"
+          thresholdPercentage: 94
 - tapOn:
     id: tab.knowledge
 - extendedWaitUntil:
@@ -48,13 +68,23 @@ appId: "${APP_ID}"
 - assertVisible:
     id: knowledge.chat.${CHAT_SESSION_ID}
 - assertVisible:
-    id: knowledge.deck.1
+    id: knowledge.deck.${DECK_ID}
 - assertVisible:
-    id: knowledge.narration.1
+    id: knowledge.narration.${AUDIO_EPISODE_ID}
 - waitForAnimationToEnd
-- assertScreenshot:
-    path: "${BASELINE_DIR}/redesign-knowledge.png"
-    thresholdPercentage: 94
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS == true}
+    commands:
+      - takeScreenshot:
+          path: "${BASELINE_DIR}/redesign-knowledge"
+- runFlow:
+    when:
+      true: ${RECORD_SCREENSHOTS != true}
+    commands:
+      - assertScreenshot:
+          path: "${BASELINE_DIR}/redesign-knowledge.png"
+          thresholdPercentage: 94
 - tapOn:
     id: knowledge.settings
 - extendedWaitUntil:

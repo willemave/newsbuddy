@@ -15,7 +15,6 @@ final class AuthenticatedSession {
     let xConnectionStore: XConnectionStore
     let activeChatSessionManager: ActiveChatSessionManager
     let chatNavigation: ChatNavigationCoordinator
-    let readingStateStore: ReadingStateStore
     let readStateCache: ReadStateCache
     let tabCoordinator: TabCoordinatorViewModel
     let knowledgeViewModel: KnowledgeTimelineViewModel
@@ -35,7 +34,6 @@ final class AuthenticatedSession {
         xConnectionStore: XConnectionStore,
         activeChatSessionManager: ActiveChatSessionManager,
         chatNavigation: ChatNavigationCoordinator,
-        readingStateStore: ReadingStateStore,
         readStateCache: ReadStateCache,
         tabCoordinator: TabCoordinatorViewModel,
         knowledgeViewModel: KnowledgeTimelineViewModel,
@@ -48,7 +46,6 @@ final class AuthenticatedSession {
         self.xConnectionStore = xConnectionStore
         self.activeChatSessionManager = activeChatSessionManager
         self.chatNavigation = chatNavigation
-        self.readingStateStore = readingStateStore
         self.readStateCache = readStateCache
         self.tabCoordinator = tabCoordinator
         self.knowledgeViewModel = knowledgeViewModel

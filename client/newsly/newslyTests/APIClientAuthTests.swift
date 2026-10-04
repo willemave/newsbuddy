@@ -924,7 +924,7 @@ final class APIClientAuthTests: XCTestCase {
             "api-client-auth-\(UUID().uuidString).lock"
         )
         return CredentialSession(
-            storage: TokenStoreCredentialStorage(tokenStore: tokenStore),
+            storage: KeychainCredentialStorage(keychain: tokenStore),
             exchange: RefreshTokenExchange(
                 transport: HTTPTransport(session: session),
                 baseURLProvider: { URL(string: "https://api.example.com") },

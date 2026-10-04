@@ -120,12 +120,12 @@ struct SourceTypeIcon: View {
         case .system(let name):
             Image(systemName: name)
                 .font(.appSymbol(size: 17, weight: .medium))
-                .foregroundStyle(metadata.color)
+                .foregroundStyle(Color.onSurfaceSecondary)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
         case .text(let value):
             Text(value)
                 .font(.appSans(size: 13, weight: .bold))
-                .foregroundStyle(metadata.color)
+                .foregroundStyle(Color.onSurfaceSecondary)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
         }
     }

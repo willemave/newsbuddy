@@ -58,7 +58,6 @@ final class BriefingSegmentRenderModel: Identifiable {
                     index,
                     textBuilder.build(
                         paragraphs: block.paragraphs ?? [],
-                        weight: block.weight,
                         discussionChips: discussionChipsByBlockIndex[index] ?? [:]
                     )
                 )
@@ -962,16 +961,5 @@ struct BriefingTierProgressView: View {
         .foregroundStyle(Color.onSurfaceSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("briefing.tier_progress.\(progress.tier)")
-    }
-}
-
-
-extension APIBriefingFirstRunTierProgress: Equatable {
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.tier == rhs.tier && lhs.sourceNames == rhs.sourceNames && lhs.discovered == rhs.discovered
-            && lhs.ready == rhs.ready && lhs.processing == rhs.processing
-            && lhs.failed == rhs.failed && lhs.skipped == rhs.skipped
-            && lhs.sourceCount == rhs.sourceCount && lhs.pendingSources == rhs.pendingSources
-            && lhs.unavailableSources == rhs.unavailableSources
     }
 }

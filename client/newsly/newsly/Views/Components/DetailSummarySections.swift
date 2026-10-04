@@ -18,7 +18,7 @@ struct DetailSummarySections: View {
                 bulletPointCount: longformArtifact.artifact.payload.keyPoints.count,
                 insightCount: 0
             ) {
-                LongformArtifactView(artifact: longformArtifact, contentId: content.id)
+                LongformArtifactView(artifact: longformArtifact)
             }
         } else if let editorialSummary = content.editorialSummary {
             summarySection(
@@ -26,7 +26,7 @@ struct DetailSummarySections: View {
                 bulletPointCount: editorialSummary.keyPoints.count,
                 insightCount: 0
             ) {
-                EditorialNarrativeSummaryView(summary: editorialSummary, contentId: content.id)
+                EditorialNarrativeSummaryView(summary: editorialSummary)
             }
         } else if let bulletedSummary = content.bulletedSummary {
             summarySection(
@@ -34,7 +34,7 @@ struct DetailSummarySections: View {
                 bulletPointCount: bulletedSummary.points.count,
                 insightCount: 0
             ) {
-                BulletedSummaryView(summary: bulletedSummary, contentId: content.id)
+                BulletedSummaryView(summary: bulletedSummary)
             }
         } else if let interleavedSummary = content.interleavedSummaryV2 {
             summarySection(
@@ -42,7 +42,7 @@ struct DetailSummarySections: View {
                 bulletPointCount: interleavedSummary.keyPoints.count,
                 insightCount: 0
             ) {
-                InterleavedSummaryV2View(summary: interleavedSummary, contentId: content.id)
+                InterleavedSummaryV2View(summary: interleavedSummary)
             }
         } else if let interleavedSummary = content.interleavedSummary {
             summarySection(
@@ -50,7 +50,7 @@ struct DetailSummarySections: View {
                 bulletPointCount: 0,
                 insightCount: interleavedSummary.insights.count
             ) {
-                InterleavedSummaryView(summary: interleavedSummary, contentId: content.id)
+                InterleavedSummaryView(summary: interleavedSummary)
             }
         } else if let structuredSummary = content.structuredSummary {
             summarySection(

@@ -12,7 +12,6 @@ import UIKit
 private enum SummaryDesign {
     static let sectionSpacing: CGFloat = 20
     static let itemSpacing: CGFloat = 12
-    static let cornerRadius: CGFloat = 12
     static let quoteBarWidth: CGFloat = 3
 }
 
@@ -20,14 +19,13 @@ struct StructuredSummaryView: View {
     let summary: StructuredSummary
     var contentId: Int?
     let startTopicSession: (String) async throws -> ChatSessionSummary
-    var onTopicDeepDive: ((String) -> Void)?
 
     @State private var isQuotesExpanded = true
     @State private var isKeyPointsExpanded = true
     @State private var isQuestionsExpanded = false
     @State private var isCounterArgsExpanded = false
-    @State private var selectedTopic: String?
     @State private var topicSession: ChatSessionSummary?
+    @State private var topicChatError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: SummaryDesign.sectionSpacing) {
@@ -110,6 +108,17 @@ struct StructuredSummaryView: View {
             NavigationStack {
                 ChatSessionView(route: ChatSessionRoute(session: session))
             }
+        }
+        .alert(
+            "Couldn't Start Chat",
+            isPresented: Binding(
+                get: { topicChatError != nil },
+                set: { if !$0 { topicChatError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(topicChatError ?? "Please try again.")
         }
     }
 
@@ -228,7 +237,6 @@ struct StructuredSummaryView: View {
             .contextMenu {
                 if contentId != nil {
                     Button {
-                        selectedTopic = topic
                         startTopicChat(topic: topic)
                     } label: {
                         Label("Deep Dive: \(topic)", systemImage: "brain.head.profile")
@@ -257,7 +265,7 @@ struct StructuredSummaryView: View {
         do {
             return try await startTopicSession(topic)
         } catch {
-            print("Failed to start topic chat: \(error)")
+            topicChatError = error.localizedDescription
             return nil
         }
     }
@@ -270,8 +278,6 @@ struct ModernKeyPointRow: View {
     let point: BulletPoint
     let contentId: Int?
     var onDigDeeper: ((String) -> Void)?
-
-    @Environment(\.colorScheme) private var colorScheme
 
     private func categoryConfig(for category: String) -> (color: Color, icon: String) {
         switch category.lowercased() {
@@ -339,9 +345,6 @@ struct ModernKeyPointRow: View {
         }
     }
 }
-
-// Legacy alias for backwards compatibility
-typealias KeyPointRow = ModernKeyPointRow
 
 // Simple flow layout for topics
 struct FlowLayout: Layout {

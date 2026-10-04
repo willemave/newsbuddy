@@ -11,8 +11,8 @@ private let podcastAudioLogger = Logger(subsystem: "com.newsly", category: "Podc
 
 protocol PodcastAudioEpisodeServicing: AnyObject {
     func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource
-    func createContentCouncilEpisode(contentId: Int, delivery: AudioEpisodeDelivery) async throws -> AudioEpisode
-    func createNewsItemDiscussionEpisode(newsItemId: Int, delivery: AudioEpisodeDelivery) async throws -> AudioEpisode
+    func createContentCouncilEpisode(contentId: Int) async throws -> AudioEpisode
+    func createNewsItemDiscussionEpisode(newsItemId: Int) async throws -> AudioEpisode
 }
 
 extension AudioEpisodeService: PodcastAudioEpisodeServicing {}
@@ -174,15 +174,9 @@ final class PodcastAudioController {
     private func createAudioEpisode(for content: ContentDetail) async throws -> AudioEpisode {
         switch content.contentType {
         case .article, .podcast, .insight_report, .unknown, .unknownRaw:
-            return try await audioEpisodeService.createContentCouncilEpisode(
-                contentId: content.id,
-                delivery: .stream
-            )
+            return try await audioEpisodeService.createContentCouncilEpisode(contentId: content.id)
         case .news:
-            return try await audioEpisodeService.createNewsItemDiscussionEpisode(
-                newsItemId: content.id,
-                delivery: .stream
-            )
+            return try await audioEpisodeService.createNewsItemDiscussionEpisode(newsItemId: content.id)
         }
     }
 

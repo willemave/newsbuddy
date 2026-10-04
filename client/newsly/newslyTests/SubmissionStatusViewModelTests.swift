@@ -107,12 +107,8 @@ final class SubmissionStatusViewModelTests: XCTestCase {
                 created: true,
                 configId: 44,
                 initialDownload: SubmissionFeedInitialDownload(
-                    requestedCount: 2,
-                    ran: true,
                     status: "completed",
-                    saved: 3,
-                    duplicates: 0,
-                    errors: 0
+                    saved: 3
                 )
             )
         )

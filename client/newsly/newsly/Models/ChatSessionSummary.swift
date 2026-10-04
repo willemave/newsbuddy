@@ -8,7 +8,7 @@
 import Foundation
 
 /// Summary of a chat session for list view
-struct ChatSessionSummary: Codable, Identifiable, Hashable {
+struct ChatSessionSummary: Identifiable, Hashable {
     static func == (lhs: ChatSessionSummary, rhs: ChatSessionSummary) -> Bool {
         lhs.id == rhs.id
     }
@@ -33,39 +33,13 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let articleSource: String?
     let articleImageUrl: String?
     let articleThumbnailUrl: String?
-    let hasPendingMessage: Bool?
-    let isWaitingForContent: Bool?
-    private let savedToKnowledgeValue: Bool?
-    let hasMessages: Bool?
+    let hasPendingMessage: Bool
+    let isWaitingForContent: Bool
+    let isSavedToKnowledge: Bool
+    let hasMessages: Bool
     let lastMessagePreview: String?
     let lastMessageRole: String?
-    private let cachedLastActivityDate: Date?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case contentId = "content_id"
-        case newsItemId = "news_item_id"
-        case title
-        case sessionType = "session_type"
-        case topic
-        case llmProvider = "llm_provider"
-        case llmModel = "llm_model"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case lastMessageAt = "last_message_at"
-        case articleTitle = "article_title"
-        case articleUrl = "article_url"
-        case articleSummary = "article_summary"
-        case articleSource = "article_source"
-        case articleImageUrl = "article_image_url"
-        case articleThumbnailUrl = "article_thumbnail_url"
-        case hasPendingMessage = "has_pending_message"
-        case isWaitingForContent = "is_waiting_for_content"
-        case savedToKnowledgeValue = "is_saved_to_knowledge"
-        case hasMessages = "has_messages"
-        case lastMessagePreview = "last_message_preview"
-        case lastMessageRole = "last_message_role"
-    }
+    let lastActivityDate: Date
 
     init(
         id: Int,
@@ -85,10 +59,10 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         articleSource: String?,
         articleImageUrl: String? = nil,
         articleThumbnailUrl: String? = nil,
-        hasPendingMessage: Bool?,
-        isWaitingForContent: Bool? = nil,
-        isSavedToKnowledge: Bool?,
-        hasMessages: Bool?,
+        hasPendingMessage: Bool = false,
+        isWaitingForContent: Bool = false,
+        isSavedToKnowledge: Bool = false,
+        hasMessages: Bool = true,
         lastMessagePreview: String?,
         lastMessageRole: String?
     ) {
@@ -111,11 +85,11 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.articleThumbnailUrl = articleThumbnailUrl
         self.hasPendingMessage = hasPendingMessage
         self.isWaitingForContent = isWaitingForContent
-        self.savedToKnowledgeValue = isSavedToKnowledge
+        self.isSavedToKnowledge = isSavedToKnowledge
         self.hasMessages = hasMessages
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageRole = lastMessageRole
-        self.cachedLastActivityDate = lastMessageAt ?? createdAt
+        self.lastActivityDate = lastMessageAt ?? createdAt
     }
 
     init(api response: APIChatSessionSummary) {
@@ -146,66 +120,20 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         )
     }
 
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIChatSessionSummary(from: decoder))
-    }
-
-    // Decoding goes through the generated APIChatSessionSummary, which parses wire
-    // date strings into Date. Encode must stay symmetric (dates back to canonical
-    // strings) — synthesized Encodable would emit numeric timestamps instead.
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encodeIfPresent(contentId, forKey: .contentId)
-        try container.encodeIfPresent(newsItemId, forKey: .newsItemId)
-        try container.encodeIfPresent(title, forKey: .title)
-        try container.encodeIfPresent(sessionType, forKey: .sessionType)
-        try container.encodeIfPresent(topic, forKey: .topic)
-        try container.encode(llmProvider, forKey: .llmProvider)
-        try container.encode(llmModel, forKey: .llmModel)
-        try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
-        try container.encodeIfPresent(updatedAt.map(ServerDate.format), forKey: .updatedAt)
-        try container.encodeIfPresent(lastMessageAt.map(ServerDate.format), forKey: .lastMessageAt)
-        try container.encodeIfPresent(articleTitle, forKey: .articleTitle)
-        try container.encodeIfPresent(articleUrl, forKey: .articleUrl)
-        try container.encodeIfPresent(articleSummary, forKey: .articleSummary)
-        try container.encodeIfPresent(articleSource, forKey: .articleSource)
-        try container.encodeIfPresent(articleImageUrl, forKey: .articleImageUrl)
-        try container.encodeIfPresent(articleThumbnailUrl, forKey: .articleThumbnailUrl)
-        try container.encodeIfPresent(hasPendingMessage, forKey: .hasPendingMessage)
-        try container.encodeIfPresent(isWaitingForContent, forKey: .isWaitingForContent)
-        try container.encodeIfPresent(savedToKnowledgeValue, forKey: .savedToKnowledgeValue)
-        try container.encodeIfPresent(hasMessages, forKey: .hasMessages)
-        try container.encodeIfPresent(lastMessagePreview, forKey: .lastMessagePreview)
-        try container.encodeIfPresent(lastMessageRole, forKey: .lastMessageRole)
-    }
-
-    private static let displayDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        formatter.timeZone = TimeZone.current
-        return formatter
-    }()
 
     /// True if the session has a message currently being processed
     var isProcessing: Bool {
-        hasPendingMessage ?? false
+        hasPendingMessage
     }
 
     /// True while a Share Sheet chat waits for its source and first turn.
     var isPreparingChat: Bool {
-        isWaitingForContent ?? false
-    }
-
-    /// True if the linked content is saved to knowledge
-    var isSavedToKnowledge: Bool {
-        savedToKnowledgeValue ?? false
+        isWaitingForContent
     }
 
     /// True if the session has any messages
     var hasAnyMessages: Bool {
-        hasMessages ?? true
+        hasMessages
     }
 
     /// True if this is a saved article with no chat messages yet
@@ -243,18 +171,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         return nil
     }
 
-    var formattedDate: String {
-        guard let date = cachedLastActivityDate else {
-            return "Date unknown"
-        }
-
-        return Self.displayDateFormatter.string(from: date)
-    }
-
-    var lastActivityDate: Date? {
-        cachedLastActivityDate
-    }
-
     var providerDisplayName: String {
         switch llmProvider.lowercased() {
         case "openai":
@@ -276,22 +192,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
             return "Deep Research"
         default:
             return llmProvider.capitalized
-        }
-    }
-
-    /// Returns the custom asset icon name for the provider
-    var providerIconAsset: String? {
-        switch llmProvider.lowercased() {
-        case "openai":
-            return "openai-icon"
-        case "anthropic":
-            return "claude-icon"
-        case "google":
-            return "gemini-icon"
-        case "deep_research":
-            return "deep-research-icon"
-        default:
-            return nil
         }
     }
 
@@ -320,53 +220,9 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         !isDeepResearch
     }
 
-    /// Icon name for the session type (used in chat list)
-    var sessionTypeIconName: String {
-        switch sessionType {
-        case "knowledge_chat":
-            return "bubble.left.and.bubble.right.fill"
-        case "assistant_quick":
-            return "sparkle.magnifyingglass"
-        case "deep_research":
-            return "magnifyingglass.circle.fill"
-        case "weekly_discovery":
-            return "calendar.badge.plus"
-        case "topic":
-            return "text.magnifyingglass"
-        case "article_brain":
-            return "doc.text.magnifyingglass"
-        case "ad_hoc":
-            return "bubble.left.and.bubble.right"
-        default:
-            return "bubble.left"
-        }
-    }
-
-    /// Human-readable label for the session type
-    var sessionTypeLabel: String {
-        switch sessionType {
-        case "knowledge_chat":
-            return "Knowledge"
-        case "assistant_quick":
-            return "Assistant"
-        case "deep_research":
-            return "Deep Research"
-        case "weekly_discovery":
-            return "Weekly Discovery"
-        case "topic":
-            return "Search"
-        case "article_brain":
-            return "Dig Deeper"
-        case "ad_hoc":
-            return "Chat"
-        default:
-            return "Chat"
-        }
-    }
-
 }
 
-struct ChatSessionListResponse: Codable {
+struct ChatSessionListResponse {
     let sessions: [ChatSessionSummary]
     let meta: PaginationMetadata
 
@@ -380,9 +236,5 @@ struct ChatSessionListResponse: Codable {
             sessions: response.sessions.map(ChatSessionSummary.init(api:)),
             meta: response.meta
         )
-    }
-
-    init(from decoder: Decoder) throws {
-        self.init(api: try APIChatSessionListResponse(from: decoder))
     }
 }

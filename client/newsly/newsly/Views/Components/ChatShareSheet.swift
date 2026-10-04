@@ -3,11 +3,9 @@
 //  newsly
 //
 
-import SwiftUI
-import UIKit
+import Foundation
 
-struct ShareContent: Identifiable {
-    let id = UUID()
+struct ShareContent {
     let messageContent: String
     let articleTitle: String?
     let articleUrl: String?
@@ -35,18 +33,4 @@ struct ShareContent: Identifiable {
         }
         return String(attributed.characters)
     }
-}
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let content: ShareContent
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let activityItems: [Any] = [content.shareText]
-        return UIActivityViewController(
-            activityItems: activityItems,
-            applicationActivities: nil
-        )
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

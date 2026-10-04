@@ -36,7 +36,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService.shared
+            deckService: LearningDeckService(client: makeTestAPIClient())
         )
 
         viewModel.performSendMessage(text: "Hello deck")
@@ -86,7 +86,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService.shared
+            deckService: LearningDeckService(client: makeTestAPIClient())
         )
 
         viewModel.performSendMessage(text: "Keep this")
@@ -131,7 +131,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService.shared
+            deckService: LearningDeckService(client: makeTestAPIClient())
         )
 
         viewModel.performSendMessage(text: "Keep polling")
@@ -184,7 +184,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService.shared
+            deckService: LearningDeckService(client: makeTestAPIClient())
         )
 
         viewModel.performSendMessage(text: "One deck send")
@@ -263,7 +263,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService.shared
+            deckService: LearningDeckService(client: makeTestAPIClient())
         )
 
         viewModel.performSendMessage(text: "First")
@@ -337,7 +337,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: registry,
-            deckService: LearningDeckService.shared
+            deckService: LearningDeckService(client: makeTestAPIClient())
         )
 
         viewModel.performSendMessage(text: "Explain this")
@@ -372,7 +372,6 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             status: .completed,
             shareEnabled: false,
             viewerAvailable: true,
-            sourceNotesAvailable: false,
             latestSuccessfulRunId: nil,
             latestRun: nil,
             createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
@@ -410,26 +409,13 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
     }
 
     private static func session() -> ChatSessionSummary {
-        ChatSessionSummary(
+        .fixture(
             id: 42,
             contentId: 7,
             title: "Deck Chat",
-            sessionType: "knowledge_chat",
-            topic: nil,
-            llmProvider: "openai",
-            llmModel: "openai:gpt-5.5",
             createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
-            updatedAt: nil,
-            lastMessageAt: nil,
             articleTitle: "Deck",
-            articleUrl: nil,
-            articleSummary: nil,
-            articleSource: nil,
-            hasPendingMessage: true,
-            isSavedToKnowledge: false,
-            hasMessages: true,
-            lastMessagePreview: nil,
-            lastMessageRole: nil
+            hasPendingMessage: true
         )
     }
 

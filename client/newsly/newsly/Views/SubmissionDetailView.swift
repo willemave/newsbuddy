@@ -70,7 +70,7 @@ struct SubmissionDetailView: View {
             if let recoveryURL = submission.recoveryURL {
                 Section(header: Text("Try again")) {
                     Text(
-                        submission.effectiveOutcome == .no_action
+                        submission.outcome == .no_action
                             ? "Share this link again, then choose Newsbuddy and a different action."
                             : "Share this link again to retry it in Newsbuddy."
                     )
@@ -81,7 +81,7 @@ struct SubmissionDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     .accessibilityIdentifier(
-                        submission.effectiveOutcome == .no_action
+                        submission.outcome == .no_action
                             ? "submission.no_action.retry"
                             : "submission.retry"
                     )
@@ -127,13 +127,14 @@ struct SubmissionDetailView: View {
                 }
             }
         }
+        .font(.modalBody)
         .contentMargins(.horizontal, Spacing.appHorizontalMargin, for: .scrollContent)
         .navigationTitle(submission.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private var statusColor: Color {
-        switch submission.effectiveOutcome {
+        switch submission.outcome {
         case .failed, .skipped, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
             return .statusDestructive
         case .subscribed, .already_subscribed, .completed:
@@ -195,12 +196,12 @@ private struct LinkRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(.appCaption)
+                .font(.modalCaption)
                 .foregroundStyle(Color.onSurfaceSecondary)
             if let url = URL(string: value) {
                 Link(destination: url) {
                     Text(value)
-                        .font(.appFootnote)
+                        .font(.modalSupporting)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
@@ -208,7 +209,7 @@ private struct LinkRow: View {
                 .accessibilityLabel("\(label): \(value)")
             } else {
                 Text(value)
-                    .font(.appFootnote)
+                    .font(.modalSupporting)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }

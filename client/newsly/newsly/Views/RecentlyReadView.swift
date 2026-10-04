@@ -8,13 +8,10 @@
 import SwiftUI
 
 struct RecentlyReadView: View {
-    let readStateCache: ReadStateCache
-
     @State private var viewModel: ContentListViewModel
     @State private var showingFilters = false
 
-    init(readStateCache: ReadStateCache, viewModel: ContentListViewModel) {
-        self.readStateCache = readStateCache
+    init(viewModel: ContentListViewModel) {
         self._viewModel = State(initialValue: viewModel)
     }
 
@@ -115,8 +112,4 @@ struct RecentlyReadView: View {
         }
         .appNavigationTitle("Recently Read")
     }
-}
-
-#Preview {
-    EmptyView()
 }

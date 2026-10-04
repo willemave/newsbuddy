@@ -16,6 +16,7 @@ struct FormChoicePillGroup: View {
     let options: [FormChoiceOption]
     @Binding var selection: String
     var unselectedBackground: Color = .surfaceSecondary
+    var font: Font = .terracottaBodyMedium
 
     var body: some View {
         HStack(spacing: 8) {
@@ -23,7 +24,8 @@ struct FormChoicePillGroup: View {
                 FormChoicePillButton(
                     option: option,
                     isSelected: selection == option.value,
-                    unselectedBackground: unselectedBackground
+                    unselectedBackground: unselectedBackground,
+                    font: font
                 ) {
                     selection = option.value
                 }
@@ -36,12 +38,13 @@ private struct FormChoicePillButton: View {
     let option: FormChoiceOption
     let isSelected: Bool
     let unselectedBackground: Color
+    let font: Font
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(option.title)
-                .font(.terracottaBodyMedium)
+                .font(font)
                 .foregroundStyle(isSelected ? Color.brandPrimary : Color.onSurface)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(isSelected ? Color.brandPrimary.opacity(0.14) : unselectedBackground)

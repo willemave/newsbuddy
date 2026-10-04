@@ -34,10 +34,11 @@ protocol ChatSessionServicing: MessageStatusFetching {
 extension ChatService: ChatSessionServicing {}
 
 class ChatService {
-    static let shared = ChatService()
-    private let client = APIClient.shared
+    private let client: APIClient
 
-    private init() {}
+    init(client: APIClient) {
+        self.client = client
+    }
 
     // MARK: - Session Management
 

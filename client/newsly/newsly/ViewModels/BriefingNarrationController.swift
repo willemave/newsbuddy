@@ -78,9 +78,9 @@ final class BriefingNarrationController {
         case failed(Error, cachedNarration: BriefingNarration?)
     }
 
-    private struct Preparation {
-        let task: Task<Void, Never>
-        var waiters: [UUID: CheckedContinuation<BriefingNarration, Error>]
+    private struct ChapterPreparation {
+        let id: UUID
+        let task: Task<AudioEpisode, Error>
     }
 
     private(set) var sessions: [String: BriefingNarrationSession] = [:]
@@ -96,10 +96,9 @@ final class BriefingNarrationController {
     @ObservationIgnored
     private let pollMaxAttempts: Int
     @ObservationIgnored
-    private var preparations: [String: Preparation] = [:]
     /// The chapter preparation each lens is awaiting, so dismissing the
     /// player can cancel it instead of letting it finish and then play.
-    private var chapterPreparations: [String: Task<AudioEpisode, Error>] = [:]
+    private var chapterPreparations: [String: ChapterPreparation] = [:]
     @ObservationIgnored
     private var playbackIntentID = UUID()
 
@@ -115,15 +114,6 @@ final class BriefingNarrationController {
         self.playbackService = playbackService
         self.pollIntervalNanoseconds = pollIntervalNanoseconds
         self.pollMaxAttempts = max(1, pollMaxAttempts)
-    }
-
-    deinit {
-        for preparation in preparations.values {
-            preparation.task.cancel()
-            for continuation in preparation.waiters.values {
-                continuation.resume(throwing: CancellationError())
-            }
-        }
     }
 
     func session(for lensKey: String) -> BriefingNarrationSession {
@@ -204,7 +194,7 @@ final class BriefingNarrationController {
     /// and clears any error, so the lens returns to its quiet resting chrome.
     func stopPlayback(for lensKey: String) {
         _ = beginPlaybackIntent()
-        chapterPreparations[lensKey]?.cancel()
+        chapterPreparations[lensKey]?.task.cancel()
         playbackService.stop()
         clearError(for: lensKey)
     }
@@ -250,11 +240,16 @@ final class BriefingNarrationController {
         }
         defer { updateSession(for: lensKey) { $0.isPreparing = false } }
 
+        let preparationID = UUID()
         let preparation = Task { [self] in
             try await self.prepareNarrationChapter(at: chapterIndex, for: lensKey)
         }
-        chapterPreparations[lensKey] = preparation
-        defer { chapterPreparations[lensKey] = nil }
+        chapterPreparations[lensKey] = ChapterPreparation(id: preparationID, task: preparation)
+        defer {
+            if chapterPreparations[lensKey]?.id == preparationID {
+                chapterPreparations[lensKey] = nil
+            }
+        }
 
         do {
             let episode = try await preparation.value
@@ -335,20 +330,15 @@ final class BriefingNarrationController {
     }
 
     func prepareNarration(for lensKey: String) async throws -> BriefingNarration {
-        let waiterID = UUID()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                    return
-                }
-                registerPreparationWaiter(continuation, id: waiterID, for: lensKey)
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.cancelPreparationWaiter(id: waiterID, for: lensKey)
-            }
-        }
+        let outcome = await Self.prepareNarration(
+            for: lensKey,
+            cachedNarration: narration(for: lensKey),
+            briefingService: briefingService,
+            pollIntervalNanoseconds: pollIntervalNanoseconds,
+            maxAttempts: pollMaxAttempts
+        )
+        try Task.checkCancellation()
+        return try applyPreparation(outcome, for: lensKey)
     }
 
     func prepareNarrationChapter(
@@ -442,37 +432,6 @@ final class BriefingNarrationController {
         }
     }
 
-    private func registerPreparationWaiter(
-        _ continuation: CheckedContinuation<BriefingNarration, Error>,
-        id waiterID: UUID,
-        for lensKey: String
-    ) {
-        if var preparation = preparations[lensKey] {
-            preparation.waiters[waiterID] = continuation
-            preparations[lensKey] = preparation
-            return
-        }
-
-        let cachedNarration = narration(for: lensKey)
-        let briefingService = briefingService
-        let pollIntervalNanoseconds = pollIntervalNanoseconds
-        let pollMaxAttempts = pollMaxAttempts
-        let task = Task { @MainActor [weak self] in
-            let outcome = await Self.prepareNarration(
-                for: lensKey,
-                cachedNarration: cachedNarration,
-                briefingService: briefingService,
-                pollIntervalNanoseconds: pollIntervalNanoseconds,
-                maxAttempts: pollMaxAttempts
-            )
-            self?.finishPreparation(outcome, for: lensKey)
-        }
-        preparations[lensKey] = Preparation(
-            task: task,
-            waiters: [waiterID: continuation]
-        )
-    }
-
     private static func retryNarration(
         _ narration: BriefingNarration,
         service: any BriefingServicing
@@ -558,20 +517,6 @@ final class BriefingNarrationController {
         }
     }
 
-    private func finishPreparation(_ outcome: PreparationOutcome, for lensKey: String) {
-        guard let preparation = preparations.removeValue(forKey: lensKey) else { return }
-        do {
-            let narration = try applyPreparation(outcome, for: lensKey)
-            for continuation in preparation.waiters.values {
-                continuation.resume(returning: narration)
-            }
-        } catch {
-            for continuation in preparation.waiters.values {
-                continuation.resume(throwing: error)
-            }
-        }
-    }
-
     private func applyPreparation(
         _ outcome: PreparationOutcome,
         for lensKey: String
@@ -591,20 +536,6 @@ final class BriefingNarrationController {
             }
             throw error
         }
-    }
-
-    private func cancelPreparationWaiter(id waiterID: UUID, for lensKey: String) {
-        guard var preparation = preparations[lensKey],
-              let continuation = preparation.waiters.removeValue(forKey: waiterID) else {
-            return
-        }
-        continuation.resume(throwing: CancellationError())
-        if preparation.waiters.isEmpty {
-            preparations.removeValue(forKey: lensKey)
-            preparation.task.cancel()
-            return
-        }
-        preparations[lensKey] = preparation
     }
 
     private func finishNarrationChapter(

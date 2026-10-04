@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Observation
 import UserNotifications
 import os.log
 
@@ -14,15 +13,10 @@ private let logger = Logger(subsystem: "com.newsly", category: "LocalNotificatio
 
 /// Service for handling local push notifications
 @MainActor
-@Observable
 final class LocalNotificationService: NSObject {
     static let shared = LocalNotificationService()
 
-    private(set) var isAuthorized = false
-
-    @ObservationIgnored
     private let notificationCenter = UNUserNotificationCenter.current()
-    @ObservationIgnored
     private var openChatRoute: ((Int) -> Void)?
 
     private override init() {
@@ -34,18 +28,10 @@ final class LocalNotificationService: NSObject {
     func requestAuthorization() async {
         do {
             let granted = try await notificationCenter.requestAuthorization(options: [.alert, .sound, .badge])
-            isAuthorized = granted
             logger.info("Notification authorization: \(granted)")
         } catch {
             logger.error("Failed to request notification authorization: \(error.localizedDescription)")
-            isAuthorized = false
         }
-    }
-
-    /// Check current authorization status
-    func checkAuthorizationStatus() async {
-        let settings = await notificationCenter.notificationSettings()
-        isAuthorized = settings.authorizationStatus == .authorized
     }
 
     /// Show an in-app notification when a chat session completes
@@ -74,13 +60,6 @@ final class LocalNotificationService: NSObject {
                 logger.info("Scheduled chat completion notification for session \(sessionId)")
             }
         }
-    }
-
-    /// Remove pending notification for a session
-    func removePendingNotification(sessionId: Int) {
-        notificationCenter.removePendingNotificationRequests(
-            withIdentifiers: ["chat_completed_\(sessionId)"]
-        )
     }
 
     func setChatRouteHandler(_ handler: @escaping (Int) -> Void) {

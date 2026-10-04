@@ -1,11 +1,25 @@
 //
-//  FeedSourcesView.swift
+//  SourcesView.swift
 //  newsly
 //
 
 import SwiftUI
 
-private enum FeedSourcesSheetDestination: Identifiable {
+enum SourceListKind {
+    case feed
+    case podcast
+
+    var title: String { self == .feed ? "Feed Sources" : "Podcast Sources" }
+    var prefix: String { self == .feed ? "feed_sources" : "podcast_sources" }
+    var icon: String { self == .feed ? "antenna.radiowaves.left.and.right" : "waveform" }
+    var subtitle: String {
+        self == .feed
+            ? "Add RSS feeds, Substacks, or YouTube channels to start receiving content"
+            : "Add podcast RSS feeds to start receiving episodes"
+    }
+}
+
+private enum SourcesSheetDestination: Identifiable {
     case addSource
     case sourceDetail(ScraperConfig)
 
@@ -19,21 +33,24 @@ private enum FeedSourcesSheetDestination: Identifiable {
     }
 }
 
-struct FeedSourcesView: View {
+struct SourcesView: View {
+    private let kind: SourceListKind
+    @State private var newLimit = ""
     @State private var viewModel: ScraperSettingsViewModel
-    @State private var activeSheet: FeedSourcesSheetDestination?
+    @State private var activeSheet: SourcesSheetDestination?
     @State private var newFeedURL: String = ""
     @State private var newFeedName: String = ""
-    @State private var newFeedType: String = "substack"
+    @State private var newFeedType: String = APIScraperType.substack.rawValue
     @State private var addSourceError: String?
     @State private var isAddingSource = false
     private let feedTypeOptions = [
-        FormChoiceOption(title: "Substack", value: "substack"),
-        FormChoiceOption(title: "RSS/Atom", value: "atom"),
-        FormChoiceOption(title: "YouTube", value: "youtube"),
+        FormChoiceOption(title: "Substack", value: APIScraperType.substack.rawValue),
+        FormChoiceOption(title: "RSS/Atom", value: APIScraperType.atom.rawValue),
+        FormChoiceOption(title: "YouTube", value: APIScraperType.youtube.rawValue),
     ]
 
-    init(viewModel: ScraperSettingsViewModel) {
+    init(kind: SourceListKind, viewModel: ScraperSettingsViewModel) {
+        self.kind = kind
         self._viewModel = State(initialValue: viewModel)
     }
 
@@ -44,10 +61,10 @@ struct FeedSourcesView: View {
                     if viewModel.isLoading && viewModel.configs.isEmpty {
                         loadingView
                     } else if viewModel.configs.isEmpty {
-                        SettingsEmptyStateView(
-                            icon: "antenna.radiowaves.left.and.right",
-                            title: "No Feed Sources",
-                            subtitle: "Add RSS feeds, Substacks, or YouTube channels to start receiving content",
+                        EmptyStateView(
+                            icon: kind.icon,
+                            title: "No \(kind.title)",
+                            subtitle: kind.subtitle,
                             actionTitle: "Add Source",
                             action: { activeSheet = .addSource }
                         )
@@ -70,7 +87,7 @@ struct FeedSourcesView: View {
             }
         }
         .background(Color.surfacePrimary)
-        .navigationTitle("Feed Sources")
+        .navigationTitle(kind.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadConfigsWithDeferredStats() }
         .sheet(item: $activeSheet) { destination in
@@ -102,7 +119,7 @@ struct FeedSourcesView: View {
         ForEach(viewModel.configs) { config in
             VStack(spacing: 0) {
                 SourceRow(
-                    name: config.displayName ?? config.feedURL ?? "Feed",
+                    name: config.displayName ?? config.feedURL ?? (kind == .feed ? "Feed" : "Podcast"),
                     url: config.feedURL,
                     type: config.scraperType,
                     isActive: config.isActive,
@@ -114,13 +131,7 @@ struct FeedSourcesView: View {
                     RowDivider()
                 }
             }
-            .swipeActions {
-                Button(role: .destructive) {
-                    Task { await viewModel.deleteConfig(config) }
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
+
         }
     }
 
@@ -138,67 +149,90 @@ struct FeedSourcesView: View {
                 Task { await viewModel.loadConfigsWithDeferredStats() }
             }
             .font(.appCaption.weight(.semibold))
-            .accessibilityIdentifier("feed_sources.error.retry")
+            .accessibilityIdentifier("\(kind.prefix).error.retry")
         }
         .padding()
-        .accessibilityIdentifier("feed_sources.error")
+        .accessibilityIdentifier("\(kind.prefix).error")
     }
 
     // MARK: - Add Source Sheet
 
     private var addSourceSheet: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                // Type selector
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("TYPE")
-                        .font(.sectionHeader)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .tracking(0.5)
+            ScrollView {
+                VStack(spacing: 24) {
+                    if kind == .feed {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("TYPE")
+                                .font(.modalCaption.weight(.semibold))
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .tracking(0.5)
 
-                    FormChoicePillGroup(options: feedTypeOptions, selection: $newFeedType)
+                            FormChoicePillGroup(
+                                options: feedTypeOptions,
+                                selection: $newFeedType,
+                                font: .modalSupporting
+                            )
+                        }
+                    }
+
+                    // URL field
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("FEED URL")
+                            .font(.modalCaption.weight(.semibold))
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .tracking(0.5)
+
+                        FormTextField(
+                            placeholder: kind == .feed ? "https://example.com/feed" : "https://example.com/podcast/feed",
+                            text: $newFeedURL,
+                            keyboardType: .URL,
+                            textInputAutocapitalization: .never,
+                            autocorrectionDisabled: true,
+                            accessibilityLabel: kind == .feed ? "Feed URL" : "Podcast feed URL"
+                        )
+                        .font(.modalBody)
+                    }
+
+                    // Name field
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("DISPLAY NAME")
+                            .font(.modalCaption.weight(.semibold))
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .tracking(0.5)
+
+                        FormTextField(
+                            placeholder: "Optional",
+                            text: $newFeedName,
+                            accessibilityLabel: "Display name"
+                        )
+                        .font(.modalBody)
+                    }
+
+                    if kind == .podcast {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("EPISODE LIMIT")
+                                .font(.modalCaption.weight(.semibold))
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .tracking(0.5)
+                            FormTextField(
+                                placeholder: "1-100, optional", text: $newLimit,
+                                keyboardType: .numberPad, accessibilityLabel: "Episode limit"
+                            )
+                            .font(.modalBody)
+                        }
+                    }
+
+                    if let addSourceError {
+                        addSourceErrorBanner(addSourceError)
+                    }
+
+                    Spacer(minLength: 24)
                 }
-
-                // URL field
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("FEED URL")
-                        .font(.sectionHeader)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .tracking(0.5)
-
-                    FormTextField(
-                        placeholder: "https://example.com/feed",
-                        text: $newFeedURL,
-                        keyboardType: .URL,
-                        textInputAutocapitalization: .never,
-                        autocorrectionDisabled: true,
-                        accessibilityLabel: "Feed URL"
-                    )
-                }
-
-                // Name field
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("DISPLAY NAME")
-                        .font(.sectionHeader)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .tracking(0.5)
-
-                    FormTextField(
-                        placeholder: "Optional",
-                        text: $newFeedName,
-                        accessibilityLabel: "Display name"
-                    )
-                }
-
-                if let addSourceError {
-                    addSourceErrorBanner(addSourceError)
-                }
-
-                Spacer()
+                .padding()
             }
-            .padding()
             .background(Color.surfacePrimary)
-            .navigationTitle("Add Feed Source")
+            .navigationTitle(kind == .feed ? "Add Feed Source" : "Add Podcast Source")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -225,7 +259,7 @@ struct FeedSourcesView: View {
                 .accessibilityHidden(true)
 
             Text(error)
-                .font(.appSubheadline)
+                .font(.modalSupporting)
                 .foregroundStyle(Color.onSurface)
 
             Spacer()
@@ -239,14 +273,25 @@ struct FeedSourcesView: View {
         guard !isAddingSource else { return }
 
         addSourceError = nil
+        let trimmedLimit = newLimit.trimmingCharacters(in: .whitespacesAndNewlines)
+        let limitValue = Int(trimmedLimit)
+        if kind == .podcast && !trimmedLimit.isEmpty && limitValue == nil {
+            addSourceError = "Limit must be a number between 1 and 100"
+            return
+        }
+        if let limitValue, !(1...100).contains(limitValue) {
+            addSourceError = "Limit must be between 1 and 100"
+            return
+        }
         isAddingSource = true
         defer { isAddingSource = false }
 
         let trimmedName = newFeedName.trimmingCharacters(in: .whitespacesAndNewlines)
         let didAdd = await viewModel.addConfig(
-            scraperType: newFeedType,
+            scraperType: kind == .feed ? newFeedType : APIScraperType.podcast_rss.rawValue,
             displayName: trimmedName.isEmpty ? nil : trimmedName,
-            feedURL: newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            feedURL: newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            limit: kind == .podcast ? limitValue : nil
         )
 
         guard didAdd else {
@@ -261,7 +306,8 @@ struct FeedSourcesView: View {
     private func resetAddForm() {
         newFeedURL = ""
         newFeedName = ""
-        newFeedType = "substack"
+        newFeedType = APIScraperType.substack.rawValue
+        newLimit = ""
         addSourceError = nil
     }
 

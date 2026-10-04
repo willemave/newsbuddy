@@ -34,7 +34,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             currentUserGate: gate
         )
 
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -61,7 +61,7 @@ final class AuthenticationViewModelTests: XCTestCase {
                 AuthError.networkError(URLError(.notConnectedToInternet))
             )
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -86,7 +86,7 @@ final class AuthenticationViewModelTests: XCTestCase {
                 AuthError.networkError(URLError(.notConnectedToInternet))
             )
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -107,7 +107,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             timezoneRevision: 1
         )
         let service = AuthenticationTestService(currentUserResult: .success(initial))
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: AuthenticationTestTokenStore(
                 accessToken: "access",
@@ -153,7 +153,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let service = AuthenticationTestService(
             currentUserResult: .success(initial)
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: AuthenticationTestTokenStore(
                 accessToken: "access",
@@ -189,7 +189,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let service = AuthenticationTestService(
             currentUserResult: .success(initial)
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: AuthenticationTestTokenStore(
                 accessToken: "access",
@@ -227,7 +227,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             currentUserResult: .failure(AuthError.notAuthenticated)
         )
 
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache,
@@ -251,7 +251,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let cache = AuthenticationTestUserCache(user: nil)
         let service = AuthenticationTestService(currentUserResult: .success(user))
         let storage = AuthenticationUnavailableCredentialStorage()
-        let controller = AuthenticationViewModel(
+        let controller = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache,
@@ -287,7 +287,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         )
         let lifecycle = AppLifecycle()
         lifecycle.record(.active)
-        let controller = AuthenticationViewModel(
+        let controller = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -320,7 +320,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let service = AuthenticationTestService(
             currentUserResult: .failure(ClientFailure.authenticationExpired)
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -343,7 +343,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         )
         let cache = AuthenticationTestUserCache(user: cachedUser)
         let service = AuthenticationTestService(currentUserResult: .success(validatedUser))
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -368,7 +368,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             currentUserResult: .success(staleUser),
             currentUserGate: gate
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -397,7 +397,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             currentUserResult: .failure(AuthError.notAuthenticated),
             explicitLogoutResult: .failed
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -429,7 +429,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             currentUserResult: .success(staleUser),
             currentUserGate: gate
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -458,7 +458,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             signInResult: .success(AuthSession(user: signedInUser, isNewUser: false)),
             signInGate: signInGate
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -487,7 +487,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             currentUserResult: .failure(AuthError.notAuthenticated),
             terminalLogoutResult: .noLongerCurrent
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache
@@ -524,7 +524,7 @@ final class AuthenticationViewModelTests: XCTestCase {
             logoutGate: logoutGate,
             terminalLogoutResult: .ended
         )
-        let viewModel = AuthenticationViewModel(
+        let viewModel = AuthenticationController(
             authService: service,
             tokenStore: tokenStore,
             userCache: cache

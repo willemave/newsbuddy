@@ -19,7 +19,6 @@ final class AppLifecycleTests: XCTestCase {
                 backgroundDuration: nil
             )
         )
-        XCTAssertNil(lifecycle.lastInterruptionReturnAt)
     }
 
     func testInterruptionReturnDoesNotAdvanceActivationGeneration() {
@@ -34,7 +33,6 @@ final class AppLifecycleTests: XCTestCase {
         lifecycle.record(.active)
 
         XCTAssertEqual(lifecycle.activation, initialActivation)
-        XCTAssertEqual(lifecycle.lastInterruptionReturnAt, currentDate)
     }
 
     func testTrueBackgroundCreatesOneWarmResumeGeneration() {
@@ -67,7 +65,6 @@ final class AppLifecycleTests: XCTestCase {
         lifecycle.record(.active)
 
         XCTAssertEqual(lifecycle.activation, initialActivation)
-        XCTAssertNil(lifecycle.lastInterruptionReturnAt)
     }
 
     func testRuntimeRetainsInjectedLifecycle() {
@@ -137,7 +134,7 @@ final class AppLifecycleTests: XCTestCase {
 
 @MainActor
 private func makeAuthenticationController() -> AuthenticationController {
-    AuthenticationViewModel(
+    AuthenticationController(
         authService: AuthenticationTestService(
             currentUserResult: .failure(AuthError.notAuthenticated)
         ),
@@ -152,17 +149,31 @@ private func makeAuthenticationController() -> AuthenticationController {
 
 @MainActor
 private func makeRootDependencyFactory() -> RootDependencyFactory {
-    let apiClient = APIClient.shared
-    let onboardingService = OnboardingService.shared
+    let tokenStore = AuthenticationTestTokenStore(
+        accessToken: nil,
+        refreshToken: nil,
+        userID: nil
+    )
+    let credentialSession = makeTestCredentialSession(tokenStore: tokenStore)
+    let apiClient = makeTestAPIClient(credentialSession: credentialSession)
+    let onboardingService = OnboardingService(client: apiClient)
+    let learningDeckService = LearningDeckService(client: apiClient)
+    let openAIService = OpenAIService(
+        apiClient: apiClient,
+        credentialSession: credentialSession
+    )
     return RootDependencyFactory(
         dependencies: RootDependencyFactory.Dependencies(
             apiClient: apiClient,
-            authenticationService: AuthenticationService.shared,
-            tokenStore: KeychainManager.shared,
-            credentialSession: CredentialSession.shared,
-            chatService: ChatService.shared,
-            contentService: ContentService.shared,
-            scraperConfigService: ScraperConfigService.shared,
+            authenticationService: AuthenticationService(
+                apiClient: apiClient,
+                credentialSession: credentialSession
+            ),
+            tokenStore: tokenStore,
+            credentialSession: credentialSession,
+            chatService: ChatService(client: apiClient),
+            contentService: ContentService(client: apiClient),
+            scraperConfigService: ScraperConfigService(client: apiClient),
             toastService: ToastService.shared,
             briefingService: LiveBriefingService(
                 apiClient: apiClient,
@@ -170,26 +181,25 @@ private func makeRootDependencyFactory() -> RootDependencyFactory {
                     _ = try await onboardingService.markTutorialComplete()
                 }
             ),
-            narrationPlaybackService: NarrationPlaybackService.shared,
-            audioEpisodeService: AudioEpisodeService.shared,
+            narrationPlaybackService: NarrationPlaybackService(nowPlayingController: .shared),
+            audioEpisodeService: AudioEpisodeService(client: apiClient),
             onboardingService: onboardingService,
             onboardingStateStore: OnboardingStateStore(
                 defaults: SharedContainer.userDefaults
             ),
-            learningDeckService: LearningDeckService.shared,
-            learningDeckStatusRegistry: LearningDeckStatusRegistry.shared,
+            learningDeckService: learningDeckService,
+            learningDeckStatusRegistry: LearningDeckStatusRegistry(
+                statusService: learningDeckService
+            ),
             twitterShareService: TwitterShareService.shared,
-            openAIService: OpenAIService.shared,
+            openAIService: openAIService,
             appSettings: AppSettings.shared,
-            xIntegrationService: XIntegrationService.shared,
-            feedbackService: FeedbackService.shared,
+            xIntegrationService: XIntegrationService(apiClient: apiClient),
+            feedbackService: FeedbackService(client: apiClient),
             cliLinkService: CLILinkService(client: apiClient),
             localNotificationService: LocalNotificationService.shared,
             sharedDefaults: SharedContainer.userDefaults,
-            makeVoiceDictationTranscriber: {
-                SpeechTranscriberFactory.makeVoiceDictationTranscriber()
-            },
-            makeChatNavigationCoordinator: { ChatNavigationCoordinator() }
+            speechTranscriber: TestUnavailableSpeechTranscriber()
         )
     )
 }

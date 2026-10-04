@@ -111,17 +111,13 @@ protocol LearningDeckServicing: LearningDeckStatusFetching {
     func retryDeck(deckId: Int) async throws -> LearningDeck
     func viewerURL(deckId: Int) async throws -> URL
     func sourceNotesURL(deckId: Int) async throws -> URL
-    func enableShare(deckId: Int) async throws -> LearningDeckShareResponse
-    func disableShare(deckId: Int) async throws -> LearningDeckShareResponse
     func deleteDeck(deckId: Int) async throws
 }
 
 final class LearningDeckService {
-    static let shared = LearningDeckService()
-
     private let client: APIClient
 
-    init(client: APIClient = .shared) {
+    init(client: APIClient) {
         self.client = client
     }
 
@@ -189,22 +185,6 @@ final class LearningDeckService {
             throw ClientFailure.invalidRequest
         }
         return try LearningDeckURLValidator.validate(response.url, apiBaseURL: apiBaseURL)
-    }
-
-    func enableShare(deckId: Int) async throws -> LearningDeckShareResponse {
-        let response: APILearningDeckShareResponse = try await client.request(
-            APIEndpoints.learningDeckShare(id: deckId),
-            method: .post
-        )
-        return LearningDeckShareResponse(apiResponse: response)
-    }
-
-    func disableShare(deckId: Int) async throws -> LearningDeckShareResponse {
-        let response: APILearningDeckShareResponse = try await client.request(
-            APIEndpoints.learningDeckShare(id: deckId),
-            method: .delete
-        )
-        return LearningDeckShareResponse(apiResponse: response)
     }
 
     func deleteDeck(deckId: Int) async throws {

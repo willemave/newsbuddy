@@ -46,60 +46,20 @@ struct SubmissionFeedSubscription {
 
 /// Domain-level view of the initial download result for a newly subscribed feed.
 struct SubmissionFeedInitialDownload {
-    let requestedCount: Int?
-    let ran: Bool?
     let status: String?
-    let reason: String?
-    let error: String?
-    let configId: Int?
-    let baseLimit: Int?
-    let targetLimit: Int?
-    let scraped: Int?
     let saved: Int?
-    let duplicates: Int?
-    let errors: Int?
 
     init(api response: APISubmissionFeedInitialDownloadResponse) {
-        requestedCount = response.requestedCount
-        ran = response.ran
         status = response.status
-        reason = response.reason
-        error = response.error
-        configId = response.configId
-        baseLimit = response.baseLimit
-        targetLimit = response.targetLimit
-        scraped = response.scraped
         saved = response.saved
-        duplicates = response.duplicates
-        errors = response.errors
     }
 
     init(
-        requestedCount: Int? = nil,
-        ran: Bool? = nil,
         status: String? = nil,
-        reason: String? = nil,
-        error: String? = nil,
-        configId: Int? = nil,
-        baseLimit: Int? = nil,
-        targetLimit: Int? = nil,
-        scraped: Int? = nil,
-        saved: Int? = nil,
-        duplicates: Int? = nil,
-        errors: Int? = nil
+        saved: Int? = nil
     ) {
-        self.requestedCount = requestedCount
-        self.ran = ran
         self.status = status
-        self.reason = reason
-        self.error = error
-        self.configId = configId
-        self.baseLimit = baseLimit
-        self.targetLimit = targetLimit
-        self.scraped = scraped
         self.saved = saved
-        self.duplicates = duplicates
-        self.errors = errors
     }
 }
 
@@ -231,7 +191,7 @@ struct SubmissionStatusItem: Identifiable {
     }
 
     var statusLabel: String {
-        switch effectiveOutcome {
+        switch outcome {
         case .queued:
             return "Queued"
         case .processing:
@@ -260,7 +220,7 @@ struct SubmissionStatusItem: Identifiable {
     }
 
     var isError: Bool {
-        switch effectiveOutcome {
+        switch outcome {
         case .failed, .skipped, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
             return true
         default:
@@ -270,7 +230,7 @@ struct SubmissionStatusItem: Identifiable {
 
     var errorDisplayText: String? {
         guard isError else { return nil }
-        switch effectiveOutcome {
+        switch outcome {
         case .skipped:
             return "Processing was skipped."
         case .feed_not_found:
@@ -288,11 +248,11 @@ struct SubmissionStatusItem: Identifiable {
         if let errorDisplayText {
             return errorDisplayText
         }
-        if effectiveOutcome == .no_action {
+        if outcome == .no_action {
             return rationale ?? "Newsbuddy could not find an action to take for this link."
         }
         if isLearningDeck {
-            switch effectiveOutcome {
+            switch outcome {
             case .completed:
                 return "Learning Deck is ready."
             case .processing:
@@ -304,7 +264,7 @@ struct SubmissionStatusItem: Identifiable {
             }
         }
         guard isFeedSubscription else { return nil }
-        switch effectiveOutcome {
+        switch outcome {
         case .subscribed:
             if feedSubscription?.initialDownload?.status?.lowercased() == "failed" {
                 return "Feed added, but recent items could not be downloaded."
@@ -341,17 +301,9 @@ struct SubmissionStatusItem: Identifiable {
         return contentType.displayName
     }
 
-    /// The submission outcome to drive display logic from. The wire model's `outcome`
-    /// field is required and always populated by the backend (default `.processing`),
-    /// so this is a straight passthrough — kept as a computed property to preserve the
-    /// call-site name used throughout the view layer.
-    var effectiveOutcome: APISubmissionOutcome {
-        outcome
-    }
-
     var recoveryURL: URL? {
         let canRecover: Bool
-        if effectiveOutcome == .no_action {
+        if outcome == .no_action {
             canRecover = true
         } else {
             canRecover = isSelfSubmission && isError

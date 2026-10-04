@@ -32,7 +32,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let user = makeUser(id: 41)
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -50,7 +50,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let transcriber = FakeSpeechTranscriber()
         let viewModel = OnboardingViewModel(
             user: makeUser(id: 46),
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: transcriber,
             onboardingStateStore: store
         )
@@ -74,7 +74,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let transcriber = DeferredStartSpeechTranscriber()
         let viewModel = OnboardingViewModel(
             user: makeUser(id: 49),
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: transcriber,
             onboardingStateStore: store
         )
@@ -93,7 +93,6 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertFalse(viewModel.isPersonalized)
         XCTAssertEqual(viewModel.audioState, .idle)
         XCTAssertNil(viewModel.errorMessage)
-        XCTAssertFalse(viewModel.hasDictationError)
         XCTAssertFalse(transcriber.hasActiveSession)
     }
 
@@ -235,7 +234,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -283,7 +282,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -301,7 +300,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let user = makeUser(id: 46)
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -317,7 +316,7 @@ final class OnboardingStateStoreTests: XCTestCase {
     func testLastAggregatorTopicCannotBeDeselected() {
         let viewModel = OnboardingViewModel(
             user: makeUser(id: 47),
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -350,7 +349,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -379,7 +378,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -394,26 +393,23 @@ final class OnboardingStateStoreTests: XCTestCase {
 
     func testLegacyFastNewsSnapshotRestoresToAggregatorStep() {
         let user = makeUser(id: 45)
-        store.saveProgress(
-            userId: user.id,
-            snapshot: OnboardingProgressSnapshot(
-                step: .fastNews,
-                isPersonalized: true,
-                suggestions: nil,
-                selectedSuggestionIds: [],
-                selectedAggregators: ["sciurls"],
-                discoveryRunId: nil,
-                discoveryRunStatus: "completed",
-                discoveryErrorMessage: nil,
-                hasReachedPollingLimit: false,
-                topicSummary: nil,
-                inferredTopics: []
-            )
+        let legacySnapshot: [String: Any] = [
+            "step": 5,
+            "isPersonalized": true,
+            "selectedSuggestionIds": [],
+            "selectedAggregators": ["sciurls"],
+            "discoveryRunStatus": "completed",
+            "hasReachedPollingLimit": false,
+            "inferredTopics": []
+        ]
+        defaults.set(
+            try! JSONSerialization.data(withJSONObject: [String(user.id): legacySnapshot]),
+            forKey: "onboarding_progress"
         )
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
+            service: OnboardingService(client: makeTestAPIClient()),
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -421,18 +417,6 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertEqual(viewModel.step, .aggregators)
         XCTAssertTrue(viewModel.selectedSuggestionIDs.isEmpty)
         XCTAssertEqual(viewModel.selectedAggregators, ["sciurls"])
-    }
-
-    func testLegacyDiscoveryRunFallsBackToLoadingSnapshot() throws {
-        let user = makeUser(id: 43)
-        let encodedRuns = try JSONEncoder().encode([String(user.id): 987])
-        defaults.set(encodedRuns, forKey: "onboarding_discovery_runs")
-
-        let snapshot = store.progress(userId: user.id)
-
-        XCTAssertEqual(snapshot?.step, .loading)
-        XCTAssertEqual(snapshot?.isPersonalized, true)
-        XCTAssertEqual(snapshot?.discoveryRunId, 987)
     }
 
     func testPersonalizedCompletionSendsOnlyRunAndPersistedSuggestionIDs() async {
@@ -524,17 +508,6 @@ final class OnboardingStateStoreTests: XCTestCase {
             createdAt: now,
             updatedAt: now
         )
-    }
-
-    private func waitUntil(
-        attempts: Int = 100,
-        condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        for _ in 0..<attempts {
-            if condition() { return true }
-            await Task.yield()
-        }
-        return condition()
     }
 
     private func settleAsyncWork() async {

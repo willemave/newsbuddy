@@ -6,28 +6,6 @@
 import Foundation
 import Observation
 
-protocol DetailChatServicing: AnyObject {
-    func createAssistantTurn(
-        message: String,
-        sessionId: Int?,
-        screenContext: AssistantScreenContext
-    ) async throws -> AssistantTurnResponse
-    func startNewsChat(newsItemId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary
-    func startArticleChat(contentId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary
-    func startNewsTopicChat(newsItemId: Int, topic: String, provider: ChatModelProvider) async throws -> ChatSessionSummary
-    func startTopicChat(contentId: Int, topic: String, provider: ChatModelProvider) async throws -> ChatSessionSummary
-    func getSessionForNewsItem(newsItemId: Int) async throws -> ChatSessionSummary?
-    func getSessionForContent(contentId: Int) async throws -> ChatSessionSummary?
-}
-
-@MainActor
-protocol ChatRouteOpening: AnyObject {
-    func openReplacingCurrentNavigation(_ route: ChatSessionRoute)
-}
-
-extension ChatService: DetailChatServicing {}
-extension ChatNavigationCoordinator: ChatRouteOpening {}
-
 @MainActor
 @Observable
 final class DetailChatCoordinator {
@@ -35,14 +13,14 @@ final class DetailChatCoordinator {
     var chatError: String?
 
     private let chatSessionManager: ActiveChatSessionManager
-    private let chatService: any DetailChatServicing
-    private let chatRouter: any ChatRouteOpening
+    private let chatService: ChatService
+    private let chatRouter: ChatNavigationCoordinator
     private let toastPresenter: any ToastPresenting
 
     init(
         chatSessionManager: ActiveChatSessionManager,
-        chatService: any DetailChatServicing,
-        chatRouter: any ChatRouteOpening,
+        chatService: ChatService,
+        chatRouter: ChatNavigationCoordinator,
         toastPresenter: any ToastPresenting
     ) {
         self.chatSessionManager = chatSessionManager

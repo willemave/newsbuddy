@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class ActiveChatSessionManagerTests: XCTestCase {
     func testStartTrackingUpdatesProcessingStateAndContentLookup() {
-        let manager = ActiveChatSessionManager(startsPolling: false)
+        let manager = makeTestActiveChatSessionManager()
 
         manager.startTracking(
             session: Self.session(id: 42),
@@ -13,14 +13,14 @@ final class ActiveChatSessionManagerTests: XCTestCase {
             messageId: 501
         )
 
-        XCTAssertTrue(manager.hasProcessingSessions)
-        XCTAssertEqual(manager.processingCount, 1)
+        XCTAssertTrue(!manager.activeSessions.isEmpty)
+        XCTAssertEqual(manager.activeSessions.count, 1)
         XCTAssertEqual(manager.getSession(forContentId: 7)?.id, 42)
         XCTAssertEqual(manager.getSession(forContentId: 7)?.messageId, 501)
     }
 
     func testNewestSessionForContentWinsUntilStopped() {
-        let manager = ActiveChatSessionManager(startsPolling: false)
+        let manager = makeTestActiveChatSessionManager()
 
         manager.startTracking(
             session: Self.session(id: 42),
@@ -40,11 +40,11 @@ final class ActiveChatSessionManagerTests: XCTestCase {
         manager.stopTracking(sessionId: 43)
 
         XCTAssertEqual(manager.getSession(forContentId: 7)?.id, 42)
-        XCTAssertEqual(manager.processingCount, 1)
+        XCTAssertEqual(manager.activeSessions.count, 1)
     }
 
     func testResetClearsTrackedSessions() {
-        let manager = ActiveChatSessionManager(startsPolling: false)
+        let manager = makeTestActiveChatSessionManager()
 
         manager.startTracking(
             session: Self.session(id: 42),
@@ -55,13 +55,13 @@ final class ActiveChatSessionManagerTests: XCTestCase {
 
         manager.reset()
 
-        XCTAssertFalse(manager.hasProcessingSessions)
-        XCTAssertEqual(manager.processingCount, 0)
+        XCTAssertFalse(!manager.activeSessions.isEmpty)
+        XCTAssertEqual(manager.activeSessions.count, 0)
         XCTAssertNil(manager.getSession(forContentId: 7))
     }
 
     func testSupersededMessageCannotCompleteOrFailReplacementSession() {
-        let manager = ActiveChatSessionManager(startsPolling: false)
+        let manager = makeTestActiveChatSessionManager()
         manager.startTracking(
             session: Self.session(id: 42),
             contentId: 7,
@@ -92,7 +92,7 @@ final class ActiveChatSessionManagerTests: XCTestCase {
             ),
             orphanGraceNanoseconds: 0
         )
-        let manager = ActiveChatSessionManager(
+        let manager = makeTestActiveChatSessionManager(
             messageCompletionRegistry: registry,
             startsPolling: true
         )
@@ -124,26 +124,9 @@ final class ActiveChatSessionManagerTests: XCTestCase {
     }
 
     private static func session(id: Int) -> ChatSessionSummary {
-        ChatSessionSummary(
+        .fixture(
             id: id,
-            contentId: nil,
-            title: "Chat",
-            sessionType: "knowledge_chat",
-            topic: nil,
-            llmProvider: "openai",
-            llmModel: "openai:gpt-5.5",
-            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
-            updatedAt: nil,
-            lastMessageAt: nil,
-            articleTitle: nil,
-            articleUrl: nil,
-            articleSummary: nil,
-            articleSource: nil,
-            hasPendingMessage: false,
-            isSavedToKnowledge: false,
-            hasMessages: true,
-            lastMessagePreview: nil,
-            lastMessageRole: nil
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!
         )
     }
 

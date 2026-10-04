@@ -12,19 +12,16 @@ struct ChatSessionView: View {
     @Environment(RootDependencyFactory.self) private var dependencyFactory
 
     private let route: ChatSessionRoute
-    private let dependencies: ChatDependencies?
     private let onShowHistory: (() -> Void)?
     private let onClose: (() -> Void)?
 
     @MainActor
     init(
         route: ChatSessionRoute,
-        dependencies: ChatDependencies? = nil,
         onShowHistory: (() -> Void)? = nil,
         onClose: (() -> Void)? = nil
     ) {
         self.route = route
-        self.dependencies = dependencies
         self.onShowHistory = onShowHistory
         self.onClose = onClose
     }
@@ -33,7 +30,7 @@ struct ChatSessionView: View {
         ChatSessionContent(
             route: route,
             lifecycle: lifecycle,
-            dependencies: dependencies ?? dependencyFactory.makeChatDependencies(
+            dependencies: dependencyFactory.makeChatDependencies(
                 activeSessionManager: activeSessionManager
             ),
             feedOptionActionModel: dependencyFactory.makeAssistantFeedOptionActionModel(),
@@ -50,13 +47,12 @@ private struct ChatSessionContent: View {
     private let lifecycle: AppLifecycle
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies
-    private let feedOptionActionModel: AssistantFeedOptionActionModel
     private let onShowHistory: (() -> Void)?
     private let onClose: (() -> Void)?
 
     @State private var viewModel: ChatSessionViewModel
+    @State private var feedOptionActionModel: AssistantFeedOptionActionModel
     @FocusState private var isInputFocused: Bool
-    @State private var activeSheet: ShareContent?
     @State private var scrollToBottomRequest = 0
     @State private var edgeBackDragOffset: CGFloat = 0
     @State private var edgeBackSwipeFeedbackTrigger = 0
@@ -73,7 +69,7 @@ private struct ChatSessionContent: View {
         self.route = route
         self.lifecycle = lifecycle
         self.dependencies = dependencies
-        self.feedOptionActionModel = feedOptionActionModel
+        _feedOptionActionModel = State(initialValue: feedOptionActionModel)
         _viewModel = State(
             initialValue: ChatSessionViewModel(
                 lifecycle: lifecycle,
@@ -119,9 +115,6 @@ private struct ChatSessionContent: View {
             }
             .onDisappear {
                 viewModel.handleDisappear()
-            }
-            .sheet(item: $activeSheet) { content in
-                ShareSheet(content: content)
             }
             .sensoryFeedback(.impact(weight: .light), trigger: edgeBackSwipeFeedbackTrigger)
     }
@@ -232,11 +225,15 @@ private struct ChatSessionContent: View {
     }
 
     private func presentShareSheet(for content: String) {
-        activeSheet = ShareContent(
+        let shareContent = ShareContent(
             messageContent: content,
             articleTitle: viewModel.session?.articleTitle,
             articleUrl: viewModel.session?.articleUrl
         )
+        ActivityViewPresenter.presentWhenReady(UIActivityViewController(
+            activityItems: [shareContent.shareText],
+            applicationActivities: nil
+        ))
     }
 
     private var bottomDock: some View {

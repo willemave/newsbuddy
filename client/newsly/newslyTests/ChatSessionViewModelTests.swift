@@ -11,10 +11,13 @@ private func makeActiveLifecycle() -> AppLifecycle {
 
 @MainActor
 final class ChatSessionViewModelTests: XCTestCase {
-    func testDefaultChatDictationUsesRecordThenTranscribeService() {
-        let service = SpeechTranscriberFactory.makeVoiceDictationTranscriber() as AnyObject
+    func testChatDictationFactoryReturnsInjectedService() {
+        let injected = VoiceDictationService(openAIService: makeTestOpenAIService())
+        let service = SpeechTranscriberFactory.makeVoiceDictationTranscriber(
+            voiceDictationService: injected
+        ) as AnyObject
 
-        XCTAssertTrue(service === VoiceDictationService.shared)
+        XCTAssertTrue(service === injected)
     }
 
     func testToggleVoiceRecordingStartsRecordingOnFirstTap() async {
@@ -492,7 +495,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 )
             }
         )
-        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let activeSessionManager = makeTestActiveChatSessionManager()
         let viewModel = ChatSessionViewModel(
             lifecycle: lifecycle,
             route: ChatSessionRoute(session: Self.session(
@@ -562,7 +565,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 )
             }
         )
-        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let activeSessionManager = makeTestActiveChatSessionManager()
         let viewModel = ChatSessionViewModel(
             lifecycle: lifecycle,
             route: ChatSessionRoute(session: Self.session(
@@ -709,7 +712,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 )
             }
         )
-        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let activeSessionManager = makeTestActiveChatSessionManager()
         let viewModel = ChatSessionViewModel(
             lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(
@@ -767,7 +770,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 }
             }
         )
-        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let activeSessionManager = makeTestActiveChatSessionManager()
         let viewModel = ChatSessionViewModel(
             lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(
@@ -830,7 +833,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             articleTitle: "Tracked Article",
             hasPendingMessage: true
         )
-        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let activeSessionManager = makeTestActiveChatSessionManager()
         let viewModel = ChatSessionViewModel(
             lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(
@@ -859,7 +862,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             await ackGate.wait()
             throw CancellationError()
         })
-        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let activeSessionManager = makeTestActiveChatSessionManager()
         let viewModel = ChatSessionViewModel(
             lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(
@@ -1027,14 +1030,10 @@ private extension ChatDependencies {
             messageCompletionRegistry: registry,
             transcriptionService: transcriptionService,
             activeSessionManager: activeSessionManager
-                ?? ActiveChatSessionManager(
-                    messageCompletionRegistry: registry,
-                    startsPolling: false
-                ),
+                ?? makeTestActiveChatSessionManager(messageCompletionRegistry: registry),
             refreshTranscriptionAvailability: {
                 transcriptionService.isAvailable
-            },
-            setBackendTranscriptionAvailable: { _ in }
+            }
         )
     }
 }

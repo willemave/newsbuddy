@@ -6,11 +6,6 @@
 import Foundation
 import SwiftUI
 
-enum ContentTimestampStyle {
-    case detailMeta
-    case compactRelative
-}
-
 enum ContentTimestampFormatter {
     private static let monthDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -84,32 +79,14 @@ enum ContentTimestampFormatter {
         return monthDayFormatter.string(from: date)
     }
 
-    static func text(from rawValue: String?, style: ContentTimestampStyle, now: Date = AppClock.now) -> String? {
-        switch style {
-        case .detailMeta:
-            return detailMetaText(from: rawValue, now: now)
-        case .compactRelative:
-            return compactRelativeText(from: rawValue, now: now)
-        }
-    }
-
-    static func text(from date: Date, style: ContentTimestampStyle, now: Date = AppClock.now) -> String {
-        switch style {
-        case .detailMeta:
-            return detailMetaText(from: date, now: now)
-        case .compactRelative:
-            return compactRelativeText(from: date, now: now)
-        }
-    }
 }
 
 struct ContentTimestampText: View {
     let rawValue: String?
-    let style: ContentTimestampStyle
     var fallback: String? = nil
 
     private var resolvedText: String? {
-        ContentTimestampFormatter.text(from: rawValue, style: style) ?? fallback
+        ContentTimestampFormatter.detailMetaText(from: rawValue) ?? fallback
     }
 
     var body: some View {

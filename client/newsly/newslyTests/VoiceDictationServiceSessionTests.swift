@@ -6,7 +6,7 @@ import XCTest
 final class VoiceDictationServiceSessionTests: XCTestCase {
     func testManualStopJoinsAutomaticFinalizationWithoutLosingTranscript() async throws {
         let transcriber = SlowFirstVoiceTranscriber()
-        let service = VoiceDictationService { _ in
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService()) { _ in
             await transcriber.transcribe()
         }
         let session = try service.makeSession(deadlines: .standard)
@@ -37,7 +37,7 @@ final class VoiceDictationServiceSessionTests: XCTestCase {
     }
 
     func testConcreteServiceReservesAndSynchronouslyReleasesSessionWithoutUsingMicrophone() throws {
-        let service = VoiceDictationService.shared
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService())
         let firstSession = try service.makeSession(deadlines: .standard)
 
         XCTAssertThrowsError(
@@ -56,7 +56,7 @@ final class VoiceDictationServiceSessionTests: XCTestCase {
 
     func testCancelDuringSlowTranscriptionDoesNotTearDownImmediateReplacement() async throws {
         let transcriber = SlowFirstVoiceTranscriber()
-        let service = VoiceDictationService { _ in
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService()) { _ in
             await transcriber.transcribe()
         }
         let firstSession = try service.makeSession(deadlines: .standard)
@@ -96,7 +96,7 @@ final class VoiceDictationServiceSessionTests: XCTestCase {
     }
 
     func testStaleRecorderCallbacksDoNotTerminateReplacement() async throws {
-        let service = VoiceDictationService { _ in "transcript" }
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService()) { _ in "transcript" }
         let firstSession = try service.makeSession(deadlines: .standard)
         let firstRecorder = try makeRecorder()
         try service.prepareRecordingForTesting(
@@ -130,7 +130,7 @@ final class VoiceDictationServiceSessionTests: XCTestCase {
     }
 
     func testCurrentRecorderUnsuccessfulFinishTerminatesOwnership() async throws {
-        let service = VoiceDictationService { _ in "transcript" }
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService()) { _ in "transcript" }
         let session = try service.makeSession(deadlines: .standard)
         let recorder = try makeRecorder()
         try service.prepareRecordingForTesting(sessionID: session.id, recorder: recorder)
@@ -143,7 +143,7 @@ final class VoiceDictationServiceSessionTests: XCTestCase {
     }
 
     func testCurrentRecorderEncodeErrorTerminatesOwnership() async throws {
-        let service = VoiceDictationService { _ in "transcript" }
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService()) { _ in "transcript" }
         let session = try service.makeSession(deadlines: .standard)
         let recorder = try makeRecorder()
         try service.prepareRecordingForTesting(sessionID: session.id, recorder: recorder)
@@ -160,7 +160,7 @@ final class VoiceDictationServiceSessionTests: XCTestCase {
 
     func testRouteLossAfterCaptureStopsDoesNotCancelBlockedTranscription() async throws {
         let transcriber = SlowFirstVoiceTranscriber()
-        let service = VoiceDictationService { _ in
+        let service = VoiceDictationService(openAIService: makeTestOpenAIService()) { _ in
             await transcriber.transcribe()
         }
         let session = try service.makeSession(deadlines: .standard)

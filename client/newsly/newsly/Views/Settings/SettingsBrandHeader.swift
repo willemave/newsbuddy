@@ -23,10 +23,10 @@ struct SettingsBrandHeader: View {
 
             VStack(spacing: 2) {
                 Text("Newsbuddy")
-                    .font(.appTitle2.weight(.semibold))
+                    .font(.modalTitle.weight(.semibold))
                     .foregroundStyle(Color.onSurface)
                 Text(appVersionLabel)
-                    .font(.appFootnote)
+                    .font(.modalCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
         }

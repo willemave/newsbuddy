@@ -92,10 +92,9 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
         await viewModel.retry(failed)
 
         XCTAssertEqual(viewModel.episodes.map(\.id), [42])
-        XCTAssertEqual(service.createDeliveries, [.background])
     }
 
-    func testRetryReplacementSurvivesStaleFollowUpLoad() async {
+    func testRetryReplacementSurvivesStaleInFlightLoad() async {
         let failed = makeEpisode(
             id: 41,
             status: .failed,
@@ -113,8 +112,13 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
         let viewModel = makeViewModel(service: service)
         await viewModel.load()
 
+        service.pauseNextListResponse()
+        let staleLoad = Task { await viewModel.load() }
+        let didPause = await waitUntil { service.listResponsePaused }
+        XCTAssertTrue(didPause)
         await viewModel.retry(failed)
-        await viewModel.load()
+        service.resumeListResponse()
+        await staleLoad.value
 
         XCTAssertEqual(viewModel.episodes.map(\.id), [42])
     }
@@ -128,14 +132,11 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
         )
         let viewModel = makeViewModel(service: service)
 
-        let didStart = await viewModel.narrate(
-            .knowledgeSourceFixture(id: 7, contentType: .news)
-        )
+        let didStart = await viewModel.narrate(.news(7))
 
         XCTAssertTrue(didStart)
         XCTAssertEqual(service.createdContentIds, [[]])
         XCTAssertEqual(service.createdNewsItemIds, [[7]])
-        XCTAssertEqual(service.createDeliveries, [.background])
         XCTAssertEqual(viewModel.episodes.map(\.id), [51])
     }
 
@@ -168,7 +169,7 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
             playbackService: playback,
             audioService: service,
             badgeStatsStore: badgeStore,
-            toastPresenter: NoopNarrationToastPresenter(),
+            readStateCache: makeTestReadStateCache(),
             pollingIntervalNanoseconds: pollingIntervalNanoseconds,
             pollingAttemptLimit: pollingAttemptLimit
         )
@@ -218,7 +219,6 @@ private final class MockCustomNarrationLibraryService: CustomNarrationLibrarySer
     private var shouldKeepListPaused = false
 
     private(set) var fetchedEpisodeIDs: [Int] = []
-    private(set) var createDeliveries: [AudioEpisodeDelivery] = []
     private(set) var createdContentIds: [[Int]] = []
     private(set) var createdNewsItemIds: [[Int]] = []
 
@@ -240,13 +240,11 @@ private final class MockCustomNarrationLibraryService: CustomNarrationLibrarySer
         contentIds: [Int],
         newsItemIds: [Int],
         title: String?,
-        markSourceContentReadOnPlay: Bool,
-        delivery: AudioEpisodeDelivery
+        markSourceContentReadOnPlay: Bool
     ) async throws -> AudioEpisode {
         _ = (title, markSourceContentReadOnPlay)
         createdContentIds.append(contentIds)
         createdNewsItemIds.append(newsItemIds)
-        createDeliveries.append(delivery)
         guard let createResponse else { throw TestError.unexpectedCall }
         return createResponse
     }
@@ -275,10 +273,6 @@ private final class MockCustomNarrationLibraryService: CustomNarrationLibrarySer
         throw TestError.unexpectedCall
     }
 
-    func enableEpisodeShare(id: Int) async throws -> AudioEpisodeShareResponse {
-        throw TestError.unexpectedCall
-    }
-
     func pauseNextListResponse() {
         shouldPauseNextList = true
     }
@@ -290,11 +284,4 @@ private final class MockCustomNarrationLibraryService: CustomNarrationLibrarySer
     enum TestError: Error {
         case unexpectedCall
     }
-}
-
-@MainActor
-private final class NoopNarrationToastPresenter: ToastPresenting {
-    func show(_ message: String, type: ToastType, duration: TimeInterval) {}
-    func showError(_ message: String) {}
-    func showSuccess(_ message: String) {}
 }

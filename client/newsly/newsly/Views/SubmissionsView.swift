@@ -24,6 +24,7 @@ struct SubmissionsView: View {
                 listView
             }
         }
+        .font(.modalBody)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .appNavigationTitle("Submissions")
@@ -81,11 +82,5 @@ struct SubmissionsView: View {
             title: "No Submissions",
             subtitle: "Submitted URLs will appear here while they're being processed."
         )
-    }
-}
-
-#Preview {
-    NavigationStack {
-        EmptyView()
     }
 }

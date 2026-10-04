@@ -8,54 +8,13 @@ import XCTest
 @testable import newsly
 
 final class ContentDetailTests: XCTestCase {
-    func testDetailSwipeIgnoresInteriorTextSelectionDrag() {
-        XCTAssertNil(
-            DetailSwipePolicy.dragOffset(
-                origin: .content,
-                translation: CGSize(width: -120, height: 6),
-                currentIndex: 0,
-                itemCount: 2
-            )
-        )
-
-        XCTAssertNil(
-            DetailSwipePolicy.dragOffset(
-                origin: .content,
-                translation: CGSize(width: 120, height: 6),
-                currentIndex: 1,
-                itemCount: 2
-            )
-        )
-
-        XCTAssertEqual(
-            DetailSwipePolicy.endAction(
-                origin: .content,
-                translation: CGSize(width: -120, height: 6),
-                currentIndex: 0,
-                itemCount: 2
-            ),
-            .ignore
-        )
-
-        XCTAssertEqual(
-            DetailSwipePolicy.endAction(
-                origin: .content,
-                translation: CGSize(width: 120, height: 6),
-                currentIndex: 1,
-                itemCount: 2
-            ),
-            .ignore
-        )
-    }
-
     func testDetailSwipeUsesLeftEdgeForBackAndRightEdgeForForward() {
         XCTAssertEqual(
             DetailSwipePolicy.endAction(
                 origin: .leadingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 1,
-                itemCount: 3,
-                leadingEdgePreviousEnabled: true
+                itemCount: 3
             ),
             .previous
         )
@@ -65,8 +24,7 @@ final class ContentDetailTests: XCTestCase {
                 origin: .trailingEdge,
                 translation: CGSize(width: -120, height: 6),
                 currentIndex: 1,
-                itemCount: 3,
-                leadingEdgePreviousEnabled: true
+                itemCount: 3
             ),
             .next
         )
@@ -76,8 +34,7 @@ final class ContentDetailTests: XCTestCase {
                 origin: .trailingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 1,
-                itemCount: 3,
-                leadingEdgePreviousEnabled: true
+                itemCount: 3
             ),
             .ignore
         )
@@ -87,21 +44,7 @@ final class ContentDetailTests: XCTestCase {
                 origin: .leadingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 0,
-                itemCount: 1,
-                leadingEdgePreviousEnabled: true
-            ),
-            .dismiss
-        )
-    }
-
-    func testFastNewsLeftEdgeSwipeDismissesInsteadOfNavigatingPrevious() {
-        XCTAssertEqual(
-            DetailSwipePolicy.endAction(
-                origin: .leadingEdge,
-                translation: CGSize(width: 120, height: 6),
-                currentIndex: 2,
-                itemCount: 5,
-                leadingEdgePreviousEnabled: false
+                itemCount: 1
             ),
             .dismiss
         )
@@ -688,7 +631,6 @@ final class ContentDetailTests: XCTestCase {
         XCTAssertNil(detail.summaryKind)
         XCTAssertNil(detail.structuredSummaryRaw)
         XCTAssertNil(detail.longformArtifactRaw)
-        XCTAssertNil(detail.feedPreview)
         XCTAssertNil(detail.imageUrl)
         XCTAssertNil(detail.detectedFeed)
         XCTAssertTrue(detail.bulletPoints.isEmpty)
@@ -749,25 +691,17 @@ final class ContentDetailTests: XCTestCase {
         XCTAssertFalse(response.hasMore)
         XCTAssertEqual(summary.id, 92)
         XCTAssertEqual(summary.contentType, .news)
-        XCTAssertEqual(summary.classification, APIContentClassification.to_read.rawValue)
-        XCTAssertEqual(summary.newsKeyPoints, ["List key point"])
-        XCTAssertEqual(
-            summary.topComment,
-            ContentSummary.TopComment(author: "reader", text: "Useful context")
-        )
-        XCTAssertEqual(summary.commentCount, 7)
         XCTAssertTrue(summary.isSavedToKnowledge)
 
         XCTAssertNil(summary.knowledgeSavedAt)
         XCTAssertNil(summary.imageUrl)
         XCTAssertNil(summary.thumbnailUrl)
-        XCTAssertNil(summary.feedPreview)
         XCTAssertNil(summary.savedSource)
     }
 
     private func decodeDetail(from json: String) throws -> ContentDetail {
         let data = Data(json.utf8)
-        return try JSONDecoder().decode(ContentDetail.self, from: data)
+        return ContentDetail(api: try decodeAPIContentDetailFixture(from: data))
     }
 
     private func decodeArtifact(from json: String) throws -> LongformArtifactEnvelope {

@@ -7,13 +7,6 @@
 
 import SwiftUI
 
-enum MastheadAccessoryAlignment {
-    /// Pinned to the top-right corner, level with the date kicker.
-    case top
-    /// Centered on the title line.
-    case title
-}
-
 struct EditorialMastheadHeader: View {
     let title: String
     var titleAccessibilityIdentifier: String? = nil
@@ -21,7 +14,6 @@ struct EditorialMastheadHeader: View {
     var date: Date = AppClock.now
     var showsDate = true
     var trailingAccessory: AnyView? = nil
-    var accessoryAlignment: MastheadAccessoryAlignment = .title
 
     private static let mastheadFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -35,36 +27,30 @@ struct EditorialMastheadHeader: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 6) {
-                if showsDate {
-                    Text(dateLabel)
-                        .kicker()
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            if showsDate {
+                Text(dateLabel)
+                    .kicker()
+            }
 
-                HStack(alignment: .center, spacing: 12) {
-                    Text(title)
-                        .accessibilityIdentifier(ifPresent: titleAccessibilityIdentifier)
-                        .font(.terracottaDisplayLarge)
-                        .foregroundStyle(Color.onSurface)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .center, spacing: 12) {
+                Text(title)
+                    .accessibilityIdentifier(ifPresent: titleAccessibilityIdentifier)
+                    .font(.terracottaDisplayLarge)
+                    .foregroundStyle(Color.onSurface)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if accessoryAlignment == .title, let trailingAccessory {
-                        trailingAccessory
-                    }
-                }
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.terracottaHeadlineSmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let trailingAccessory {
+                    trailingAccessory
                 }
             }
 
-            if accessoryAlignment == .top, let trailingAccessory {
-                trailingAccessory
+            if let subtitle {
+                Text(subtitle)
+                    .font(.terracottaHeadlineSmall)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)

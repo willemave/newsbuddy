@@ -9,7 +9,7 @@ struct SettingsLegalSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Legal & Support")
+            SectionHeader(title: "Legal & Support", font: .modalSupporting.weight(.semibold))
             VStack(spacing: 0) {
                 ForEach(Array(links.enumerated()), id: \.element.title) { index, link in
                     if index > 0 { RowDivider(leadingInset: Spacing.rowHorizontal) }
@@ -22,7 +22,7 @@ struct SettingsLegalSection: View {
             .settingsCard()
 
             Text("Newsbuddy uses external AI services to process content and instructions you submit.")
-                .font(.appCaption)
+                .font(.modalSupporting)
                 .foregroundStyle(Color.onSurfaceTertiary)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 10)

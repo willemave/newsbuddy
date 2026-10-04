@@ -12,27 +12,53 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
             ],
             decks: [
                 makeDeck(id: 4, sourceContentId: 7),
-                makeDeck(id: 5, sourceKind: .githubRepo, sourceContentId: 8)
+                makeDeck(id: 5, sourceKind: .github_repo, sourceContentId: 8)
             ],
             narrations: [
                 makeNarration(id: 6, contentIds: [8, 9], newsItemIds: [7])
             ]
         )
 
-        XCTAssertEqual(index[KnowledgeSourceKey(id: 7, isNews: false)], [.chat, .deck])
-        XCTAssertEqual(index[KnowledgeSourceKey(id: 7, isNews: true)], [.chat, .narration])
-        XCTAssertEqual(index[KnowledgeSourceKey(id: 8, isNews: false)], [.narration])
-        XCTAssertEqual(index[KnowledgeSourceKey(id: 9, isNews: false)], [.narration])
+        XCTAssertEqual(index[.content(7)], [.chat, .deck])
+        XCTAssertEqual(index[.news(7)], [.chat, .narration])
+        XCTAssertEqual(index[.content(8)], [.narration])
+        XCTAssertEqual(index[.content(9)], [.narration])
     }
 
-    func testSourceKeyUsesContentTypeNamespace() {
-        XCTAssertEqual(
-            KnowledgeSourceKey(.knowledgeSourceFixture(id: 7, contentType: .news)),
-            KnowledgeSourceKey(id: 7, isNews: true)
-        )
-        XCTAssertEqual(
-            KnowledgeSourceKey(.knowledgeSourceFixture(id: 7)),
-            KnowledgeSourceKey(id: 7, isNews: false)
+    func testSourceUsesContentTypeNamespace() {
+        let news = KnowledgeSource(makeContent(id: 7, contentType: .news))
+        let article = KnowledgeSource(makeContent(id: 7, contentType: .article))
+
+        XCTAssertEqual(news, .news(7))
+        XCTAssertEqual(news.newsItemId, 7)
+        XCTAssertNil(news.contentId)
+        XCTAssertEqual(article, .content(7))
+        XCTAssertEqual(article.contentId, 7)
+        XCTAssertNil(article.newsItemId)
+    }
+
+    func testMarkersFollowDisplayOrderAndDescribeResults() {
+        let derivatives: KnowledgeSourceDerivatives = [.narration, .chat, .deck]
+
+        XCTAssertEqual(derivatives.actions, [.deck, .chat, .listen])
+        XCTAssertEqual(derivatives.accessibilitySummary, "Has deck, chat, narration")
+        XCTAssertEqual(KnowledgeSourceDerivatives().accessibilitySummary, "")
+    }
+
+    private func makeContent(id: Int, contentType: APIContentType) -> ContentSummary {
+        ContentSummary(
+            id: id,
+            contentType: contentType,
+            url: "https://example.com/\(id)",
+            title: "Saved source",
+            source: "Example",
+            platform: nil,
+            status: .completed,
+            shortSummary: "Summary",
+            createdAt: "2026-09-27T12:00:00Z",
+            processedAt: nil,
+            isRead: false,
+            isSavedToKnowledge: true
         )
     }
 
@@ -81,7 +107,6 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
             status: .completed,
             shareEnabled: false,
             viewerAvailable: true,
-            sourceNotesAvailable: false,
             latestSuccessfulRunId: nil,
             latestRun: nil,
             createdAt: Date(timeIntervalSince1970: 1_800_000_000),
@@ -107,33 +132,6 @@ final class KnowledgeSourceDerivativesTests: XCTestCase {
             errorMessage: nil,
             createdAt: Date(timeIntervalSince1970: 1_800_000_000),
             updatedAt: nil
-        )
-    }
-}
-
-extension ContentSummary {
-    /// A ready saved Knowledge source for source-action tests.
-    static func knowledgeSourceFixture(
-        id: Int,
-        contentType: APIContentType = .article,
-        title: String = "Saved source"
-    ) -> ContentSummary {
-        ContentSummary(
-            id: id,
-            contentType: contentType,
-            url: "https://example.com/\(id)",
-            title: title,
-            source: "Example",
-            platform: nil,
-            status: .completed,
-            shortSummary: "Summary",
-            createdAt: "2026-09-27T12:00:00Z",
-            processedAt: nil,
-            classification: nil,
-            publicationDate: nil,
-            isRead: false,
-            isSavedToKnowledge: true,
-            knowledgeSavedAt: "2026-09-27T12:00:00Z"
         )
     }
 }

@@ -8,6 +8,16 @@ import Foundation
 typealias ScraperConfigStats = APIScraperConfigStatsResponse
 typealias ScraperConfig = APIScraperConfigResponse
 
+extension APIScraperType {
+    static let articleFeedTypes: Set<Self> = [.substack, .atom, .youtube]
+    static let podcastTypes: Set<Self> = [.podcast_rss]
+    static let libraryTypes = articleFeedTypes.union(podcastTypes)
+
+    static var articleFeedRawValues: [String] { articleFeedTypes.map(\.rawValue).sorted() }
+    static var podcastRawValues: [String] { podcastTypes.map(\.rawValue).sorted() }
+    static var libraryRawValues: [String] { libraryTypes.map(\.rawValue).sorted() }
+}
+
 extension APIScraperConfigStatsResponse {
     var latestProcessedDate: Date? {
         latestProcessedAt
@@ -57,22 +67,6 @@ extension APIScraperConfigStatsResponse {
         }
         guard let latestProcessedDate else { return nil }
         return "Last processed \(Self.relativeFormatter.localizedString(for: latestProcessedDate, relativeTo: Date()))"
-    }
-
-    var nextExpectedSummary: String? {
-        guard let nextExpectedDate else { return nil }
-
-        let now = Date()
-        if abs(nextExpectedDate.timeIntervalSince(now)) < 3600 {
-            return "Expected around now"
-        }
-        if nextExpectedDate > now {
-            let relative = Self.relativeFormatter.localizedString(for: nextExpectedDate, relativeTo: now)
-            return "Likely \(relative)"
-        }
-
-        let relative = Self.relativeFormatter.localizedString(for: nextExpectedDate, relativeTo: now)
-        return "Overdue \(relative)"
     }
 
     var cadenceSummary: String? {

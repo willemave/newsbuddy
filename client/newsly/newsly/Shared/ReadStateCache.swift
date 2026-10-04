@@ -43,13 +43,13 @@ final class ReadStateCache {
     private let badgeStatsStore: BadgeStatsStore
 
     init(
-        contentReadRepository: ReadStatusRepositoryType = ReadStatusRepository(),
-        newsReadRepository: ReadStatusRepositoryType = ReadStatusRepository(endpoint: .newsItems),
-        badgeStatsStore: BadgeStatsStore? = nil
+        contentReadRepository: ReadStatusRepositoryType,
+        newsReadRepository: ReadStatusRepositoryType,
+        badgeStatsStore: BadgeStatsStore
     ) {
         self.contentReadRepository = contentReadRepository
         self.newsReadRepository = newsReadRepository
-        self.badgeStatsStore = badgeStatsStore ?? .shared
+        self.badgeStatsStore = badgeStatsStore
     }
 
     func isRead(id: Int, contentType: APIContentType) -> Bool {
