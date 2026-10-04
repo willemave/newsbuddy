@@ -4,7 +4,7 @@ use newsly_providers::{AnalyzedContentType, GeneratedContentAnalysis, Instructio
 use newsly_queue::{OwnedWorkPlan, TaskResult};
 use serde_json::{Map, Value};
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::{HandlerExecution, LeaseHealth};
 
 use super::super::extraction::ExtractionAttempt;
@@ -15,7 +15,8 @@ use super::support::{
     payload_bool, payload_string, request_id, should_run_structured_analysis, storage_failure,
     with_finalizer,
 };
-use super::tweet::{execute_tweet_analysis, normalized_external_url};
+use super::tweet::execute_tweet_analysis;
+use crate::content::normalize_external_url;
 use crate::content::repository::load_content_snapshot;
 
 #[allow(clippy::too_many_lines)]
@@ -97,7 +98,7 @@ pub(super) async fn execute_analyze_url(
             let mut title = article.title.clone();
             let mut metadata_updates = Map::new();
             let mut instruction_links = Vec::new();
-            let usage_sink = Arc::new(AgentUsageSink::new(
+            let usage_sink = Arc::new(AgentUsageRecorder::new(
                 services.pool.clone(),
                 AgentUsageAttribution {
                     operation: "content_analyzer.analyze_url".to_owned(),
@@ -282,8 +283,8 @@ pub(super) fn instruction_link_plan(
     link: &InstructionLink,
     original_url: &str,
 ) -> Option<InstructionLinkPlan> {
-    let normalized = normalized_external_url(&link.url)?;
-    if normalized == normalized_external_url(original_url)? {
+    let normalized = normalize_external_url(&link.url)?;
+    if normalized == normalize_external_url(original_url)? {
         return None;
     }
     Some(InstructionLinkPlan {

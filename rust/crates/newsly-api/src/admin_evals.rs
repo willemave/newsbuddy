@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, OriginalUri, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{OriginalUri, State};
+use axum::http::HeaderMap;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -22,11 +22,9 @@ use crate::admin_api_keys::{admin_login_redirect, escape_html, has_valid_admin_s
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::model_usage::ApiAgentUsageSink;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
-const PAGE_OPERATION_ID: &str = "adminEvalSummariesPage";
-const RUN_OPERATION_ID: &str = "adminEvalSummariesRun";
 const EVAL_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_EVAL_INPUT_CHARS: usize = 120_000;
 
@@ -65,23 +63,14 @@ struct EvalModel {
     credential_env: &'static str,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-struct ModelPricing {
-    input_per_million_usd: Option<f64>,
-    output_per_million_usd: Option<f64>,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct AdminEvalRunRequest {
     content_types: Vec<String>,
     models: Vec<String>,
-    longform_template: String,
     recent_pool_size: usize,
     sample_size: usize,
     seed: Option<i64>,
-    pricing: BTreeMap<String, ModelPricing>,
 }
 
 impl Default for AdminEvalRunRequest {
@@ -93,11 +82,9 @@ impl Default for AdminEvalRunRequest {
                 "news".to_owned(),
             ],
             models: MODELS.iter().map(|model| model.alias.to_owned()).collect(),
-            longform_template: "editorial_narrative_v1".to_owned(),
             recent_pool_size: 200,
             sample_size: 3,
             seed: None,
-            pricing: BTreeMap::new(),
         }
     }
 }
@@ -150,8 +137,6 @@ struct AdminEvalCell {
     request_tokens_actual: Option<u64>,
     output_chars: usize,
     display_output: Option<Value>,
-    raw_output: Option<Value>,
-    prompt_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -170,7 +155,6 @@ struct AdminEvalItemResult {
 struct AdminEvalConfigResponse {
     content_types: Vec<String>,
     models: Vec<String>,
-    longform_template: String,
     recent_pool_size: usize,
     sample_size: usize,
     seed: Option<i64>,
@@ -231,13 +215,11 @@ pub(super) async fn page(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
-    let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, PAGE_OPERATION_ID, &request_id)?;
     Ok(Html(render_page()).into_response())
 }
 
@@ -259,31 +241,17 @@ pub(super) async fn run(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<AdminEvalRunRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, RUN_OPERATION_ID, &request_id)?;
     let Json(mut request) = decode_json(payload, &request_id)?;
     validate_request(&mut request, &request_id)?;
 
-    // The endpoint is classified as a write for cutover/drain purposes even though comparison
-    // results are ephemeral. Verify its owner in a short transaction, then release the connection
-    // before object-store and model-provider calls.
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::verify_route_now(state.database.pool(), &stamp, &request_id).await?;
 
     let started_at = Utc::now();
     let candidates = list_admin_eval_candidates(
@@ -312,14 +280,7 @@ pub(super) async fn run(
             if disabled.contains(model.alias) {
                 continue;
             }
-            let cell = run_cell(
-                state.database.pool(),
-                source,
-                *model,
-                gateway,
-                request.pricing.get(model.alias),
-            )
-            .await;
+            let cell = run_cell(state.database.pool(), source, *model, gateway).await;
             if cell.status == "error" && cell.error.as_deref().is_some_and(is_hard_provider_error) {
                 disabled.insert(model.alias);
                 skipped_models.push(AdminEvalSkippedModel {
@@ -353,7 +314,6 @@ pub(super) async fn run(
         config: AdminEvalConfigResponse {
             content_types: request.content_types.clone(),
             models: request.models.clone(),
-            longform_template: request.longform_template.clone(),
             recent_pool_size: request.recent_pool_size,
             sample_size: request.sample_size,
             seed: request.seed,
@@ -402,26 +362,6 @@ fn validate_request(request: &mut AdminEvalRunRequest, request_id: &str) -> Resu
     if !(1..=100).contains(&request.sample_size) || request.sample_size > request.recent_pool_size {
         return Err(validation_error(
             "sample_size must be between 1 and 100 and no larger than recent_pool_size",
-            request_id,
-        ));
-    }
-    if !matches!(
-        request.longform_template.as_str(),
-        "long_bullets_v1" | "interleaved_v2" | "structured_v1" | "editorial_narrative_v1"
-    ) {
-        return Err(validation_error("unknown longform_template", request_id));
-    }
-    if request.pricing.values().any(|pricing| {
-        [
-            pricing.input_per_million_usd,
-            pricing.output_per_million_usd,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|value| !value.is_finite() || value < 0.0)
-    }) {
-        return Err(validation_error(
-            "pricing values must be finite and nonnegative",
             request_id,
         ));
     }
@@ -568,7 +508,6 @@ async fn run_cell(
     source: &EvalSource,
     model: EvalModel,
     gateway: &SummarizationGateway,
-    pricing: Option<&ModelPricing>,
 ) -> AdminEvalCell {
     let request_chars = source.text.chars().count();
     let request_tokens_estimate = request_chars.div_ceil(4);
@@ -605,11 +544,6 @@ async fn run_cell(
                 .unwrap_or_default()
                 .chars()
                 .count();
-            let estimated_cost_usd = estimate_cost(
-                output.usage.input_tokens,
-                output.usage.output_tokens,
-                pricing,
-            );
             AdminEvalCell {
                 model_alias: model.alias.to_owned(),
                 model_label: model.label.to_owned(),
@@ -625,19 +559,15 @@ async fn run_cell(
                         .input_tokens
                         .saturating_add(output.usage.output_tokens),
                 },
-                estimated_cost_usd,
-                cost_reason: estimated_cost_usd
-                    .is_none()
-                    .then_some("pricing_not_configured".to_owned()),
+                estimated_cost_usd: None,
+                cost_reason: Some("cost_recorded_in_vendor_usage".to_owned()),
                 generated_title: generated_title.clone(),
                 title_chars: generated_title.as_deref().map_or(0, str::len),
                 request_chars,
                 request_tokens_estimate,
                 request_tokens_actual: Some(output.usage.input_tokens),
                 output_chars,
-                display_output: Some(output.summary_json.clone()),
-                raw_output: Some(output.summary_json),
-                prompt_type: "production_longform_artifact_v1".to_owned(),
+                display_output: Some(output.summary_json),
             }
         }
         Err(error) => AdminEvalCell {
@@ -661,20 +591,8 @@ async fn run_cell(
             request_tokens_actual: None,
             output_chars: 0,
             display_output: None,
-            raw_output: None,
-            prompt_type: "production_longform_artifact_v1".to_owned(),
         },
     }
-}
-
-fn estimate_cost(input: u64, output: u64, pricing: Option<&ModelPricing>) -> Option<f64> {
-    let pricing = pricing?;
-    let input_rate = pricing.input_per_million_usd?;
-    let output_rate = pricing.output_per_million_usd?;
-    Some(
-        (u64_metric(input) / 1_000_000.0) * input_rate
-            + (u64_metric(output) / 1_000_000.0) * output_rate,
-    )
 }
 
 fn aggregate(items: &[AdminEvalItemResult]) -> AdminEvalAggregate {
@@ -822,12 +740,7 @@ fn duration_millis(duration: Duration) -> u64 {
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        message,
-        request_id.to_owned(),
-    )
+    ApiError::validation_message(message, request_id)
 }
 
 fn render_page() -> String {
@@ -841,13 +754,12 @@ fn render_page() -> String {
             escape_html(model.model_spec),
         );
     }
+    let shell = crate::admin_shell::admin_shell("Summary Eval");
     format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Summary Eval</title><style>
-body{{font:15px system-ui;margin:0;background:#f7f7f5;color:#191919}}main{{max-width:1000px;margin:2rem auto;padding:0 1rem}}section,pre{{background:white;border:1px solid #ddd;border-radius:10px;padding:1rem}}label{{display:block;margin:.5rem 0}}small{{color:#777;font-family:monospace}}input,button{{font:inherit;padding:.45rem}}button{{margin-top:1rem}}pre{{white-space:pre-wrap;overflow:auto;max-height:65vh}}
-</style></head><body><main><nav><a href="/admin/">Dashboard</a> · <a href="/admin/evals/summaries">Evals</a></nav><h1>Production summary comparison</h1><p>This runs the exact Rust long-form artifact contract. Offline Python remains the owner of dataset construction and embedding/model experiment pipelines.</p><section>
+        r#"{shell}<main><nav><a href="/admin/">Dashboard</a> · <a href="/admin/evals/summaries">Evals</a></nav><h1>Production summary comparison</h1><p>This runs the exact Rust long-form artifact contract. Offline Python remains the owner of dataset construction and embedding/model experiment pipelines.</p><section>
 <strong>Content types</strong><label><input type="checkbox" class="type" value="article" checked> Article</label><label><input type="checkbox" class="type" value="podcast" checked> Podcast</label><label><input type="checkbox" class="type" value="news" checked> News</label><strong>Models</strong>{model_options}<label>Recent pool <input id="pool" type="number" min="10" max="2000" value="200"></label><label>Sample size <input id="sample" type="number" min="1" max="100" value="3"></label><label>Seed <input id="seed" type="number"></label><button id="run">Run comparison</button> <span id="status"></span></section><h2>Result</h2><pre id="result">No run yet.</pre></main><script>
 const selected=(selector)=>[...document.querySelectorAll(selector)].filter(x=>x.checked).map(x=>x.value);
-document.getElementById('run').onclick=async()=>{{const button=document.getElementById('run');const status=document.getElementById('status');button.disabled=true;status.textContent='Running…';try{{const seed=document.getElementById('seed').value;const response=await fetch('/admin/evals/summaries/run',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify({{content_types:selected('.type'),models:selected('.model'),longform_template:'editorial_narrative_v1',recent_pool_size:Number(document.getElementById('pool').value),sample_size:Number(document.getElementById('sample').value),seed:seed?Number(seed):null,pricing:{{}}}})}});const payload=await response.json();document.getElementById('result').textContent=JSON.stringify(payload,null,2);status.textContent=response.ok?'Done':'Failed';}}catch(error){{status.textContent='Failed';document.getElementById('result').textContent=String(error);}}finally{{button.disabled=false;}}}};
+document.getElementById('run').onclick=async()=>{{const button=document.getElementById('run');const status=document.getElementById('status');button.disabled=true;status.textContent='Running…';try{{const seed=document.getElementById('seed').value;const response=await fetch('/admin/evals/summaries/run',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify({{content_types:selected('.type'),models:selected('.model'),recent_pool_size:Number(document.getElementById('pool').value),sample_size:Number(document.getElementById('sample').value),seed:seed?Number(seed):null}})}});const payload=await response.json();document.getElementById('result').textContent=JSON.stringify(payload,null,2);status.textContent=response.ok?'Done':'Failed';}}catch(error){{status.textContent='Failed';document.getElementById('result').textContent=String(error);}}finally{{button.disabled=false;}}}};
 </script></body></html>"#
     )
 }

@@ -85,9 +85,7 @@ impl SchedulerRepository {
                     .await?;
                 ScheduledJobReport {
                     job,
-                    considered: report.expired_reclaimable
-                        + report.misrouted
-                        + report.orphaned_leases,
+                    considered: report.expired_reclaimable + report.orphaned_leases,
                     enqueued: 0,
                     skipped: report.expired_reclaimable,
                     detail: "queue_repaired",

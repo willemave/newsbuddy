@@ -5,26 +5,25 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
-    ToolPolicy,
+    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
+    ResponseContract, ToolPolicy,
 };
-use reqwest::{StatusCode, Url};
+use reqwest::Url;
 use schemars::JsonSchema;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Map;
 use thiserror::Error;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::openrouter_embeddings::{OpenRouterEmbeddingClient, OpenRouterEmbeddingError};
+use crate::{ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
+use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_NEWS_MODEL: &str = "openai:gpt-6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "openrouter:qwen/qwen3-embedding-8b";
 const DEFAULT_OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1/";
-const MAX_EMBEDDING_BATCH: usize = 128;
-const MAX_EMBEDDING_TEXT_CHARS: usize = 50_000;
-const MAX_EMBEDDING_TOTAL_CHARS: usize = 1_000_000;
-const MAX_PROVIDER_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LINK_CANDIDATES: usize = 30;
 const MAX_SELECTED_LINKS: usize = 6;
 
@@ -197,14 +196,10 @@ pub struct EmbeddingBatch {
 
 #[derive(Debug, Clone)]
 pub struct NewsItemGateway {
-    client: reqwest::Client,
     engine: RigAgentEngine,
     summary_model: String,
     link_model: String,
-    embedding_model: String,
-    embedding_url: Url,
-    openrouter_key: Option<SecretString>,
-    openrouter_policy: OpenRouterPrivacyPolicy,
+    embeddings: OpenRouterEmbeddingClient,
     deadline: Duration,
 }
 
@@ -217,51 +212,32 @@ impl NewsItemGateway {
     /// invalid HTTP client/base URL.
     pub fn from_env() -> Result<Self, NewsItemGatewayError> {
         let deadline = Duration::from_secs(
-            env::var("NEWS_PROCESSING_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(90)
-                .clamp(15, 600),
+            u64_from_env(
+                "NEWS_PROCESSING_TIMEOUT_SECONDS",
+                90,
+                "an unsigned integer number of seconds",
+            )?
+            .clamp(15, 600),
         );
         let client = reqwest::Client::builder().timeout(deadline).build()?;
         let openrouter_key = secret_env("OPENROUTER_API_KEY");
-        let credentials = ProviderCredentials {
-            openai: secret_env("OPENAI_API_KEY"),
-            anthropic: secret_env("ANTHROPIC_API_KEY"),
-            google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-            openrouter: openrouter_key.clone(),
-        };
-        let openrouter_policy = OpenRouterPrivacyPolicy::default();
-        let engine = RigAgentEngine::new(credentials, openrouter_policy.clone())?;
+        let credentials = ProviderCredentials::from_env();
+        let engine = RigAgentEngine::new(credentials);
         let embedding_model =
             env::var("NEWS_EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_EMBEDDING_MODEL.to_owned());
-        let embedding_name = embedding_model
-            .strip_prefix("openrouter:")
-            .filter(|model| !model.trim().is_empty())
-            .ok_or_else(|| {
-                NewsItemGatewayError::UnsupportedEmbeddingModel(embedding_model.clone())
-            })?;
-        let mut base = Url::parse(
-            &env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| DEFAULT_OPENROUTER_BASE.to_owned()),
-        )
-        .map_err(|error| NewsItemGatewayError::Url(error.to_string()))?;
-        if !base.path().ends_with('/') {
-            base.set_path(&format!("{}/", base.path().trim_end_matches('/')));
-        }
-        let embedding_url = base
-            .join("embeddings")
-            .map_err(|error| NewsItemGatewayError::Url(error.to_string()))?;
-        Ok(Self {
+        let embeddings = OpenRouterEmbeddingClient::new(
             client,
+            &embedding_model,
+            &env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| DEFAULT_OPENROUTER_BASE.to_owned()),
+            openrouter_key,
+        )?;
+        Ok(Self {
             engine,
             summary_model: env::var("NEWS_PROCESSING_MODEL")
                 .unwrap_or_else(|_| DEFAULT_NEWS_MODEL.to_owned()),
             link_model: env::var("NEWS_LINK_SELECTION_MODEL")
                 .unwrap_or_else(|_| DEFAULT_NEWS_MODEL.to_owned()),
-            embedding_model: embedding_name.to_owned(),
-            embedding_url,
-            openrouter_key,
-            openrouter_policy,
+            embeddings,
             deadline,
         })
     }
@@ -271,7 +247,7 @@ impl NewsItemGateway {
     }
 
     pub fn embedding_model(&self) -> &str {
-        &self.embedding_model
+        self.embeddings.model()
     }
 
     /// Generate and validate the canonical short-form news summary.
@@ -280,19 +256,11 @@ impl NewsItemGateway {
     ///
     /// Returns an error when the evidence is empty, the provider call fails, or the structured
     /// output violates the Newsly summary contract.
-    pub async fn summarize(
-        &self,
-        evidence: String,
-    ) -> Result<GeneratedNewsSummary, NewsItemGatewayError> {
-        self.summarize_with_events(evidence, Arc::new(NoEvents))
-            .await
-    }
-
     /// Runs summary generation while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same input, provider, and validation errors as [`Self::summarize`].
+    /// Returns input, provider, and validation errors from summary generation.
     pub async fn summarize_with_events(
         &self,
         evidence: String,
@@ -332,27 +300,11 @@ impl NewsItemGateway {
     ///
     /// Returns an error for invalid candidates, provider failures, or an invented/malformed link
     /// in the structured response.
-    pub async fn select_relevant_links(
-        &self,
-        article_title: Option<&str>,
-        source_url: Option<&str>,
-        candidates: &[LinkCandidate],
-    ) -> Result<SelectedRelevantLinks, NewsItemGatewayError> {
-        self.select_relevant_links_with_events(
-            article_title,
-            source_url,
-            candidates,
-            Arc::new(NoEvents),
-        )
-        .await
-    }
-
     /// Runs relevant-link selection while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same candidate, provider, and validation errors as
-    /// [`Self::select_relevant_links`].
+    /// Returns candidate, provider, and validation errors from link selection.
     pub async fn select_relevant_links_with_events(
         &self,
         article_title: Option<&str>,
@@ -425,88 +377,12 @@ impl NewsItemGateway {
     /// Returns an error for invalid or oversized input, unavailable credentials, transport or
     /// provider failures, and malformed embedding shapes or vectors.
     pub async fn embed(&self, texts: &[String]) -> Result<EmbeddingBatch, NewsItemGatewayError> {
-        validate_embedding_input(texts)?;
-        if texts.is_empty() {
-            return Ok(EmbeddingBatch {
-                vectors: Vec::new(),
-                model: self.embedding_model.clone(),
-                usage: ProviderUsage::default(),
-                provider_response_id: None,
-            });
-        }
-        let key = self
-            .openrouter_key
-            .as_ref()
-            .ok_or(NewsItemGatewayError::OpenRouterUnavailable)?;
-        let provider = Value::Object(self.openrouter_policy.request_parameters()?);
-        let response = self
-            .client
-            .post(self.embedding_url.clone())
-            .bearer_auth(key.expose_secret())
-            .json(&EmbeddingRequest {
-                model: &self.embedding_model,
-                input: texts,
-                encoding_format: "float",
-                provider,
-            })
-            .send()
-            .await?;
-        let status = response.status();
-        let request_id = response
-            .headers()
-            .get("x-request-id")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        let bytes = response.bytes().await?;
-        if bytes.len() > MAX_PROVIDER_RESPONSE_BYTES {
-            return Err(NewsItemGatewayError::EmbeddingResponseTooLarge(bytes.len()));
-        }
-        if !status.is_success() {
-            return Err(NewsItemGatewayError::EmbeddingProvider {
-                status,
-                message: bounded_provider_error(&bytes),
-            });
-        }
-        let payload = serde_json::from_slice::<EmbeddingResponse>(&bytes)?;
-        let mut rows = payload.data;
-        rows.sort_by_key(|row| row.index);
-        if rows.len() != texts.len()
-            || rows
-                .iter()
-                .enumerate()
-                .any(|(expected, row)| row.index != expected)
-        {
-            return Err(NewsItemGatewayError::EmbeddingShape {
-                expected: texts.len(),
-                actual: rows.len(),
-            });
-        }
-        let dimension = rows.first().map_or(0, |row| row.embedding.len());
-        if dimension == 0 || rows.iter().any(|row| row.embedding.len() != dimension) {
-            return Err(NewsItemGatewayError::InvalidEmbedding(
-                "provider returned empty or inconsistent vector dimensions".to_owned(),
-            ));
-        }
-        let vectors = rows
-            .into_iter()
-            .map(|row| normalize_vector(row.embedding))
-            .collect::<Result<Vec<_>, _>>()?;
-        let usage = payload.usage.unwrap_or_default();
+        let batch = self.embeddings.embed(texts).await?;
         Ok(EmbeddingBatch {
-            vectors,
-            model: payload
-                .model
-                .unwrap_or_else(|| self.embedding_model.clone()),
-            usage: ProviderUsage {
-                request_count: 1,
-                input_tokens: usage
-                    .prompt_tokens
-                    .filter(|tokens| *tokens > 0)
-                    .or(usage.total_tokens)
-                    .unwrap_or(0),
-                ..ProviderUsage::default()
-            },
-            provider_response_id: payload.id.or(request_id),
+            vectors: batch.vectors,
+            model: batch.model,
+            usage: batch.usage,
+            provider_response_id: batch.provider_response_id,
         })
     }
 
@@ -557,70 +433,6 @@ impl NewsItemGateway {
             )
             .await?)
     }
-}
-
-#[derive(Debug, Serialize)]
-struct EmbeddingRequest<'a> {
-    model: &'a str,
-    input: &'a [String],
-    encoding_format: &'static str,
-    provider: Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingResponse {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-    data: Vec<EmbeddingRow>,
-    #[serde(default)]
-    usage: Option<EmbeddingUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingRow {
-    index: usize,
-    embedding: Vec<f64>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct EmbeddingUsage {
-    prompt_tokens: Option<u64>,
-    total_tokens: Option<u64>,
-}
-
-fn validate_embedding_input(texts: &[String]) -> Result<(), NewsItemGatewayError> {
-    if texts.len() > MAX_EMBEDDING_BATCH {
-        return Err(NewsItemGatewayError::TooManyEmbeddingInputs(texts.len()));
-    }
-    let mut total = 0usize;
-    for text in texts {
-        let count = text.chars().count();
-        if count == 0 || count > MAX_EMBEDDING_TEXT_CHARS {
-            return Err(NewsItemGatewayError::InvalidEmbeddingInputLength(count));
-        }
-        total = total.saturating_add(count);
-    }
-    if total > MAX_EMBEDDING_TOTAL_CHARS {
-        return Err(NewsItemGatewayError::EmbeddingInputTooLarge(total));
-    }
-    Ok(())
-}
-
-fn normalize_vector(vector: Vec<f64>) -> Result<Vec<f64>, NewsItemGatewayError> {
-    if vector.iter().any(|value| !value.is_finite()) {
-        return Err(NewsItemGatewayError::InvalidEmbedding(
-            "provider returned a non-finite vector component".to_owned(),
-        ));
-    }
-    let norm = vector.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if !norm.is_finite() || norm <= 1e-12 {
-        return Err(NewsItemGatewayError::InvalidEmbedding(
-            "provider returned a zero-length vector".to_owned(),
-        ));
-    }
-    Ok(vector.into_iter().map(|value| value / norm).collect())
 }
 
 fn normalize_candidates(
@@ -725,11 +537,6 @@ fn compact(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn bounded_provider_error(bytes: &[u8]) -> String {
-    let message = String::from_utf8_lossy(bytes);
-    message.chars().take(1_000).collect()
-}
-
 fn secret_env(name: &str) -> Option<SecretString> {
     env::var(name)
         .ok()
@@ -737,56 +544,18 @@ fn secret_env(name: &str) -> Option<SecretString> {
         .map(SecretString::from)
 }
 
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, _call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async {
-            Err(AgentRuntimeError::Tool(
-                "news-item generation does not expose tools".to_owned(),
-            ))
-        })
-    }
-}
-
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum NewsItemGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("news summary input is empty")]
     EmptySummaryInput,
     #[error("news-item provider returned no structured output")]
     MissingStructuredOutput,
     #[error("invalid generated news summary: {0}")]
     InvalidSummary(String),
-    #[error("OpenRouter is required for hosted news embeddings")]
-    OpenRouterUnavailable,
-    #[error("unsupported production news embedding model {0}; expected an openrouter: model")]
-    UnsupportedEmbeddingModel(String),
-    #[error("embedding request has {0} inputs; the maximum is {MAX_EMBEDDING_BATCH}")]
-    TooManyEmbeddingInputs(usize),
-    #[error("embedding input has invalid character length {0}")]
-    InvalidEmbeddingInputLength(usize),
-    #[error(
-        "embedding request has {0} total characters; the maximum is {MAX_EMBEDDING_TOTAL_CHARS}"
-    )]
-    EmbeddingInputTooLarge(usize),
-    #[error("embedding provider returned HTTP {status}: {message}")]
-    EmbeddingProvider { status: StatusCode, message: String },
-    #[error("embedding response has {0} bytes and exceeds the response limit")]
-    EmbeddingResponseTooLarge(usize),
-    #[error("embedding response shape mismatch: expected {expected} rows, got {actual}")]
-    EmbeddingShape { expected: usize, actual: usize },
-    #[error("invalid embedding: {0}")]
-    InvalidEmbedding(String),
+    #[error(transparent)]
+    Embedding(#[from] OpenRouterEmbeddingError),
     #[error("link selection has {0} candidates; the maximum is {MAX_LINK_CANDIDATES}")]
     TooManyLinkCandidates(usize),
     #[error("link selection returned {0} links; the maximum is {MAX_SELECTED_LINKS}")]
@@ -799,10 +568,6 @@ pub enum NewsItemGatewayError {
     InvalidUrl(String),
     #[error(transparent)]
     Agent(#[from] AgentRuntimeError),
-    #[error(transparent)]
-    Engine(#[from] crate::RigAgentEngineError),
-    #[error(transparent)]
-    Routing(#[from] crate::OpenRouterRoutingError),
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error("invalid provider URL: {0}")]
@@ -819,9 +584,7 @@ impl NewsItemGatewayError {
                 true
             }
             Self::Http(error) => crate::public_http::retryable_http_error(error),
-            Self::EmbeddingProvider { status, .. } => {
-                status.is_server_error() || matches!(status.as_u16(), 408 | 429)
-            }
+            Self::Embedding(error) => error.retryable(),
             _ => false,
         }
     }
@@ -830,6 +593,8 @@ impl NewsItemGatewayError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::StatusCode;
+    use serde_json::Value;
 
     #[test]
     fn generated_summary_enforces_persisted_wire_constraints() {
@@ -898,34 +663,27 @@ mod tests {
     }
 
     #[test]
-    fn embedding_vectors_are_finite_nonzero_and_normalized() {
-        let vector = normalize_vector(vec![3.0, 4.0]).expect("valid vector");
-        assert!((vector[0] - 0.6).abs() < 1e-12);
-        assert!((vector[1] - 0.8).abs() < 1e-12);
-        assert!(normalize_vector(vec![0.0, 0.0]).is_err());
-        assert!(normalize_vector(vec![f64::NAN]).is_err());
-    }
-
-    #[test]
     fn local_embedding_models_are_rejected_for_production() {
         let value = "Qwen/Qwen3-Embedding-8B".to_owned();
         assert!(value.strip_prefix("openrouter:").is_none());
     }
     #[test]
     fn typed_retry_policy_stops_configuration_and_authentication_failures() {
-        assert!(!NewsItemGatewayError::OpenRouterUnavailable.retryable());
         assert!(
-            !NewsItemGatewayError::EmbeddingProvider {
+            !NewsItemGatewayError::Embedding(OpenRouterEmbeddingError::Unavailable).retryable()
+        );
+        assert!(
+            !NewsItemGatewayError::Embedding(OpenRouterEmbeddingError::Provider {
                 status: StatusCode::UNAUTHORIZED,
                 message: "temporary-looking text".to_owned()
-            }
+            })
             .retryable()
         );
         assert!(
-            NewsItemGatewayError::EmbeddingProvider {
+            NewsItemGatewayError::Embedding(OpenRouterEmbeddingError::Provider {
                 status: StatusCode::TOO_MANY_REQUESTS,
                 message: String::new()
-            }
+            })
             .retryable()
         );
         assert!(

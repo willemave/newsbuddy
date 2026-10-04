@@ -8,16 +8,18 @@ use newsly_domain::{
     can_bridge_relation_clusters,
 };
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Postgres, Transaction};
 
-use crate::content::UsageWrite;
+use crate::content::{
+    UsageInsert, UsageWrite, insert_usage, normalize_external_url as normalize_http_url,
+};
 
 use super::input::{
     article_title, choose_article_url, exact_relation_key, existing_summary, metadata_tweet_body,
-    normalize_http_url, normalize_key_points, relation_search_query, relevant_links_json,
-    summary_json, summary_title,
+    normalize_key_points, relation_search_query, relevant_links_json, summary_json, summary_title,
 };
 use super::model::{
     BodyPointer, BodySource, EnrichmentFinalizationPlan, EnrichmentMutation, EnrichmentPreparation,
@@ -27,6 +29,21 @@ use super::model::{
 
 const RELATED_LOOKBACK_DAYS: i64 = 14;
 const MAX_RELATED_CANDIDATES: i64 = 150;
+
+macro_rules! news_row_columns {
+    () => {
+        r#"
+            id::bigint AS id,
+            owner_user_id::bigint AS owner_user_id,
+            visibility_scope, platform, source_type, source_label, source_external_id,
+            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
+            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
+            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
+            status, representative_news_item_id::bigint AS representative_news_item_id,
+            cluster_size, ingested_at
+        "#
+    };
+}
 
 #[derive(Debug, FromRow)]
 struct NewsRow {
@@ -65,7 +82,7 @@ pub(super) async fn prepare_enrichment(
     transaction: &mut Transaction<'_, Postgres>,
     news_item_id: i64,
 ) -> Result<EnrichmentPreparation, NewsRepositoryError> {
-    let Some(row) = load_news_row(transaction, news_item_id, true).await? else {
+    let Some(row) = load_news_row(transaction, news_item_id).await? else {
         return Ok(EnrichmentPreparation::NotFound);
     };
     let mut snapshot = snapshot_from_row(&row, BodySource::None);
@@ -112,7 +129,7 @@ pub(super) async fn prepare_processing(
     transaction: &mut Transaction<'_, Postgres>,
     news_item_id: i64,
 ) -> Result<Option<ProcessPreparation>, NewsRepositoryError> {
-    let Some(row) = load_news_row(transaction, news_item_id, true).await? else {
+    let Some(row) = load_news_row(transaction, news_item_id).await? else {
         return Ok(None);
     };
     let body_source = resolve_body_source(transaction, &row).await?;
@@ -158,7 +175,7 @@ pub(super) async fn load_relation_candidates(
     let floor = (Utc::now() - Duration::days(RELATED_LOOKBACK_DAYS)).naive_utc();
     let exact_key = item_document.exact_relation_key.as_ref();
     let title_query = relation_search_query(item_document.primary_title.as_deref());
-    let rows = sqlx::query_as::<_, NewsRow>(
+    let rows = sqlx::query_as::<_, NewsRow>(concat!(
         r#"
         WITH candidates AS (
             SELECT item.*,
@@ -204,19 +221,14 @@ pub(super) async fn load_relation_candidates(
             ORDER BY id, rank DESC, ingested_at DESC
         )
         SELECT
-            id::bigint AS id,
-            owner_user_id::bigint AS owner_user_id,
-            visibility_scope, platform, source_type, source_label, source_external_id,
-            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
-            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
-            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
-            status, representative_news_item_id::bigint AS representative_news_item_id,
-            cluster_size, ingested_at
+        "#,
+        news_row_columns!(),
+        r#"
         FROM deduplicated
         ORDER BY rank DESC, ingested_at DESC, id DESC
         LIMIT $13
         "#,
-    )
+    ))
     .bind(snapshot.id)
     .bind(&snapshot.visibility_scope)
     .bind(snapshot.owner_user_id)
@@ -259,20 +271,19 @@ pub(super) async fn apply_enrichment(
         &plan.usage,
     )
     .await?;
-    let Some(row) = load_news_row(transaction, plan.snapshot.id, true).await? else {
+    let Some(row) = load_news_row(transaction, plan.snapshot.id).await? else {
         return Ok(NewsApplyOutcome::NewsItemMissing);
     };
     if source_fingerprint(&row) != plan.snapshot.fingerprint {
         return Ok(NewsApplyOutcome::SourceChanged);
     }
     let mut metadata = row.raw_metadata.as_object().cloned().unwrap_or_default();
-    let (status, source, article_url, final_url, strategy, error, extracted_chars) =
-        apply_enrichment_metadata(
-            &mut metadata,
-            &plan.snapshot,
-            &plan.mutation,
-            plan.finalized_at,
-        );
+    let article_extraction = apply_enrichment_metadata(
+        &mut metadata,
+        &plan.snapshot,
+        &plan.mutation,
+        plan.finalized_at,
+    );
     sqlx::query(
         r#"
         UPDATE news_items
@@ -281,7 +292,6 @@ pub(super) async fn apply_enrichment(
             article_url = COALESCE($3, article_url),
             canonical_story_url = COALESCE(canonical_story_url, $3),
             article_domain = COALESCE(article_domain, $4),
-            enrichment_updated_at = $5,
             updated_at = timezone('UTC', clock_timestamp())
         WHERE id::bigint = $1
         "#,
@@ -290,7 +300,6 @@ pub(super) async fn apply_enrichment(
     .bind(Value::Object(metadata))
     .bind(published_final_url(&plan.mutation))
     .bind(enrichment_domain(&plan.mutation))
-    .bind(plan.finalized_at.naive_utc())
     .execute(&mut **transaction)
     .await?;
     let mut request = EnqueueRequest::new(TaskType::ProcessNewsItem);
@@ -304,13 +313,7 @@ pub(super) async fn apply_enrichment(
         .await?;
     tracing::info!(
         news_item_id = plan.snapshot.id,
-        status,
-        source = ?source,
-        article_url = ?article_url,
-        final_url = ?final_url,
-        strategy = ?strategy,
-        error = ?error,
-        extracted_chars,
+        article_extraction = %article_extraction,
         "news article enrichment finalized"
     );
     Ok(NewsApplyOutcome::Applied)
@@ -341,7 +344,7 @@ pub(super) async fn apply_processing(
         )
         .await?;
     }
-    let Some(row) = load_news_row(transaction, plan.snapshot.id, true).await? else {
+    let Some(row) = load_news_row(transaction, plan.snapshot.id).await? else {
         return Ok(NewsApplyOutcome::NewsItemMissing);
     };
     if source_fingerprint(&row) != plan.snapshot.fingerprint {
@@ -403,42 +406,21 @@ pub(super) async fn apply_processing(
 async fn load_news_row(
     transaction: &mut Transaction<'_, Postgres>,
     news_item_id: i64,
-    lock: bool,
 ) -> Result<Option<NewsRow>, sqlx::Error> {
-    let query = if lock {
+    sqlx::query_as::<_, NewsRow>(concat!(
         r#"
         SELECT
-            id::bigint AS id,
-            owner_user_id::bigint AS owner_user_id,
-            visibility_scope, platform, source_type, source_label, source_external_id,
-            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
-            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
-            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
-            status, representative_news_item_id::bigint AS representative_news_item_id,
-            cluster_size, ingested_at
+        "#,
+        news_row_columns!(),
+        r#"
         FROM news_items
         WHERE id::bigint = $1
         FOR UPDATE
-        "#
-    } else {
-        r#"
-        SELECT
-            id::bigint AS id,
-            owner_user_id::bigint AS owner_user_id,
-            visibility_scope, platform, source_type, source_label, source_external_id,
-            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
-            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
-            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
-            status, representative_news_item_id::bigint AS representative_news_item_id,
-            cluster_size, ingested_at
-        FROM news_items
-        WHERE id::bigint = $1
-        "#
-    };
-    sqlx::query_as::<_, NewsRow>(query)
-        .bind(news_item_id)
-        .fetch_optional(&mut **transaction)
-        .await
+        "#,
+    ))
+    .bind(news_item_id)
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 async fn find_existing_content(
@@ -554,17 +536,12 @@ async fn find_reusable_exact_summary(
         return Ok((None, None));
     };
     let floor = (Utc::now() - Duration::days(RELATED_LOOKBACK_DAYS)).naive_utc();
-    let rows = sqlx::query_as::<_, NewsRow>(
+    let rows = sqlx::query_as::<_, NewsRow>(concat!(
         r#"
         SELECT
-            id::bigint AS id,
-            owner_user_id::bigint AS owner_user_id,
-            visibility_scope, platform, source_type, source_label, source_external_id,
-            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
-            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
-            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
-            status, representative_news_item_id::bigint AS representative_news_item_id,
-            cluster_size, ingested_at
+        "#,
+        news_row_columns!(),
+        r#"
         FROM news_items
         WHERE status = 'ready'
           AND representative_news_item_id IS NULL
@@ -579,7 +556,7 @@ async fn find_reusable_exact_summary(
           )
         ORDER BY ingested_at DESC, id DESC
         "#,
-    )
+    ))
     .bind(snapshot.id)
     .bind(&snapshot.visibility_scope)
     .bind(snapshot.owner_user_id)
@@ -697,7 +674,7 @@ fn relation_document_from_snapshot(snapshot: &NewsSnapshot) -> NewsRelationDocum
 }
 
 fn relation_fingerprint(document: &NewsRelationDocument) -> String {
-    stable_sha256(&serde_json::to_value(document).unwrap_or(Value::Null))
+    stable_sha256(&serde_json::to_value(document).expect("NewsRelationDocument serializes"))
 }
 
 fn stable_sha256(value: &Value) -> String {
@@ -724,21 +701,25 @@ fn exact_url_variant(key: Option<&RelationExactKey>, index: usize) -> String {
     }
 }
 
-#[allow(clippy::too_many_lines, clippy::type_complexity)]
+#[derive(Serialize)]
+struct EnrichmentMetadata {
+    status: &'static str,
+    source: Option<&'static str>,
+    article_url: Option<String>,
+    final_url: Option<String>,
+    strategy: Option<String>,
+    error: Option<String>,
+    extracted_chars: i32,
+    updated_at: String,
+}
+
+#[allow(clippy::too_many_lines)]
 fn apply_enrichment_metadata(
     metadata: &mut Map<String, Value>,
     snapshot: &NewsSnapshot,
     mutation: &EnrichmentMutation,
     finalized_at: chrono::DateTime<Utc>,
-) -> (
-    &'static str,
-    Option<&'static str>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    i32,
-) {
+) -> Value {
     let updated_at = finalized_at.to_rfc3339();
     let result = match mutation {
         EnrichmentMutation::Existing => {
@@ -757,15 +738,16 @@ fn apply_enrichment_metadata(
                 .clone()
                 .or_else(|| snapshot.canonical_story_url.clone())
                 .or_else(|| url.clone());
-            (
-                "completed",
-                Some("existing"),
+            EnrichmentMetadata {
+                status: "completed",
+                source: Some("existing"),
                 article_url,
-                url,
-                None,
-                None,
-                0,
-            )
+                final_url: url,
+                strategy: None,
+                error: None,
+                extracted_chars: 0,
+                updated_at,
+            }
         }
         EnrichmentMutation::Metadata { text, source_url } => {
             metadata.insert(
@@ -777,15 +759,16 @@ fn apply_enrichment_metadata(
                     "updated_at": updated_at,
                 }),
             );
-            (
-                "completed",
-                Some("metadata"),
-                source_url.clone(),
-                source_url.clone(),
-                None,
-                None,
-                i32::try_from(text.chars().count()).unwrap_or(i32::MAX),
-            )
+            EnrichmentMetadata {
+                status: "completed",
+                source: Some("metadata"),
+                article_url: source_url.clone(),
+                final_url: source_url.clone(),
+                strategy: None,
+                error: None,
+                extracted_chars: i32::try_from(text.chars().count()).unwrap_or(i32::MAX),
+                updated_at,
+            }
         }
         EnrichmentMutation::Content {
             content_id,
@@ -809,15 +792,16 @@ fn apply_enrichment_metadata(
             {
                 metadata.insert("source_metadata".to_owned(), source_metadata.clone());
             }
-            (
-                "completed",
-                Some("content"),
-                Some(article_url.clone()),
-                final_url.clone(),
-                None,
-                None,
-                *extracted_chars,
-            )
+            EnrichmentMetadata {
+                status: "completed",
+                source: Some("content"),
+                article_url: Some(article_url.clone()),
+                final_url: final_url.clone(),
+                strategy: None,
+                error: None,
+                extracted_chars: *extracted_chars,
+                updated_at,
+            }
         }
         EnrichmentMutation::Storage {
             article_url,
@@ -853,57 +837,49 @@ fn apply_enrichment_metadata(
                     article.insert("title".to_owned(), Value::String(title.clone()));
                 }
             }
-            (
-                "completed",
-                Some("storage"),
-                Some(article_url.clone()),
-                Some(final_url.clone()),
-                Some(extraction_method.clone()),
-                None,
-                body.char_count,
-            )
+            EnrichmentMetadata {
+                status: "completed",
+                source: Some("storage"),
+                article_url: Some(article_url.clone()),
+                final_url: Some(final_url.clone()),
+                strategy: Some(extraction_method.clone()),
+                error: None,
+                extracted_chars: body.char_count,
+                updated_at,
+            }
         }
         EnrichmentMutation::Skipped {
             article_url,
             reason,
-        } => (
-            "skipped",
-            None,
-            article_url.clone(),
-            article_url.clone(),
-            None,
-            Some(reason.clone()),
-            0,
-        ),
+        } => EnrichmentMetadata {
+            status: "skipped",
+            source: None,
+            article_url: article_url.clone(),
+            final_url: article_url.clone(),
+            strategy: None,
+            error: Some(reason.clone()),
+            extracted_chars: 0,
+            updated_at,
+        },
         EnrichmentMutation::Failed {
             article_url,
             final_url,
             strategy,
             reason,
-        } => (
-            "failed",
-            None,
-            article_url.clone(),
-            final_url.clone(),
-            strategy.clone(),
-            Some(reason.clone()),
-            0,
-        ),
+        } => EnrichmentMetadata {
+            status: "failed",
+            source: None,
+            article_url: article_url.clone(),
+            final_url: final_url.clone(),
+            strategy: strategy.clone(),
+            error: Some(reason.clone()),
+            extracted_chars: 0,
+            updated_at,
+        },
     };
-    metadata.insert(
-        "article_extraction".to_owned(),
-        json!({
-            "status": result.0,
-            "source": result.1,
-            "article_url": result.2,
-            "final_url": result.3,
-            "strategy": result.4,
-            "error": result.5,
-            "extracted_chars": result.6,
-            "updated_at": updated_at,
-        }),
-    );
-    result
+    let article_extraction = serde_json::to_value(result).expect("enrichment metadata serializes");
+    metadata.insert("article_extraction".to_owned(), article_extraction.clone());
+    article_extraction
 }
 
 fn enrichment_domain(mutation: &EnrichmentMutation) -> Option<&str> {
@@ -980,23 +956,18 @@ async fn candidate_fingerprints_match(
         .iter()
         .map(|candidate| candidate.document.id)
         .collect::<Vec<_>>();
-    let rows = sqlx::query_as::<_, NewsRow>(
+    let rows = sqlx::query_as::<_, NewsRow>(concat!(
         r#"
         SELECT
-            id::bigint AS id,
-            owner_user_id::bigint AS owner_user_id,
-            visibility_scope, platform, source_type, source_label, source_external_id,
-            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
-            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
-            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
-            status, representative_news_item_id::bigint AS representative_news_item_id,
-            cluster_size, ingested_at
+        "#,
+        news_row_columns!(),
+        r#"
         FROM news_items
         WHERE id::bigint = ANY($1)
         ORDER BY id
         FOR UPDATE
         "#,
-    )
+    ))
     .bind(&ids)
     .fetch_all(&mut **transaction)
     .await?;
@@ -1127,7 +1098,7 @@ async fn reconcile_relation(
     .bind(representative_id)
     .execute(&mut **transaction)
     .await?;
-    recompute_cluster(transaction, representative_id, plan.finalized_at).await?;
+    recompute_cluster(transaction, representative_id).await?;
     Ok(representative_id)
 }
 
@@ -1135,25 +1106,19 @@ async fn reconcile_relation(
 async fn recompute_cluster(
     transaction: &mut Transaction<'static, Postgres>,
     representative_id: i64,
-    finalized_at: chrono::DateTime<Utc>,
 ) -> Result<(), NewsRepositoryError> {
-    let rows = sqlx::query_as::<_, NewsRow>(
+    let rows = sqlx::query_as::<_, NewsRow>(concat!(
         r#"
         SELECT
-            id::bigint AS id,
-            owner_user_id::bigint AS owner_user_id,
-            visibility_scope, platform, source_type, source_label, source_external_id,
-            canonical_item_url, canonical_story_url, article_url, article_domain, discussion_url,
-            COALESCE(summary_key_points, '[]'::json) AS summary_key_points,
-            summary_text, COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
-            status, representative_news_item_id::bigint AS representative_news_item_id,
-            cluster_size, ingested_at
+        "#,
+        news_row_columns!(),
+        r#"
         FROM news_items
         WHERE id::bigint = $1 OR representative_news_item_id::bigint = $1
         ORDER BY ingested_at, id
         FOR UPDATE
         "#,
-    )
+    ))
     .bind(representative_id)
     .fetch_all(&mut **transaction)
     .await?;
@@ -1205,7 +1170,6 @@ async fn recompute_cluster(
             raw_metadata = $7,
             representative_news_item_id = NULL,
             cluster_size = $8,
-            enrichment_updated_at = $9,
             updated_at = timezone('UTC', clock_timestamp())
         WHERE id::bigint = $1
         "#,
@@ -1218,7 +1182,6 @@ async fn recompute_cluster(
     .bind(&aggregate.article_domain)
     .bind(Value::Object(metadata))
     .bind(size)
-    .bind(finalized_at.naive_utc())
     .execute(&mut **transaction)
     .await?;
     sqlx::query(
@@ -1227,14 +1190,12 @@ async fn recompute_cluster(
         SET
             representative_news_item_id = CASE WHEN id::bigint = $1 THEN NULL ELSE $1 END,
             cluster_size = $2,
-            enrichment_updated_at = $3,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = ANY($4)
+        WHERE id::bigint = ANY($3)
         "#,
     )
     .bind(representative_id)
     .bind(size)
-    .bind(finalized_at.naive_utc())
     .bind(rows.iter().map(|row| row.id).collect::<Vec<_>>())
     .execute(&mut **transaction)
     .await?;
@@ -1297,15 +1258,10 @@ fn document_evidence_len(document: &NewsRelationDocument) -> usize {
 }
 
 fn cluster_payload(rows: &[NewsRow], preferred_title: Option<&str>) -> Value {
-    let mut source_labels = Vec::new();
-    let mut domains = Vec::new();
     let mut discussion_snippets = Vec::new();
     let mut related_titles = Vec::new();
-    let mut latest = None::<NaiveDateTime>;
     push_unique(&mut related_titles, preferred_title);
     for row in rows {
-        push_unique(&mut source_labels, row.source_label.as_deref());
-        push_unique(&mut domains, row.article_domain.as_deref());
         let metadata = row.raw_metadata.as_object();
         push_unique(
             &mut related_titles,
@@ -1333,15 +1289,10 @@ fn cluster_payload(rows: &[NewsRow], preferred_title: Option<&str>) -> Value {
         {
             push_unique(&mut discussion_snippets, Some(comment));
         }
-        latest = Some(latest.map_or(row.ingested_at, |value| value.max(row.ingested_at)));
     }
     json!({
-        "member_ids": rows.iter().map(|row| row.id).collect::<Vec<_>>(),
-        "source_labels": source_labels,
-        "domains": domains,
         "discussion_snippets": discussion_snippets.into_iter().take(5).collect::<Vec<_>>(),
         "related_titles": related_titles,
-        "latest_member_ingested_at": latest.map(|value| value.to_string()),
     })
 }
 
@@ -1572,18 +1523,24 @@ async fn persist_extraction_usage(
         match write {
             UsageWrite::Extraction(batch) => {
                 for (index, event) in batch.events.iter().enumerate() {
-                    insert_resource_usage(
+                    insert_usage(
                         transaction,
-                        ResourceUsageInsert {
+                        UsageInsert {
                             provider: "document_extractor",
                             model: extraction_method_name(batch.method),
                             feature: "document_extraction",
                             operation: extraction_intent_name(batch.intent),
-                            request_id: &batch.request_id,
+                            request_id: Some(&batch.request_id),
                             task_id,
+                            content_id: None,
                             user_id,
                             request_count: (index == 0).then_some(1),
                             resource_count: Some(i32::try_from(event.quantity).unwrap_or(i32::MAX)),
+                            input_tokens: None,
+                            cache_read_tokens: None,
+                            cache_write_tokens: None,
+                            output_tokens: None,
+                            total_tokens: None,
                             cost_usd: None,
                             pricing_version: None,
                             metadata: json!({
@@ -1598,18 +1555,24 @@ async fn persist_extraction_usage(
                 }
             }
             UsageWrite::Firecrawl(usage) => {
-                insert_resource_usage(
+                insert_usage(
                     transaction,
-                    ResourceUsageInsert {
+                    UsageInsert {
                         provider: "firecrawl",
                         model: "scrape-v2",
                         feature: "html_extraction",
                         operation: "firecrawl_scrape",
-                        request_id: &usage.request_id,
+                        request_id: Some(&usage.request_id),
                         task_id,
+                        content_id: None,
                         user_id,
                         request_count: Some(1),
                         resource_count: Some(1),
+                        input_tokens: None,
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        output_tokens: None,
+                        total_tokens: None,
                         cost_usd: usage.cost_usd,
                         pricing_version: Some("configured-v1"),
                         metadata: json!({
@@ -1626,55 +1589,6 @@ async fn persist_extraction_usage(
             }
         }
     }
-    Ok(())
-}
-
-struct ResourceUsageInsert<'a> {
-    provider: &'a str,
-    model: &'a str,
-    feature: &'a str,
-    operation: &'a str,
-    request_id: &'a str,
-    task_id: i64,
-    user_id: Option<i64>,
-    request_count: Option<i32>,
-    resource_count: Option<i32>,
-    cost_usd: Option<f64>,
-    pricing_version: Option<&'a str>,
-    metadata: Value,
-}
-
-async fn insert_resource_usage(
-    transaction: &mut Transaction<'static, Postgres>,
-    write: ResourceUsageInsert<'_>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id, task_id, user_id,
-            request_count, resource_count, cost_usd, currency, pricing_version, metadata, created_at
-        )
-        VALUES (
-            $1, $2, $3, $4, 'queue', $5, $6,
-            (SELECT id FROM users WHERE id::bigint = $7 AND is_active IS TRUE),
-            $8, $9, $10, 'USD', $11, $12, timezone('UTC', clock_timestamp())
-        )
-        "#,
-    )
-    .bind(write.provider)
-    .bind(write.model)
-    .bind(write.feature)
-    .bind(write.operation)
-    .bind(write.request_id)
-    .bind(write.task_id)
-    .bind(write.user_id)
-    .bind(write.request_count)
-    .bind(write.resource_count)
-    .bind(write.cost_usd)
-    .bind(write.pricing_version)
-    .bind(write.metadata)
-    .execute(&mut **transaction)
-    .await?;
     Ok(())
 }
 

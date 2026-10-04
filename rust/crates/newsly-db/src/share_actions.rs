@@ -1,10 +1,12 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
+use newsly_domain::truncate_chars;
 use serde_json::{Map, Value, json};
-use sqlx::{FromRow, PgPool, Postgres, Transaction};
+use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 use crate::chat::{CreateChatSessionInput, CreateChatSessionOutcome, create_chat_session};
 use crate::llm_tasks::LlmTaskActionProjection;
+use crate::llm_tasks::{ACTION_COLUMNS_SQL, LlmTaskActionRow, json_object_or_default};
 
 const TERMINAL_STATUSES: [&str; 3] = ["completed", "failed", "cancelled"];
 
@@ -86,21 +88,10 @@ pub struct ShareActionFinalizationTask {
     pub status: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequestedActionStatus {
-    Approved,
-    Applying,
-    Applied,
-    AwaitingApproval,
-    Proposed,
-    Rejected,
-    Failed,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct RequestedShareAction {
     pub id: i64,
-    pub status: RequestedActionStatus,
+    pub approved: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,26 +131,6 @@ struct TaskRow {
     input_json: Value,
     workspace_path: Option<String>,
     user_is_active: bool,
-}
-
-#[derive(Debug, Clone, FromRow)]
-struct ActionRow {
-    id: i64,
-    llm_task_id: i64,
-    action_name: String,
-    action_status: String,
-    approval_policy: String,
-    approval_required: bool,
-    action_input: Value,
-    action_result: Value,
-    rationale: Option<String>,
-    idempotency_key: Option<String>,
-    approved_by_user_id: Option<i64>,
-    error_message: Option<String>,
-    created_at: NaiveDateTime,
-    approved_at: Option<NaiveDateTime>,
-    started_at: Option<NaiveDateTime>,
-    completed_at: Option<NaiveDateTime>,
 }
 
 /// Inserts the generic LLM ledger row. The caller enqueues `run_llm_task` in the same transaction.
@@ -298,10 +269,10 @@ pub async fn begin_share_action_preparation(
         user_id: row.user_id,
         mode: row.mode.clone(),
         workflow_key: row.workflow_key.clone(),
-        approval_policy: json_object(row.approval_policy),
+        approval_policy: json_object_or_default(row.approval_policy),
         allowed_actions: json_strings(row.allowed_actions),
-        tool_policy: json_object(row.tool_policy),
-        input: json_object(row.input_json),
+        tool_policy: json_object_or_default(row.tool_policy),
+        input: json_object_or_default(row.input_json),
         workspace_path: required_text(row.workspace_path, "workspace_path")?,
         prepare_shared_source,
         deterministic_chat: row.mode == "chat",
@@ -384,9 +355,9 @@ pub async fn lock_share_action_for_finalization(
         id: row.id,
         user_id: row.user_id,
         mode: row.mode,
-        approval_policy: json_object(row.approval_policy),
+        approval_policy: json_object_or_default(row.approval_policy),
         allowed_actions: json_strings(row.allowed_actions),
-        input: json_object(row.input_json),
+        input: json_object_or_default(row.input_json),
         status: row.status,
     })
 }
@@ -466,19 +437,15 @@ pub async fn request_share_action(
     {
         return Ok(RequestedShareAction {
             id: existing.0,
-            status: requested_status(&existing.1)?,
+            approved: requested_action_is_approved(&existing.1)?,
         });
     }
 
     let policy = approval_policy(&task.approval_policy, action_name)?;
-    let (action_status, approval_required, requested_status) = match policy {
-        "auto_apply" => ("approved", false, RequestedActionStatus::Approved),
-        "dry_run" => ("proposed", false, RequestedActionStatus::Proposed),
-        "approval_required" => (
-            "awaiting_approval",
-            true,
-            RequestedActionStatus::AwaitingApproval,
-        ),
+    let (action_status, approval_required, approved) = match policy {
+        "auto_apply" => ("approved", false, true),
+        "dry_run" => ("proposed", false, false),
+        "approval_required" => ("awaiting_approval", true, false),
         _ => unreachable!("approval_policy returns a closed value"),
     };
     let id = sqlx::query_scalar::<_, i64>(
@@ -505,10 +472,7 @@ pub async fn request_share_action(
     .bind(idempotency_key)
     .fetch_one(&mut **transaction)
     .await?;
-    Ok(RequestedShareAction {
-        id,
-        status: requested_status,
-    })
+    Ok(RequestedShareAction { id, approved })
 }
 
 pub async fn mark_share_action_applying(
@@ -709,9 +673,9 @@ pub async fn approve_share_action(
             id: row.id,
             user_id: row.user_id,
             mode: row.mode,
-            approval_policy: json_object(row.approval_policy),
+            approval_policy: json_object_or_default(row.approval_policy),
             allowed_actions: json_strings(row.allowed_actions),
-            input: json_object(row.input_json),
+            input: json_object_or_default(row.input_json),
             status: row.status,
         },
         action: action.into(),
@@ -742,7 +706,6 @@ pub async fn fail_share_action_approval(
     action_id: i64,
     error_type: &str,
     message: &str,
-    action_result: Option<&Map<String, Value>>,
 ) -> Result<LlmTaskActionProjection, ShareActionRepositoryError> {
     let row = load_task_for_update(transaction, task_id)
         .await?
@@ -766,7 +729,6 @@ pub async fn fail_share_action_approval(
             approved_by_user_id = $4::bigint::integer,
             approved_at = COALESCE(approved_at, timezone('UTC', clock_timestamp())),
             started_at = COALESCE(started_at, timezone('UTC', clock_timestamp())),
-            action_result = COALESCE($5, action_result),
             error_message = $3,
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
@@ -777,7 +739,6 @@ pub async fn fail_share_action_approval(
     .bind(task_id)
     .bind(truncate_chars(message, 4_000))
     .bind(user_id)
-    .bind(action_result.map(|value| Value::Object(value.clone())))
     .execute(&mut **transaction)
     .await?;
     let durable_error_type = truncate_chars(error_type, 128);
@@ -936,7 +897,7 @@ async fn load_actions<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    Ok(sqlx::query_as::<_, ActionRow>(ACTION_SQL)
+    Ok(sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE llm_task_id::bigint = $1 ORDER BY created_at, id")))
         .bind(task_id)
         .fetch_all(executor)
         .await?
@@ -949,8 +910,8 @@ async fn load_action_for_update(
     transaction: &mut Transaction<'_, Postgres>,
     task_id: i64,
     action_id: i64,
-) -> Result<Option<ActionRow>, sqlx::Error> {
-    sqlx::query_as::<_, ActionRow>(ACTION_FOR_UPDATE_SQL)
+) -> Result<Option<LlmTaskActionRow>, sqlx::Error> {
+    sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE id::bigint = $2 AND llm_task_id::bigint = $1 FOR UPDATE")))
         .bind(task_id)
         .bind(action_id)
         .fetch_optional(&mut **transaction)
@@ -1037,15 +998,12 @@ fn approval_policy<'a>(
     }
 }
 
-fn requested_status(value: &str) -> Result<RequestedActionStatus, ShareActionRepositoryError> {
+fn requested_action_is_approved(value: &str) -> Result<bool, ShareActionRepositoryError> {
     match value {
-        "approved" => Ok(RequestedActionStatus::Approved),
-        "applying" => Ok(RequestedActionStatus::Applying),
-        "applied" => Ok(RequestedActionStatus::Applied),
-        "awaiting_approval" => Ok(RequestedActionStatus::AwaitingApproval),
-        "proposed" => Ok(RequestedActionStatus::Proposed),
-        "rejected" => Ok(RequestedActionStatus::Rejected),
-        "failed" => Ok(RequestedActionStatus::Failed),
+        "approved" => Ok(true),
+        "applying" | "applied" | "awaiting_approval" | "proposed" | "rejected" | "failed" => {
+            Ok(false)
+        }
         other => Err(ShareActionRepositoryError::InvalidActionStatus(
             other.to_owned(),
         )),
@@ -1059,13 +1017,6 @@ fn history_entry(status: &str, state: &str, note: &str, now: DateTime<Utc>) -> V
         "created_at": now.naive_utc().format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
         "note": note,
     })
-}
-
-fn json_object(value: Value) -> Map<String, Value> {
-    match value {
-        Value::Object(object) => object,
-        _ => Map::new(),
-    }
 }
 
 fn json_strings(value: Value) -> Vec<String> {
@@ -1089,53 +1040,6 @@ fn required_text(
     value
         .filter(|value| !value.trim().is_empty())
         .ok_or(ShareActionRepositoryError::MissingTaskField(field))
-}
-
-fn truncate_chars(value: &str, maximum: usize) -> String {
-    value.chars().take(maximum).collect()
-}
-
-const ACTION_SQL: &str = r#"
-    SELECT id::bigint AS id, llm_task_id::bigint AS llm_task_id, action_name,
-           action_status, approval_policy, approval_required, action_input, action_result,
-           rationale, idempotency_key, approved_by_user_id::bigint AS approved_by_user_id,
-           error_message, created_at, approved_at, started_at, completed_at
-    FROM llm_task_actions
-    WHERE llm_task_id::bigint = $1
-    ORDER BY created_at, id
-"#;
-
-const ACTION_FOR_UPDATE_SQL: &str = r#"
-    SELECT id::bigint AS id, llm_task_id::bigint AS llm_task_id, action_name,
-           action_status, approval_policy, approval_required, action_input, action_result,
-           rationale, idempotency_key, approved_by_user_id::bigint AS approved_by_user_id,
-           error_message, created_at, approved_at, started_at, completed_at
-    FROM llm_task_actions
-    WHERE id::bigint = $2 AND llm_task_id::bigint = $1
-    FOR UPDATE
-"#;
-
-impl From<ActionRow> for LlmTaskActionProjection {
-    fn from(row: ActionRow) -> Self {
-        Self {
-            id: row.id,
-            llm_task_id: row.llm_task_id,
-            action_name: row.action_name,
-            action_status: row.action_status,
-            approval_policy: row.approval_policy,
-            approval_required: row.approval_required,
-            action_input: json_object(row.action_input),
-            action_result: json_object(row.action_result),
-            rationale: row.rationale,
-            idempotency_key: row.idempotency_key,
-            approved_by_user_id: row.approved_by_user_id,
-            error_message: row.error_message,
-            created_at: row.created_at.and_utc(),
-            approved_at: row.approved_at.map(|value| value.and_utc()),
-            started_at: row.started_at.map(|value| value.and_utc()),
-            completed_at: row.completed_at.map(|value| value.and_utc()),
-        }
-    }
 }
 
 #[derive(Debug, Error)]

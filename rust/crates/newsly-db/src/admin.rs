@@ -1,7 +1,49 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
-use sqlx::{FromRow, PgPool};
+use sqlx::{AssertSqlSafe, FromRow, PgPool};
 use thiserror::Error;
+
+pub const VENDOR_COST_AGGREGATES_SQL: &str = r"
+    CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
+        THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
+        ELSE NULL END AS cost_usd,
+    ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
+    ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
+    ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::numeric, 8)::double precision AS provider_estimate_usd,
+    COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
+    COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
+";
+
+pub fn render_vendor_usage_cost(
+    cost: Option<f64>,
+    known_cost: f64,
+    public_list_estimate: f64,
+    provider_estimate: f64,
+    non_billable_records: i64,
+    unpriced_records: i64,
+) -> String {
+    cost.map_or_else(
+        || format!("Unknown (${known_cost:.6} priced subtotal: ${public_list_estimate:.6} public-list estimates, ${provider_estimate:.6} provider estimates; {non_billable_records} non-billable, {unpriced_records} unpriced records)"),
+        |cost| format!("${cost:.6} (${public_list_estimate:.6} public-list estimates, ${provider_estimate:.6} provider estimates; {non_billable_records} non-billable records)"),
+    )
+}
+
+#[cfg(test)]
+mod cost_render_tests {
+    use super::render_vendor_usage_cost;
+
+    #[test]
+    fn cost_rendering_uses_one_precision_and_preserves_unknown_totals() {
+        assert_eq!(
+            render_vendor_usage_cost(None, 0.3, 0.25, 0.05, 1, 2),
+            "Unknown ($0.300000 priced subtotal: $0.250000 public-list estimates, $0.050000 provider estimates; 1 non-billable, 2 unpriced records)"
+        );
+        assert_eq!(
+            render_vendor_usage_cost(Some(0.3), 0.3, 0.25, 0.05, 1, 0),
+            "$0.300000 ($0.250000 public-list estimates, $0.050000 provider estimates; 1 non-billable records)"
+        );
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct AdminCountRow {
@@ -18,9 +60,7 @@ pub struct AdminQueueCountRow {
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct AdminUserStats {
-    pub total_users: i64,
     pub active_users: i64,
-    pub recent_users: i64,
     pub onboarding_completed: i64,
 }
 
@@ -29,7 +69,6 @@ pub struct AdminProviderCostRow {
     pub provider: String,
     pub row_count: i64,
     pub request_count: i64,
-    pub resource_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
@@ -44,9 +83,7 @@ pub struct AdminRecentFailureRow {
     pub queue_name: String,
     pub task_type: String,
     pub error_message: Option<String>,
-    pub retry_count: i32,
     pub created_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,10 +104,7 @@ pub struct AdminFeedbackRow {
     pub message: String,
     pub source: String,
     pub app_version: Option<String>,
-    pub build_number: Option<String>,
     pub platform: Option<String>,
-    pub os_version: Option<String>,
-    pub device_model: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -87,40 +121,23 @@ pub struct AdminVendorUsageFilter {
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct AdminVendorUsageRow {
-    pub id: i64,
     pub created_at: DateTime<Utc>,
     pub provider: String,
     pub model: String,
     pub feature: String,
-    pub operation: String,
-    pub source: Option<String>,
-    pub request_id: Option<String>,
-    pub task_id: Option<i64>,
-    pub content_id: Option<i64>,
-    pub session_id: Option<i64>,
-    pub message_id: Option<i64>,
     pub user_id: Option<i64>,
     pub user_email: Option<String>,
     pub user_name: Option<String>,
-    pub input_tokens: Option<i32>,
-    pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
-    pub request_count: Option<i32>,
-    pub resource_count: Option<i32>,
     pub cost_usd: Option<f64>,
     pub cost_basis: Option<String>,
-    pub pricing_version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct AdminVendorUsageTotals {
     pub row_count: i64,
-    pub attributed_row_count: i64,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
     pub total_tokens: i64,
     pub request_count: i64,
-    pub resource_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
@@ -140,7 +157,6 @@ pub struct AdminVendorUsageDailyRow {
     pub non_billable_record_count: i64,
     pub unpriced_call_count: i64,
     pub request_count: i64,
-    pub resource_count: i64,
     pub total_tokens: i64,
 }
 
@@ -166,8 +182,6 @@ pub struct AdminEvalCandidate {
     pub platform: Option<String>,
     pub publication_date: Option<NaiveDateTime>,
     pub content_metadata: Value,
-    pub storage_provider: Option<String>,
-    pub storage_bucket: Option<String>,
     pub storage_key: Option<String>,
 }
 
@@ -197,8 +211,6 @@ pub async fn list_admin_eval_candidates(
                 content.platform,
                 content.publication_date,
                 content.content_metadata,
-                body.storage_provider,
-                body.storage_bucket,
                 body.storage_key,
                 row_number() OVER (
                     PARTITION BY content.content_type
@@ -221,8 +233,6 @@ pub async fn list_admin_eval_candidates(
             platform,
             publication_date,
             content_metadata,
-            storage_provider,
-            storage_bucket,
             storage_key
         FROM ranked
         WHERE recency_rank <= $2::bigint
@@ -281,37 +291,27 @@ pub async fn load_admin_dashboard(
     let user_stats = sqlx::query_as::<_, AdminUserStats>(
         r#"
         SELECT
-            COUNT(*)::bigint AS total_users,
             COUNT(*) FILTER (WHERE is_active IS TRUE)::bigint AS active_users,
-            COUNT(*) FILTER (WHERE created_at >= timezone('UTC', clock_timestamp()) - interval '24 hours')::bigint AS recent_users,
             COUNT(*) FILTER (WHERE has_completed_onboarding IS TRUE)::bigint AS onboarding_completed
         FROM users
         "#,
     )
     .fetch_one(pool)
     .await?;
-    let provider_costs = sqlx::query_as::<_, AdminProviderCostRow>(
+    let provider_costs = sqlx::query_as::<_, AdminProviderCostRow>(AssertSqlSafe(format!(
         r#"
         SELECT
             provider,
             COUNT(*)::bigint AS row_count,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
-            COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
-                THEN COALESCE(SUM(cost_usd), 0.0)::double precision
-                ELSE NULL END AS cost_usd,
-            COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
-            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
-            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::double precision AS provider_estimate_usd,
-            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
-            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
+            {VENDOR_COST_AGGREGATES_SQL}
         FROM vendor_usage_records
         WHERE created_at >= timezone('UTC', clock_timestamp()) - interval '30 days'
         GROUP BY provider
         ORDER BY COALESCE(SUM(cost_usd), 0.0) DESC, COUNT(*) DESC
         LIMIT 12
-        "#,
-    )
+        "#
+    )))
     .fetch_all(pool)
     .await?;
     let recent_failures = sqlx::query_as::<_, AdminRecentFailureRow>(
@@ -321,9 +321,7 @@ pub async fn load_admin_dashboard(
             queue_name,
             task_type,
             error_message,
-            retry_count,
-            created_at,
-            completed_at
+            created_at
         FROM processing_tasks
         WHERE status = 'failed'
           AND created_at >= timezone('UTC', clock_timestamp()) - interval '24 hours'
@@ -360,10 +358,7 @@ pub async fn list_admin_feedback(
             feedback.message,
             feedback.source,
             feedback.app_version,
-            feedback.build_number,
             feedback.platform,
-            feedback.os_version,
-            feedback.device_model,
             feedback.created_at
         FROM user_feedback AS feedback
         LEFT JOIN users ON users.id = feedback.user_id
@@ -388,29 +383,16 @@ pub async fn load_admin_vendor_usage(
     let rows = sqlx::query_as::<_, AdminVendorUsageRow>(
         r#"
         SELECT
-            usage.id::bigint,
             usage.created_at AT TIME ZONE 'UTC' AS created_at,
             usage.provider,
             usage.model,
             usage.feature,
-            usage.operation,
-            usage.source,
-            usage.request_id,
-            usage.task_id::bigint,
-            usage.content_id::bigint,
-            usage.session_id::bigint,
-            usage.message_id::bigint,
             usage.user_id::bigint,
             users.email AS user_email,
             users.full_name AS user_name,
-            usage.input_tokens,
-            usage.output_tokens,
             usage.total_tokens,
-            usage.request_count,
-            usage.resource_count,
             usage.cost_usd,
-            usage.cost_basis,
-            usage.pricing_version
+            usage.cost_basis
         FROM vendor_usage_records AS usage
         LEFT JOIN users ON users.id = usage.user_id
         WHERE ($1::text IS NULL OR usage.provider = $1)
@@ -432,24 +414,13 @@ pub async fn load_admin_vendor_usage(
     .bind(limit)
     .fetch_all(pool)
     .await?;
-    let totals = sqlx::query_as::<_, AdminVendorUsageTotals>(
+    let totals = sqlx::query_as::<_, AdminVendorUsageTotals>(AssertSqlSafe(format!(
         r#"
         SELECT
             COUNT(*)::bigint AS row_count,
-            COUNT(user_id)::bigint AS attributed_row_count,
-            COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
-            COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
-            COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
-                THEN COALESCE(SUM(cost_usd), 0.0)::double precision
-                ELSE NULL END AS cost_usd,
-            COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
-            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
-            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::double precision AS provider_estimate_usd,
-            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
-            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
+            {VENDOR_COST_AGGREGATES_SQL}
         FROM vendor_usage_records
         WHERE ($1::text IS NULL OR provider = $1)
           AND ($2::text IS NULL OR model = $2)
@@ -457,8 +428,8 @@ pub async fn load_admin_vendor_usage(
           AND ($4::bigint IS NULL OR user_id = $4)
           AND ($5::timestamptz IS NULL OR created_at >= $5)
           AND ($6::timestamptz IS NULL OR created_at <= $6)
-        "#,
-    )
+        "#
+    )))
     .bind(filter.provider.as_deref())
     .bind(filter.model.as_deref())
     .bind(filter.feature.as_deref())
@@ -467,21 +438,13 @@ pub async fn load_admin_vendor_usage(
     .bind(filter.end_at)
     .fetch_one(pool)
     .await?;
-    let daily = sqlx::query_as::<_, AdminVendorUsageDailyRow>(
+    let daily = sqlx::query_as::<_, AdminVendorUsageDailyRow>(AssertSqlSafe(format!(
         r#"
         SELECT
             created_at::date AS usage_day,
             COUNT(*)::bigint AS row_count,
-            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
-                THEN COALESCE(SUM(cost_usd), 0.0)::double precision
-                ELSE NULL END AS cost_usd,
-            COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
-            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
-            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::double precision AS provider_estimate_usd,
-            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
-            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count,
+            {VENDOR_COST_AGGREGATES_SQL},
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
-            COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens
         FROM vendor_usage_records
         WHERE ($1::text IS NULL OR provider = $1)
@@ -493,8 +456,8 @@ pub async fn load_admin_vendor_usage(
         GROUP BY created_at::date
         ORDER BY created_at::date DESC
         LIMIT 60
-        "#,
-    )
+        "#
+    )))
     .bind(filter.provider.as_deref())
     .bind(filter.model.as_deref())
     .bind(filter.feature.as_deref())

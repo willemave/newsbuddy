@@ -14,6 +14,10 @@ Each quote snapshots its source, rate, version, quantity and effective date.
 Unknown models, endpoint/tier mismatches, incomplete meters and malformed
 provider costs remain unknown rather than zero.
 
+Token pricing runs in a PostgreSQL BEFORE INSERT trigger gated on verified Rust
+operation names. Renaming or adding a token-consuming operation must update that
+verification allowlist; an unrecognized operation remains unpriced.
+
 | Provider/model | Published USD rate | Evidence and applicability |
 | --- | --- | --- |
 | OpenAI GPT-6 Luna | Per million: input 0.10, cache read 0.01, cache write 0.125, output 0.50 | [Model sheet](https://developers.openai.com/api/docs/models/gpt-6-luna); observed Responses endpoint and actual tier |

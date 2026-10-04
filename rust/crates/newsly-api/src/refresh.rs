@@ -1,5 +1,5 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 const REFRESH_OPERATION_ID: &str = "refreshToken";
@@ -34,18 +34,13 @@ pub(super) fn router() -> Router<AppState> {
         (status = 503, description = "Refresh temporarily unavailable", body = newsly_contracts::ErrorEnvelope)
     )
 )]
-#[expect(
-    clippy::too_many_lines,
-    reason = "refresh rotation is one security-sensitive transaction with explicit replay branches"
-)]
 pub(super) async fn refresh_token(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<RefreshTokenRequest>, JsonRejection>,
 ) -> Result<Json<AccessTokenResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REFRESH_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if payload.refresh_token.is_empty() {
         return Err(ApiError::new(
@@ -66,7 +61,7 @@ pub(super) async fn refresh_token(
         .decode_refresh_token(&payload.refresh_token)
         .map_err(|_| invalid_refresh_token(&request_id))?;
     let digest = Sha256::digest(payload.refresh_token.as_bytes());
-    let token_hash = sha256_hex(&digest);
+    let token_hash = newsly_domain::hex_encode(&digest);
     let advisory_lock_key = i64::from_be_bytes(
         digest[..8]
             .try_into()
@@ -75,13 +70,8 @@ pub(super) async fn refresh_token(
     let attempt_id = payload.attempt_id.map(|value| value.to_string());
     let now = Utc::now();
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let claim = begin_refresh_rotation(
         &mut transaction,
         &token_hash,
@@ -136,10 +126,7 @@ pub(super) async fn refresh_token(
             return Err(invalid_refresh_token(&request_id));
         }
     };
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     tracing::info!(
         user_id = verified.user_id,
         replayed,
@@ -157,14 +144,4 @@ fn invalid_refresh_token(request_id: &str) -> ApiError {
         request_id.to_owned(),
     )
     .bearer()
-}
-
-fn sha256_hex(digest: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        output.push(char::from(HEX[usize::from(byte >> 4)]));
-        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    output
 }

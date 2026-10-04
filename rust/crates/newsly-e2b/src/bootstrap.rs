@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::time::Instant;
@@ -14,8 +13,7 @@ use crate::envd_process::EnvdProcessClient;
 use crate::error::E2bError;
 use crate::session::DirectE2bProvider;
 use crate::types::{
-    CommandRequest, CommandResult, ExecutionTag, ExitStatus, OutputLimits, SandboxHandle,
-    SandboxUser,
+    CommandRequest, ExecutionTag, ExitStatus, OutputLimits, SandboxHandle, SandboxUser,
 };
 
 pub const VM_BOOTSTRAP_EXECUTABLE: &str = "/usr/local/bin/newsly-vm-bootstrap";
@@ -97,16 +95,6 @@ impl VmCapabilities {
     }
 }
 
-#[async_trait]
-pub trait VmBootstrapProvider: Send + Sync {
-    async fn probe_vm_capabilities(
-        &self,
-        sandbox: &SandboxHandle,
-        absolute_deadline: Instant,
-        cancellation: CancellationToken,
-    ) -> Result<VmCapabilities, E2bError>;
-}
-
 #[derive(Clone, Debug)]
 pub struct VmBootstrapClient {
     process: EnvdProcessClient,
@@ -168,86 +156,10 @@ impl VmBootstrapClient {
         }
         VmCapabilities::parse(&result.output.stdout)
     }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn run_command(
-        &self,
-        sandbox: &SandboxHandle,
-        operation: &'static str,
-        command: &str,
-        args: Vec<String>,
-        username: Option<SandboxUser>,
-        deadline: Instant,
-        output_limits: OutputLimits,
-        cancellation: CancellationToken,
-    ) -> Result<CommandResult, E2bError> {
-        let execution_tag = ExecutionTag::new();
-        let request = CommandRequest {
-            command: command.to_owned(),
-            args,
-            env: BTreeMap::new(),
-            cwd: None,
-            username,
-            tag: execution_tag.clone(),
-            stdin_enabled: false,
-            absolute_deadline: deadline,
-            idle_timeout: self.limits.command_idle_timeout,
-            output_limits,
-        };
-        let stream = match self
-            .process
-            .start(sandbox, request, cancellation.clone())
-            .await
-        {
-            Ok(stream) => stream,
-            Err(ambiguous @ E2bError::AmbiguousDelivery { .. }) => match self
-                .process
-                .recover_by_tag(
-                    sandbox,
-                    execution_tag,
-                    deadline,
-                    self.limits.command_idle_timeout,
-                    output_limits,
-                    cancellation,
-                )
-                .await
-            {
-                Ok(stream) => stream,
-                Err(E2bError::RecoveryUnavailable { .. }) => return Err(ambiguous),
-                Err(error) => return Err(error),
-            },
-            Err(error) => return Err(error),
-        };
-        let result = stream.collect_result().await?;
-        if result.exit_code != 0 || result.status != ExitStatus::Exited {
-            // Command stderr is the actionable bootstrap failure. Transport status is only a
-            // fallback when the command produced no diagnostic.
-            let detail = (!result.output.stderr.trim().is_empty())
-                .then_some(result.output.stderr.as_str())
-                .or_else(|| {
-                    (!result.output.stdout.trim().is_empty())
-                        .then_some(result.output.stdout.as_str())
-                })
-                .or_else(|| {
-                    result
-                        .error
-                        .as_deref()
-                        .filter(|value| !value.trim().is_empty())
-                })
-                .unwrap_or("no diagnostic output");
-            return Err(E2bError::VmBootstrapFailed {
-                operation,
-                exit_code: result.exit_code,
-                message: detail.trim().chars().take(4_000).collect(),
-            });
-        }
-        Ok(result)
-    }
 }
 
-#[async_trait]
-impl VmBootstrapProvider for DirectE2bProvider {
-    async fn probe_vm_capabilities(
+impl DirectE2bProvider {
+    pub async fn probe_vm_capabilities(
         &self,
         sandbox: &SandboxHandle,
         absolute_deadline: Instant,

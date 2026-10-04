@@ -3,10 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::sync::Arc;
 
-use futures_util::stream::{self, StreamExt};
 use newsly_db::{
-    PersistedContentRecord, PersistedNewsRecord, PreparedScrapeSources, ScrapeConfigSnapshot,
-    ScrapeRepositoryError, ScrapedContentRecord, ScrapedNewsRecord, due_discussion_refresh_ids,
+    PersistedContentRecord, PersistedNewsRecord, ScrapeConfigSnapshot, ScrapeRepositoryError,
+    ScrapedContentRecord, ScrapedNewsRecord, due_discussion_refresh_ids,
     matching_scrape_config_ids, persist_scraped_content, persist_scraped_news,
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
@@ -24,7 +23,6 @@ use crate::{
     TaskFinalizerResult, TaskHandler,
 };
 
-const MAX_CONCURRENT_SOURCES: usize = 6;
 const DISCUSSION_REFRESH_LIMIT: i64 = 100;
 
 #[derive(Debug, Clone)]
@@ -93,7 +91,7 @@ async fn execute_scrape(
             RequestedSource::Substack => Some("substack"),
             RequestedSource::Atom => Some("atom"),
             RequestedSource::Podcast => Some("podcast_rss"),
-            _ => None,
+            RequestedSource::DiscussionComments => None,
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -116,7 +114,7 @@ async fn execute_scrape(
             ));
         }
     };
-    prepared.configs.retain(|config| {
+    prepared.retain(|config| {
         config.scraper_type != "aggregator"
             || config
                 .config
@@ -125,7 +123,7 @@ async fn execute_scrape(
                 .and_then(AggregatorKey::from_key)
                 .is_some_and(|key| request.sources.contains(&RequestedSource::Aggregator(key)))
     });
-    if config_id.is_some() && prepared.configs.is_empty() {
+    if config_id.is_some() && prepared.is_empty() {
         return HandlerExecution::from_result(TaskResult::ok());
     }
     let mut source_plans = match build_source_plans(&request, &prepared) {
@@ -196,38 +194,40 @@ async fn execute_scrape(
         );
     }
 
-    for source in &mut source_plans {
-        if let SourcePlanKind::Feed(targets) = &mut source.kind {
-            for target in targets {
-                let content_type = if target.scraper_type == "podcast_rss" {
-                    "podcast"
-                } else {
-                    "article"
-                };
-                target.known_urls =
-                    match newsly_db::known_feed_urls(&services.pool, target.user_id, content_type)
-                        .await
-                    {
-                        Ok(urls) => urls,
-                        Err(error) => {
-                            return HandlerExecution::from_result(TaskResult::fail(
-                                Some(error.to_string()),
-                                true,
-                            ));
-                        }
-                    };
-            }
+    let Some(mut source_plan) = source_plans.pop() else {
+        return HandlerExecution::from_result(TaskResult::ok());
+    };
+    if !source_plans.is_empty() {
+        return HandlerExecution::from_result(TaskResult::fail(
+            Some("inline scrape retained multiple source plans after fan-out".to_owned()),
+            false,
+        ));
+    }
+    if let SourcePlanKind::Feed(targets) = &mut source_plan.kind {
+        for target in targets {
+            let content_type = if target.scraper_type == "podcast_rss" {
+                "podcast"
+            } else {
+                "article"
+            };
+            target.known_urls = match newsly_db::known_feed_urls(
+                &services.pool,
+                target.user_id,
+                content_type,
+            )
+            .await
+            {
+                Ok(urls) => urls,
+                Err(error) => {
+                    return HandlerExecution::from_result(TaskResult::fail(
+                        Some(error.to_string()),
+                        true,
+                    ));
+                }
+            };
         }
     }
-    let gateway = services.gateway.clone();
-    let outcomes = stream::iter(source_plans)
-        .map(move |plan| {
-            let gateway = gateway.clone();
-            async move { execute_source(&gateway, plan).await }
-        })
-        .buffer_unordered(MAX_CONCURRENT_SOURCES)
-        .collect::<Vec<_>>()
-        .await;
+    let outcomes = vec![execute_source(&services.gateway, source_plan).await];
 
     if lease.ownership_lost() {
         return HandlerExecution::from_result(TaskResult::fail(
@@ -296,12 +296,13 @@ impl ScrapeRequest {
             let value = source
                 .as_str()
                 .ok_or_else(|| "scrape source names must be strings".to_owned())?;
-            let parsed = RequestedSource::parse(value)
-                .ok_or_else(|| format!("unknown scrape source {value:?}"))?;
-            if parsed == RequestedSource::All {
+            if normalize_name(value) == "all" {
                 sources.extend(RequestedSource::all_concrete());
             } else {
-                sources.insert(parsed);
+                sources.insert(
+                    RequestedSource::parse(value)
+                        .ok_or_else(|| format!("unknown scrape source {value:?}"))?,
+                );
             }
         }
         let first_edition_run_id = task
@@ -323,7 +324,6 @@ impl ScrapeRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RequestedSource {
-    All,
     Aggregator(AggregatorKey),
     Reddit,
     Substack,
@@ -339,12 +339,11 @@ impl RequestedSource {
         }
         let normalized = normalize_name(value);
         match normalized.as_str() {
-            "all" => Some(Self::All),
             "reddit" => Some(Self::Reddit),
             "substack" => Some(Self::Substack),
             "atom" => Some(Self::Atom),
-            "podcast" | "podcasts" | "podcastrss" | "podcastunified" => Some(Self::Podcast),
-            "discussioncomments" | "discussions" => Some(Self::DiscussionComments),
+            "podcast" => Some(Self::Podcast),
+            "discussioncomments" => Some(Self::DiscussionComments),
             _ => None,
         }
     }
@@ -366,7 +365,6 @@ impl RequestedSource {
 
     fn canonical_name(self) -> String {
         match self {
-            Self::All => "all".to_owned(),
             Self::Aggregator(key) => key.as_str().to_owned(),
             Self::Reddit => "reddit".to_owned(),
             Self::Substack => "substack".to_owned(),
@@ -396,15 +394,13 @@ struct SourcePlan {
 
 fn build_source_plans(
     request: &ScrapeRequest,
-    prepared: &PreparedScrapeSources,
+    prepared: &[ScrapeConfigSnapshot],
 ) -> Result<Vec<SourcePlan>, String> {
     let mut plans = Vec::new();
     for source in &request.sources {
         match *source {
-            RequestedSource::All => unreachable!("all is expanded while parsing"),
             RequestedSource::Aggregator(key) => {
                 let required_config_ids = prepared
-                    .configs
                     .iter()
                     .filter(|config| {
                         config.scraper_type == "aggregator"
@@ -432,7 +428,6 @@ fn build_source_plans(
             }
             RequestedSource::Reddit => {
                 let targets = prepared
-                    .configs
                     .iter()
                     .filter(|config| config.scraper_type == "reddit")
                     .filter_map(reddit_target)
@@ -450,7 +445,6 @@ fn build_source_plans(
                     _ => unreachable!(),
                 };
                 let targets = prepared
-                    .configs
                     .iter()
                     .filter(|config| config.scraper_type == scraper_type)
                     .filter_map(feed_target)
@@ -620,7 +614,7 @@ fn configured_source_outcome(
 struct ScrapeFinalizer {
     queue: QueueKernel,
     request: ScrapeRequest,
-    prepared: PreparedScrapeSources,
+    prepared: Vec<ScrapeConfigSnapshot>,
     outcomes: Vec<SourceOutcome>,
 }
 
@@ -758,8 +752,7 @@ impl ScrapeFinalizer {
         &self,
         transaction: &mut Transaction<'static, Postgres>,
     ) -> Result<TaskFinalizerResult, Box<dyn Error + Send + Sync>> {
-        let valid_config_ids =
-            matching_scrape_config_ids(transaction, &self.prepared.configs).await?;
+        let valid_config_ids = matching_scrape_config_ids(transaction, &self.prepared).await?;
         let mut downstream = Vec::new();
         let mut process_content_ids = BTreeSet::new();
         let mut enrich_news_ids = BTreeSet::new();

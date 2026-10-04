@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, Extension, Multipart, State};
+use axum::extract::{DefaultBodyLimit, Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
-use newsly_contracts::{AudioTranscriptionHealthResponse, AudioTranscriptionResponse};
+use newsly_contracts::AudioTranscriptionResponse;
 use newsly_db::{NewTranscriptionUsage, record_transcription_usage};
 use newsly_providers::{
     OpenAiTranscriptionError, TranscriptionChunkUsage, TranscriptionUsageObserver,
@@ -20,43 +20,17 @@ use utoipa::ToSchema;
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{internal_error, require_operation, verify_stamp};
+use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
 
-const TRANSCRIBE_OPERATION_ID: &str = "transcribeOpenaiTranscriptionsAudio";
 const MAX_UPLOAD_BYTES: u64 = 500_000_000;
 const MULTIPART_BODY_BYTES: usize = 500_000_000 + 1024 * 1024;
 
 pub(super) fn router() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/api/openai/transcriptions/health",
-            get(transcription_health),
-        )
-        .route(
-            "/api/openai/transcriptions",
-            post(transcribe_audio).layer(DefaultBodyLimit::max(MULTIPART_BODY_BYTES)),
-        )
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/openai/transcriptions/health",
-    operation_id = "transcriptionOpenaiHealth",
-    tag = "openai",
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = AudioTranscriptionHealthResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope)
+    Router::new().route(
+        "/api/openai/transcriptions",
+        post(transcribe_audio).layer(DefaultBodyLimit::max(MULTIPART_BODY_BYTES)),
     )
-)]
-pub(super) async fn transcription_health(
-    State(state): State<AppState>,
-    _current_user: AuthenticatedUser,
-) -> Json<AudioTranscriptionHealthResponse> {
-    Json(AudioTranscriptionHealthResponse {
-        available: state.transcription.is_some(),
-    })
 }
 
 #[derive(ToSchema)]
@@ -88,11 +62,10 @@ pub(super) async fn transcribe_audio(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     multipart: Multipart,
 ) -> Result<Json<AudioTranscriptionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, TRANSCRIBE_OPERATION_ID, &request_id)?;
     let upload = store_upload(multipart, &request_id).await?;
     let provider = state.transcription.as_ref().ok_or_else(|| {
         ApiError::new(
@@ -103,19 +76,7 @@ pub(super) async fn transcribe_audio(
         )
     })?;
 
-    // Verify ownership in a short prepare transaction. The gateway's request permit remains held
-    // while the provider runs, so a route transition cannot complete around the external call.
-    let mut prepare = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut prepare, &stamp, &request_id).await?;
-    prepare
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::verify_route_now(state.database.pool(), &stamp, &request_id).await?;
 
     let result = provider
         .transcribe_upload_observed(
@@ -320,18 +281,7 @@ fn audio_format(filename: &str) -> &'static str {
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn upload_too_large(request_id: &str) -> ApiError {

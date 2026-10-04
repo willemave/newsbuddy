@@ -87,3 +87,57 @@ async fn x_connection_update_persists_json_scopes_and_preserves_them_when_empty(
     .unwrap();
     assert_eq!(stored_scopes, json!(["bookmark.read", "users.read"]));
 }
+
+#[sqlx::test]
+async fn canonical_x_snapshot_merge_locks_and_preserves_concurrent_content_fields(pool: PgPool) {
+    let id: i64 = sqlx::query_scalar("INSERT INTO contents (url,content_type,status,is_aggregate,content_metadata) VALUES ('https://x.com/test/status/1','article','completed',FALSE,$1) RETURNING id::bigint")
+        .bind(json!({"tweet_snapshot":{"text":"old"},"domain":{"tweet_snapshot":{"text":"old"},"keep":1},"processing":{"tweet_snapshot":"misplaced"}}))
+        .fetch_one(&pool).await.unwrap();
+    let mut content_tx = pool.begin().await.unwrap();
+    let stored: Value =
+        sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id::bigint=$1 FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *content_tx)
+            .await
+            .unwrap();
+    let mut metadata = stored.as_object().unwrap().clone();
+    crate::content_metadata::set_field(&mut metadata, "summary", json!({"title":"concurrent"}));
+    sqlx::query("UPDATE contents SET content_metadata=$2 WHERE id::bigint=$1")
+        .bind(id)
+        .bind(Value::Object(metadata))
+        .execute(&mut *content_tx)
+        .await
+        .unwrap();
+    let updates = json!({"tweet_snapshot":{"text":"new"},"tweet_snapshot_included":[{"id":"2"}]});
+    let mut x_tx = pool.begin().await.unwrap();
+    {
+        let merge = super::persist_x_bookmark_snapshot(&mut x_tx, id, &updates);
+        tokio::pin!(merge);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut merge)
+                .await
+                .is_err()
+        );
+        content_tx.commit().await.unwrap();
+        merge.await.unwrap();
+    }
+    x_tx.commit().await.unwrap();
+    let stored: Value =
+        sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id::bigint=$1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored["tweet_snapshot"], updates["tweet_snapshot"]);
+    assert_eq!(
+        stored["domain"]["tweet_snapshot"],
+        updates["tweet_snapshot"]
+    );
+    assert_eq!(
+        stored["domain"]["tweet_snapshot_included"],
+        updates["tweet_snapshot_included"]
+    );
+    assert!(stored["processing"].get("tweet_snapshot").is_none());
+    assert_eq!(stored["summary"]["title"], "concurrent");
+    assert_eq!(stored["domain"]["keep"], 1);
+}

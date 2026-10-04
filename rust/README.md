@@ -73,7 +73,6 @@ cancellation, and reattachment without duplicate command execution.
 `GET /openapi.json` exposes the authoritative Rust contract. The same Utoipa
 document generates:
 
-- `docs/library/reference/openapi.json`;
 - `contracts/openapi/public.openapi.json`;
 - app and Share Extension Swift wire types.
 
@@ -85,9 +84,6 @@ untyped JSON is not explicitly allowlisted.
 The Rust CLI consumes request and error types directly from `newsly-contracts`.
 It decodes ordinary successful responses as JSON to tolerate future enum values,
 so there is no generated CLI model file or checked CLI-specific OpenAPI copy.
-The internal `--agent` export mode remains only as a language-neutral
-operation-inventory check.
-
 Regenerate and verify deliberate contract changes from the repository root:
 
 ```bash
@@ -115,12 +111,29 @@ The external `willemave/newsbuddy` Homebrew tap is released independently.
 Verify that its current formula packages the Rust `newsbuddy` binary before
 relying on it; a source install always builds the checked-out revision.
 
+For stored transcript compatibility, `newsly-admin db transcript-compatibility`
+returns bounded counts and a `last_id`/`more` cursor without message payloads.
+`db transcript-backfill` defaults to a dry run. Its `--apply` form requires
+`--batch-id`, `--actor`, and `--reason` and limits a page to 1,000 rows. Take a
+database snapshot before an authorized production run: canonical conversion
+discards legacy fields already ignored by readers. Reuse the same incident ID
+and page arguments to resume a partial page; use a fresh incident ID for a new
+page. Concurrently changed or processing rows are skipped. Repeat the complete
+inventory afterward before retiring the converter. This command's presence
+does not authorize deployment or production backfill.
+
 ## Configuration and local execution
 
 All application binaries use `DATABASE_URL`. A native PostgreSQL URL is
 preferred; the compatibility `postgresql+psycopg://` spelling is normalized at
 startup. Secrets are redacted from diagnostics. Rust tuning variables use the
 `NEWSLY_RUST_*` prefix.
+
+The Rust database adapter owns the SQLAlchemy URL compatibility conversion.
+Remove it and the shell equivalents only after the deployed env file, local
+production/local-Docker env files, and backup cron all use native PostgreSQL
+URLs. Keep the `DATABASE_URL` key for backups and record that verified cutover
+in `docs/log.md`; this cleanup does not authorize changing live configuration.
 
 From this directory:
 

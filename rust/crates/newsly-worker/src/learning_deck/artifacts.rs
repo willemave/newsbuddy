@@ -1,20 +1,18 @@
+use futures_util::StreamExt as _;
 use std::collections::BTreeSet;
 use std::env;
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use newsly_db::StoredLearningDeckArtifact;
-use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectPath;
 use object_store::{
-    Attribute, AttributeValue, Attributes, ClientOptions, Error as ObjectStoreError, ObjectStore,
-    ObjectStoreExt, PutOptions,
+    Attribute, AttributeValue, Attributes, Error as ObjectStoreError, ObjectStore, ObjectStoreExt,
+    PutOptions,
 };
 use regex::Regex;
 use reqwest::Url;
-use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
@@ -82,62 +80,11 @@ impl std::fmt::Debug for ArtifactBackend {
 
 impl LearningDeckArtifactStore {
     pub(super) fn from_env(pool: sqlx::PgPool) -> Result<Self, LearningDeckArtifactError> {
-        let provider = env::var("CONTENT_BODY_STORAGE_PROVIDER")
-            .unwrap_or_else(|_| "local".to_owned())
-            .trim()
-            .to_owned();
-        let backend = match provider.as_str() {
-            "local" => {
-                let configured = env::var_os("CONTENT_BODY_LOCAL_ROOT")
-                    .map_or_else(|| PathBuf::from("data/content_bodies"), PathBuf::from);
-                let root = if configured.is_absolute() {
-                    configured
-                } else {
-                    env::current_dir()?.join(configured)
-                };
-                validate_root(&root)?;
+        let backend = match newsly_providers::ObjectStorageBackend::from_environment()? {
+            newsly_providers::ObjectStorageBackend::Local { root } => {
                 ArtifactBackend::Local { root }
             }
-            "s3_compatible" => {
-                let bucket = required("CONTENT_BODY_STORAGE_BUCKET")?;
-                let endpoint = optional_url("CONTENT_BODY_STORAGE_ENDPOINT")?;
-                let region = optional("CONTENT_BODY_STORAGE_REGION");
-                let access_key =
-                    optional("CONTENT_BODY_STORAGE_ACCESS_KEY").map(SecretString::from);
-                let secret_key =
-                    optional("CONTENT_BODY_STORAGE_SECRET_KEY").map(SecretString::from);
-                if access_key.is_some() != secret_key.is_some() {
-                    return Err(LearningDeckArtifactError::IncompleteCredentials);
-                }
-                let timeout_seconds =
-                    bounded_u64("CONTENT_BODY_STORAGE_TIMEOUT_SECONDS", 30, 1, 300)?;
-                let mut builder = AmazonS3Builder::from_env()
-                    .with_bucket_name(bucket)
-                    .with_disable_bulk_delete(true)
-                    .with_client_options(
-                        ClientOptions::new().with_timeout(Duration::from_secs(timeout_seconds)),
-                    );
-                if let Some(endpoint) = endpoint {
-                    builder = builder
-                        .with_allow_http(endpoint.scheme() == "http")
-                        .with_endpoint(endpoint.to_string());
-                }
-                if let Some(region) = region {
-                    builder = builder.with_region(region);
-                }
-                if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
-                    builder = builder
-                        .with_access_key_id(access_key.expose_secret())
-                        .with_secret_access_key(secret_key.expose_secret());
-                }
-                let store = builder
-                    .build()
-                    .map_err(|error| LearningDeckArtifactError::ObjectStore(error.to_string()))?;
-                ArtifactBackend::S3 {
-                    store: Arc::new(store),
-                }
-            }
-            _ => return Err(LearningDeckArtifactError::UnsupportedProvider(provider)),
+            newsly_providers::ObjectStorageBackend::S3 { store } => ArtifactBackend::S3 { store },
         };
         let prefix = normalize_prefix(
             &env::var("CONTENT_BODY_STORAGE_PREFIX").unwrap_or_else(|_| "content".to_owned()),
@@ -354,11 +301,26 @@ impl LearningDeckArtifactStore {
                         return Err(LearningDeckArtifactError::ObjectStore(error.to_string()));
                     }
                 };
-                result
-                    .bytes()
-                    .await
-                    .map(|bytes| Some(bytes.to_vec()))
-                    .map_err(|error| LearningDeckArtifactError::ObjectStore(error.to_string()))
+                let maximum = newsly_providers::MAX_SOURCE_BODY_BYTES;
+                if result.meta.size > maximum as u64 {
+                    return Err(LearningDeckArtifactError::SourceTooLarge(maximum));
+                }
+                let mut bytes = Vec::with_capacity(
+                    usize::try_from(result.meta.size)
+                        .unwrap_or(maximum)
+                        .min(maximum),
+                );
+                let mut stream = result.into_stream();
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(|error| {
+                        LearningDeckArtifactError::ObjectStore(error.to_string())
+                    })?;
+                    if bytes.len().saturating_add(chunk.len()) > maximum {
+                        return Err(LearningDeckArtifactError::SourceTooLarge(maximum));
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(Some(bytes))
             }
         }
     }
@@ -366,10 +328,17 @@ impl LearningDeckArtifactStore {
     async fn exists(&self, key: &str) -> Result<bool, LearningDeckArtifactError> {
         validate_object_key(key)?;
         match &self.backend {
-            ArtifactBackend::Local { root } => {
-                let path = safe_existing_local_path(root, key).await?;
-                Ok(path.is_some())
-            }
+            ArtifactBackend::Local { root } => newsly_providers::read_local_object(root, key, 0)
+                .await
+                .map(|slice| slice.is_some())
+                .map_err(|error| match error {
+                    newsly_providers::LocalStorageError::UnsafePath(path) => {
+                        LearningDeckArtifactError::UnsafeLocalPath(path)
+                    }
+                    newsly_providers::LocalStorageError::File { path, source } => {
+                        LearningDeckArtifactError::File { path, source }
+                    }
+                }),
             ArtifactBackend::S3 { store } => {
                 let path = ObjectPath::parse(key).map_err(|error| {
                     LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
@@ -386,16 +355,16 @@ impl LearningDeckArtifactStore {
     async fn delete(&self, key: &str) -> Result<(), LearningDeckArtifactError> {
         validate_object_key(key)?;
         match &self.backend {
-            ArtifactBackend::Local { root } => {
-                let Some(path) = safe_existing_local_path(root, key).await? else {
-                    return Ok(());
-                };
-                match tokio::fs::remove_file(&path).await {
-                    Ok(()) => Ok(()),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                    Err(source) => Err(LearningDeckArtifactError::File { path, source }),
-                }
-            }
+            ArtifactBackend::Local { root } => newsly_providers::delete_local_object(root, key)
+                .await
+                .map_err(|error| match error {
+                    newsly_providers::LocalStorageError::UnsafePath(path) => {
+                        LearningDeckArtifactError::UnsafeLocalPath(path)
+                    }
+                    newsly_providers::LocalStorageError::File { path, source } => {
+                        LearningDeckArtifactError::File { path, source }
+                    }
+                }),
             ArtifactBackend::S3 { store } => {
                 let path = ObjectPath::parse(key).map_err(|error| {
                     LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
@@ -769,31 +738,8 @@ fn join_key(prefix: &str, suffix: &str) -> Result<String, LearningDeckArtifactEr
     Ok(key)
 }
 
-fn validate_root(root: &Path) -> Result<(), LearningDeckArtifactError> {
-    if root == Path::new("/")
-        || !root.is_absolute()
-        || root.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::CurDir | Component::Prefix(_)
-            )
-        })
-    {
-        return Err(LearningDeckArtifactError::UnsafeRoot(root.to_path_buf()));
-    }
-    Ok(())
-}
-
 fn validate_object_key(key: &str) -> Result<(), LearningDeckArtifactError> {
-    let path = Path::new(key);
-    if key.is_empty()
-        || key.len() > 2_048
-        || key.contains(['\0', '\\'])
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
+    if !newsly_providers::is_safe_object_key(key) {
         return Err(LearningDeckArtifactError::UnsafeObjectKey(key.to_owned()));
     }
     Ok(())
@@ -855,67 +801,23 @@ async fn write_local(
 }
 
 async fn read_local(root: &Path, key: &str) -> Result<Option<Vec<u8>>, LearningDeckArtifactError> {
-    let Some(path) = safe_existing_local_path(root, key).await? else {
-        return Ok(None);
-    };
-    tokio::fs::read(&path)
+    let maximum = newsly_providers::MAX_SOURCE_BODY_BYTES;
+    let slice = newsly_providers::read_local_object(root, key, maximum)
         .await
-        .map(Some)
-        .map_err(|source| LearningDeckArtifactError::File { path, source })
-}
-
-async fn safe_existing_local_path(
-    root: &Path,
-    key: &str,
-) -> Result<Option<PathBuf>, LearningDeckArtifactError> {
-    let canonical_root = match tokio::fs::canonicalize(root).await {
-        Ok(root) => root,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(LearningDeckArtifactError::File {
-                path: root.to_path_buf(),
-                source,
-            });
-        }
-    };
-    let requested = root.join(key);
-    let path = match tokio::fs::canonicalize(&requested).await {
-        Ok(path) => path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(LearningDeckArtifactError::File {
-                path: requested,
-                source,
-            });
-        }
-    };
-    if !path.starts_with(&canonical_root) {
-        return Err(LearningDeckArtifactError::UnsafeLocalPath(path));
-    }
-    Ok(Some(path))
-}
-
-fn required(name: &'static str) -> Result<String, LearningDeckArtifactError> {
-    optional(name).ok_or(LearningDeckArtifactError::Missing(name))
-}
-
-fn optional(name: &'static str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn optional_url(name: &'static str) -> Result<Option<Url>, LearningDeckArtifactError> {
-    optional(name)
-        .map(|value| {
-            let url = value
-                .parse::<Url>()
-                .map_err(|_| LearningDeckArtifactError::InvalidUrl(name, value.clone()))?;
-            if !matches!(url.scheme(), "http" | "https") || url.cannot_be_a_base() {
-                return Err(LearningDeckArtifactError::InvalidUrl(name, value));
+        .map_err(|error| match error {
+            newsly_providers::LocalStorageError::UnsafePath(path) => {
+                LearningDeckArtifactError::UnsafeLocalPath(path)
             }
-            Ok(url)
+            newsly_providers::LocalStorageError::File { path, source } => {
+                LearningDeckArtifactError::File { path, source }
+            }
+        })?;
+    slice
+        .map(|slice| {
+            if slice.truncated {
+                return Err(LearningDeckArtifactError::SourceTooLarge(maximum));
+            }
+            Ok(slice.bytes)
         })
         .transpose()
 }
@@ -929,22 +831,6 @@ fn bounded_usize(
     let value = env::var(name)
         .ok()
         .map_or(Ok(default), |value| value.parse::<usize>())
-        .map_err(|_| LearningDeckArtifactError::InvalidValue(name))?;
-    if !(minimum..=maximum).contains(&value) {
-        return Err(LearningDeckArtifactError::InvalidValue(name));
-    }
-    Ok(value)
-}
-
-fn bounded_u64(
-    name: &'static str,
-    default: u64,
-    minimum: u64,
-    maximum: u64,
-) -> Result<u64, LearningDeckArtifactError> {
-    let value = env::var(name)
-        .ok()
-        .map_or(Ok(default), |value| value.parse::<u64>())
         .map_err(|_| LearningDeckArtifactError::InvalidValue(name))?;
     if !(minimum..=maximum).contains(&value) {
         return Err(LearningDeckArtifactError::InvalidValue(name));
@@ -980,20 +866,10 @@ pub(super) fn guess_content_type(path: &str) -> String {
 pub(super) enum LearningDeckArtifactError {
     #[error("artifact cleanup ledger failed")]
     Database(#[from] sqlx::Error),
-    #[error("missing required object-storage setting {0}")]
-    Missing(&'static str),
-    #[error("unsupported CONTENT_BODY_STORAGE_PROVIDER {0:?}")]
-    UnsupportedProvider(String),
-    #[error(
-        "CONTENT_BODY_STORAGE_ACCESS_KEY and CONTENT_BODY_STORAGE_SECRET_KEY must be set together"
-    )]
-    IncompleteCredentials,
+    #[error("invalid artifact storage configuration")]
+    Configuration(#[from] newsly_providers::ObjectStorageConfigError),
     #[error("invalid Learning Deck worker configuration in {0}")]
     InvalidValue(&'static str),
-    #[error("invalid URL for {0}: {1:?}")]
-    InvalidUrl(&'static str, String),
-    #[error("unsafe local artifact root {0:?}")]
-    UnsafeRoot(PathBuf),
     #[error("unsafe local artifact path {0:?}")]
     UnsafeLocalPath(PathBuf),
     #[error("unsafe Learning Deck object key {0:?}")]
@@ -1004,6 +880,8 @@ pub(super) enum LearningDeckArtifactError {
     Contract(String),
     #[error("Learning Deck artifact contract failed: {}", .0.join("; "))]
     RepairableContract(Vec<String>),
+    #[error("Learning Deck source exceeds the {0}-byte read limit")]
+    SourceTooLarge(usize),
     #[error("stored Learning Deck artifact is unavailable: {0}")]
     ObjectUnavailable(String),
     #[error("Learning Deck object-store operation failed: {0}")]
@@ -1020,8 +898,6 @@ pub(super) enum LearningDeckArtifactError {
     Json(#[from] serde_json::Error),
     #[error("Learning Deck artifact validator could not compile")]
     Regex(#[from] regex::Error),
-    #[error("could not resolve the current directory")]
-    CurrentDirectory(#[from] std::io::Error),
 }
 
 impl LearningDeckArtifactError {

@@ -1,6 +1,6 @@
 use super::{EnqueueRequest, Map, SourcePlan, SourcePlanKind, TaskType, Value};
 
-// All entrypoints, including old durable "all" payloads, converge here before HTTP work.
+// All entrypoints converge here after aggregate payloads expand into concrete sources.
 pub(super) fn isolated_scrape_requests(
     plans: &[SourcePlan],
     run_id: Option<i64>,
@@ -28,9 +28,6 @@ pub(super) fn isolated_scrape_requests(
             let global = matches!(plan.kind, SourcePlanKind::Aggregator { .. });
             if let Some(id) = run_id.filter(|_| !global) {
                 payload.insert("first_edition_run_id".to_owned(), Value::from(id));
-            }
-            if global && run_id.is_some() {
-                payload.insert("due_only".to_owned(), Value::Bool(true));
             }
             child.payload = Some(payload);
             child.owner_user_id = user_id;

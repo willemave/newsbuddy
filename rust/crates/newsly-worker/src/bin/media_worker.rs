@@ -2,19 +2,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use newsly_db::Database;
-use newsly_domain::{ResourceKey, RuntimeOwner};
 use newsly_providers::{MediaGateway, MediaGatewayConfig, OpenAiTranscriptionGateway};
-use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
-};
+use newsly_queue::{QueueKernel, TaskType};
+use newsly_worker::HandlerRegistry;
 use newsly_worker::media::{
     DownloadTweetVideoAudioHandler, MediaFileStore, MediaWorkerProcessConfig, MediaWorkerServices,
     ProcessPodcastMediaHandler, TranscribeTweetVideoHandler,
 };
 use newsly_worker::process::{
-    initialize_observability, notification_database_url, spawn_shutdown_signal,
+    QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
-use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
 pub(crate) async fn main() -> Result<()> {
@@ -72,37 +69,23 @@ pub(crate) async fn main() -> Result<()> {
     handlers.register(ProcessPodcastMediaHandler::new(Arc::clone(&services)))?;
     handlers.register(DownloadTweetVideoAudioHandler::new(Arc::clone(&services)))?;
     handlers.register(TranscribeTweetVideoHandler::new(services))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [
-            ResourceKey::new(TaskType::ProcessPodcastMedia.as_str())?,
-            ResourceKey::new(TaskType::DownloadTweetVideoAudio.as_str())?,
-            ResourceKey::new(TaskType::TranscribeTweetVideo.as_str())?,
-        ],
-    )?;
-    let mut claim = ClaimRequest::for_queue(config.worker_id.clone(), TaskQueue::Media, scope);
-    claim.lease_duration = config.lease_duration;
-    let mut worker_config = WorkerConfig::new(claim);
-    worker_config.max_retries = config.max_retries;
-
-    let notification_hub =
-        QueueNotificationHub::spawn(notification_database_url(config.database_url()));
-    let notifications = notification_hub.subscribe();
-    let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
-
-    tracing::info!(
-        worker_id = %config.worker_id,
-        queue = %TaskQueue::Media,
-        task_types = "process_podcast_media,download_tweet_video_audio,transcribe_tweet_video",
-        tweet_video_enabled = config.tweet_video_enabled,
-        "Newsly Rust media worker started; only rows stamped for the Rust runtime are claimable"
-    );
-    let run_result = worker.run(shutdown_rx).await;
-    shutdown_task.abort();
-    notification_hub.close().await;
-    database.close().await;
-    let summary = run_result.context("Newsly Rust media worker stopped unexpectedly")?;
-    tracing::info!(?summary, "Newsly Rust media worker stopped");
-    Ok(())
+    run_queue_worker(
+        database,
+        queue,
+        handlers,
+        notification_database_url(config.database_url()),
+        QueueWorkerRunConfig {
+            process_name: "Newsly Rust media worker",
+            worker_id: &config.worker_id,
+            lease_duration: config.lease_duration,
+            max_retries: config.max_retries,
+            task_types: &[
+                TaskType::ProcessPodcastMedia,
+                TaskType::DownloadTweetVideoAudio,
+                TaskType::TranscribeTweetVideo,
+            ],
+            task_type_filter: None,
+        },
+    )
+    .await
 }

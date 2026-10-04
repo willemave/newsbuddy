@@ -7,14 +7,11 @@ use newsly_account_deletion_worker::{
     UnavailableXGrantRevoker, XGrantRevoker,
 };
 use newsly_db::Database;
-use newsly_domain::{ResourceKey, RuntimeOwner};
-use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
-};
+use newsly_queue::{QueueKernel, TaskType};
+use newsly_worker::HandlerRegistry;
 use newsly_worker::process::{
-    initialize_observability, notification_database_url, spawn_shutdown_signal,
+    QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
-use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,10 +40,9 @@ async fn main() -> Result<()> {
             Arc::new(UnavailableXGrantRevoker::new(error.to_string()))
         }
     };
-    let objects = Arc::new(
-        ConfiguredArtifactStore::new(config.artifact_storage.clone())
-            .context("account-deletion object-storage configuration failed")?,
-    );
+    let objects = Arc::new(ConfiguredArtifactStore::new(
+        config.artifact_storage.clone(),
+    ));
     let services = Arc::new(AccountDeletionServices::new(
         database.pool().clone(),
         queue.clone(),
@@ -57,33 +53,19 @@ async fn main() -> Result<()> {
 
     let mut handlers = HandlerRegistry::new();
     handlers.register(AccountDeletionHandler::new(services))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [ResourceKey::new(TaskType::DeleteUserAccount.as_str())?],
-    )?;
-    let mut claim = ClaimRequest::for_queue(config.worker_id.clone(), TaskQueue::Backfill, scope);
-    claim.task_type = Some(TaskType::DeleteUserAccount);
-    claim.lease_duration = config.lease_duration;
-    let mut worker_config = WorkerConfig::new(claim);
-    worker_config.max_retries = config.max_retries;
-
-    let notification_hub =
-        QueueNotificationHub::spawn(notification_database_url(config.database_url()));
-    let notifications = notification_hub.subscribe();
-    let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
-
-    tracing::info!(
-        worker_id = %config.worker_id,
-        queue = %TaskQueue::Backfill,
-        task_type = %TaskType::DeleteUserAccount,
-        "Newsly Rust account-deletion worker started; only rows stamped for the Rust runtime are claimable"
-    );
-    let run_result = worker.run(shutdown_rx).await;
-    shutdown_task.abort();
-    notification_hub.close().await;
-    database.close().await;
-    let summary = run_result.context("Newsly Rust account-deletion worker stopped unexpectedly")?;
-    tracing::info!(?summary, "Newsly Rust account-deletion worker stopped");
-    Ok(())
+    run_queue_worker(
+        database,
+        queue,
+        handlers,
+        notification_database_url(config.database_url()),
+        QueueWorkerRunConfig {
+            process_name: "Newsly Rust account-deletion worker",
+            worker_id: &config.worker_id,
+            lease_duration: config.lease_duration,
+            max_retries: config.max_retries,
+            task_types: &[TaskType::DeleteUserAccount],
+            task_type_filter: Some(TaskType::DeleteUserAccount),
+        },
+    )
+    .await
 }

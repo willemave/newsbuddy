@@ -2,13 +2,13 @@
 
 A1. Private product data belongs to the authenticated user. Matching numeric IDs never grant cross-user access, and device caches are cleared when the account changes.
 
-A2. Apple sign-in is the production identity boundary; debug users are development-only.
+A2. Apple sign-in is the production identity boundary. Account email comes only from Apple's verified identity token, while the user's name comes from Apple's one-time client payload. When a client supplies a sign-in nonce, the server binds the identity token to that nonce; the nonce becomes mandatory only after the installed-client migration window closes. Debug users require an explicit non-production server flag.
 
-A3. Refresh tokens rotate once. A consumed token cannot mint another session; for a short bounded window, repeating the same recorded rotation attempt may retrieve the one already-issued replacement.
+A3. Refresh tokens rotate once. A consumed token cannot mint another session; for a short bounded window, repeating the same recorded rotation attempt may retrieve the one already-issued replacement. Expired replay payloads and consumed-token records are retired by bounded recurring maintenance, with a one-minute safety margin before deleting token records.
 
-A4. Account deletion requires fresh authorization and deactivates the account only after durable cleanup work has been accepted.
+A4. Account deletion requires fresh authorization and deactivates the account only after durable cleanup work has been accepted. Cleanup removes all account-owned state, including user identity and request data from every persisted metadata namespace, diagnostic attempts, cooldowns, and CLI-link approvals with their device names and unclaimed secrets.
 
-A5. API keys, provider tokens, and user-managed model keys are encrypted, revocable secrets. They are never returned in full or written to logs.
+A5. API keys are hashed and revocable; provider tokens and user-managed model keys are encrypted and revocable. Secrets never enter logs. A newly minted API key may be returned once. CLI-link approval holds that one-time key only until claim or session expiry; expired unclaimed keys are revoked and cleared, while claimed keys remain valid. Abandoned sessions are retired in bounded recurring cleanup.
 
 A6. Personalized onboarding suggestions are server-owned proposals with stable IDs scoped to one authenticated user's discovery run. They remain proposals until that user confirms their IDs.
 

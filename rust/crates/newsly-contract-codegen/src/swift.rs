@@ -216,16 +216,18 @@ fn render_int_enum(name: &str, values: &[i64]) -> String {
 }
 
 fn render_model(model: &Model, policy: &Policy, target: ClientTarget) -> anyhow::Result<String> {
-    let name = policy.model_policy(&model.name).map_or_else(
-        || format!("API{}", strip_dto_suffix(&model.name)),
-        super::policy::ModelPolicy::swift_name,
-    );
+    let name = policy.swift_type_name(&model.name);
     let fields = model
         .fields
         .iter()
         .map(|field| SwiftField::new(model, field, policy, target))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let mut lines = vec![format!("struct {name}: Codable {{")];
+    let conformances = if policy.settings.equatable_models.contains(&model.name) {
+        "Codable, Equatable"
+    } else {
+        "Codable"
+    };
+    let mut lines = vec![format!("struct {name}: {conformances} {{")];
     for field in &fields {
         lines.push(format!("    let {}: {}", field.name, field.type_name));
     }
@@ -617,10 +619,6 @@ fn snake_to_lower_camel(value: &str) -> String {
         }
     }
     output
-}
-
-fn strip_dto_suffix(value: &str) -> &str {
-    value.strip_suffix("Dto").unwrap_or(value)
 }
 
 fn swift_identifier(value: &str) -> String {

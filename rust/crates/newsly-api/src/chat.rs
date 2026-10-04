@@ -3,7 +3,7 @@ mod cursor;
 mod presentation;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -14,11 +14,11 @@ use newsly_contracts::{
     SendMessageResponse, UpdateChatSessionRequest,
 };
 use newsly_db::{
-    ChatMutationOutcome, ChatRecordAccess, CreateChatSessionInput, CreateChatSessionOutcome,
-    StageAssistantTurnInput, StageChatMessageInput, StageChatTurnOutcome, StagedChatTurn,
-    UpdateChatSessionInput, archive_chat_session, create_chat_session, get_chat_message_status,
-    get_chat_session_detail, get_chat_session_summary, list_chat_sessions, stage_assistant_turn,
-    stage_chat_message, update_chat_session,
+    AssistantScreenContext, ChatMutationOutcome, ChatRecordAccess, CreateChatSessionInput,
+    CreateChatSessionOutcome, StageAssistantTurnInput, StageChatMessageInput, StageChatTurnOutcome,
+    StagedChatTurn, UpdateChatSessionInput, archive_chat_session, create_chat_session,
+    get_chat_message_status, get_chat_session_detail, get_chat_session_summary, list_chat_sessions,
+    stage_assistant_turn, stage_chat_message, update_chat_session,
 };
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde::Deserialize;
@@ -27,16 +27,8 @@ use serde_json::{Map, Value};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
-
-const CREATE_SESSION_OPERATION_ID: &str = "createContentChatSession";
-const UPDATE_SESSION_OPERATION_ID: &str = "updateContentChatSession";
-const DELETE_SESSION_OPERATION_ID: &str = "deleteContentChatSession";
-const SEND_MESSAGE_OPERATION_ID: &str = "sendContentChatSessionsMessage";
-const ASSISTANT_TURN_OPERATION_ID: &str = "createContentChatAssistantTurn";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -149,7 +141,7 @@ pub(super) async fn list_sessions_page(
         .as_deref()
         .map(|value| cursor::decode(value, query.content_id, query.news_item_id))
         .transpose()
-        .map_err(|message| bad_request(message, &request_id))?;
+        .map_err(|error| bad_request(error.to_string(), &request_id))?;
     let overfetch = query.limit + 1;
     let mut sessions = list_chat_sessions(
         state.database.pool(),
@@ -165,17 +157,20 @@ pub(super) async fn list_sessions_page(
     if has_more {
         sessions.truncate(query.limit);
     }
-    let next_cursor = has_more.then(|| {
-        sessions.last().map(|session| {
-            cursor::encode(
-                session.id,
-                session.last_message_at.unwrap_or(session.created_at),
-                query.content_id,
-                query.news_item_id,
-            )
+    let next_cursor = has_more
+        .then(|| {
+            sessions.last().map(|session| {
+                cursor::encode(
+                    session.id,
+                    session.last_message_at.unwrap_or(session.created_at),
+                    query.content_id,
+                    query.news_item_id,
+                )
+                .map_err(|error| internal_error(error, &request_id))
+            })
         })
-    });
-    let next_cursor = next_cursor.flatten();
+        .flatten()
+        .transpose()?;
     let sessions = sessions
         .into_iter()
         .map(presentation::session)
@@ -212,11 +207,10 @@ pub(super) async fn create_session(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<CreateChatSessionRequest>, JsonRejection>,
 ) -> Result<Json<CreateChatSessionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_SESSION_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_create_request(&payload, &request_id)?;
     if payload.content_id.is_some() && payload.news_item_id.is_some() {
@@ -231,8 +225,8 @@ pub(super) async fn create_session(
     } else {
         "knowledge_chat"
     };
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = create_chat_session(
         &mut transaction,
         &CreateChatSessionInput {
@@ -258,10 +252,7 @@ pub(super) async fn create_session(
         }
         CreateChatSessionOutcome::UserInactive => return Err(inactive_user(&request_id)),
     };
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     let session = require_session_summary(&state, current_user.id, session_id, &request_id).await?;
     Ok(Json(CreateChatSessionResponse { session }))
@@ -328,11 +319,10 @@ pub(super) async fn update_session(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<UpdateChatSessionRequest>, JsonRejection>,
 ) -> Result<Json<ChatSessionSummaryDto>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, UPDATE_SESSION_OPERATION_ID, &request_id)?;
     let session_id = positive_path(path, "session_id", &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_update_request(&payload, &request_id)?;
@@ -345,8 +335,8 @@ pub(super) async fn update_session(
     let resolved = payload
         .llm_provider
         .map(|provider| resolve_model(Some(provider), payload.llm_model_hint.as_deref()));
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = update_chat_session(
         &mut transaction,
         &UpdateChatSessionInput {
@@ -359,10 +349,7 @@ pub(super) async fn update_session(
     .await
     .map_err(|error| internal_error(error, &request_id))?;
     mutation_result(outcome, &request_id)?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(
         require_session_summary(&state, current_user.id, session_id, &request_id).await?,
     ))
@@ -390,21 +377,17 @@ pub(super) async fn delete_session(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<StatusCode, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DELETE_SESSION_OPERATION_ID, &request_id)?;
     let session_id = positive_path(path, "session_id", &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = archive_chat_session(&mut transaction, current_user.id, session_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     mutation_result(outcome, &request_id)?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -432,16 +415,15 @@ pub(super) async fn send_message(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<SendChatMessageRequest>, JsonRejection>,
 ) -> Result<Json<SendMessageResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, SEND_MESSAGE_OPERATION_ID, &request_id)?;
     let session_id = positive_path(path, "session_id", &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_message(&payload.message, &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = stage_chat_message(
         &mut transaction,
         &StageChatMessageInput {
@@ -461,10 +443,7 @@ pub(super) async fn send_message(
         &request_id,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(SendMessageResponse {
         session_id: staged.session_id,
         user_message: presentation::processing_user(&staged),
@@ -495,17 +474,27 @@ pub(super) async fn create_assistant_turn(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<AssistantTurnRequest>, JsonRejection>,
 ) -> Result<Json<AssistantTurnResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, ASSISTANT_TURN_OPERATION_ID, &request_id)?;
     let Json(mut payload) = decode_json(payload, &request_id)?;
     normalize_and_validate_assistant(&mut payload, &request_id)?;
-    let screen_context = serde_json::to_value(&payload.screen_context)
-        .map_err(|error| internal_error(error, &request_id))?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let context = payload.screen_context;
+    let screen_context = AssistantScreenContext {
+        screen_type: context.screen_type,
+        screen_title: context.screen_title,
+        content_id: context.content_id,
+        news_item_id: context.news_item_id,
+        visible_content_ids: context.visible_content_ids,
+        visible_news_item_ids: context.visible_news_item_ids,
+        selected_topic: context.selected_topic,
+        query: context.query,
+        note: context.note,
+        assistant_action: context.assistant_action,
+    };
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = stage_assistant_turn(
         &mut transaction,
         &StageAssistantTurnInput {
@@ -526,10 +515,7 @@ pub(super) async fn create_assistant_turn(
         &request_id,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let session =
         require_session_summary(&state, current_user.id, staged.session_id, &request_id).await?;
     Ok(Json(AssistantTurnResponse {
@@ -683,6 +669,8 @@ fn normalize_and_validate_assistant(
     let context = &mut payload.screen_context;
     context.visible_content_ids.truncate(12);
     context.visible_news_item_ids.truncate(12);
+    context.visible_content_ids.retain(|id| *id > 0);
+    context.visible_news_item_ids.retain(|id| *id > 0);
     if context.content_id.is_some_and(|value| value <= 0)
         || context.news_item_id.is_some_and(|value| value <= 0)
     {
@@ -717,7 +705,25 @@ fn normalize_and_validate_assistant(
         100,
         "assistant_action",
         request_id,
-    )
+    )?;
+    context.screen_type = context.screen_type.trim().to_owned();
+    if context.screen_type.is_empty() {
+        "unknown".clone_into(&mut context.screen_type);
+    }
+    for text in [
+        &mut context.screen_title,
+        &mut context.selected_topic,
+        &mut context.query,
+        &mut context.note,
+        &mut context.assistant_action,
+    ] {
+        *text = text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+    }
+    Ok(())
 }
 
 fn validate_optional_len(
@@ -815,9 +821,7 @@ fn staged_result(
 ) -> Result<StagedChatTurn, ApiError> {
     match outcome {
         StageChatTurnOutcome::Staged(staged) => Ok(staged),
-        StageChatTurnOutcome::NotFound | StageChatTurnOutcome::Hidden => {
-            Err(not_found("Session not found", request_id))
-        }
+        StageChatTurnOutcome::NotFound => Err(not_found("Session not found", request_id)),
         StageChatTurnOutcome::Forbidden => Err(forbidden_session(request_id)),
         StageChatTurnOutcome::Archived => Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -870,25 +874,8 @@ fn positive_path(
     Ok(value)
 }
 
-async fn begin_write<'a>(
-    state: &'a AppState,
-    request_id: &str,
-) -> Result<sqlx::Transaction<'a, sqlx::Postgres>, ApiError> {
-    state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))
-}
-
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        message,
-        request_id.to_owned(),
-    )
+    ApiError::validation_message(message, request_id)
 }
 
 fn not_found(message: &str, request_id: &str) -> ApiError {
@@ -928,6 +915,31 @@ fn queue_error(error: QueueError, request_id: &str) -> ApiError {
 #[cfg(test)]
 mod model_selection_tests {
     use super::*;
+
+    #[test]
+    fn assistant_context_normalizes_before_durable_staging() {
+        let mut payload: AssistantTurnRequest = serde_json::from_value(serde_json::json!({
+            "message":"Explain", "screen_context":{
+                "screen_type":" ","screen_title":" Reader ","selected_topic":" ",
+                "query":" q ","note":" note ","assistant_action":" explain ",
+                "visible_content_ids":[0,-1,2,2],"visible_news_item_ids":[-3,4]
+            }
+        }))
+        .unwrap();
+        normalize_and_validate_assistant(&mut payload, "request").unwrap();
+        assert_eq!(payload.screen_context.screen_type, "unknown");
+        assert_eq!(
+            payload.screen_context.screen_title.as_deref(),
+            Some("Reader")
+        );
+        assert_eq!(payload.screen_context.selected_topic, None);
+        assert_eq!(payload.screen_context.visible_content_ids, vec![2, 2]);
+        assert_eq!(payload.screen_context.visible_news_item_ids, vec![4]);
+        assert_eq!(
+            payload.screen_context.assistant_action.as_deref(),
+            Some("explain")
+        );
+    }
 
     #[test]
     fn openai_chat_defaults_to_sol_and_preserves_explicit_selection() {

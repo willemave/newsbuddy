@@ -134,7 +134,6 @@ fn truncate_chars(value: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::fs;
 
     use tempfile::tempdir;
@@ -169,6 +168,5 @@ mod tests {
     #[test]
     fn text_truncation_respects_unicode_character_boundaries() {
         assert_eq!(truncate_chars("aé🙂z", 3), "aé🙂");
-        let _portable_path_fixture = OsString::from("unused");
     }
 }

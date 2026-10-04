@@ -1,9 +1,7 @@
 //! Durable preparation and publication for `learning_deck` LLM tasks.
 //!
-//! The repository deliberately exposes immutable values at every external-I/O boundary. Source
-//! object reads, E2B/Rig execution, browser validation, and artifact writes happen after the
-//! preparation transaction commits. Publication is performed later inside the queue kernel's
-//! exact lease-fenced finalization transaction.
+//! External I/O uses immutable preparation after its transaction commits. Publication happens
+//! in the queue kernel's fresh, exact lease-fenced finalization transaction.
 
 use std::collections::HashSet;
 
@@ -28,16 +26,9 @@ pub struct LearningDeckTaskSnapshot {
     pub id: i64,
     pub user_id: i64,
     pub deck_id: i64,
-    pub deck_title: String,
-    pub mode: String,
-    pub workflow_key: String,
-    pub approval_policy: Map<String, Value>,
-    pub allowed_actions: Vec<String>,
     pub tool_policy: Map<String, Value>,
-    pub input: Map<String, Value>,
     pub interests_prompt: Option<String>,
     pub workspace_path: String,
-    pub created_at: DateTime<Utc>,
     pub source: LearningDeckSourceMaterial,
 }
 
@@ -143,11 +134,7 @@ struct TaskRow {
     id: i64,
     user_id: i64,
     task_kind: String,
-    mode: String,
-    workflow_key: String,
     status: String,
-    approval_policy: Value,
-    allowed_actions: Value,
     tool_policy: Value,
     input_json: Value,
     workspace_path: Option<String>,
@@ -165,7 +152,7 @@ struct DeckRow {
     source_content_id: Option<i64>,
     source_title: Option<String>,
     source_metadata: Value,
-    title: String,
+
     deleted_at: Option<NaiveDateTime>,
 }
 
@@ -290,20 +277,13 @@ pub async fn begin_learning_deck_preparation(
             id: task.id,
             user_id: task.user_id,
             deck_id: deck.id,
-            deck_title: deck.title,
-            mode: task.mode,
-            workflow_key: task.workflow_key,
-            approval_policy: json_object(task.approval_policy),
-            allowed_actions: string_array(task.allowed_actions),
             tool_policy: json_object(task.tool_policy),
-            input: json_object(task.input_json.clone()),
             interests_prompt: task
                 .input_json
                 .get("interests_prompt")
                 .and_then(Value::as_str)
                 .and_then(|value| clean_string(Some(value))),
             workspace_path,
-            created_at: task.created_at.and_utc(),
             source,
         },
     ))
@@ -673,7 +653,9 @@ async fn prepare_content_source(
     else {
         return Ok(None);
     };
-    let metadata = json_object(content.content_metadata.clone());
+    let metadata = json_object(crate::content_metadata::source_metadata(
+        &content.content_metadata,
+    ));
     let mut snapshot = Map::from_iter([
         ("source_kind".to_owned(), Value::from(source.source_kind)),
         (
@@ -724,11 +706,7 @@ async fn load_task_for_update(
             id::bigint AS id,
             user_id::bigint AS user_id,
             task_kind,
-            mode,
-            workflow_key,
             status,
-            approval_policy,
-            allowed_actions,
             tool_policy,
             input_json,
             workspace_path,
@@ -759,7 +737,6 @@ async fn load_deck_for_update(
             source_content_id::bigint AS source_content_id,
             source_title,
             source_metadata,
-            title,
             deleted_at
         FROM learning_decks
         WHERE id::bigint = $1

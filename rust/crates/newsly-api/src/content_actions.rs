@@ -1,5 +1,5 @@
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, post};
 use axum::{Json, Router};
@@ -19,17 +19,8 @@ use serde_json::{Map, Value};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error, not_found};
 use crate::{AppState, request_id_from_headers};
-
-const MARK_READ_OPERATION_ID: &str = "markContentRead";
-const MARK_UNREAD_OPERATION_ID: &str = "markContentUnread";
-const BULK_MARK_READ_OPERATION_ID: &str = "bulkContentMarkRead";
-const SAVE_KNOWLEDGE_OPERATION_ID: &str = "saveContentToKnowledge";
-const REMOVE_KNOWLEDGE_OPERATION_ID: &str = "removeContentFromKnowledge";
-const REPROCESS_KNOWLEDGE_OPERATION_ID: &str = "reprocessKnowledgeContent";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -72,18 +63,17 @@ pub(super) async fn mark_content_read(
     Path(content_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<MarkReadResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, MARK_READ_OPERATION_ID, &request_id)?;
     validate_content_id(content_id, &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     require_content(&mut transaction, content_id, &request_id).await?;
     persist_content_read(&mut transaction, current_user.id, content_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    commit_write(transaction, &request_id).await?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(MarkReadResponse {
         status: OperationStatus::Success,
         content_id,
@@ -110,18 +100,17 @@ pub(super) async fn mark_content_unread(
     Path(content_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<MarkUnreadResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, MARK_UNREAD_OPERATION_ID, &request_id)?;
     validate_content_id(content_id, &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     require_content(&mut transaction, content_id, &request_id).await?;
     let removed_records = persist_content_unread(&mut transaction, current_user.id, content_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    commit_write(transaction, &request_id).await?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(MarkUnreadResponse {
         status: OperationStatus::Success,
         content_id,
@@ -149,11 +138,10 @@ pub(super) async fn bulk_mark_read(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<BulkMarkReadRequest>, JsonRejection>,
 ) -> Result<Json<BulkMarkReadResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, BULK_MARK_READ_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if payload.content_ids.is_empty() {
         return Err(ApiError::new(
@@ -174,8 +162,8 @@ pub(super) async fn bulk_mark_read(
         ));
     }
     let total_requested = payload.content_ids.len();
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let result = mark_contents_read(&mut transaction, current_user.id, &payload.content_ids)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
@@ -185,7 +173,7 @@ pub(super) async fn bulk_mark_read(
             &request_id,
         ));
     }
-    commit_write(transaction, &request_id).await?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(BulkMarkReadResponse {
         status: OperationStatus::Success,
         marked_count: result.marked_count,
@@ -214,18 +202,17 @@ pub(super) async fn save_to_knowledge(
     Path(content_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<KnowledgeMutationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, SAVE_KNOWLEDGE_OPERATION_ID, &request_id)?;
     validate_content_id(content_id, &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     require_content(&mut transaction, content_id, &request_id).await?;
     persist_knowledge_save(&mut transaction, current_user.id, content_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    commit_write(transaction, &request_id).await?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(KnowledgeMutationResponse {
         status: KnowledgeMutationStatus::Success,
         content_id,
@@ -254,18 +241,17 @@ pub(super) async fn remove_from_knowledge(
     Path(content_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<KnowledgeMutationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REMOVE_KNOWLEDGE_OPERATION_ID, &request_id)?;
     validate_content_id(content_id, &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     require_content(&mut transaction, content_id, &request_id).await?;
     let removed = persist_knowledge_removal(&mut transaction, current_user.id, content_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    commit_write(transaction, &request_id).await?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(KnowledgeMutationResponse {
         status: if removed {
             KnowledgeMutationStatus::Success
@@ -303,13 +289,12 @@ pub(super) async fn reprocess_knowledge_content(
     Path(content_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<KnowledgeMutationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REPROCESS_KNOWLEDGE_OPERATION_ID, &request_id)?;
     validate_content_id(content_id, &request_id)?;
-    let mut transaction = begin_write(&state, &request_id).await?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome =
         reset_saved_content_for_reprocessing(&mut transaction, current_user.id, content_id)
             .await
@@ -343,7 +328,7 @@ pub(super) async fn reprocess_knowledge_content(
             "Reprocessing started"
         }
     };
-    commit_write(transaction, &request_id).await?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(KnowledgeMutationResponse {
         status: KnowledgeMutationStatus::Success,
         content_id,
@@ -390,26 +375,4 @@ async fn require_content(
     } else {
         Err(not_found("Content", request_id))
     }
-}
-
-async fn begin_write<'a>(
-    state: &'a AppState,
-    request_id: &str,
-) -> Result<sqlx::Transaction<'a, sqlx::Postgres>, ApiError> {
-    state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))
-}
-
-async fn commit_write(
-    transaction: sqlx::Transaction<'_, sqlx::Postgres>,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))
 }

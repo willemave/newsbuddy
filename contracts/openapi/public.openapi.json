@@ -25,15 +25,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "cost_bucket",
-            "in": "query",
-            "description": "day, week, or month",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -244,123 +235,6 @@
         }
       }
     },
-    "/admin/errors": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "operationId": "errorsDashboard",
-        "parameters": [
-          {
-            "name": "hours",
-            "in": "query",
-            "description": "Lookback window in hours",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "min_errors",
-            "in": "query",
-            "description": "Minimum category count",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "component",
-            "in": "query",
-            "description": "Optional component filter",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Error dashboard",
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "303": {
-            "description": "Admin login required"
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/admin/errors/reset": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "operationId": "resetErrorLogs",
-        "responses": {
-          "303": {
-            "description": "Error logs removed or admin login required"
-          },
-          "404": {
-            "description": "Error directory not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/admin/evals/summaries": {
       "get": {
         "tags": [
@@ -489,32 +363,6 @@
           },
           "500": {
             "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/admin/llm-usage": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "operationId": "legacyLlmUsageRedirect",
-        "responses": {
-          "303": {
-            "description": "Admin login required"
-          },
-          "307": {
-            "description": "Redirected to vendor usage"
-          },
-          "409": {
-            "description": "Stale runtime owner",
             "content": {
               "application/json": {
                 "schema": {
@@ -1219,16 +1067,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "Personal markdown library disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
           }
         },
         "security": [
@@ -1288,16 +1126,6 @@
           },
           "500": {
             "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Personal markdown library disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -2158,17 +1986,6 @@
           "briefing"
         ],
         "operationId": "narrationBriefing",
-        "parameters": [
-          {
-            "name": "delivery",
-            "in": "query",
-            "description": "background or stream",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2264,17 +2081,6 @@
           "briefing"
         ],
         "operationId": "chapteredBriefingNarration",
-        "parameters": [
-          {
-            "name": "delivery",
-            "in": "query",
-            "description": "background or stream",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2930,16 +2736,6 @@
           "content"
         ],
         "operationId": "createContentCustomNarrationAudioEpisode",
-        "parameters": [
-          {
-            "name": "delivery",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/AudioEpisodeDelivery"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3035,16 +2831,6 @@
           "content"
         ],
         "operationId": "createContentFastNewsAudioEpisode",
-        "parameters": [
-          {
-            "name": "delivery",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/AudioEpisodeDelivery"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "",
@@ -4902,92 +4688,6 @@
         ]
       }
     },
-    "/api/content/narration/{target_type}/{target_id}": {
-      "get": {
-        "tags": [
-          "content"
-        ],
-        "operationId": "getContentNarration",
-        "parameters": [
-          {
-            "name": "target_type",
-            "in": "path",
-            "description": "Narration target type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NarrationTargetType"
-            }
-          },
-          {
-            "name": "target_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "minimum": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NarrationResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Content not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Narration audio unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/content/recently-read/list": {
       "get": {
         "tags": [
@@ -5095,446 +4795,6 @@
         ]
       }
     },
-    "/api/content/scrapers/": {
-      "get": {
-        "tags": [
-          "scrapers"
-        ],
-        "operationId": "listContentScraperConfigs",
-        "parameters": [
-          {
-            "name": "type",
-            "in": "query",
-            "description": "Single scraper type",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "types",
-            "in": "query",
-            "description": "Comma-separated scraper types",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "include_stats",
-            "in": "query",
-            "description": "Include derived source stats",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Scraper configurations",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ScraperConfigResponse"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Unsupported scraper type",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "scrapers"
-        ],
-        "operationId": "createContentScraperConfig",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateUserScraperConfig"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Scraper config created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScraperConfigResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid or duplicate scraper config",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/content/scrapers/subscribe": {
-      "post": {
-        "tags": [
-          "scrapers"
-        ],
-        "operationId": "subscribeContentScrapersToFeed",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubscribeToFeedRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Existing subscription reactivated or already active",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScraperConfigResponse"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Feed subscription created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScraperConfigResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid or unsupported feed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/content/scrapers/{config_id}": {
-      "put": {
-        "tags": [
-          "scrapers"
-        ],
-        "operationId": "updateContentScraperConfig",
-        "parameters": [
-          {
-            "name": "config_id",
-            "in": "path",
-            "description": "Scraper config ID",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateUserScraperConfig"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Scraper config updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScraperConfigResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Scraper config not found or invalid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "scrapers"
-        ],
-        "operationId": "deleteContentScraperConfigEndpoint",
-        "parameters": [
-          {
-            "name": "config_id",
-            "in": "path",
-            "description": "Scraper config ID",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Scraper config deleted"
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Scraper config not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/content/search": {
       "get": {
         "tags": [
@@ -5578,17 +4838,6 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "description": "Deprecated offset",
-            "required": false,
-            "deprecated": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
             }
           }
         ],
@@ -5712,83 +4961,6 @@
           },
           "500": {
             "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/content/search/podcasts": {
-      "get": {
-        "tags": [
-          "content"
-        ],
-        "operationId": "searchContentPodcastEpisodeMatches",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 200,
-              "minLength": 2
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 25,
-              "minimum": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PodcastEpisodeSearchResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Search provider failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -6270,14 +5442,6 @@
               "format": "int64",
               "minimum": 1
             }
-          },
-          {
-            "name": "delivery",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/AudioEpisodeDelivery"
-            }
           }
         ],
         "responses": {
@@ -6673,93 +5837,6 @@
           },
           "404": {
             "description": "Content not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/content/{content_id}/discussion/refresh": {
-      "post": {
-        "tags": [
-          "content"
-        ],
-        "operationId": "refreshContentDiscussion",
-        "parameters": [
-          {
-            "name": "content_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "minimum": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContentDiscussionResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Content not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
             "content": {
               "application/json": {
                 "schema": {
@@ -9262,6 +8339,16 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Invalid credentials",
             "content": {
@@ -9477,14 +8564,6 @@
               "type": "integer",
               "format": "int64",
               "minimum": 1
-            }
-          },
-          {
-            "name": "delivery",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/AudioEpisodeDelivery"
             }
           }
         ],
@@ -9829,93 +8908,6 @@
         ]
       }
     },
-    "/api/news/items/{news_item_id}/discussion/refresh": {
-      "post": {
-        "tags": [
-          "news"
-        ],
-        "operationId": "refreshNewsItemDiscussion",
-        "parameters": [
-          {
-            "name": "news_item_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "minimum": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContentDiscussionResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "News item not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/onboarding/audio-discover": {
       "post": {
         "tags": [
@@ -10163,221 +9155,6 @@
         ]
       }
     },
-    "/api/onboarding/fast-discover": {
-      "post": {
-        "tags": [
-          "onboarding"
-        ],
-        "operationId": "runOnboardingFastDiscover",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OnboardingFastDiscoverRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingFastDiscoverResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Feed discovery unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/onboarding/parse-voice": {
-      "post": {
-        "tags": [
-          "onboarding"
-        ],
-        "operationId": "parseOnboardingVoice",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OnboardingVoiceParseRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingVoiceParseResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/onboarding/profile": {
-      "post": {
-        "tags": [
-          "onboarding"
-        ],
-        "operationId": "buildOnboardingProfile",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OnboardingProfileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingProfileResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale runtime owner",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/onboarding/tutorial-complete": {
       "post": {
         "tags": [
@@ -10541,41 +9318,6 @@
           },
           "503": {
             "description": "Transcription unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/openai/transcriptions/health": {
-      "get": {
-        "tags": [
-          "openai"
-        ],
-        "operationId": "transcriptionOpenaiHealth",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AudioTranscriptionHealthResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials",
             "content": {
               "application/json": {
                 "schema": {
@@ -11478,7 +10220,7 @@
             }
           },
           "409": {
-            "description": "Stale runtime owner",
+            "description": "Email already registered or stale runtime owner",
             "content": {
               "application/json": {
                 "schema": {
@@ -12115,9 +10857,7 @@
           "request_tokens_estimate",
           "request_tokens_actual",
           "output_chars",
-          "display_output",
-          "raw_output",
-          "prompt_type"
+          "display_output"
         ],
         "properties": {
           "model_alias": {
@@ -12189,11 +10929,7 @@
             "type": "integer",
             "minimum": 0
           },
-          "display_output": {},
-          "raw_output": {},
-          "prompt_type": {
-            "type": "string"
-          }
+          "display_output": {}
         }
       },
       "AdminEvalConfigResponse": {
@@ -12201,7 +10937,6 @@
         "required": [
           "content_types",
           "models",
-          "longform_template",
           "recent_pool_size",
           "sample_size",
           "seed"
@@ -12218,9 +10953,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "longform_template": {
-            "type": "string"
           },
           "recent_pool_size": {
             "type": "integer",
@@ -12334,10 +11066,6 @@
               "openrouter_deepseek_flash"
             ]
           },
-          "longform_template": {
-            "type": "string",
-            "default": "editorial_narrative_v1"
-          },
           "recent_pool_size": {
             "type": "integer",
             "default": 200,
@@ -12355,16 +11083,6 @@
             ],
             "format": "int64",
             "default": null
-          },
-          "pricing": {
-            "type": "object",
-            "default": {},
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ModelPricing"
-            },
-            "propertyNames": {
-              "type": "string"
-            }
           }
         },
         "additionalProperties": false
@@ -12804,75 +11522,6 @@
           }
         }
       },
-      "ApiKeyCreateResponse": {
-        "type": "object",
-        "description": "One-time create result. Both plaintext aliases are retained for exact\ncompatibility with the existing generated contract.",
-        "required": [
-          "api_key",
-          "key",
-          "key_prefix",
-          "record"
-        ],
-        "properties": {
-          "api_key": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "key_prefix": {
-            "type": "string"
-          },
-          "record": {
-            "$ref": "#/components/schemas/ApiKeySummaryResponse"
-          }
-        }
-      },
-      "ApiKeySummaryResponse": {
-        "type": "object",
-        "description": "Admin-visible API-key metadata. Secret hashes are never part of this wire\ncontract.",
-        "required": [
-          "id",
-          "user_id",
-          "key_prefix",
-          "created_at"
-        ],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "user_id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "key_prefix": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "revoked_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "last_used_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "created_by_admin_user_id": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          }
-        }
-      },
       "AppleSignInRequest": {
         "type": "object",
         "required": [
@@ -12882,13 +11531,13 @@
           "id_token": {
             "type": "string"
           },
-          "email": {
+          "full_name": {
             "type": [
               "string",
               "null"
             ]
           },
-          "full_name": {
+          "nonce": {
             "type": [
               "string",
               "null"
@@ -13088,13 +11737,6 @@
           }
         }
       },
-      "AudioEpisodeDelivery": {
-        "type": "string",
-        "enum": [
-          "background",
-          "stream"
-        ]
-      },
       "AudioEpisodeKind": {
         "type": "string",
         "enum": [
@@ -13277,17 +11919,6 @@
           "completed",
           "failed"
         ]
-      },
-      "AudioTranscriptionHealthResponse": {
-        "type": "object",
-        "required": [
-          "available"
-        ],
-        "properties": {
-          "available": {
-            "type": "boolean"
-          }
-        }
       },
       "AudioTranscriptionResponse": {
         "type": "object",
@@ -17508,26 +16139,6 @@
           }
         }
       },
-      "ModelPricing": {
-        "type": "object",
-        "properties": {
-          "input_per_million_usd": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "output_per_million_usd": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          }
-        },
-        "additionalProperties": false
-      },
       "NarrationResponse": {
         "type": "object",
         "required": [
@@ -17762,15 +16373,6 @@
           }
         }
       },
-      "NewsItemStatus": {
-        "type": "string",
-        "enum": [
-          "new",
-          "processing",
-          "ready",
-          "failed"
-        ]
-      },
       "NewsItemSummaryResponse": {
         "type": "object",
         "description": "Canonical short-form News card data.\n\n`content_type` and `is_saved_to_knowledge` remain on the wire while installed clients still\ndecode this endpoint through their legacy Content card adapter. They have one truthful value\nfor this News-owned response and are not used as a cross-product identity fallback.",
@@ -17926,13 +16528,6 @@
             "format": "int64"
           }
         }
-      },
-      "NewsItemVisibilityScope": {
-        "type": "string",
-        "enum": [
-          "global",
-          "user"
-        ]
       },
       "OnboardingAudioDiscoverRequest": {
         "type": "object",
@@ -18225,25 +16820,6 @@
           }
         }
       },
-      "OnboardingFastDiscoverRequest": {
-        "type": "object",
-        "required": [
-          "profile_summary"
-        ],
-        "properties": {
-          "profile_summary": {
-            "type": "string",
-            "minLength": 3
-          },
-          "inferred_topics": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 12
-          }
-        }
-      },
       "OnboardingFastDiscoverResponse": {
         "type": "object",
         "required": [
@@ -18268,51 +16844,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OnboardingSuggestion"
-            }
-          }
-        }
-      },
-      "OnboardingProfileRequest": {
-        "type": "object",
-        "required": [
-          "first_name"
-        ],
-        "properties": {
-          "first_name": {
-            "type": "string",
-            "maxLength": 120,
-            "minLength": 1
-          },
-          "interest_topics": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 12
-          }
-        }
-      },
-      "OnboardingProfileResponse": {
-        "type": "object",
-        "required": [
-          "profile_summary",
-          "inferred_topics",
-          "candidate_sources"
-        ],
-        "properties": {
-          "profile_summary": {
-            "type": "string"
-          },
-          "inferred_topics": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "candidate_sources": {
-            "type": "array",
-            "items": {
-              "type": "string"
             }
           }
         }
@@ -18429,64 +16960,6 @@
           }
         }
       },
-      "OnboardingVoiceParseRequest": {
-        "type": "object",
-        "required": [
-          "transcript"
-        ],
-        "properties": {
-          "transcript": {
-            "type": "string",
-            "maxLength": 6000,
-            "minLength": 3
-          },
-          "locale": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 20
-          }
-        }
-      },
-      "OnboardingVoiceParseResponse": {
-        "type": "object",
-        "required": [
-          "first_name",
-          "interest_topics",
-          "confidence",
-          "missing_fields"
-        ],
-        "properties": {
-          "first_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "interest_topics": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "confidence": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double",
-            "maximum": 1,
-            "minimum": 0
-          },
-          "missing_fields": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
       "OperationStatus": {
         "type": "string",
         "enum": [
@@ -18526,9 +16999,6 @@
       },
       "PodcastEpisodeSearchResponse": {
         "type": "object",
-        "required": [
-          "results"
-        ],
         "properties": {
           "results": {
             "type": "array",
@@ -19500,17 +17970,6 @@
             "type": "string",
             "description": "URL to submit (HTTP/HTTPS only)."
           },
-          "content_type": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ContentType",
-                "description": "Optional content-type hint. New records are still persisted as unknown until analysis."
-              }
-            ]
-          },
           "title": {
             "type": [
               "string",
@@ -19668,32 +18127,6 @@
           "processing",
           "completed",
           "failed"
-        ]
-      },
-      "TaskType": {
-        "type": "string",
-        "enum": [
-          "scrape",
-          "backfill_feeds",
-          "analyze_url",
-          "process_content",
-          "enrich_news_item_article",
-          "process_news_item",
-          "process_podcast_media",
-          "download_tweet_video_audio",
-          "transcribe_tweet_video",
-          "summarize",
-          "fetch_news_item_discussion",
-          "generate_image",
-          "discover_feeds",
-          "onboarding_discover",
-          "dig_deeper",
-          "chat_turn",
-          "sync_integration",
-          "generate_audio_episode",
-          "run_llm_task",
-          "briefing_refresh",
-          "delete_user_account"
         ]
       },
       "TokenResponse": {

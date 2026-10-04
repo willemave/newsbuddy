@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
 
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 use super::{
     BRIEFING_NARRATION_KIND, BriefingSegmentProjection, dedupe_source_keys, parse_source_ids,
@@ -103,7 +101,11 @@ fn plan_from_segments(index: i32, segments: &[&BriefingSegmentProjection]) -> Na
     NarrationPlan {
         index,
         segment_ids: segments.iter().map(|segment| segment.id).collect(),
-        source_keys: dedupe_source_keys(segments.iter().flat_map(|segment| &segment.source_keys)),
+        source_keys: dedupe_source_keys(
+            segments
+                .iter()
+                .flat_map(|segment| segment.source_keys.iter().cloned()),
+        ),
         duration_seconds: estimate_duration_seconds(&narration_text).max(1),
         narration_text,
     }
@@ -215,12 +217,7 @@ fn estimate_duration_seconds(text: &str) -> i32 {
 
 pub(super) fn stable_hash(value: &Value) -> String {
     let encoded = serde_json::to_vec(value).expect("JSON values always serialize");
-    let digest = Sha256::digest(encoded);
-    let mut encoded_digest = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut encoded_digest, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    encoded_digest
+    newsly_domain::sha256_hex(&encoded)
 }
 
 #[cfg(test)]

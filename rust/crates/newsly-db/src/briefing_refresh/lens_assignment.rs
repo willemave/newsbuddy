@@ -10,7 +10,7 @@ use super::{
         semantic_lens_rows,
     },
     publication::bump_first_edition_revision,
-    sources::{load_eligible_sources_for_keys, u64_to_i32},
+    sources::load_eligible_sources_for_keys,
 };
 
 pub async fn apply_briefing_lens_assignment(
@@ -374,38 +374,12 @@ pub(super) async fn persist_lens_assignment_usage(
     usages: &[BriefingLensAssignmentUsage],
 ) -> Result<(), sqlx::Error> {
     for usage in usages {
-        let total_tokens = usage
-            .usage
-            .input_tokens
-            .saturating_add(usage.usage.output_tokens);
-        sqlx::query(
-            r#"
-            INSERT INTO vendor_usage_records (
-                provider, model, feature, operation, source, request_id, task_id, user_id,
-                request_count, input_tokens, cache_read_tokens, cache_write_tokens,
-                output_tokens, total_tokens, currency, pricing_version, metadata, created_at
-            )
-            VALUES (
-                $1, $2, $3, $4, 'queue', $5, $6::bigint::integer, $7::bigint::integer,
-                $8, $9, $10, $11, $12, $13, 'USD', '2026-08-02', '{}'::jsonb,
-                timezone('UTC', clock_timestamp())
-            )
-            "#,
+        crate::news_lens_embeddings::record_usage(
+            &mut **transaction,
+            seed.task_id,
+            Some(seed.user_id),
+            usage,
         )
-        .bind(&usage.provider)
-        .bind(&usage.model)
-        .bind(&usage.feature)
-        .bind(&usage.operation)
-        .bind(&usage.provider_response_id)
-        .bind(seed.task_id)
-        .bind(seed.user_id)
-        .bind(u64_to_i32(usage.usage.request_count))
-        .bind(u64_to_i32(usage.usage.input_tokens))
-        .bind(u64_to_i32(usage.usage.cached_input_tokens))
-        .bind(u64_to_i32(usage.usage.cache_write_tokens))
-        .bind(u64_to_i32(usage.usage.output_tokens))
-        .bind(u64_to_i32(total_tokens))
-        .execute(&mut **transaction)
         .await?;
     }
     Ok(())

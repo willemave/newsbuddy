@@ -1,29 +1,29 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
-pub struct SourceHealth {
-    pub source_key: String,
-    pub last_attempt_at: DateTime<Utc>,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub consecutive_failures: i32,
-    pub persisted_count: i64,
-    pub new_count: i64,
-    pub error_code: Option<String>,
+pub(crate) struct SourceHealth {
+    pub(crate) source_key: String,
+    pub(crate) last_attempt_at: DateTime<Utc>,
+    pub(crate) last_success_at: Option<DateTime<Utc>>,
+    pub(crate) consecutive_failures: i32,
+    pub(crate) persisted_count: i64,
+    pub(crate) new_count: i64,
+    pub(crate) error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct HealthSnapshot {
-    pub generated_at: DateTime<Utc>,
-    pub content: CountByStatus,
-    pub tasks: CountByStatus,
-    pub events: EventHealth,
-    pub usage: UsageFreshness,
-    pub sources: Vec<SourceHealth>,
-    pub pipeline: newsly_db::PipelineHealthCounts,
+pub(crate) struct HealthSnapshot {
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) content: CountByStatus,
+    pub(crate) tasks: CountByStatus,
+    pub(crate) events: EventHealth,
+    pub(crate) usage: UsageFreshness,
+    pub(crate) sources: Vec<SourceHealth>,
+    pub(crate) pipeline: newsly_db::PipelineHealthCounts,
 }
 
 impl HealthSnapshot {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         use std::fmt::Write;
         let mut output = format!(
             "Health snapshot:\n- content: {} total\n- tasks: {} total\n- events: {} total\n- latest usage record: {}",
@@ -82,7 +82,9 @@ struct UsageFreshnessRow {
 ///
 /// Returns [`OperatorQueryError::Sqlx`] when `PostgreSQL` rejects a query or a result cannot be
 /// decoded.
-pub async fn load_health_snapshot(pool: &PgPool) -> Result<HealthSnapshot, OperatorQueryError> {
+pub(crate) async fn load_health_snapshot(
+    pool: &PgPool,
+) -> Result<HealthSnapshot, OperatorQueryError> {
     let content_rows = sqlx::query_as::<_, StatusCountRow>(
         r"
         SELECT COALESCE(status, 'unknown') AS label, COUNT(*)::bigint AS count

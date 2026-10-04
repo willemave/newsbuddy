@@ -20,30 +20,6 @@ macro_rules! string_enum {
     };
 }
 
-string_enum!(TaskType {
-    Scrape,
-    BackfillFeeds,
-    AnalyzeUrl,
-    ProcessContent,
-    EnrichNewsItemArticle,
-    ProcessNewsItem,
-    ProcessPodcastMedia,
-    DownloadTweetVideoAudio,
-    TranscribeTweetVideo,
-    Summarize,
-    FetchNewsItemDiscussion,
-    GenerateImage,
-    DiscoverFeeds,
-    OnboardingDiscover,
-    DigDeeper,
-    ChatTurn,
-    SyncIntegration,
-    GenerateAudioEpisode,
-    RunLlmTask,
-    BriefingRefresh,
-    DeleteUserAccount,
-});
-
 string_enum!(TaskStatus {
     Pending,
     Processing,
@@ -111,15 +87,6 @@ impl JsonSchema for SummaryVersion {
         })
     }
 }
-
-string_enum!(NewsItemVisibilityScope { Global, User });
-
-string_enum!(NewsItemStatus {
-    New,
-    Processing,
-    Ready,
-    Failed,
-});
 
 #[cfg(test)]
 mod tests {

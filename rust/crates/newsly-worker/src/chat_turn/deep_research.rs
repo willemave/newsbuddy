@@ -8,8 +8,8 @@ use newsly_agent_runtime::{
 };
 use newsly_db::{ChatTaskSnapshot, persist_deep_research_response_id};
 use newsly_providers::{
-    BackgroundBuiltInTools, BackgroundReasoningSummary, BackgroundResponseStatus,
-    OpenAiBackgroundRequest, OpenAiBackgroundResponses, OpenAiGatewayError,
+    BackgroundBuiltInTools, BackgroundResponseStatus, OpenAiBackgroundGateway,
+    OpenAiBackgroundRequest, OpenAiGatewayError,
 };
 use serde_json::Map;
 use sqlx::PgPool;
@@ -17,10 +17,9 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::DEEP_RESEARCH_MODEL;
 use super::agent::ChatAgentRuntime;
 use super::prompts::deep_research_context;
-
-const DEEP_RESEARCH_MODEL: &str = "o4-mini-deep-research-2025-06-26";
 
 #[derive(Debug)]
 pub(super) struct DeepResearchRun {
@@ -33,7 +32,7 @@ pub(super) struct DeepResearchRun {
 
 pub(super) async fn run_deep_research(
     agent: &ChatAgentRuntime,
-    gateway: Arc<dyn OpenAiBackgroundResponses>,
+    gateway: Arc<OpenAiBackgroundGateway>,
     pool: &PgPool,
     snapshot: &ChatTaskSnapshot,
     cancellation: CancellationToken,
@@ -59,14 +58,10 @@ pub(super) async fn run_deep_research(
             .start(OpenAiBackgroundRequest {
                 model: DEEP_RESEARCH_MODEL.to_owned(),
                 input,
-                instructions: None,
-                reasoning_summary: Some(BackgroundReasoningSummary::Detailed),
                 tools: BackgroundBuiltInTools {
                     web_search: true,
                     code_interpreter: true,
                 },
-                max_output_tokens: None,
-                max_tool_calls: None,
                 metadata: HashMap::from_iter([
                     (
                         "queue_task_id".to_owned(),
@@ -77,16 +72,16 @@ pub(super) async fn run_deep_research(
                 ]),
                 safety_identifier: Some(format!("newsly-user-{}", snapshot.user_id)),
             })
-            .await?;
-        let mut transaction = pool.begin().await?;
-        let persisted = persist_deep_research_response_id(
-            &mut transaction,
-            snapshot.message_id,
-            snapshot.stream_generation,
-            &response.response_id,
-        )
-        .await?;
-        transaction.commit().await?;
+            .await
+            .map_err(DeepResearchError::StartProvider)?;
+        let persisted =
+            match persist_started_response_id(pool, snapshot, &response.response_id).await {
+                Ok(persisted) => persisted,
+                Err(error) => {
+                    cancel_orphaned_response(gateway.as_ref(), &response.response_id).await;
+                    return Err(error);
+                }
+            };
         match persisted {
             Some(persisted_id) if persisted_id == response.response_id => persisted_id,
             Some(persisted_id) => {
@@ -104,7 +99,10 @@ pub(super) async fn run_deep_research(
         if cancellation.is_cancelled() {
             return Err(DeepResearchError::Cancelled);
         }
-        let response = gateway.retrieve(&response_id).await?;
+        let response = gateway
+            .retrieve(&response_id)
+            .await
+            .map_err(DeepResearchError::PollProvider)?;
         match response.status {
             BackgroundResponseStatus::Queued | BackgroundResponseStatus::InProgress => {
                 tokio::select! {
@@ -193,7 +191,24 @@ pub(super) async fn run_deep_research(
     Err(DeepResearchError::PollingBudgetExhausted)
 }
 
-async fn cancel_orphaned_response(gateway: &dyn OpenAiBackgroundResponses, response_id: &str) {
+async fn persist_started_response_id(
+    pool: &PgPool,
+    snapshot: &ChatTaskSnapshot,
+    response_id: &str,
+) -> Result<Option<String>, DeepResearchError> {
+    let mut transaction = pool.begin().await?;
+    let persisted = persist_deep_research_response_id(
+        &mut transaction,
+        snapshot.message_id,
+        snapshot.stream_generation,
+        response_id,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(persisted)
+}
+
+async fn cancel_orphaned_response(gateway: &OpenAiBackgroundGateway, response_id: &str) {
     if let Err(error) = gateway.cancel(response_id).await {
         tracing::warn!(
             response_id,
@@ -219,8 +234,10 @@ pub(super) enum DeepResearchError {
     InvalidTranscript,
     #[error("deep research failed: {0}")]
     Terminal(String),
-    #[error(transparent)]
-    Provider(#[from] OpenAiGatewayError),
+    #[error("deep research start failed: {0}")]
+    StartProvider(OpenAiGatewayError),
+    #[error("deep research polling failed: {0}")]
+    PollProvider(OpenAiGatewayError),
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]

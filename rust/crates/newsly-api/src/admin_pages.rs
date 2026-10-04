@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 
 use axum::Router;
-use axum::extract::{Extension, OriginalUri, Query, State};
+use axum::extract::{OriginalUri, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -12,22 +12,15 @@ use newsly_db::{
 };
 use serde::Deserialize;
 
-use crate::admin_api_keys::{admin_login_redirect, escape_html, has_valid_admin_session, redirect};
+use crate::admin_api_keys::{admin_login_redirect, escape_html, has_valid_admin_session};
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{internal_error, require_operation};
+use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
-
-const DASHBOARD_OPERATION_ID: &str = "adminDashboard";
-const FEEDBACK_OPERATION_ID: &str = "adminFeedbackPage";
-const VENDOR_USAGE_OPERATION_ID: &str = "vendorUsageDashboard";
-const LEGACY_USAGE_OPERATION_ID: &str = "legacyLlmUsageRedirect";
 
 #[derive(Debug, Deserialize)]
 pub(super) struct DashboardQuery {
     stats_range: Option<String>,
-    #[allow(dead_code)]
-    cost_bucket: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,7 +39,6 @@ pub(super) fn router() -> Router<AppState> {
         .route("/admin/", get(dashboard))
         .route("/admin/feedback", get(feedback))
         .route("/admin/vendor-usage", get(vendor_usage))
-        .route("/admin/llm-usage", get(legacy_llm_usage))
 }
 
 #[utoipa::path(
@@ -55,8 +47,7 @@ pub(super) fn router() -> Router<AppState> {
     operation_id = "adminDashboard",
     tag = "admin",
     params(
-        ("stats_range" = Option<String>, Query, description = "24h, 7d, 30d, or all"),
-        ("cost_bucket" = Option<String>, Query, description = "day, week, or month")
+        ("stats_range" = Option<String>, Query, description = "24h, 7d, 30d, or all")
     ),
     responses(
         (status = 200, description = "Admin dashboard", content_type = "text/html", body = String),
@@ -69,14 +60,13 @@ pub(super) async fn dashboard(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
     Query(query): Query<DashboardQuery>,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DASHBOARD_OPERATION_ID, &request_id)?;
     let (range, cutoff) = dashboard_cutoff(query.stats_range.as_deref());
     let snapshot = load_admin_dashboard(state.database.pool(), cutoff)
         .await
@@ -100,13 +90,12 @@ pub(super) async fn feedback(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, FEEDBACK_OPERATION_ID, &request_id)?;
     let rows = list_admin_feedback(state.database.pool())
         .await
         .map_err(|error| internal_error(error, &request_id))?;
@@ -138,50 +127,18 @@ pub(super) async fn vendor_usage(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
     Query(query): Query<VendorUsageQuery>,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, VENDOR_USAGE_OPERATION_ID, &request_id)?;
     let filter = vendor_filter(&query);
     let snapshot = load_admin_vendor_usage(state.database.pool(), &filter)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     Ok(Html(render_vendor_usage(&snapshot, &query)).into_response())
-}
-
-#[utoipa::path(
-    get,
-    path = "/admin/llm-usage",
-    operation_id = "legacyLlmUsageRedirect",
-    tag = "admin",
-    responses(
-        (status = 307, description = "Redirected to vendor usage"),
-        (status = 303, description = "Admin login required"),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn legacy_llm_usage(
-    State(state): State<AppState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-) -> Result<Response, ApiError> {
-    if !has_valid_admin_session(&state, &headers) {
-        return Ok(admin_login_redirect(uri.path()));
-    }
-    let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, LEGACY_USAGE_OPERATION_ID, &request_id)?;
-    let target = uri.query().map_or_else(
-        || "/admin/vendor-usage".to_owned(),
-        |query| format!("/admin/vendor-usage?{query}"),
-    );
-    let mut response = redirect(&target);
-    *response.status_mut() = axum::http::StatusCode::TEMPORARY_REDIRECT;
-    Ok(response)
 }
 
 fn dashboard_cutoff(value: Option<&str>) -> (&'static str, Option<DateTime<Utc>>) {
@@ -233,7 +190,7 @@ fn parse_date(value: Option<&str>, end_of_day: bool) -> Option<DateTime<Utc>> {
 }
 
 fn render_dashboard(snapshot: &AdminDashboardSnapshot, range: &str) -> String {
-    let mut html = document_start("Dashboard");
+    let mut html = crate::admin_shell::admin_shell("Dashboard");
     let total_content = snapshot
         .content_counts
         .iter()
@@ -322,7 +279,7 @@ fn render_counts<'a>(html: &mut String, rows: impl Iterator<Item = (&'a String, 
 }
 
 fn render_feedback(rows: &[AdminFeedbackRow]) -> String {
-    let mut html = document_start("Feedback");
+    let mut html = crate::admin_shell::admin_shell("Feedback");
     html.push_str("<main><p><a href=\"/admin/\">Dashboard</a></p><h1>User feedback</h1>");
     for row in rows {
         let user = row
@@ -349,7 +306,7 @@ fn render_feedback(rows: &[AdminFeedbackRow]) -> String {
 }
 
 fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQuery) -> String {
-    let mut html = document_start("Vendor Usage");
+    let mut html = crate::admin_shell::admin_shell("Vendor Usage");
     let _ = write!(
         html,
         "<main><p><a href=\"/admin/\">Dashboard</a></p><h1>Vendor usage</h1><form method=\"get\"><input name=\"provider\" placeholder=\"provider\" value=\"{}\"><input name=\"model\" placeholder=\"model\" value=\"{}\"><input name=\"feature\" placeholder=\"feature\" value=\"{}\"><input name=\"user_id\" placeholder=\"user id\" value=\"{}\"><input name=\"start_date\" type=\"date\" value=\"{}\"><input name=\"end_date\" type=\"date\" value=\"{}\"><button>Filter</button></form><section class=\"cards\"><div><strong>{}</strong><span>Rows</span></div><div><strong>{}</strong><span>Tokens</span></div><div><strong>{}</strong><span>Requests</span></div><div><strong>{}</strong><span>Cost</span></div></section>",
@@ -433,16 +390,13 @@ fn render_usage_cost(
     non_billable_records: i64,
     unpriced_records: i64,
 ) -> String {
-    cost.map_or_else(
-        || format!("Unknown (${known_cost:.6} priced subtotal: ${public_list_estimate:.6} public-list estimates, ${provider_estimate:.6} provider estimates; {non_billable_records} non-billable, {unpriced_records} unpriced records)"),
-        |cost| format!("${cost:.6} (${public_list_estimate:.6} public-list estimates, ${provider_estimate:.6} provider estimates; {non_billable_records} non-billable records)"),
-    )
-}
-
-fn document_start(title: &str) -> String {
-    format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><style>body{{font:15px system-ui;margin:0;background:#f7f7f5;color:#191919}}main{{max-width:1150px;margin:3rem auto;padding:0 1rem}}nav{{margin-bottom:2rem}}table{{border-collapse:collapse;width:100%;background:white;margin-bottom:2rem}}th,td{{text-align:left;padding:.65rem;border:1px solid #ddd;vertical-align:top}}.cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin:1.5rem 0}}.cards div{{background:white;border:1px solid #ddd;padding:1rem}}.cards strong,.cards span{{display:block}}.cards strong{{font-size:1.6rem}}article{{background:white;border:1px solid #ddd;padding:1rem;margin:1rem 0}}blockquote{{white-space:pre-wrap}}input,button{{font:inherit;padding:.55rem;margin:.25rem}}</style></head><body>",
-        escape_html(title)
+    newsly_db::render_vendor_usage_cost(
+        cost,
+        known_cost,
+        public_list_estimate,
+        provider_estimate,
+        non_billable_records,
+        unpriced_records,
     )
 }
 
@@ -473,12 +427,8 @@ mod usage_tests {
             daily: Vec::new(),
             totals: newsly_db::AdminVendorUsageTotals {
                 row_count: 2,
-                attributed_row_count: 0,
-                input_tokens: 0,
-                output_tokens: 0,
                 total_tokens: 0,
                 request_count: 2,
-                resource_count: 0,
                 cost_usd: None,
                 known_cost_usd: 0.25,
                 public_list_estimate_usd: 0.20,

@@ -26,18 +26,8 @@ impl TaskFinalizer for EnrichmentFinalizer {
         transaction: &'a mut Transaction<'static, Postgres>,
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
-            let result = match apply_enrichment(transaction, &self.queue, &self.plan).await? {
-                NewsApplyOutcome::Applied => TaskFinalizerResult::Keep,
-                NewsApplyOutcome::NewsItemMissing => {
-                    TaskFinalizerResult::Override(TaskResult::fail(
-                        Some("news item disappeared before finalization".to_owned()),
-                        false,
-                    ))
-                }
-                NewsApplyOutcome::SourceChanged | NewsApplyOutcome::CandidateChanged => {
-                    TaskFinalizerResult::Override(TaskResult::defer(1))
-                }
-            };
+            let result =
+                finalizer_result(apply_enrichment(transaction, &self.queue, &self.plan).await?);
             Ok::<_, Box<dyn Error + Send + Sync>>(result)
         })
     }
@@ -61,19 +51,22 @@ impl TaskFinalizer for ProcessNewsFinalizer {
         transaction: &'a mut Transaction<'static, Postgres>,
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
-            let result = match apply_processing(transaction, &self.queue, &self.plan).await? {
-                NewsApplyOutcome::Applied => TaskFinalizerResult::Keep,
-                NewsApplyOutcome::NewsItemMissing => {
-                    TaskFinalizerResult::Override(TaskResult::fail(
-                        Some("news item disappeared before finalization".to_owned()),
-                        false,
-                    ))
-                }
-                NewsApplyOutcome::SourceChanged | NewsApplyOutcome::CandidateChanged => {
-                    TaskFinalizerResult::Override(TaskResult::defer(1))
-                }
-            };
+            let result =
+                finalizer_result(apply_processing(transaction, &self.queue, &self.plan).await?);
             Ok::<_, Box<dyn Error + Send + Sync>>(result)
         })
+    }
+}
+
+fn finalizer_result(outcome: NewsApplyOutcome) -> TaskFinalizerResult {
+    match outcome {
+        NewsApplyOutcome::Applied => TaskFinalizerResult::Keep,
+        NewsApplyOutcome::NewsItemMissing => TaskFinalizerResult::Override(TaskResult::fail(
+            Some("news item disappeared before finalization".to_owned()),
+            false,
+        )),
+        NewsApplyOutcome::SourceChanged | NewsApplyOutcome::CandidateChanged => {
+            TaskFinalizerResult::Override(TaskResult::defer(1))
+        }
     }
 }

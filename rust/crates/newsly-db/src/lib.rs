@@ -31,12 +31,14 @@ mod briefing_refresh;
 mod chat;
 mod chat_tasks;
 mod chat_tooling;
+mod chat_transcript_audit;
 mod chat_transcripts;
 mod cli_link;
 mod config;
 mod content_actions;
 mod content_bodies;
 mod content_feeds;
+pub mod content_metadata;
 mod content_misc;
 mod content_read;
 mod content_submission;
@@ -79,8 +81,9 @@ pub use admin::{
     AdminCountRow, AdminDashboardSnapshot, AdminEvalCandidate, AdminFeedbackRow,
     AdminProviderCostRow, AdminQueueCountRow, AdminRecentFailureRow, AdminRepositoryError,
     AdminUserStats, AdminVendorUsageDailyRow, AdminVendorUsageFilter, AdminVendorUsageRow,
-    AdminVendorUsageSnapshot, AdminVendorUsageTotals, list_admin_eval_candidates,
-    list_admin_feedback, load_admin_dashboard, load_admin_vendor_usage,
+    AdminVendorUsageSnapshot, AdminVendorUsageTotals, VENDOR_COST_AGGREGATES_SQL,
+    list_admin_eval_candidates, list_admin_feedback, load_admin_dashboard, load_admin_vendor_usage,
+    render_vendor_usage_cost,
 };
 pub use adoption::{
     AdoptionError, AdoptionReport, MigrationHistoryError, adopt_existing_database,
@@ -88,14 +91,14 @@ pub use adoption::{
 };
 pub use agent_library::{
     AgentKnowledgeItem, AgentLibraryBodyPointer, AgentLibraryContentProjection,
-    AgentLibraryRepositoryError, find_agent_knowledge_items, list_agent_library_content,
+    AgentLibraryRepositoryError, find_agent_knowledge_items, find_agent_library_content,
+    list_agent_library_content,
 };
 pub use agent_usage::{AgentUsageRepositoryError, NewAgentModelUsage, record_agent_model_usage};
 pub use api_keys::{
     ApiKeyRepositoryError, ApiKeySummaryProjection, ApiKeyTargetUser, CreatedApiKey,
-    GeneratedApiKey, create_api_key, ensure_system_admin_user, extract_api_key_prefix,
-    generate_api_key, hash_api_key, list_api_key_target_users, list_api_keys, revoke_api_key,
-    verify_api_key_hash,
+    create_api_key, ensure_system_admin_user, hash_api_key, is_api_key_token,
+    list_api_key_target_users, list_api_keys, revoke_api_key,
 };
 pub use audio_episodes::{
     AudioEpisodeReadTrigger, AudioEpisodeRecord, AudioEpisodeRepositoryError,
@@ -109,7 +112,6 @@ pub use audio_episodes::{
 };
 pub use auth::{
     AuthenticatedUserRow, AuthenticationRepositoryError, find_user_by_api_key, find_user_by_id,
-    is_api_key_token,
 };
 pub use briefing::{
     AudioEpisodeProjection, BriefingDiscussionProjection, BriefingFirstRunProjection,
@@ -122,8 +124,7 @@ pub use briefing::{
     expedite_pending_briefing_refresh, load_briefing_index, load_briefing_index_validator,
     load_briefing_lens_page, load_briefing_narration, load_briefing_refresh_task,
     mark_briefing_lens_read, mark_briefing_sources_read, prepare_briefing_narration,
-    public_audio_episode_error_message, recent_briefing_dig_count, record_briefing_dig_usage,
-    retry_briefing_narration,
+    recent_briefing_dig_count, record_briefing_dig_usage, retry_briefing_narration,
 };
 pub use briefing_refresh::{
     ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION, BriefingAppendBatch,
@@ -145,7 +146,7 @@ pub use chat::{
     DEFAULT_CHAT_MODEL, StageAssistantTurnInput, StageChatMessageInput, StageChatTurnOutcome,
     StagedChatTurn, UpdateChatSessionInput, archive_chat_session, create_chat_session,
     get_chat_message_status, get_chat_session_detail, get_chat_session_summary, list_chat_sessions,
-    stage_assistant_turn, stage_chat_message, update_chat_session,
+    load_active_feed_urls, stage_assistant_turn, stage_chat_message, update_chat_session,
 };
 pub use chat_tasks::{
     AssistantScreenContext, ChatAdvisoryWriteOutcome, ChatContentMaterial,
@@ -161,9 +162,15 @@ pub use chat_tooling::{
     list_unread_chat_news, prepare_chat_article_conversion, search_accessible_content,
     search_agent_knowledge, search_chat_news,
 };
+pub use chat_transcript_audit::{
+    ChatTranscriptBackfillError, ChatTranscriptBackfillPage, ChatTranscriptCompatibility,
+    ChatTranscriptCompatibilityAuditError, ChatTranscriptCompatibilityPage,
+    audit_chat_transcript_compatibility, backfill_chat_transcript_compatibility,
+    classify_chat_transcript_compatibility,
+};
 pub use cli_link::{
     ApprovedCliLink, CliLinkPollStatus, CliLinkRepositoryError, PolledCliLink, StartedCliLink,
-    approve_cli_link, poll_cli_link, start_cli_link,
+    approve_cli_link, poll_cli_link, start_cli_link, sweep_expired_cli_links,
 };
 pub use config::{DatabaseConfig, DatabaseConfigError, normalize_database_url};
 pub use content_actions::{
@@ -181,14 +188,13 @@ pub use content_feeds::{
     list_recently_read_content, search_visible_content,
 };
 pub use content_misc::{
-    ContentConversionPlan, ContentMiscRepositoryError, ContentNarrationPlan, ConvertedArticle,
-    DiscussionRefreshPlan, DiscussionTargetKind, FeedBackfillEntry, FeedBackfillOrigin,
-    FeedBackfillPersistence, FeedBackfillPlan, FeedBackfillPreparation, NewsConversionPlan,
-    SubmissionPage, SubmissionProjection, TweetContentPlan, finalize_article_conversion,
-    known_feed_urls, list_submission_projections, persist_content_discussion,
-    persist_feed_backfill, persist_news_discussion, prepare_content_conversion,
-    prepare_content_discussion_refresh, prepare_content_narration, prepare_feed_backfill,
-    prepare_news_conversion, prepare_news_discussion_refresh, prepare_tweet_content,
+    ContentConversionPlan, ContentMiscRepositoryError, ConvertedArticle, DiscussionRefreshPlan,
+    DiscussionTargetKind, FeedBackfillEntry, FeedBackfillOrigin, FeedBackfillPersistence,
+    FeedBackfillPlan, FeedBackfillPreparation, NewsConversionPlan, SubmissionPage,
+    SubmissionProjection, finalize_article_conversion, known_feed_urls,
+    list_submission_projections, persist_content_discussion, persist_feed_backfill,
+    persist_news_discussion, prepare_content_conversion, prepare_content_discussion_refresh,
+    prepare_feed_backfill, prepare_news_conversion, prepare_news_discussion_refresh,
 };
 pub use content_read::{
     ContentDetailProjection, ContentReadRepositoryError, NewsItemProjection, NewsListCursor,
@@ -268,7 +274,7 @@ pub use news_category_schedule::{
     NewsCategoryNight, NewsCategoryRunClaimFence, NewsCategoryRunContext, NewsCategoryRunStatus,
     NewsCategorySchedule, NewsCategoryScheduleError, attach_news_category_run_task,
     begin_news_category_run, canonicalize_timezone, finish_news_category_run,
-    next_news_category_night, prepare_due_news_category_runs, reserve_news_category_naming_attempt,
+    prepare_due_news_category_runs, reserve_news_category_naming_attempt,
     set_user_news_category_timezone, settle_stale_news_category_runs,
 };
 pub use onboarding::{
@@ -278,11 +284,11 @@ pub use onboarding::{
 };
 pub use onboarding_flow::{
     AgentOnboardingSuggestionProjection, ExistingOnboardingFeedConfig, OnboardingAudioLaneInput,
-    OnboardingAudioLaneProjection, OnboardingAudioRunInput, OnboardingAudioRunProjection,
-    OnboardingCompletionAggregator, OnboardingCompletionInput, OnboardingCompletionProjection,
-    OnboardingCompletionSource, OnboardingFlowRepositoryError, complete_onboarding_selection,
-    create_onboarding_audio_run, list_existing_onboarding_feed_configs,
-    load_agent_onboarding_suggestions, load_onboarding_completion_suggestions,
+    OnboardingAudioRunInput, OnboardingCompletionAggregator, OnboardingCompletionInput,
+    OnboardingCompletionProjection, OnboardingCompletionSource, OnboardingFlowRepositoryError,
+    complete_onboarding_selection, create_onboarding_audio_run,
+    list_existing_onboarding_feed_configs, load_agent_onboarding_suggestions,
+    load_onboarding_completion_suggestions,
 };
 pub use onboarding_tasks::{
     FeedDiscoveryFavorite, FeedDiscoveryTaskSnapshot, NewOnboardingSuggestion,
@@ -299,35 +305,37 @@ pub use ownership::{
 };
 pub use pool::{Database, DatabaseError};
 pub use refresh_tokens::{
-    RefreshRotationClaim, RefreshTokenRepositoryError, begin_refresh_rotation, store_refresh_replay,
+    RefreshRotationClaim, RefreshTokenRepositoryError, RefreshTokenSweepReport,
+    begin_refresh_rotation, store_refresh_replay, sweep_consumed_refresh_tokens,
 };
 pub use route_fence::{RouteWriteFenceError, verify_route_write_fence};
 pub use scrape::{
-    PersistedContentRecord, PersistedNewsRecord, PreparedScrapeSources, ScrapeConfigSnapshot,
-    ScrapeRepositoryError, ScrapedContentRecord, ScrapedNewsRecord, due_discussion_refresh_ids,
+    PersistedContentRecord, PersistedNewsRecord, ScrapeConfigSnapshot, ScrapeRepositoryError,
+    ScrapedContentRecord, ScrapedNewsRecord, due_discussion_refresh_ids,
     matching_scrape_config_ids, persist_scraped_content, persist_scraped_news,
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
 pub use scraper_configs::{
     AppliedFeedSubscription, FeedSubscriptionMutation, NewScraperConfig, ScraperConfigPatch,
-    ScraperConfigProjection, ScraperConfigRepositoryError, apply_validated_feed_subscription,
-    canonicalize_feed_url, create_scraper_config, delete_scraper_config, find_scraper_config,
-    list_scraper_configs, scraper_config_identity_exists, update_scraper_config,
+    ScraperConfigProjection, ScraperConfigRepositoryError, apply_aggregator_subscription,
+    apply_validated_feed_subscription, canonicalize_feed_url, create_scraper_config,
+    delete_scraper_config, find_scraper_config, list_scraper_configs,
+    scraper_config_identity_exists, update_scraper_config,
 };
 pub use scraper_stats::{
     ScraperConfigStatsProjection, ScraperStatsRepositoryError, get_scraper_config_stats,
 };
 pub use share_actions::{
     ApproveShareActionOutcome, CreatedShareActionTask, NewShareActionTask,
-    PreparedContentProjection, PreparedShareSource, RequestedActionStatus, RequestedShareAction,
-    ShareActionAgentSnapshot, ShareActionFinalizationTask, ShareActionPreparation,
-    ShareActionPreparationDraft, ShareActionRepositoryError, ShareActionTaskProjection,
-    approve_share_action, begin_share_action_preparation, enrich_prepared_share_content,
-    fail_share_action_approval, fail_share_action_task, find_prepared_share_content,
-    find_share_action_for_user, finish_share_action_preparation, finish_share_action_task,
-    get_or_create_share_chat_session, insert_share_action_task, load_share_action_action,
-    lock_share_action_for_finalization, mark_share_action_applied, mark_share_action_applying,
-    mark_share_action_failed, persist_share_action_agent_output, request_share_action,
+    PreparedContentProjection, PreparedShareSource, RequestedShareAction, ShareActionAgentSnapshot,
+    ShareActionFinalizationTask, ShareActionPreparation, ShareActionPreparationDraft,
+    ShareActionRepositoryError, ShareActionTaskProjection, approve_share_action,
+    begin_share_action_preparation, enrich_prepared_share_content, fail_share_action_approval,
+    fail_share_action_task, find_prepared_share_content, find_share_action_for_user,
+    finish_share_action_preparation, finish_share_action_task, get_or_create_share_chat_session,
+    insert_share_action_task, load_share_action_action, lock_share_action_for_finalization,
+    mark_share_action_applied, mark_share_action_applying, mark_share_action_failed,
+    persist_share_action_agent_output, request_share_action,
 };
 pub use stats::{
     ProcessingCountsProjection, StatsRepositoryError, UnreadCountsProjection,
@@ -342,15 +350,16 @@ pub use task_sandboxes::{
 pub use users::{
     AppleUserUpsert, DebugUserPatch, UserProfilePatch, UserProfileProjection,
     UserProfileRepositoryError, create_or_update_debug_user, deactivate_active_user,
-    find_or_create_apple_user, find_user_profile, update_user_profile,
+    find_apple_user, find_or_create_apple_user, find_user_profile, update_user_profile,
 };
 pub use vendor_pricing::{
     CalculatedVendorCost, VendorResourceMeter, calculate_vendor_resource_cost,
 };
 pub(crate) use vendor_pricing::{elevenlabs_tts_cost, openai_transcription_cost};
 pub use vendor_usage::{
-    NewNarrationTtsUsage, NewTranscriptionUsage, NewXUserLookupUsage, VendorUsageRepositoryError,
-    record_narration_tts_usage, record_transcription_usage, record_x_user_lookup_usage,
+    NewExaSearchUsage, NewNarrationTtsUsage, NewTranscriptionUsage, NewXUserLookupUsage,
+    VendorUsageRepositoryError, record_exa_search_usage, record_narration_tts_usage,
+    record_transcription_usage, record_x_user_lookup_usage,
 };
 pub use x_sync::{
     NewXSyncUsage, PrepareXSyncOutcome, PreparedXSync, XSyncConnectionUpdate, XSyncRepositoryError,
@@ -362,7 +371,7 @@ pub use x_sync::{
 };
 
 mod task_failure;
-pub use task_failure::settle_failed_task;
+pub use task_failure::{TerminalTaskSettlement, settle_failed_task};
 
 mod source_health;
 pub use source_health::{PipelineHealthCounts, pipeline_health_counts, record_source_health};
@@ -381,6 +390,7 @@ pub use feed_history::{FeedHistoryProjection, load_feed_history};
 pub mod aggregator_corpus;
 pub mod first_edition_progress;
 pub mod news_lens_embeddings;
+mod news_visibility;
 
 #[cfg(test)]
 mod aggregator_visibility_tests;

@@ -1,10 +1,12 @@
+use crate::audio_episode_presentation::present_audio_episode;
+use newsly_domain::truncate_chars;
 use std::collections::HashSet;
 use std::env;
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::{HOST, RANGE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, Response};
@@ -15,9 +17,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use futures_util::Stream;
 use newsly_contracts::{
-    AudioEpisodeDeliveryQuery, AudioEpisodeKind, AudioEpisodeListQuery, AudioEpisodeResponse,
-    AudioEpisodeShareResponse, AudioEpisodeStatus, CUSTOM_NARRATION_MAX_SOURCES,
-    CustomNarrationCreateRequest,
+    AudioEpisodeListQuery, AudioEpisodeResponse, AudioEpisodeShareResponse,
+    CUSTOM_NARRATION_MAX_SOURCES, CustomNarrationCreateRequest,
 };
 use newsly_db::{
     AudioEpisodeReadTrigger, AudioEpisodeRecord, AudioEpisodeShareOutcome, NewAudioEpisode,
@@ -33,27 +34,16 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt as _;
 
 use crate::auth::AuthenticatedUser;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error, not_found};
 use crate::{AppState, request_id_from_headers};
+use newsly_domain::hex_encode;
 
 mod streaming;
 
 use streaming::{AUDIO_CHUNK_BYTES, audio_stream_response, stream_stored_audio};
 
-const CREATE_FAST_OPERATION_ID: &str = "createContentFastNewsAudioEpisode";
-const CREATE_COUNCIL_OPERATION_ID: &str = "createContentCouncilAudioEpisode";
-const CREATE_DISCUSSION_OPERATION_ID: &str = "createDiscussionNewsItemAudioEpisode";
-const CREATE_CUSTOM_OPERATION_ID: &str = "createContentCustomNarrationAudioEpisode";
-const ENABLE_SHARE_OPERATION_ID: &str = "enableContentAudioEpisodePublicShare";
-const DISABLE_SHARE_OPERATION_ID: &str = "disableContentAudioEpisodePublicShare";
-const PLAYBACK_FINISHED_OPERATION_ID: &str = "finishContentFinishedAudioEpisodePlayback";
-const AUDIO_FILE_OPERATION_ID: &str = "getContentAudioEpisodeAudio";
-const STREAM_OPERATION_ID: &str = "streamContentAudioEpisode";
 const FAST_NEWS_LIMIT: usize = 200;
 const LONGFORM_BODY_MAX_CHARS: usize = 16_000;
 const CUSTOM_SOURCE_TOTAL_CHAR_LIMIT: usize = 24_000;
@@ -111,7 +101,6 @@ pub(super) fn router() -> Router<AppState> {
     path = "/api/content/audio-episodes/fast-news",
     operation_id = "createContentFastNewsAudioEpisode",
     tag = "content",
-    params(AudioEpisodeDeliveryQuery),
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, body = AudioEpisodeResponse),
@@ -126,12 +115,9 @@ pub(super) async fn create_fast_news_audio_episode(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    query: Result<Query<AudioEpisodeDeliveryQuery>, QueryRejection>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<AudioEpisodeResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_FAST_OPERATION_ID, &request_id)?;
-    let Query(_delivery) = decode_query(query, &request_id)?;
     let page = list_visible_news_items(
         state.database.pool(),
         current_user.id,
@@ -173,7 +159,7 @@ pub(super) async fn create_fast_news_audio_episode(
         },
     )
     .await
-    .map(|episode| Json(present_audio_episode(&episode)))
+    .and_then(|episode| present_audio_episode(episode.into(), &request_id).map(Json))
 }
 
 #[utoipa::path(
@@ -182,8 +168,7 @@ pub(super) async fn create_fast_news_audio_episode(
     operation_id = "createContentCouncilAudioEpisode",
     tag = "content",
     params(
-        ("content_id" = i64, Path, minimum = 1),
-        AudioEpisodeDeliveryQuery
+        ("content_id" = i64, Path, minimum = 1)
     ),
     security(("HTTPBearer" = [])),
     responses(
@@ -200,14 +185,11 @@ pub(super) async fn create_content_council_audio_episode(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
-    query: Result<Query<AudioEpisodeDeliveryQuery>, QueryRejection>,
 ) -> Result<Json<AudioEpisodeResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_COUNCIL_OPERATION_ID, &request_id)?;
     let content_id = positive_path_id(path, "content_id", &request_id)?;
-    let Query(_delivery) = decode_query(query, &request_id)?;
     let projection =
         find_visible_content_detail(state.database.pool(), current_user.id, content_id)
             .await
@@ -239,7 +221,7 @@ pub(super) async fn create_content_council_audio_episode(
         },
     )
     .await
-    .map(|episode| Json(present_audio_episode(&episode)))
+    .and_then(|episode| present_audio_episode(episode.into(), &request_id).map(Json))
 }
 
 #[utoipa::path(
@@ -248,8 +230,7 @@ pub(super) async fn create_content_council_audio_episode(
     operation_id = "createDiscussionNewsItemAudioEpisode",
     tag = "discussion",
     params(
-        ("news_item_id" = i64, Path, minimum = 1),
-        AudioEpisodeDeliveryQuery
+        ("news_item_id" = i64, Path, minimum = 1)
     ),
     security(("HTTPBearer" = [])),
     responses(
@@ -266,14 +247,11 @@ pub(super) async fn create_news_item_discussion_audio_episode(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
-    query: Result<Query<AudioEpisodeDeliveryQuery>, QueryRejection>,
 ) -> Result<Json<AudioEpisodeResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_DISCUSSION_OPERATION_ID, &request_id)?;
     let news_item_id = positive_path_id(path, "news_item_id", &request_id)?;
-    let Query(_delivery) = decode_query(query, &request_id)?;
     let item = find_visible_news_item_detail(state.database.pool(), current_user.id, news_item_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?
@@ -309,7 +287,7 @@ pub(super) async fn create_news_item_discussion_audio_episode(
         },
     )
     .await
-    .map(|episode| Json(present_audio_episode(&episode)))
+    .and_then(|episode| present_audio_episode(episode.into(), &request_id).map(Json))
 }
 
 #[utoipa::path(
@@ -317,7 +295,6 @@ pub(super) async fn create_news_item_discussion_audio_episode(
     path = "/api/content/audio-episodes/custom-narrations",
     operation_id = "createContentCustomNarrationAudioEpisode",
     tag = "content",
-    params(AudioEpisodeDeliveryQuery),
     request_body = CustomNarrationCreateRequest,
     security(("HTTPBearer" = [])),
     responses(
@@ -338,13 +315,10 @@ pub(super) async fn create_custom_narration_audio_episode(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    query: Result<Query<AudioEpisodeDeliveryQuery>, QueryRejection>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<CustomNarrationCreateRequest>, JsonRejection>,
 ) -> Result<Json<AudioEpisodeResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_CUSTOM_OPERATION_ID, &request_id)?;
-    let Query(_delivery) = decode_query(query, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     let content_ids = normalize_ids(payload.content_ids, "Content", &request_id)?;
     let news_item_ids = normalize_ids(payload.news_item_ids, "Fast Read", &request_id)?;
@@ -461,7 +435,7 @@ pub(super) async fn create_custom_narration_audio_episode(
         },
     )
     .await
-    .map(|episode| Json(present_audio_episode(&episode)))
+    .and_then(|episode| present_audio_episode(episode.into(), &request_id).map(Json))
 }
 
 #[utoipa::path(
@@ -495,7 +469,13 @@ pub(super) async fn list_custom_narration_audio_episodes(
     let episodes = list_user_custom_narrations(state.database.pool(), current_user.id, query.limit)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(episodes.iter().map(present_audio_episode).collect()))
+    Ok(Json(episodes.into_iter().filter_map(|episode| {
+        let episode_id = episode.id;
+        match present_audio_episode(episode.into(), &request_id) {
+            Ok(episode) => Some(episode),
+            Err(error) => { tracing::warn!(episode_id, error = ?error, "skipping invalid audio episode in list"); None }
+        }
+    }).collect()))
 }
 
 #[utoipa::path(
@@ -525,7 +505,7 @@ pub(super) async fn get_audio_episode(
         .await
         .map_err(|error| internal_error(error, &request_id))?
         .ok_or_else(|| not_found("Audio episode", &request_id))?;
-    Ok(Json(present_audio_episode(&episode)))
+    present_audio_episode(episode.into(), &request_id).map(Json)
 }
 
 #[utoipa::path(
@@ -550,11 +530,10 @@ pub(super) async fn get_audio_episode_audio(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Response, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, AUDIO_FILE_OPERATION_ID, &request_id)?;
     let episode_id = positive_path_id(path, "audio_episode_id", &request_id)?;
     let episode =
         mark_play_started(&state, &stamp, current_user.id, episode_id, &request_id).await?;
@@ -596,19 +575,13 @@ pub(super) async fn finish_audio_episode_playback(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<AudioEpisodeResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, PLAYBACK_FINISHED_OPERATION_ID, &request_id)?;
     let episode_id = positive_path_id(path, "audio_episode_id", &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let episode = find_user_audio_episode_for_update(&mut transaction, current_user.id, episode_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?
@@ -619,11 +592,8 @@ pub(super) async fn finish_audio_episode_playback(
     mark_audio_episode_sources_read(&mut transaction, &episode, AudioEpisodeReadTrigger::Finish)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(present_audio_episode(&episode)))
+    crate::write_support::commit(transaction, &request_id).await?;
+    present_audio_episode(episode.into(), &request_id).map(Json)
 }
 
 #[utoipa::path(
@@ -647,11 +617,10 @@ pub(super) async fn enable_audio_episode_public_share(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<AudioEpisodeShareResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, ENABLE_SHARE_OPERATION_ID, &request_id)?;
     let episode_id = positive_path_id(path, "audio_episode_id", &request_id)?;
     let nonce = random_share_nonce().map_err(|error| internal_error(error, &request_id))?;
     let token = state
@@ -659,13 +628,8 @@ pub(super) async fn enable_audio_episode_public_share(
         .issue_audio_episode_share_token(episode_id, &nonce)
         .map_err(|error| internal_error(error, &request_id))?;
     let token_hash = hash_token(&token);
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = newsly_db::enable_audio_episode_share(
         &mut transaction,
         current_user.id,
@@ -690,10 +654,7 @@ pub(super) async fn enable_audio_episode_public_share(
             return Err(conflict("Narration is not ready to share", &request_id));
         }
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let page_path = format!("/audio/share/{token}/");
     let audio_path = format!("/audio/share/{token}/audio");
     Ok(Json(AudioEpisodeShareResponse {
@@ -723,19 +684,13 @@ pub(super) async fn disable_audio_episode_public_share(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<AudioEpisodeShareResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DISABLE_SHARE_OPERATION_ID, &request_id)?;
     let episode_id = positive_path_id(path, "audio_episode_id", &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let disabled =
         newsly_db::disable_audio_episode_share(&mut transaction, current_user.id, episode_id)
             .await
@@ -743,10 +698,7 @@ pub(super) async fn disable_audio_episode_public_share(
     if !disabled {
         return Err(not_found("Audio episode", &request_id));
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(AudioEpisodeShareResponse {
         share_enabled: false,
         share_page_url: None,
@@ -772,27 +724,17 @@ pub(super) async fn disable_audio_episode_public_share(
         (status = 500, body = newsly_contracts::ErrorEnvelope)
     )
 )]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the route keeps the read-on-play transaction and follow-stream state machine together"
-)]
 pub(super) async fn stream_audio_episode(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Response, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, STREAM_OPERATION_ID, &request_id)?;
     let episode_id = positive_path_id(path, "audio_episode_id", &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let mut episode =
         find_user_audio_episode_for_update(&mut transaction, current_user.id, episode_id)
             .await
@@ -802,10 +744,7 @@ pub(super) async fn stream_audio_episode(
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     if episode.status == "completed" {
-        transaction
-            .commit()
-            .await
-            .map_err(|error| internal_error(error, &request_id))?;
+        crate::write_support::commit(transaction, &request_id).await?;
         let stored_path = episode
             .audio_storage_path
             .as_deref()
@@ -836,10 +775,7 @@ pub(super) async fn stream_audio_episode(
             .await
             .map_err(|error| internal_error(error, &request_id))?;
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     let follow_state = state.clone();
     let stream = io_byte_stream(async_stream::try_stream! {
@@ -946,13 +882,8 @@ async fn create_and_enqueue(
     request_id: &str,
     input: NewAudioEpisode<'_>,
 ) -> Result<AudioEpisodeRecord, ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     let episode = upsert_audio_episode(&mut transaction, &input)
         .await
         .map_err(|error| internal_error(error, request_id))?;
@@ -961,10 +892,7 @@ async fn create_and_enqueue(
             .await
             .map_err(|error| internal_error(error, request_id))?;
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
+    crate::write_support::commit(transaction, request_id).await?;
     Ok(episode)
 }
 
@@ -995,13 +923,8 @@ async fn mark_play_started(
     episode_id: i64,
     request_id: &str,
 ) -> Result<AudioEpisodeRecord, ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     let episode = find_user_audio_episode_for_update(&mut transaction, user_id, episode_id)
         .await
         .map_err(|error| internal_error(error, request_id))?
@@ -1009,10 +932,7 @@ async fn mark_play_started(
     mark_audio_episode_sources_read(&mut transaction, &episode, AudioEpisodeReadTrigger::Play)
         .await
         .map_err(|error| internal_error(error, request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
+    crate::write_support::commit(transaction, request_id).await?;
     Ok(episode)
 }
 
@@ -1164,128 +1084,6 @@ fn custom_narration_title(snapshot: &Value) -> String {
     }
 }
 
-fn present_audio_episode(episode: &AudioEpisodeRecord) -> AudioEpisodeResponse {
-    let status =
-        AudioEpisodeStatus::try_from(episode.status.as_str()).unwrap_or(AudioEpisodeStatus::Failed);
-    AudioEpisodeResponse {
-        id: episode.id,
-        kind: AudioEpisodeKind::try_from(episode.kind.as_str())
-            .unwrap_or(AudioEpisodeKind::CustomNarration),
-        status,
-        title: episode.title.clone(),
-        source_content_id: episode.source_content_id,
-        source_item_ids: json_i64_array(Some(&episode.source_item_ids)),
-        source_content_ids: episode_source_content_ids(episode),
-        source_count: episode_source_count(episode),
-        source_titles: episode_source_titles(episode),
-        subtitle: episode
-            .source_snapshot
-            .get("items")
-            .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(|item| item.get("source_name"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned),
-        artwork_url: episode
-            .source_snapshot
-            .get("items")
-            .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(|item| {
-                item.get("image_url")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("thumbnail_url").and_then(Value::as_str))
-            })
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned),
-        read_on_play_content_ids: json_i64_array(
-            episode
-                .source_snapshot
-                .get("read_on_play")
-                .and_then(|policy| policy.get("content_ids")),
-        ),
-        read_on_play_news_item_ids: json_i64_array(
-            episode
-                .source_snapshot
-                .get("read_on_play")
-                .and_then(|policy| policy.get("news_item_ids")),
-        ),
-        duration_seconds: episode.duration_seconds,
-        audio_url: (status == AudioEpisodeStatus::Completed
-            && episode.audio_storage_path.is_some())
-        .then(|| format!("/api/content/audio-episodes/{}/audio", episode.id)),
-        stream_url: Some(format!("/api/content/audio-episodes/{}/stream", episode.id)),
-        script_text: episode.script_text.clone(),
-        error_message: (status == AudioEpisodeStatus::Failed)
-            .then(|| "Couldn't prepare audio. Please try again.".to_owned()),
-        created_at: episode.created_at,
-        updated_at: episode.updated_at,
-    }
-}
-
-fn episode_source_content_ids(episode: &AudioEpisodeRecord) -> Vec<i64> {
-    if let Some(content_id) = episode.source_content_id {
-        return vec![content_id];
-    }
-    let direct = json_i64_array(episode.source_snapshot.get("content_ids"));
-    if !direct.is_empty() {
-        return direct;
-    }
-    episode
-        .source_snapshot
-        .get("items")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("content_id").and_then(Value::as_i64))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn episode_source_titles(episode: &AudioEpisodeRecord) -> Vec<String> {
-    if episode.source_content_id.is_some() {
-        return episode
-            .source_snapshot
-            .get("title")
-            .and_then(Value::as_str)
-            .map(|title| vec![title.to_owned()])
-            .unwrap_or_default();
-    }
-    episode
-        .source_snapshot
-        .get("items")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("title").and_then(Value::as_str))
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn episode_source_count(episode: &AudioEpisodeRecord) -> usize {
-    episode
-        .source_snapshot
-        .get("source_count")
-        .and_then(Value::as_u64)
-        .and_then(|count| usize::try_from(count).ok())
-        .unwrap_or_else(|| {
-            let content_count = episode_source_content_ids(episode).len();
-            if content_count > 0 {
-                content_count
-            } else {
-                json_i64_array(Some(&episode.source_item_ids)).len()
-            }
-        })
-}
-
 async fn shared_episode(
     state: &AppState,
     token: &str,
@@ -1320,23 +1118,12 @@ fn normalize_ids(ids: Vec<i64>, label: &str, request_id: &str) -> Result<Vec<i64
     Ok(ids.into_iter().filter(|id| seen.insert(*id)).collect())
 }
 
-fn json_i64_array(value: Option<&Value>) -> Vec<i64> {
-    value
-        .and_then(Value::as_array)
-        .map(|values| values.iter().filter_map(Value::as_i64).collect())
-        .unwrap_or_default()
-}
-
 fn sum_item_usize(items: &[Value], field: &str) -> usize {
     items
         .iter()
         .filter_map(|item| item.get(field).and_then(Value::as_u64))
         .filter_map(|value| usize::try_from(value).ok())
         .sum()
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    value.chars().take(max).collect()
 }
 
 fn random_share_nonce() -> Result<String, getrandom::Error> {
@@ -1420,18 +1207,7 @@ fn decode_query<T>(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn conflict(message: &str, request_id: &str) -> ApiError {

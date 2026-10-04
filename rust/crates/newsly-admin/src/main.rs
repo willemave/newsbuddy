@@ -5,18 +5,21 @@ use std::str::FromStr;
 use anyhow::{Context, Result as AnyResult, bail};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use newsly_admin::{
-    database, e2e, evals, load_ownership_policy_manifest,
-    operator::{self, QueryWindow, UsageGroupBy},
-};
-use newsly_db::{Database, DatabaseConfig, OwnershipMutationContext, OwnershipRepository};
-use newsly_domain::{
-    ApplicationSha, OwnershipTarget, OwnershipVersion, ReadinessState, ReplicaId, ResourceKey,
-    ResourceKind, RuntimeOwner, TransitionIntent,
-};
+use newsly_db::{Database, DatabaseConfig, OwnershipRepository};
+use newsly_domain::{OwnershipTarget, OwnershipVersion, ResourceKey, ResourceKind};
 use secrecy::SecretString;
 use serde::Serialize;
+mod database;
+mod e2e;
+mod evals;
+mod operator;
+mod ownership_commands;
+mod ownership_manifest;
 mod task_commands;
+mod transcript_commands;
+
+use operator::{QueryWindow, UsageGroupBy};
+use ownership_manifest::load_ownership_policy_manifest;
 
 #[derive(Debug, Parser)]
 #[command(name = "newsly-admin", about = "Newsly Rust runtime operator")]
@@ -54,6 +57,20 @@ enum Command {
     Evals(EvalsArgs),
     /// Seed deterministic local-only data for iOS `AXe` and Maestro tests.
     E2e(E2eArgs),
+}
+
+impl Command {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Db(args) => args.command.name(),
+            Self::Ownership(args) => args.command.name(),
+            Self::Health(args) => args.command.name(),
+            Self::Tasks(args) => args.command.name(),
+            Self::Usage(_) => "usage.summary",
+            Self::Evals(_) => "evals.export-title-clustering",
+            Self::E2e(_) => "e2e.seed",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -95,6 +112,41 @@ enum DbCommand {
         #[arg(long)]
         sql: String,
     },
+    /// Count canonical, legacy-shape and invalid stored chat transcripts without returning payloads.
+    TranscriptCompatibility {
+        #[arg(long, default_value_t = 0)]
+        after_id: i64,
+        #[arg(long, default_value_t = 1_000)]
+        limit: i64,
+    },
+    /// Dry-run or apply a bounded compare-and-swap conversion of legacy chat transcripts.
+    TranscriptBackfill {
+        #[arg(long, default_value_t = 0)]
+        after_id: i64,
+        #[arg(long, default_value_t = 1_000)]
+        limit: i64,
+        #[arg(long)]
+        batch_id: Option<uuid::Uuid>,
+        #[arg(long)]
+        actor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+impl DbCommand {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Tables { .. } => "db.tables",
+            Self::Schema { .. } => "db.schema",
+            Self::Query { .. } => "db.query",
+            Self::Explain { .. } => "db.explain",
+            Self::TranscriptCompatibility { .. } => "db.transcript-compatibility",
+            Self::TranscriptBackfill { .. } => "db.transcript-backfill",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -121,6 +173,15 @@ enum HealthCommand {
         #[arg(long, default_value_t = 10)]
         top_errors_limit: i64,
     },
+}
+
+impl HealthCommand {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Snapshot => "health.snapshot",
+            Self::Queue { .. } => "health.queue",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -174,6 +235,16 @@ enum TasksCommand {
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
+}
+
+impl TasksCommand {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::ReconcileArchive { .. } => "tasks.reconcile-archive",
+            Self::ArtworkBackfill { .. } => "tasks.artwork-backfill",
+            Self::Failures { .. } => "tasks.failures",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -340,6 +411,23 @@ enum OwnershipCommand {
     },
 }
 
+impl OwnershipCommand {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::ValidateManifest { .. } => "ownership.validate-manifest",
+            Self::SeedManifest { .. } => "ownership.seed-manifest",
+            Self::Show { .. } => "ownership.show",
+            Self::Prepare { .. } => "ownership.prepare",
+            Self::PrepareRollback { .. } => "ownership.prepare-rollback",
+            Self::Acknowledge { .. } => "ownership.acknowledge",
+            Self::Promote { .. } => "ownership.promote",
+            Self::PromoteRollback { .. } => "ownership.promote-rollback",
+            Self::DrainStatus { .. } => "ownership.drain-status",
+            Self::ClearAcknowledgements { .. } => "ownership.clear-acknowledgements",
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 struct AuditArgs {
     #[arg(long, env = "NEWSLY_APPLICATION_SHA")]
@@ -370,7 +458,7 @@ async fn main() -> ExitCode {
         .init();
 
     let cli = Cli::parse();
-    let command = command_name(&cli.command);
+    let command = cli.command.name();
     match run(&cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -409,34 +497,6 @@ async fn run(cli: &Cli) -> AnyResult<()> {
     result
 }
 
-fn command_name(command: &Command) -> &'static str {
-    match command {
-        Command::Db(DbArgs {
-            command: DbCommand::Tables { .. },
-        }) => "db.tables",
-        Command::Db(DbArgs {
-            command: DbCommand::Schema { .. },
-        }) => "db.schema",
-        Command::Db(DbArgs {
-            command: DbCommand::Query { .. },
-        }) => "db.query",
-        Command::Db(DbArgs {
-            command: DbCommand::Explain { .. },
-        }) => "db.explain",
-        Command::Ownership(_) => "ownership",
-        Command::Health(HealthArgs {
-            command: HealthCommand::Snapshot,
-        }) => "health.snapshot",
-        Command::Health(HealthArgs {
-            command: HealthCommand::Queue { .. },
-        }) => "health.queue",
-        Command::Tasks(_) => "tasks.failures",
-        Command::Usage(_) => "usage.summary",
-        Command::Evals(_) => "evals.export-title-clustering",
-        Command::E2e(_) => "e2e.seed",
-    }
-}
-
 async fn execute_command(
     database: &Database,
     command: &Command,
@@ -446,7 +506,8 @@ async fn execute_command(
         Command::Db(db) => execute_db_command(database, db, output).await,
         Command::Ownership(ownership) => {
             let repository = OwnershipRepository::new(database.pool().clone());
-            execute_ownership_command(&repository, &ownership.command).await
+            ownership_commands::execute_ownership_command(&repository, &ownership.command, output)
+                .await
         }
         Command::Health(health) => execute_health_command(database, health, output).await,
         Command::Tasks(tasks) => {
@@ -508,6 +569,31 @@ async fn execute_db_command(
         DbCommand::Explain { sql } => {
             let result = database::explain_query(database.pool(), sql).await?;
             emit_success(output, "db.explain", &result, &result.render_text())?;
+        }
+        DbCommand::TranscriptCompatibility { after_id, limit } => {
+            transcript_commands::execute_compatibility(database, *after_id, *limit, output).await?;
+        }
+        DbCommand::TranscriptBackfill {
+            after_id,
+            limit,
+            batch_id,
+            actor,
+            reason,
+            apply,
+        } => {
+            transcript_commands::execute_backfill(
+                database,
+                transcript_commands::TranscriptBackfillCommand {
+                    after_id: *after_id,
+                    limit: *limit,
+                    batch_id: *batch_id,
+                    actor: actor.as_deref(),
+                    reason: reason.as_deref(),
+                    apply: *apply,
+                },
+                output,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -614,191 +700,6 @@ async fn execute_usage_command(
         }
     }
     Ok(())
-}
-
-#[allow(clippy::too_many_lines)]
-async fn execute_ownership_command(
-    repository: &OwnershipRepository,
-    command: &OwnershipCommand,
-) -> AnyResult<()> {
-    match command {
-        OwnershipCommand::ValidateManifest {
-            manifest,
-            live: true,
-        } => {
-            let manifest = load_ownership_policy_manifest(manifest)?;
-            let seeds = manifest.registry_seeds()?;
-            let missing = repository.missing_resources(&seeds).await?;
-            if !missing.is_empty() {
-                let keys = missing
-                    .iter()
-                    .map(|seed| format!("{}:{}", seed.resource_kind, seed.resource_key))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                bail!("live runtime ownership registry is missing: {keys}");
-            }
-            println!("ownership manifest and live registry valid");
-        }
-        OwnershipCommand::ValidateManifest { live: false, .. } => {
-            unreachable!("offline validation exits before database initialization");
-        }
-        OwnershipCommand::SeedManifest { manifest, audit } => {
-            let manifest = load_ownership_policy_manifest(manifest)?;
-            let context = mutation_context(audit, TransitionIntent::Cutover)?;
-            let created = repository
-                .seed_missing(&manifest.registry_seeds()?, &context)
-                .await?;
-            println!("registered {} missing ownership resources", created.len());
-        }
-        OwnershipCommand::Show { resource } => {
-            let record = repository.get(resource.kind, &resource.key).await?;
-            println!("{}", serde_json::to_string_pretty(&record)?);
-        }
-        OwnershipCommand::Prepare { target, audit } => {
-            let context = mutation_context(audit, TransitionIntent::Cutover)?;
-            let prepared = repository
-                .prepare_batch(&ownership_targets(target), &context)
-                .await?;
-            println!("prepared {} ownership resources", prepared.len());
-        }
-        OwnershipCommand::PrepareRollback { target, audit } => {
-            let context = mutation_context(audit, TransitionIntent::Rollback)?;
-            let prepared = repository
-                .prepare_batch(&ownership_targets(target), &context)
-                .await?;
-            println!(
-                "prepared rollback for {} ownership resources",
-                prepared.len()
-            );
-        }
-        OwnershipCommand::Acknowledge {
-            resource,
-            desired_version,
-            replica_id,
-            readiness,
-            application_sha,
-        } => {
-            let acknowledgement = repository
-                .acknowledge(
-                    resource.kind,
-                    &resource.key,
-                    OwnershipVersion::new(*desired_version)?,
-                    &ReplicaId::new(replica_id)?,
-                    readiness.parse::<ReadinessState>()?,
-                    &ApplicationSha::new(application_sha)?,
-                )
-                .await?;
-            println!(
-                "acknowledged {}:{} version {} as {:?} by {}",
-                acknowledgement.resource_kind,
-                acknowledgement.resource_key,
-                acknowledgement.desired_version.get(),
-                acknowledgement.readiness_state,
-                acknowledgement.replica_id.as_str(),
-            );
-        }
-        OwnershipCommand::Promote {
-            target,
-            replicas,
-            audit,
-        } => {
-            promote(
-                repository,
-                target,
-                replicas,
-                audit,
-                TransitionIntent::Cutover,
-            )
-            .await?;
-        }
-        OwnershipCommand::PromoteRollback {
-            target,
-            replicas,
-            audit,
-        } => {
-            promote(
-                repository,
-                target,
-                replicas,
-                audit,
-                TransitionIntent::Rollback,
-            )
-            .await?;
-        }
-        OwnershipCommand::DrainStatus {
-            task_type,
-            source_owner,
-        } => {
-            let status = repository
-                .task_drain_status(
-                    &ResourceKey::new(task_type)?,
-                    source_owner.parse::<RuntimeOwner>()?,
-                )
-                .await?;
-            println!(
-                "pending={} processing={} drained={}",
-                status.pending,
-                status.processing,
-                status.is_drained()
-            );
-        }
-        OwnershipCommand::ClearAcknowledgements {
-            resource,
-            expected_owner,
-            expected_version,
-            minimum_age_seconds,
-            audit,
-        } => {
-            let context = mutation_context(audit, TransitionIntent::Cutover)?;
-            let deleted = repository
-                .clear_acknowledgements(
-                    resource.kind,
-                    &resource.key,
-                    expected_owner.parse::<RuntimeOwner>()?,
-                    OwnershipVersion::new(*expected_version)?,
-                    *minimum_age_seconds,
-                    &context,
-                )
-                .await?;
-            println!("cleared {deleted} ownership acknowledgements");
-        }
-    }
-    Ok(())
-}
-
-async fn promote(
-    repository: &OwnershipRepository,
-    target: &[TargetArg],
-    replicas: &[String],
-    audit: &AuditArgs,
-    intent: TransitionIntent,
-) -> AnyResult<()> {
-    let context = mutation_context(audit, intent)?;
-    let replicas = replicas
-        .iter()
-        .map(ReplicaId::new)
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let promoted = repository
-        .promote_batch(&ownership_targets(target), &replicas, &context)
-        .await?;
-    println!("promoted {} ownership resources", promoted.len());
-    Ok(())
-}
-
-fn mutation_context(
-    audit: &AuditArgs,
-    intent: TransitionIntent,
-) -> AnyResult<OwnershipMutationContext> {
-    Ok(OwnershipMutationContext::new(
-        ApplicationSha::new(&audit.application_sha)?,
-        &audit.actor,
-        &audit.reason,
-        intent,
-    )?)
-}
-
-fn ownership_targets(targets: &[TargetArg]) -> Vec<OwnershipTarget> {
-    targets.iter().map(|target| target.0.clone()).collect()
 }
 
 fn emit_success<T: Serialize>(
@@ -967,8 +868,48 @@ mod tests {
         ] {
             let cli = Cli::try_parse_from(arguments).expect("global output should parse");
             assert_eq!(cli.output, OutputFormat::Json);
-            assert_eq!(command_name(&cli.command), "db.query");
+            assert_eq!(cli.command.name(), "db.query");
         }
+    }
+
+    #[test]
+    fn nested_command_names_match_success_and_error_envelopes() {
+        let tasks = Cli::try_parse_from(["newsly-admin", "tasks", "failures"]).unwrap();
+        assert_eq!(tasks.command.name(), "tasks.failures");
+
+        let ownership = Cli::try_parse_from([
+            "newsly-admin",
+            "ownership",
+            "show",
+            "--resource",
+            "task_type,scrape",
+        ])
+        .unwrap();
+        assert_eq!(ownership.command.name(), "ownership.show");
+
+        let transcripts = Cli::try_parse_from([
+            "newsly-admin",
+            "db",
+            "transcript-compatibility",
+            "--after-id",
+            "100",
+            "--limit",
+            "500",
+        ])
+        .unwrap();
+        assert_eq!(transcripts.command.name(), "db.transcript-compatibility");
+
+        let backfill = Cli::try_parse_from([
+            "newsly-admin",
+            "db",
+            "transcript-backfill",
+            "--after-id",
+            "100",
+            "--limit",
+            "500",
+        ])
+        .unwrap();
+        assert_eq!(backfill.command.name(), "db.transcript-backfill");
     }
 
     #[test]

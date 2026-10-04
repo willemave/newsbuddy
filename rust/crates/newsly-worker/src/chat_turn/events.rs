@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
+use super::usage_source;
 use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 
 const TOOL_PROGRESS_WRITE_INTERVAL: Duration = Duration::from_millis(250);
@@ -153,21 +154,13 @@ impl AgentEventSink for ChatEvents {
             }
         }
         if let AgentEvent::Usage { observation } = &event {
-            self.usage.publish(observation.as_ref().clone())?;
+            self.usage.record(observation.as_ref().clone())?;
         }
         lock(&self.sender)
             .as_ref()
             .ok_or_else(|| AgentRuntimeError::EventSink("chat event sink is closed".to_owned()))?
             .send(event)
             .map_err(|_| AgentRuntimeError::EventSink("chat event queue is closed".to_owned()))
-    }
-}
-
-fn usage_source(snapshot: &ChatTaskSnapshot) -> String {
-    match snapshot.context.kind {
-        newsly_db::ChatTurnKind::Article => "async".to_owned(),
-        newsly_db::ChatTurnKind::Assistant => snapshot.context.source.clone(),
-        newsly_db::ChatTurnKind::DeepResearch => "deep_research".to_owned(),
     }
 }
 

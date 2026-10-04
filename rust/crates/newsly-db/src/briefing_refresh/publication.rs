@@ -2,10 +2,9 @@
 
 use super::{
     BTreeMap, BTreeSet, BriefingRefreshApplyOutcome, BriefingRefreshConfig, BriefingRefreshMode,
-    BriefingRefreshPublication, BriefingRefreshRepositoryError, BriefingSegmentUsage,
-    ComposedBriefingAppend, ComposedBriefingCompaction, ComposedBriefingSegment,
-    DEFAULT_MASTHEAD_DECK, HashSet, NaiveDateTime, Postgres, PreparedBriefingRefresh, Transaction,
-    Utc, Value, json,
+    BriefingRefreshPublication, BriefingRefreshRepositoryError, ComposedBriefingAppend,
+    ComposedBriefingCompaction, ComposedBriefingSegment, DEFAULT_MASTHEAD_DECK, HashSet,
+    NaiveDateTime, Postgres, PreparedBriefingRefresh, Transaction, Utc, Value, json,
     preparation::{ensure_state, lock_state},
     sources::{json_strings, load_eligible_sources_for_keys, load_read_source_keys, u64_to_i32},
 };
@@ -19,7 +18,6 @@ pub async fn apply_briefing_refresh(
     ensure_state(transaction, prepared.user_id, config).await?;
     let current_version = lock_state(transaction, prepared.user_id).await?;
     let version_stale = current_version != prepared.starting_version;
-    persist_composition_usage(transaction, publication).await?;
     let append_current = if version_stale {
         false
     } else {
@@ -103,7 +101,6 @@ pub async fn apply_briefing_refresh(
     } else {
         current_version
     };
-    let last_append = (appended > 0).then_some(publication.finalized_at.naive_utc());
     let masthead_deck = if appended > 0 {
         Some(masthead_deck(transaction, prepared.user_id).await?)
     } else {
@@ -113,16 +110,12 @@ pub async fn apply_briefing_refresh(
         r#"
         UPDATE briefing_states
         SET version = $2,
-            last_sweep_at = $3,
-            last_append_at = COALESCE($4, last_append_at),
-            masthead_deck = COALESCE($5, masthead_deck)
+            masthead_deck = COALESCE($3, masthead_deck)
         WHERE user_id::bigint = $1
         "#,
     )
     .bind(prepared.user_id)
     .bind(version)
-    .bind(publication.finalized_at.naive_utc())
-    .bind(last_append)
     .bind(masthead_deck)
     .execute(&mut **transaction)
     .await?;
@@ -246,12 +239,11 @@ pub(super) async fn persist_segment(
         r#"
         INSERT INTO briefing_segments (
             lens_id, user_id, blocks, markdown_raw, narration_text, source_keys,
-            event_groups, status, model, prompt_version, input_tokens, output_tokens,
-            generation_ms, warnings, created_at, updated_at
+            event_groups, status, model, prompt_version, warnings, created_at, updated_at
         )
         VALUES (
             $1::bigint::integer, $2::bigint::integer, $3, $4, $5, $6, $7,
-            'active', $8, $9, $10, $11, $12, $13,
+            'active', $8, $9, '[]'::jsonb,
             timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
         )
         "#,
@@ -265,80 +257,6 @@ pub(super) async fn persist_segment(
     .bind(json!(segment.event_groups))
     .bind(&segment.model)
     .bind(&segment.prompt_version)
-    .bind(segment.input_tokens)
-    .bind(segment.output_tokens)
-    .bind(segment.generation_ms)
-    .bind(json!(segment.warnings))
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-pub(super) async fn persist_composition_usage(
-    transaction: &mut Transaction<'static, Postgres>,
-    publication: &BriefingRefreshPublication,
-) -> Result<(), sqlx::Error> {
-    for segment in publication
-        .append_segments
-        .iter()
-        .map(|window| &window.segment)
-        .chain(
-            publication
-                .compactions
-                .iter()
-                .flat_map(|plan| plan.segments.iter()),
-        )
-    {
-        persist_usage(transaction, &publication.prepared, &segment.usage).await?;
-    }
-    Ok(())
-}
-
-pub(super) async fn persist_usage(
-    transaction: &mut Transaction<'static, Postgres>,
-    prepared: &PreparedBriefingRefresh,
-    usage: &BriefingSegmentUsage,
-) -> Result<(), sqlx::Error> {
-    if usage.operation == "briefing.compose_window.observed" {
-        return Ok(());
-    }
-    let total_tokens = usage
-        .usage
-        .input_tokens
-        .saturating_add(usage.usage.output_tokens);
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id, task_id, user_id,
-            request_count, input_tokens, cache_read_tokens, cache_write_tokens,
-            output_tokens, total_tokens,
-            currency, pricing_version, metadata, created_at
-        )
-        VALUES (
-            $1, $2, 'briefing_compose', $3, 'queue', $4,
-            $5::bigint::integer, $6::bigint::integer, $7, $8, $9, $10, $11, $12,
-            'USD', '2026-08-02', $13, timezone('UTC', clock_timestamp())
-        )
-        "#,
-    )
-    .bind(&usage.provider)
-    .bind(&usage.model)
-    .bind(&usage.operation)
-    .bind(&usage.provider_response_id)
-    .bind(prepared.task_id)
-    .bind(prepared.user_id)
-    .bind(u64_to_i32(usage.usage.request_count))
-    .bind(u64_to_i32(usage.usage.input_tokens))
-    .bind(u64_to_i32(usage.usage.cached_input_tokens))
-    .bind(u64_to_i32(usage.usage.cache_write_tokens))
-    .bind(u64_to_i32(usage.usage.output_tokens))
-    .bind(u64_to_i32(total_tokens))
-    .bind(json!({
-        "prompt_version": super::BRIEFING_COMPOSITION_PROMPT_VERSION,
-        "reasoning_tokens": usage.usage.reasoning_tokens,
-        "input_audio_tokens": usage.usage.input_audio_tokens,
-        "output_audio_tokens": usage.usage.output_audio_tokens,
-    }))
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -358,12 +276,12 @@ pub(super) async fn persist_embedding_usage(
             INSERT INTO vendor_usage_records (
                 provider, model, feature, operation, source, request_id, task_id, user_id,
                 request_count, input_tokens, output_tokens, total_tokens,
-                currency, pricing_version, metadata, created_at
+                currency, metadata, created_at
             )
             VALUES (
                 $1, $2, 'briefing_event_grouping', 'briefing.embed_events', 'queue', $3,
                 $4::bigint::integer, $5::bigint::integer, $6, $7, $8, $9,
-                'USD', '2026-08-02', '{}'::jsonb, timezone('UTC', clock_timestamp())
+                'USD', '{}'::jsonb, timezone('UTC', clock_timestamp())
             )
             "#,
         )

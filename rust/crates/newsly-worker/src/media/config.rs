@@ -1,26 +1,22 @@
 use std::env;
 use std::fmt::{self, Debug, Formatter};
+use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use newsly_db::DatabaseConfig;
 use secrecy::SecretString;
 use thiserror::Error;
 use url::Url;
 
-use crate::config::WorkerLogFormat;
+use crate::queue_process_config::{
+    QueueWorkerProcessConfig, QueueWorkerProcessConfigError, QueueWorkerProcessEnv,
+};
 
 const MAX_MEDIA_BYTES: u64 = 500_000_000;
 
 #[derive(Clone)]
 pub struct MediaWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub openai_api_key: SecretString,
     pub openai_api_base: Option<String>,
     pub transcription_timeout: Duration,
@@ -47,13 +43,7 @@ impl Debug for MediaWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("MediaWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("openai_api_key", &"[REDACTED]")
             .field("openai_api_base", &self.openai_api_base)
             .field("transcription_timeout", &self.transcription_timeout)
@@ -91,40 +81,22 @@ impl MediaWorkerProcessConfig {
     /// Returns a field-specific error for missing secrets or unsafe and out-of-range values.
     #[allow(clippy::too_many_lines)]
     pub fn from_env() -> Result<Self, MediaWorkerConfigError> {
-        let database_url = required_secret("DATABASE_URL")?;
-        let mut database = DatabaseConfig::new(database_url.clone(), "newsly-media-worker");
-        database.max_connections = parse_u32("NEWSLY_MEDIA_DATABASE_MAX_CONNECTIONS", 8)?;
-        database.min_connections = parse_u32("NEWSLY_MEDIA_DATABASE_MIN_CONNECTIONS", 0)?;
-        database.acquire_timeout = Duration::from_millis(parse_u64(
-            "NEWSLY_MEDIA_DATABASE_ACQUIRE_TIMEOUT_MS",
-            5_000,
-        )?);
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
-            return Err(MediaWorkerConfigError::InvalidRange(
-                "NEWSLY_MEDIA_DATABASE connection bounds",
-            ));
-        }
-
-        let worker_id = env::var("NEWSLY_MEDIA_WORKER_ID").unwrap_or_else(|_| {
-            let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
-            format!("rust-media-{host}-{}", std::process::id())
-        });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
-            return Err(MediaWorkerConfigError::InvalidRange(
-                "NEWSLY_MEDIA_WORKER_ID",
-            ));
-        }
-        let lease_duration =
-            Duration::from_secs(parse_u64("NEWSLY_MEDIA_WORKER_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
-            return Err(MediaWorkerConfigError::InvalidRange(
-                "NEWSLY_MEDIA_WORKER_LEASE_SECONDS",
-            ));
-        }
-        let max_retries = parse_i32("MAX_TASK_RETRIES", 3)?;
-        if max_retries < 0 {
-            return Err(MediaWorkerConfigError::InvalidRange("MAX_TASK_RETRIES"));
-        }
+        let process = QueueWorkerProcessConfig::from_env_with(
+            "newsly-media-worker",
+            "rust-media",
+            QueueWorkerProcessEnv {
+                database_max_connections: "NEWSLY_MEDIA_DATABASE_MAX_CONNECTIONS",
+                database_min_connections: "NEWSLY_MEDIA_DATABASE_MIN_CONNECTIONS",
+                database_acquire_timeout_ms: "NEWSLY_MEDIA_DATABASE_ACQUIRE_TIMEOUT_MS",
+                database_bounds: "NEWSLY_MEDIA_DATABASE connection bounds",
+                default_max_connections: 8,
+                worker_id: "NEWSLY_MEDIA_WORKER_ID",
+                lease_seconds: "NEWSLY_MEDIA_WORKER_LEASE_SECONDS",
+                default_log_filter: "newsly_worker=info,newsly_queue=info,newsly_providers=info",
+                trim_database_url: true,
+                empty_database_url_is_missing: false,
+            },
+        )?;
 
         let transcription_timeout = bounded_duration(
             "OPENAI_TRANSCRIPTION_TIMEOUT_SECONDS",
@@ -225,15 +197,7 @@ impl MediaWorkerProcessConfig {
             .transpose()?;
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter: env::var("RUST_LOG").unwrap_or_else(|_| {
-                "newsly_worker=info,newsly_queue=info,newsly_providers=info".to_owned()
-            }),
-            log_format: parse_log_format()?,
+            process,
             openai_api_key: required_secret("OPENAI_API_KEY")?,
             openai_api_base,
             transcription_timeout,
@@ -259,9 +223,13 @@ impl MediaWorkerProcessConfig {
             tweet_video_enabled: parse_bool("TWEET_VIDEO_ENABLED", true)?,
         })
     }
+}
 
-    pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+impl Deref for MediaWorkerProcessConfig {
+    type Target = QueueWorkerProcessConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.process
     }
 }
 
@@ -271,22 +239,6 @@ fn required_secret(name: &'static str) -> Result<SecretString, MediaWorkerConfig
         return Err(MediaWorkerConfigError::Empty(name));
     }
     Ok(SecretString::from(value))
-}
-
-fn parse_log_format() -> Result<WorkerLogFormat, MediaWorkerConfigError> {
-    match env::var("NEWSLY_RUST_LOG_FORMAT")
-        .unwrap_or_else(|_| "json".to_owned())
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "json" => Ok(WorkerLogFormat::Json),
-        "pretty" | "text" => Ok(WorkerLogFormat::Pretty),
-        _ => Err(MediaWorkerConfigError::InvalidValue {
-            name: "NEWSLY_RUST_LOG_FORMAT",
-            expected: "json or pretty",
-        }),
-    }
 }
 
 fn bounded_duration(
@@ -302,15 +254,7 @@ fn bounded_duration(
     Ok(duration)
 }
 
-fn parse_u32(name: &'static str, default: u32) -> Result<u32, MediaWorkerConfigError> {
-    parse_number(name, default)
-}
-
 fn parse_u64(name: &'static str, default: u64) -> Result<u64, MediaWorkerConfigError> {
-    parse_number(name, default)
-}
-
-fn parse_i32(name: &'static str, default: i32) -> Result<i32, MediaWorkerConfigError> {
     parse_number(name, default)
 }
 
@@ -427,4 +371,20 @@ pub enum MediaWorkerConfigError {
     InvalidPath(&'static str),
     #[error("Rust media workers require local content-body storage, got {0:?}")]
     UnsupportedStorageProvider(String),
+}
+
+impl From<QueueWorkerProcessConfigError> for MediaWorkerConfigError {
+    fn from(error: QueueWorkerProcessConfigError) -> Self {
+        match error {
+            QueueWorkerProcessConfigError::Missing(name)
+            | QueueWorkerProcessConfigError::InvalidUnicode(name) => Self::Missing(name),
+            QueueWorkerProcessConfigError::Empty(name) => Self::Empty(name),
+            QueueWorkerProcessConfigError::InvalidNumber(name, _) => Self::InvalidNumber(name),
+            QueueWorkerProcessConfigError::Invalid(name) => Self::InvalidValue {
+                name,
+                expected: "a supported value",
+            },
+            QueueWorkerProcessConfigError::Range(name) => Self::InvalidRange(name),
+        }
+    }
 }

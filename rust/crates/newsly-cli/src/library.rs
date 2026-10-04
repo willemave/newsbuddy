@@ -10,21 +10,20 @@ use sha2::{Digest as _, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-pub const LIBRARY_MANIFEST_FILENAME: &str = ".newsbuddy-manifest.json";
-pub const LEGACY_LIBRARY_MANIFEST_FILENAME: &str = ".newsly-agent-manifest.json";
+pub(crate) const LIBRARY_MANIFEST_FILENAME: &str = ".newsbuddy-manifest.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct LibrarySyncReceipt {
-    pub library_root: PathBuf,
-    pub downloaded: usize,
-    pub deleted: usize,
-    pub unchanged: usize,
-    pub repaired: usize,
-    pub document_count: usize,
+pub(crate) struct LibrarySyncReceipt {
+    pub(crate) library_root: PathBuf,
+    pub(crate) downloaded: usize,
+    pub(crate) deleted: usize,
+    pub(crate) unchanged: usize,
+    pub(crate) repaired: usize,
+    pub(crate) document_count: usize,
 }
 
 #[derive(Debug, Error)]
-pub enum LibrarySyncError<E> {
+pub(crate) enum LibrarySyncError<E> {
     #[error("missing library root")]
     MissingRoot,
     #[error(
@@ -62,7 +61,7 @@ struct LocalLibraryManifest {
 ///
 /// Returns an error for unsafe paths or symlinks, invalid manifests or checksums, local filesystem
 /// failures, remote fetch failures, or an unapproved full prune.
-pub async fn sync_library<F, Fut, E>(
+pub(crate) async fn sync_library<F, Fut, E>(
     root: &Path,
     remote: &AgentLibraryManifestResponse,
     allow_prune_all: bool,
@@ -79,8 +78,7 @@ where
     set_directory_mode(root)?;
 
     let canonical_manifest_path = root.join(LIBRARY_MANIFEST_FILENAME);
-    let legacy_manifest_path = root.join(LEGACY_LIBRARY_MANIFEST_FILENAME);
-    let local = load_local_manifest(&canonical_manifest_path, &legacy_manifest_path)?;
+    let local = load_local_manifest(&canonical_manifest_path)?;
     if remote.documents.is_empty() && !local.files.is_empty() && !allow_prune_all {
         return Err(LibrarySyncError::PruneAllRefused);
     }
@@ -153,19 +151,12 @@ where
     })
 }
 
-fn load_local_manifest(
-    canonical_path: &Path,
-    legacy_path: &Path,
-) -> Result<LocalLibraryManifest, std::io::Error> {
+fn load_local_manifest(canonical_path: &Path) -> Result<LocalLibraryManifest, std::io::Error> {
     let data = match fs::read(canonical_path) {
         Ok(data) => data,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match fs::read(legacy_path) {
-            Ok(data) => data,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(LocalLibraryManifest::default());
-            }
-            Err(error) => return Err(error),
-        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(LocalLibraryManifest::default());
+        }
         Err(error) => return Err(error),
     };
     serde_json::from_slice(&data).map_err(std::io::Error::other)

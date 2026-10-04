@@ -174,7 +174,7 @@ async fn prepare(
             vector,
         },
         Some(newsly_db::BriefingLensAssignmentUsage {
-            provider: "openrouter".into(),
+            provider: super::EMBEDDING_PROVIDER.into(),
             model: batch.model,
             provider_response_id: batch.provider_response_id,
             usage: batch.usage,
@@ -203,7 +203,8 @@ impl TaskFinalizer for EmbeddingFinalizer {
                 .await?;
             let saved = news_lens_embeddings::save(tx, &self.embedding).await?;
             if let Some(usage) = &self.usage {
-                newsly_db::news_lens_embeddings::record_usage(tx, self.task_id, usage).await?;
+                newsly_db::news_lens_embeddings::record_usage(&mut **tx, self.task_id, None, usage)
+                    .await?;
             }
             Ok(if saved {
                 TaskFinalizerResult::Keep

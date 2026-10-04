@@ -1,5 +1,5 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -69,7 +69,7 @@ pub(super) async fn update_current_user(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<UpdateUserProfileRequest>, JsonRejection>,
 ) -> Result<Json<UserResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
@@ -140,10 +140,7 @@ pub(super) async fn update_current_user(
         .await
         .map_err(|error| internal_error(error, &request_id))?
         .ok_or_else(|| invalid_credentials(&request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(user_response(profile)))
 }
 

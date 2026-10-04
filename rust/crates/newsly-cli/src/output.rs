@@ -2,19 +2,20 @@
 
 use std::fmt;
 use std::io::Write;
-use std::str::FromStr;
 
 use clap::ValueEnum;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-pub const FORMAT_JSON: &str = "json";
-pub const FORMAT_TEXT: &str = "text";
+use crate::client::ApiError;
+
+pub(crate) const FORMAT_JSON: &str = "json";
+pub(crate) const FORMAT_TEXT: &str = "text";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
-pub enum OutputFormat {
+pub(crate) enum OutputFormat {
     #[default]
     Json,
     Text,
@@ -29,34 +30,30 @@ impl fmt::Display for OutputFormat {
     }
 }
 
-impl FromStr for OutputFormat {
-    type Err = OutputError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        validate_format(value)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Envelope {
+pub(crate) struct Envelope {
     #[serde(skip_serializing_if = "String::is_empty")]
-    pub command: String,
-    pub ok: bool,
+    pub(crate) command: String,
+    pub(crate) ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    pub(crate) data: Option<Value>,
     /// Optional display body supplied by the command; never part of the JSON envelope.
     #[serde(skip)]
-    pub text_data: Option<String>,
+    pub(crate) text_data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub job: Option<Value>,
+    pub(crate) job: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<EnvelopeError>,
+    pub(crate) error: Option<ApiError>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_path: Option<String>,
+    pub(crate) config_path: Option<String>,
 }
 
 impl Envelope {
-    pub fn success(command: impl Into<String>, data: Option<Value>, job: Option<Value>) -> Self {
+    pub(crate) fn success(
+        command: impl Into<String>,
+        data: Option<Value>,
+        job: Option<Value>,
+    ) -> Self {
         Self {
             command: command.into(),
             ok: true,
@@ -68,9 +65,9 @@ impl Envelope {
         }
     }
 
-    pub fn failure(
+    pub(crate) fn failure(
         command: impl Into<String>,
-        error: EnvelopeError,
+        error: ApiError,
         config_path: Option<String>,
     ) -> Self {
         Self {
@@ -85,55 +82,12 @@ impl Envelope {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct EnvelopeError {
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status_code: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retryable: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-}
-
-impl EnvelopeError {
-    pub fn message(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            status_code: None,
-            code: None,
-            details: None,
-            retryable: None,
-            request_id: None,
-        }
-    }
-}
-
 #[derive(Debug, Error)]
-pub enum OutputError {
-    #[error("unsupported output format; expected one of: json, text")]
-    UnsupportedFormat,
+pub(crate) enum OutputError {
     #[error("failed to encode CLI output: {0}")]
     Json(#[from] serde_json::Error),
     #[error("failed to write CLI output: {0}")]
     Io(#[from] std::io::Error),
-}
-
-/// Parse a supported output format.
-///
-/// # Errors
-///
-/// Returns [`OutputError::UnsupportedFormat`] for values other than `json` or `text`.
-pub fn validate_format(format: &str) -> Result<OutputFormat, OutputError> {
-    match format {
-        FORMAT_JSON => Ok(OutputFormat::Json),
-        FORMAT_TEXT => Ok(OutputFormat::Text),
-        _ => Err(OutputError::UnsupportedFormat),
-    }
 }
 
 /// Write an output envelope using the selected format.
@@ -141,7 +95,7 @@ pub fn validate_format(format: &str) -> Result<OutputFormat, OutputError> {
 /// # Errors
 ///
 /// Returns an error when JSON encoding or writing fails.
-pub fn emit(
+pub(crate) fn emit(
     writer: &mut impl Write,
     envelope: &Envelope,
     format: OutputFormat,
@@ -205,11 +159,11 @@ mod tests {
 
     #[test]
     fn json_error_envelope_preserves_typed_error_fields() {
-        let error = EnvelopeError {
+        let error = ApiError {
             message: "conflict".to_owned(),
             status_code: Some(409),
             code: Some("already_exists".to_owned()),
-            details: Some(json!({"content_id": 42})),
+            details: Some(Box::new(json!({"content_id": 42}))),
             retryable: Some(false),
             request_id: Some("request-1".to_owned()),
         };
@@ -243,29 +197,13 @@ mod tests {
 
     #[test]
     fn text_error_uses_error_block() {
-        let envelope = Envelope::failure(
-            "jobs.get",
-            EnvelopeError::message("network unavailable"),
-            None,
-        );
+        let envelope = Envelope::failure("jobs.get", ApiError::local("network unavailable"), None);
         let mut output = Vec::new();
         emit(&mut output, &envelope, OutputFormat::Text).expect("emit text");
         let output = String::from_utf8(output).expect("UTF-8 output");
         assert!(output.starts_with("command: jobs.get\nok: false\nerror:\n"));
         assert!(output.contains("\"message\": \"network unavailable\""));
         assert!(!output.contains("status_code"));
-    }
-
-    #[test]
-    fn output_format_validation_preserves_cli_error_contract() {
-        assert_eq!(validate_format("json").expect("JSON"), OutputFormat::Json);
-        assert_eq!(validate_format("text").expect("text"), OutputFormat::Text);
-        assert_eq!(
-            validate_format("yaml")
-                .expect_err("unsupported format")
-                .to_string(),
-            "unsupported output format; expected one of: json, text"
-        );
     }
 
     #[test]

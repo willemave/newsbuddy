@@ -429,7 +429,7 @@ pub(super) async fn assign_nonsemantic_pending_lenses(
     .into_iter()
     .collect::<HashSet<_>>();
     for row in &unassigned {
-        let Some(key) = news_topic(&row.raw_metadata)
+        let Some(key) = news_topic(&row.source.raw_metadata)
             .0
             .map(|slug| format!("news-{slug}"))
             .filter(|key| active_lens_keys.contains(key))
@@ -451,21 +451,9 @@ pub(super) async fn load_lens_assignment_snapshot(
         .map(|row| BriefingUnassignedSource {
             pending_id: row.pending_id,
             source_kind: "news".to_owned(),
-            source_id: row.id,
+            source_id: row.source.id,
             enqueued_at: row.enqueued_at.and_utc(),
-            source: source_from_news(
-                row.id,
-                row.summary_text.as_deref(),
-                &row.summary_key_points,
-                &row.raw_metadata,
-                row.article_url.as_deref(),
-                row.canonical_story_url.as_deref(),
-                row.canonical_item_url.as_deref(),
-                row.published_at,
-                row.processed_at,
-                row.ingested_at,
-                row.created_at,
-            ),
+            source: source_from_news(&row.source),
         })
         .collect();
     let active_lenses = semantic_lens_rows(transaction, user_id)
@@ -614,22 +602,10 @@ pub(super) async fn load_append_batches(
             BriefingPendingIdentity {
                 id: row.pending_id,
                 source_kind: "news".to_owned(),
-                source_id: row.id,
+                source_id: row.source.id,
                 lens_key: row.lens_key.clone(),
             },
-            source_from_news(
-                row.id,
-                row.summary_text.as_deref(),
-                &row.summary_key_points,
-                &row.raw_metadata,
-                row.article_url.as_deref(),
-                row.canonical_story_url.as_deref(),
-                row.canonical_item_url.as_deref(),
-                row.published_at,
-                row.processed_at,
-                row.ingested_at,
-                row.created_at,
-            ),
+            source_from_news(&row.source),
             row.enqueued_at,
         ));
     }

@@ -21,6 +21,7 @@ jsonschema.workspace = true
 newsly-agent-runtime = { path = "../newsly-agent-runtime" }
 newsly-extraction = { path = "../newsly-extraction" }
 rig-core.workspace = true
+object_store.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 scraper.workspace = true

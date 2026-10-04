@@ -9,8 +9,10 @@ mod admin_evals;
 mod admin_logs;
 mod admin_onboarding;
 mod admin_pages;
+mod admin_shell;
 mod agent;
 mod apple_auth;
+mod audio_episode_presentation;
 mod audio_episodes;
 mod audio_storage;
 mod auth;
@@ -27,9 +29,7 @@ mod content_read;
 mod content_submission;
 mod debug_auth;
 mod discussions;
-mod encoding;
 mod error;
-mod feed_validation;
 mod gateway;
 mod health;
 mod integrations;
@@ -45,6 +45,7 @@ mod observability;
 mod onboarding;
 mod onboarding_flow;
 mod openai;
+mod pagination_cursor;
 mod public_pages;
 mod refresh;
 mod route_manifest;
@@ -56,6 +57,8 @@ mod users;
 mod wire_presence;
 mod write_support;
 
+use crate::learning_deck_artifacts::LearningDeckArtifactStore;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,8 +66,8 @@ use axum::Router;
 use axum::http::{HeaderMap, HeaderName};
 use newsly_db::{Database, OwnershipRepository};
 use newsly_providers::{
-    ContentMiscGateway, IntegrationTokenCipher, OnboardingGateway, OpenAiTranscriptionGateway,
-    ScrapeGateway, XOAuthGateway,
+    BriefingDigGateway, ContentMiscGateway, IntegrationTokenCipher, OnboardingGateway,
+    OpenAiTranscriptionGateway, ScrapeGateway, XOAuthGateway,
 };
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
@@ -90,13 +93,22 @@ pub struct AppState {
     audio_storage: Arc<audio_storage::AudioStorage>,
     content_body_store: Arc<content_body_storage::ContentBodyStore>,
     content_misc: Arc<ContentMiscGateway>,
+    briefing_dig: Arc<BriefingDigGateway>,
     scrape: Arc<ScrapeGateway>,
-    feed_validator: feed_validation::FeedValidator,
+    feed_validator: newsly_providers::FeedValidator,
     onboarding: Arc<OnboardingGateway>,
     transcription: Option<Arc<OpenAiTranscriptionGateway>>,
     integration_token_cipher: Option<IntegrationTokenCipher>,
-    x_oauth: Option<Arc<XOAuthGateway>>,
+    learning_deck_artifact_store: Arc<learning_deck_artifacts::LearningDeckArtifactStore>,
+    learning_deck_token_signer: Arc<learning_deck_tokens::LearningDeckTokenSigner>,
+    x_oauth: Option<XOAuthServices>,
     gateway: gateway::Gateway,
+}
+
+#[derive(Debug, Clone)]
+struct XOAuthServices {
+    gateway: Arc<XOAuthGateway>,
+    token_cipher: IntegrationTokenCipher,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -184,12 +196,14 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
             .map(Arc::new)
         })
         .transpose()?;
-    let feed_validator = feed_validation::FeedValidator::new();
+    let feed_validator = newsly_providers::FeedValidator::new();
     let content_body_store = Arc::new(content_body_storage::ContentBodyStore::from_environment()?);
     let content_misc = Arc::new(ContentMiscGateway::from_env()?);
+    let briefing_dig = Arc::new(BriefingDigGateway::from_env()?);
     let scrape = Arc::new(ScrapeGateway::from_env()?);
     let onboarding = Arc::new(OnboardingGateway::from_env()?);
     let audio_storage = Arc::new(audio_storage::AudioStorage::from_environment()?);
+    let learning_deck_token_signer = Arc::new(config.auth.learning_deck_token_signer()?);
     let integration_token_cipher = config
         .integration_token_encryption_key
         .as_ref()
@@ -199,14 +213,22 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         config.x_client_id.clone(),
         config.x_oauth_redirect_uri.clone(),
     ) {
-        (Some(client_id), Some(redirect_uri)) => Some(Arc::new(XOAuthGateway::new(
-            &client_id,
-            config.x_client_secret.clone(),
-            &redirect_uri,
-            config.x_oauth_authorize_url.clone(),
-            config.x_oauth_token_url.clone(),
-            config.x_api_base_url.clone(),
-        )?)),
+        (Some(client_id), Some(redirect_uri)) => {
+            let token_cipher = integration_token_cipher.clone().ok_or_else(|| {
+                anyhow::anyhow!("X_TOKEN_ENCRYPTION_KEY is required when X OAuth is configured")
+            })?;
+            Some(XOAuthServices {
+                gateway: Arc::new(XOAuthGateway::new(
+                    &client_id,
+                    config.x_client_secret.clone(),
+                    &redirect_uri,
+                    config.x_oauth_authorize_url.clone(),
+                    config.x_oauth_token_url.clone(),
+                    config.x_api_base_url.clone(),
+                )?),
+                token_cipher,
+            })
+        }
         _ => None,
     };
     let application_sha = config.application_sha.clone();
@@ -220,17 +242,22 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         service_name: config.service_name.into(),
         readiness_timeout: config.readiness_timeout,
         checkout_timeout: config.checkout_timeout,
-        debug_auth_enabled: config.debug || config.environment.eq_ignore_ascii_case("development"),
-        secure_admin_cookie: config.environment.eq_ignore_ascii_case("production"),
+        debug_auth_enabled: config.debug,
+        secure_admin_cookie: config.environment.requires_secure_cookies(),
         auth: config.auth,
         audio_storage,
+        learning_deck_artifact_store: Arc::new(LearningDeckArtifactStore::from_content_store(
+            &content_body_store,
+        )),
         content_body_store,
         content_misc,
+        briefing_dig,
         scrape,
         feed_validator,
         onboarding,
         transcription,
         integration_token_cipher,
+        learning_deck_token_signer,
         x_oauth,
         gateway,
     };

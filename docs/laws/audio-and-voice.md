@@ -19,3 +19,5 @@ AV8. One feature owns microphone capture at a time and releases it after cancell
 AV9. Manual stop and silence stop produce at most one transcript and one action. Cancellation produces neither.
 
 AV10. Dictation follows the same validation and action path as typed input, and typing remains available when voice service fails.
+
+AV11. Audio source IDs and trimmed titles have the same projection across episode and Briefing routes, including single-content and multi-item snapshots. Unknown stored episode kinds or statuses fail an individual lookup; lists omit and log invalid rows without hiding valid episodes or inventing a known kind.

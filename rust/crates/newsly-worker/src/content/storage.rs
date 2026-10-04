@@ -94,13 +94,15 @@ impl LocalContentBodyStore {
         }
         let key = Path::new(&pointer.storage_key);
         validate_relative_path(key)?;
-        let Some(bytes) = read_optional(&self.root, key).await? else {
+        let Some(slice) = read_optional(&self.root, key, MAX_SOURCE_BODY_BYTES).await? else {
             return Ok(None);
         };
-        if bytes.len() > MAX_SOURCE_BODY_BYTES {
-            return Err(ContentBodyStoreError::BodyTooLarge(bytes.len()));
+        if slice.truncated {
+            return Err(ContentBodyStoreError::BodyTooLarge(
+                MAX_SOURCE_BODY_BYTES.saturating_add(1),
+            ));
         }
-        String::from_utf8(bytes)
+        String::from_utf8(slice.bytes)
             .map(Some)
             .map_err(ContentBodyStoreError::InvalidUtf8)
     }

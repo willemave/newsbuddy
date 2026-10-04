@@ -1,13 +1,14 @@
+use crate::briefing::parse_source_ids;
 use sqlx::PgPool;
 
 use super::{
     ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION,
     BriefingLensAssignmentPlan, BriefingRefreshConfig, BriefingRefreshMode,
-    BriefingRefreshPublication, BriefingRefreshSource, BriefingSegmentUsage,
-    ComposedBriefingAppend, ComposedBriefingSegment, PrepareBriefingRefreshOutcome,
-    PreparedBriefingRefresh, PreparedBriefingRefreshSeed, ProviderUsage, Utc,
-    apply_briefing_lens_assignment, apply_briefing_refresh, json, prepare_briefing_refresh,
-    sources::{briefing_context, news_topic, parse_source_ids},
+    BriefingRefreshPublication, BriefingRefreshSource, ComposedBriefingAppend,
+    ComposedBriefingSegment, PrepareBriefingRefreshOutcome, PreparedBriefingRefresh,
+    PreparedBriefingRefreshSeed, Utc, apply_briefing_lens_assignment, apply_briefing_refresh, json,
+    prepare_briefing_refresh,
+    sources::{briefing_context, news_topic},
 };
 
 fn test_config() -> BriefingRefreshConfig {
@@ -150,22 +151,6 @@ fn article_publication(prepared: PreparedBriefingRefresh) -> BriefingRefreshPubl
                 event_groups: source_keys.iter().cloned().map(|key| vec![key]).collect(),
                 model: "openai:gpt-5.6-luna".to_owned(),
                 prompt_version: BRIEFING_COMPOSITION_PROMPT_VERSION.to_owned(),
-                input_tokens: Some(10),
-                output_tokens: Some(5),
-                generation_ms: 25,
-                warnings: Vec::new(),
-                usage: BriefingSegmentUsage {
-                    provider: "openai".to_owned(),
-                    model: "gpt-5.6-luna".to_owned(),
-                    provider_response_id: Some("response-test".to_owned()),
-                    usage: ProviderUsage {
-                        request_count: 1,
-                        input_tokens: 10,
-                        output_tokens: 5,
-                        ..ProviderUsage::default()
-                    },
-                    operation: "briefing.compose_window".to_owned(),
-                },
             },
         }],
         compactions: Vec::new(),
@@ -363,16 +348,8 @@ async fn publication_atomically_replaces_pending_ownership_with_a_segment(pool: 
         .fetch_one(&pool)
         .await
         .expect("usage count");
-    let usage_prompt_version: String = sqlx::query_scalar(
-        "SELECT metadata::jsonb ->> 'prompt_version' FROM vendor_usage_records WHERE user_id::bigint = $1 AND feature = 'briefing_compose'",
-    )
-    .bind(user_id)
-    .fetch_one(&pool)
-    .await
-    .expect("usage prompt version");
-    assert_eq!((pending, segments, usage), (0, 1, 1));
+    assert_eq!((pending, segments, usage), (0, 1, 0));
     assert_eq!(prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
-    assert_eq!(usage_prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
 }
 
 #[sqlx::test]

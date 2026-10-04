@@ -2,7 +2,6 @@
   "tasks": [
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::content::AnalyzeUrlHandler",
       "payload_schema": "tasks/analyze_url.schema.json",
       "payload_schema_sha256": "d13c09211d5f4b67cb2e09ded59955c71f9deac4e6ed880dc8f76dcd57163da7",
       "queue": "content",
@@ -11,7 +10,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::feed_backfill::BackfillFeedsHandler",
       "payload_schema": "tasks/backfill_feeds.schema.json",
       "payload_schema_sha256": "f7ab630c55f900787eec11e76de76e0460be686014657ac8b7ccc8a20983d565",
       "queue": "backfill",
@@ -20,7 +18,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::briefing_refresh::BriefingRefreshHandler",
       "payload_schema": "tasks/briefing_refresh.schema.json",
       "payload_schema_sha256": "56ec4f932275aefc521c8352bedfe8487b1d023d9ddfe67e54ddb15f9e0ccc28",
       "queue": "llm",
@@ -29,7 +26,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::chat_turn::ChatPartitionHandler",
       "payload_schema": "tasks/chat_turn.schema.json",
       "payload_schema_sha256": "664b09f60c132d58ab86f3f863f1bfddceffadf44bcbdeec9a22d3cc726b7af1",
       "queue": "chat",
@@ -38,7 +34,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_account_deletion_worker::AccountDeletionHandler",
       "payload_schema": "tasks/delete_user_account.schema.json",
       "payload_schema_sha256": "267564bd25e030a7ab7616ebdd378a3efbe92fc54cf153d9c92d9daea5f69a39",
       "queue": "backfill",
@@ -47,7 +42,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::chat_turn::ChatPartitionHandler",
       "payload_schema": "tasks/dig_deeper.schema.json",
       "payload_schema_sha256": "437c845d4a73311da0729ace6d8950c9589412f6f5c38cb14c3286df1315a40c",
       "queue": "chat",
@@ -56,7 +50,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::feed_discovery::DiscoverFeedsHandler",
       "payload_schema": "tasks/discover_feeds.schema.json",
       "payload_schema_sha256": "267564bd25e030a7ab7616ebdd378a3efbe92fc54cf153d9c92d9daea5f69a39",
       "queue": "content",
@@ -65,7 +58,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::media::DownloadTweetVideoAudioHandler",
       "payload_schema": "tasks/download_tweet_video_audio.schema.json",
       "payload_schema_sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f",
       "queue": "media",
@@ -74,7 +66,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::news_item::EnrichNewsItemArticleHandler",
       "payload_schema": "tasks/enrich_news_item_article.schema.json",
       "payload_schema_sha256": "264fd5603cb75f025f6f32d05624e3c0e9ccbebb7392e012c3839f1701147bac",
       "queue": "content",
@@ -83,7 +74,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::discussion::FetchNewsItemDiscussionHandler",
       "payload_schema": "tasks/fetch_news_item_discussion.schema.json",
       "payload_schema_sha256": "305ccb1ded325ebce60a696b56c327982b1b2a60a38b85447b2299e38fe4ec18",
       "queue": "discussion",
@@ -92,7 +82,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::audio_episode::GenerateAudioEpisodeHandler",
       "payload_schema": "tasks/generate_audio_episode.schema.json",
       "payload_schema_sha256": "b498d247e54d2b698fc4dd5c56b087ec37da9485603fa626a00e02846b9f5373",
       "queue": "audio_episode",
@@ -101,7 +90,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::image_generation::GenerateImageHandler",
       "payload_schema": "tasks/generate_image.schema.json",
       "payload_schema_sha256": "f0e330dc48e57b51be29c1587768339c386a0c501b55fb8811fea97b9161b8f6",
       "queue": "image",
@@ -110,7 +98,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::onboarding_discovery::OnboardingDiscoverHandler",
       "payload_schema": "tasks/onboarding_discover.schema.json",
       "payload_schema_sha256": "b062c30ae2e5563de71b851e0918eec510f4d6fcf05303f9205804b868c6ad17",
       "queue": "onboarding",
@@ -119,7 +106,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::briefing_refresh::PrepareNewsLensHandler",
       "payload_schema": "tasks/prepare_news_lens.schema.json",
       "payload_schema_sha256": "a8309ef50c89a7f01fba7d24f873d0128372ff78c692e10f55f08f814f9e3489",
       "queue": "llm",
@@ -128,7 +114,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::briefing_refresh::ReclusterNewsLensesHandler",
       "payload_schema": "tasks/recluster_news_lenses.schema.json",
       "payload_schema_sha256": "96229d0779df9b010bfb9fce811a26f9fddab41b64773d55c384c42ed2a3f9b8",
       "queue": "llm",
@@ -137,7 +122,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::content::ProcessContentHandler",
       "payload_schema": "tasks/process_content.schema.json",
       "payload_schema_sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f",
       "queue": "content",
@@ -146,7 +130,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::news_item::ProcessNewsItemHandler",
       "payload_schema": "tasks/process_news_item.schema.json",
       "payload_schema_sha256": "305ccb1ded325ebce60a696b56c327982b1b2a60a38b85447b2299e38fe4ec18",
       "queue": "content",
@@ -155,7 +138,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::media::ProcessPodcastMediaHandler",
       "payload_schema": "tasks/process_podcast_media.schema.json",
       "payload_schema_sha256": "ea351ae614de2fde397456262bc4525230952676a9373cbefd7a6ec520ab3375",
       "queue": "media",
@@ -164,7 +146,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::run_llm_task::RunLlmTaskHandler",
       "payload_schema": "tasks/run_llm_task.schema.json",
       "payload_schema_sha256": "ccfec97dc428186578483f7515d0ce17a603a8c60bd77d1a0c9baeab2dca27c8",
       "queue": "llm",
@@ -173,7 +154,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::scrape::ScrapeHandler",
       "payload_schema": "tasks/scrape.schema.json",
       "payload_schema_sha256": "22a8e7fb64cd115a2cde883ba31cfa710c7342a2a0c714929ac612a56fc9dd58",
       "queue": "content",
@@ -182,7 +162,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::summarization::SummarizeHandler",
       "payload_schema": "tasks/summarize.schema.json",
       "payload_schema_sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f",
       "queue": "content",
@@ -191,7 +170,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::x_sync::XSyncIntegrationHandler",
       "payload_schema": "tasks/sync_integration.schema.json",
       "payload_schema_sha256": "d786f2906900d6be7ca5f5436377de639640f7d65a56d7e1eb0006178eaef0c8",
       "queue": "twitter",
@@ -200,7 +178,6 @@
     },
     {
       "dedupe_by_content": true,
-      "handler": "newsly_worker::media::TranscribeTweetVideoHandler",
       "payload_schema": "tasks/transcribe_tweet_video.schema.json",
       "payload_schema_sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f",
       "queue": "media",

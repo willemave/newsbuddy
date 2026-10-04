@@ -65,6 +65,15 @@ impl Scheduler {
             };
             match result {
                 Ok(Some(report)) => {
+                    if job == SchedulerJob::QueueWatchdog
+                        && let Err(error) = self.repository.prune_security_and_diagnostics().await
+                    {
+                        tracing::warn!(
+                            error = %error,
+                            error_code = "security_retention_failed",
+                            "Queue watchdog completed; retention will retry on its next tick"
+                        );
+                    }
                     tracing::info!(
                         job = report.job.as_str(),
                         scheduled_for = %scheduled_for,
@@ -74,8 +83,8 @@ impl Scheduler {
                         detail = report.detail,
                         "scheduler job completed"
                     );
-                    if let Some(maintenance) = report.maintenance {
-                        self.alert_watchdog(maintenance).await;
+                    if report.maintenance.is_some() {
+                        self.alert_watchdog().await;
                     }
                 }
                 Ok(None) => {
@@ -97,7 +106,7 @@ impl Scheduler {
         }
     }
 
-    async fn alert_watchdog(&self, _report: crate::MaintenanceReport) {
+    async fn alert_watchdog(&self) {
         use newsly_db::pipeline_monitoring::{claim_alert, set_signal, settle_alert};
         let pool = self.repository.pool();
         let configured = self.config.watchdog_slack_webhook_url.is_some();

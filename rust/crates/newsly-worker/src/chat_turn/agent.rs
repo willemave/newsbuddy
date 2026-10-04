@@ -4,18 +4,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEngine, AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError, MessagePart,
-    MessageRole, NewslyMessage, NewslyTranscript, RequestPart, ResponseContract, ToolPolicy,
+    AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError, MessagePart, MessageRole,
+    NewslyMessage, NewslyTranscript, RequestPart, ResponseContract, ToolPolicy,
 };
-use newsly_db::{ChatTaskSnapshot, ChatTurnKind};
-use newsly_e2b::{ControlPlaneConfig, DirectE2bProvider, E2bError, FileLimits};
+use newsly_db::ChatTaskSnapshot;
+use newsly_e2b::{DirectE2bProvider, E2bError};
 use newsly_providers::{
     FeedValidationError, FeedValidator, IntegrationTokenCipher, ModelProvider, ModelSpec,
-    OnboardingGateway, OnboardingGatewayError, OpenRouterPrivacyPolicy, ProviderCredentials,
-    RigAgentEngine, RigAgentEngineError,
+    OnboardingGateway, OnboardingGatewayError, ProviderCredentials, RigAgentEngine,
 };
 use newsly_queue::QueueKernel;
-use reqwest::Url;
 use secrecy::SecretString;
 use serde_json::{Map, Value};
 use sqlx::PgPool;
@@ -25,15 +23,23 @@ use tokio_util::sync::CancellationToken;
 
 use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::share_actions::{ShareActionAgentConfig, ShareActionAgentConfigError};
-use crate::task_sandbox::{TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner};
+use crate::task_sandbox::{
+    TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner, direct_provider, exa_endpoint,
+    secret_env,
+};
 use crate::task_tools::ExaSearchClient;
 
 use super::events::ChatEvents;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ChatAgentRunKind {
+    Article,
+    Assistant,
+}
 use super::prompts::{ChatPromptError, system_prompt};
 use super::routing::{article_tools, route_assistant_turn};
 use super::tools::{ChatToolDependencies, ChatToolExecutor};
 
-const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai/search";
 const CONTEXT_WINDOW_TOKENS: usize = 64_000;
 const TOOL_SCHEMA_RESERVE_TOKENS: usize = 4_000;
 const CHAT_HISTORY_MAX_TOKENS: usize = 16_000;
@@ -88,7 +94,7 @@ pub struct ChatAgentRuntime {
     body_store: ContentBodyStore,
     credentials: ProviderCredentials,
     cipher: Option<IntegrationTokenCipher>,
-    openrouter_policy: OpenRouterPrivacyPolicy,
+    http: reqwest::Client,
     config: ChatAgentConfig,
 }
 
@@ -98,13 +104,7 @@ impl ChatAgentRuntime {
         let e2b_key = secret_env("LLM_TASK_SANDBOX_E2B_API_KEY")
             .or_else(|| secret_env("E2B_API_KEY"))
             .ok_or(ChatAgentBuildError::MissingE2bKey)?;
-        let provider = Arc::new(DirectE2bProvider::new(
-            ControlPlaneConfig::production(e2b_key.clone())?,
-            FileLimits {
-                upload_bytes: 1_000_000,
-                download_bytes: 1_000_000,
-            },
-        )?);
+        let provider = direct_provider(e2b_key, 1_000_000)?;
         let lifecycle = TaskSandboxOwner::new(
             pool.clone(),
             Arc::clone(&provider),
@@ -114,24 +114,13 @@ impl ChatAgentRuntime {
                 sandbox_timeout: shared.sandbox_timeout,
             },
         )?;
-        let endpoint = env::var("EXA_API_BASE_URL")
-            .ok()
-            .map(|value| value.trim_end_matches('/').to_owned())
-            .map_or_else(
-                || Url::parse(DEFAULT_EXA_API_BASE),
-                |value| Url::parse(&format!("{value}/search")),
-            )
-            .map_err(|_| ChatAgentBuildError::Invalid("EXA_API_BASE_URL"))?;
+        let endpoint =
+            exa_endpoint().map_err(|_| ChatAgentBuildError::Invalid("EXA_API_BASE_URL"))?;
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
         let onboarding = OnboardingGateway::from_env()?;
         let feed_validator = FeedValidator::new();
-        let credentials = ProviderCredentials {
-            openai: secret_env("OPENAI_API_KEY"),
-            anthropic: secret_env("ANTHROPIC_API_KEY"),
-            google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-            openrouter: secret_env("OPENROUTER_API_KEY"),
-        };
+        let credentials = ProviderCredentials::from_env();
         let cipher = secret_env("X_TOKEN_ENCRYPTION_KEY")
             .as_ref()
             .map(IntegrationTokenCipher::new)
@@ -147,7 +136,7 @@ impl ChatAgentRuntime {
             body_store: ContentBodyStore::from_env()?,
             credentials,
             cipher,
-            openrouter_policy: OpenRouterPrivacyPolicy::default(),
+            http: reqwest::Client::new(),
             config,
         })
     }
@@ -173,14 +162,12 @@ impl ChatAgentRuntime {
     pub(super) async fn run(
         &self,
         snapshot: &ChatTaskSnapshot,
+        kind: ChatAgentRunKind,
         cancellation: CancellationToken,
     ) -> Result<ChatAgentRun, ChatAgentError> {
-        if snapshot.context.kind == ChatTurnKind::DeepResearch {
-            return Err(ChatAgentError::UnsupportedKind);
-        }
         let content_body = self.content_body(snapshot).await?;
-        let (instruction, allowed_tools) = match snapshot.context.kind {
-            ChatTurnKind::Assistant => {
+        let (instruction, allowed_tools) = match kind {
+            ChatAgentRunKind::Assistant => {
                 let context = snapshot
                     .context
                     .screen_context
@@ -189,13 +176,10 @@ impl ChatAgentRuntime {
                 let route = route_assistant_turn(&snapshot.context.user_prompt, context)?;
                 (route.instruction, route.allowed_tools)
             }
-            ChatTurnKind::Article => (None, article_tools()),
-            ChatTurnKind::DeepResearch => unreachable!(),
+            ChatAgentRunKind::Article => (None, article_tools()),
         };
-        let engine = RigAgentEngine::new(
-            self.credentials_for(snapshot)?,
-            self.openrouter_policy.clone(),
-        )?;
+        let engine =
+            RigAgentEngine::with_http_client(self.credentials_for(snapshot)?, self.http.clone());
         let deadline = Instant::now()
             .checked_add(self.config.sandbox_timeout)
             .ok_or(ChatAgentError::Deadline)?;
@@ -218,7 +202,7 @@ impl ChatAgentRuntime {
         let events = Arc::new(ChatEvents::new(self.pool.clone(), snapshot));
         let definitions = ChatToolExecutor::definitions();
         validate_allowed_tools(&allowed_tools, &definitions)?;
-        let system_prompt = system_prompt(snapshot, content_body.as_deref(), instruction)?;
+        let system_prompt = system_prompt(snapshot, kind, content_body.as_deref(), instruction)?;
         let history_budget = available_history_tokens(
             &system_prompt,
             &snapshot.context.user_prompt,
@@ -227,9 +211,9 @@ impl ChatAgentRuntime {
         let history = trim_history_to_token_budget(&snapshot.history, history_budget)?;
         let history_message_count = history.messages.len();
         let request = AgentRequest {
-            feature: match snapshot.context.kind {
-                ChatTurnKind::Assistant => "assistant_chat".to_owned(),
-                _ => "article_chat".to_owned(),
+            feature: match kind {
+                ChatAgentRunKind::Assistant => "assistant_chat".to_owned(),
+                ChatAgentRunKind::Article => "article_chat".to_owned(),
             },
             model_spec: ModelSpec::parse(&snapshot.context.session.model)?.canonical(),
             system_prompt,
@@ -448,29 +432,6 @@ fn bounded_i64(
     Ok(value)
 }
 
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .map(SecretString::from)
-}
-
-trait ModelProviderName {
-    fn as_str(&self) -> &'static str;
-}
-
-impl ModelProviderName for ModelProvider {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Anthropic => "anthropic",
-            Self::Google => "google",
-            Self::OpenRouter => "openrouter",
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum ChatAgentBuildError {
     #[error("LLM_TASK_SANDBOX_E2B_API_KEY or E2B_API_KEY is required")]
@@ -507,8 +468,6 @@ pub(super) enum ChatAgentError {
     Deadline,
     #[error("chat agent was cancelled after losing its queue lease")]
     Cancelled,
-    #[error("deep research does not run through Rig")]
-    UnsupportedKind,
     #[error("assistant turn is missing its immutable screen context")]
     MissingScreenContext,
     #[error("a user-managed provider key exists but X_TOKEN_ENCRYPTION_KEY is unavailable")]
@@ -525,8 +484,6 @@ pub(super) enum ChatAgentError {
     Storage(#[from] ContentBodyStoreError),
     #[error(transparent)]
     Model(#[from] newsly_providers::ModelSpecError),
-    #[error(transparent)]
-    Rig(#[from] RigAgentEngineError),
     #[error(transparent)]
     Cipher(#[from] newsly_providers::IntegrationTokenCipherError),
     #[error(transparent)]

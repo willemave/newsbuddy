@@ -74,8 +74,7 @@ pub async fn publish_chat_turn(
             error = NULL,
             partial_text = NULL,
             tool_progress = NULL,
-            stream_updated_at = timezone('UTC', clock_timestamp()),
-            tool_progress_updated_at = timezone('UTC', clock_timestamp())
+            stream_updated_at = timezone('UTC', clock_timestamp())
         WHERE id::bigint = $1 AND stream_generation = $2 AND status = 'processing'
         "#,
     )
@@ -168,8 +167,7 @@ pub async fn fail_chat_turn(
             error = $2,
             partial_text = NULL,
             tool_progress = NULL,
-            stream_updated_at = timezone('UTC', clock_timestamp()),
-            tool_progress_updated_at = timezone('UTC', clock_timestamp())
+            stream_updated_at = timezone('UTC', clock_timestamp())
         WHERE id::bigint = $1 AND status = 'processing'
         "#,
     )

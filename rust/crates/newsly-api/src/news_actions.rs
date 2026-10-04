@@ -1,6 +1,6 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::routing::post;
 use axum::{Json, Router};
 use newsly_contracts::{BulkMarkReadRequest, BulkMarkReadResponse, OperationStatus};
@@ -9,10 +9,8 @@ use newsly_db::mark_visible_news_items_read;
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
-
-const OPERATION_ID: &str = "markNewsItemsRead";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new().route("/api/news/items/mark-read", post(mark_news_items_read))
@@ -37,11 +35,10 @@ pub(super) async fn mark_news_items_read(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<BulkMarkReadRequest>, JsonRejection>,
 ) -> Result<Json<BulkMarkReadResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if payload.content_ids.is_empty() {
         return Err(validation_error(
@@ -51,21 +48,13 @@ pub(super) async fn mark_news_items_read(
     }
 
     let total_requested = payload.content_ids.len();
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let result =
         mark_visible_news_items_read(&mut transaction, current_user.id, &payload.content_ids)
             .await
             .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     Ok(Json(BulkMarkReadResponse {
         status: OperationStatus::Success,
@@ -76,16 +65,5 @@ pub(super) async fn mark_news_items_read(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }

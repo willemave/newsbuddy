@@ -1,11 +1,11 @@
 use newsly_contracts::{ShareActionAgentResult, ShareActionBriefingTarget, ShareActionCandidate};
 use newsly_db::ShareActionAgentSnapshot;
+use newsly_domain::sha256_hex;
 use newsly_providers::ValidatedFeed;
 use newsly_queue::compatibility_canonical_json;
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,38 +216,8 @@ pub fn build_host_action(
                 }),
             })
         }
-        ShareActionWorkflow::Chat => {
-            let chat = result.chat.as_ref();
-            let url = chat
-                .and_then(|candidate| candidate.content_url.as_deref())
-                .or(result.primary_url.as_deref())
-                .unwrap_or(&input_url);
-            ShareActionHostInput::Content(ContentActionInput {
-                url: normalized_http_url(url)?,
-                title: clean(result.title.clone()),
-                platform: clean(result.platform.clone()),
-                content_type: clean(result.content_type.clone()),
-                instruction: clean(result.rationale.clone()),
-                chat_initial_message: chat
-                    .and_then(|candidate| clean(candidate.initial_message.clone()))
-                    .or_else(|| input_optional_text(task, "chat_initial_message")),
-            })
-        }
-        ShareActionWorkflow::Presentation => {
-            let presentation = result.presentation.as_ref();
-            let source_url = presentation
-                .and_then(|candidate| candidate.source_url.as_deref())
-                .or(result.primary_url.as_deref())
-                .unwrap_or(&input_url);
-            ShareActionHostInput::LearningDeck(LearningDeckActionInput {
-                source_url: normalized_http_url(source_url)?,
-                title: presentation
-                    .and_then(|candidate| clean(candidate.title.clone()))
-                    .or_else(|| clean(result.title.clone())),
-                interests_prompt: input_optional_text(task, "interests_prompt").or_else(|| {
-                    presentation.and_then(|candidate| clean(candidate.interests_prompt.clone()))
-                }),
-            })
+        ShareActionWorkflow::Chat | ShareActionWorkflow::Presentation => {
+            return Err(ShareActionWorkflowError::UnsupportedMode(task.mode.clone()));
         }
     };
     Ok(Some(prepare_host_action(
@@ -408,13 +378,13 @@ fn prepare_host_action(
 ) -> PreparedHostAction {
     let action_input = host_input_json(&typed_input);
     let encoded = compatibility_canonical_json(&Value::Object(action_input.clone()));
-    let digest = Sha256::digest(encoded.as_bytes());
+    let digest = sha256_hex(encoded.as_bytes());
     PreparedHostAction {
         action_name: action_name.to_owned(),
         action_input,
         typed_input,
         rationale: clean(rationale),
-        idempotency_key: format!("{action_name}:{}", hex_encode(&digest)),
+        idempotency_key: format!("{action_name}:{digest}"),
     }
 }
 
@@ -569,16 +539,6 @@ fn validate_artifact_urls(result: &ShareActionAgentResult) -> Result<(), ShareAc
     for candidate in &result.content_urls {
         normalized_http_url(&candidate.url)?;
     }
-    if let Some(presentation) = &result.presentation
-        && let Some(url) = &presentation.source_url
-    {
-        normalized_http_url(url)?;
-    }
-    if let Some(chat) = &result.chat
-        && let Some(url) = &chat.content_url
-    {
-        normalized_http_url(url)?;
-    }
     if let Some(target) = &result.briefing_target {
         normalized_http_url(target.url())?;
     }
@@ -630,16 +590,6 @@ fn insert_optional(target: &mut Map<String, Value>, key: &str, value: Option<&st
     if let Some(value) = value {
         target.insert(key.to_owned(), Value::from(value));
     }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
 }
 
 #[derive(Debug, Error)]

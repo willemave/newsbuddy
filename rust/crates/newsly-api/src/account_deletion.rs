@@ -1,5 +1,5 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::delete;
 use axum::{Json, Router};
@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::decode_json;
 use crate::{AppState, request_id_from_headers};
 
 const DELETE_ACCOUNT_OPERATION_ID: &str = "deleteMeCurrentAccount";
@@ -41,11 +41,10 @@ pub(super) async fn delete_current_account(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<DeleteAccountRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<DeleteAccountResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DELETE_ACCOUNT_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if payload.id_token.is_empty() || payload.authorization_code.is_empty() {
         return Err(ApiError::new(
@@ -60,7 +59,7 @@ pub(super) async fn delete_current_account(
     // short transaction that changes account state and hands work to the queue.
     let identity = state
         .auth
-        .verify_apple_identity(&payload.id_token)
+        .verify_apple_identity(&payload.id_token, None)
         .await
         .map_err(|error| apple_reauthentication_error(error, &request_id))?;
     if identity.subject != current_user.apple_id {
@@ -85,13 +84,8 @@ pub(super) async fn delete_current_account(
             )
         })?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let deactivated = deactivate_active_user(&mut transaction, current_user.id)
         .await
         .map_err(|error| deletion_unavailable(error, &request_id))?;

@@ -1,17 +1,16 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
 use newsly_contracts::{AppleSignInRequest, TokenResponse};
-use newsly_db::find_or_create_apple_user;
-use serde_json::Value;
+use newsly_db::{UserProfileRepositoryError, find_apple_user, find_or_create_apple_user};
 
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::users::user_response;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 const APPLE_SIGN_IN_OPERATION_ID: &str = "appleSignin";
@@ -31,7 +30,7 @@ pub(super) fn router() -> Router<AppState> {
         (status = 200, description = "Successful Response", body = TokenResponse),
         (status = 400, description = "Missing or invalid account data", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid Apple token", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
+        (status = 409, description = "Email already registered or stale runtime owner", body = newsly_contracts::ErrorEnvelope),
         (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
         (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
     )
@@ -39,59 +38,67 @@ pub(super) fn router() -> Router<AppState> {
 pub(super) async fn apple_sign_in(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<AppleSignInRequest>, JsonRejection>,
 ) -> Result<Json<TokenResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, APPLE_SIGN_IN_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
 
     // Apple verification is remote work. Complete it before opening the short
     // persistence transaction so a JWKS fetch never holds PostgreSQL locks.
     let identity = state
         .auth
-        .verify_apple_identity(&payload.id_token)
+        .verify_apple_identity(&payload.id_token, payload.nonce.as_deref())
         .await
         .map_err(|error| {
             tracing::warn!(error = %error, operation_id = APPLE_SIGN_IN_OPERATION_ID, "Apple identity verification failed");
             invalid_apple_token(&request_id)
         })?;
-    let email =
-        first_nonempty(payload.email.as_deref(), identity.email.as_deref()).ok_or_else(|| {
+    let full_name = first_nonempty(payload.full_name.as_deref(), None).map(str::to_owned);
+
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
+    let upsert = if let Some(existing) = find_apple_user(&mut transaction, &identity.subject)
+        .await
+        .map_err(|error| internal_error(error, &request_id))?
+    {
+        existing
+    } else {
+        let email = first_nonempty(identity.email.as_deref(), None).ok_or_else(|| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "missing_email",
-                "Email is required but was not found in the request or Apple token",
+                "Email is required but was not found in the Apple token",
                 request_id.clone(),
             )
         })?;
-    let full_name = first_nonempty(payload.full_name.as_deref(), None)
-        .map(str::to_owned)
-        .or_else(|| apple_name(identity.name.as_ref()));
-    validate_identity_field("email", email, &request_id)?;
-    if let Some(name) = full_name.as_deref() {
-        validate_identity_field("full_name", name, &request_id)?;
-    }
-
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
+        validate_identity_field("email", email, &request_id)?;
+        if let Some(name) = full_name.as_deref() {
+            validate_identity_field("full_name", name, &request_id)?;
+        }
+        find_or_create_apple_user(
+            &mut transaction,
+            &identity.subject,
+            email,
+            full_name.as_deref(),
+        )
         .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
-    let upsert = find_or_create_apple_user(
-        &mut transaction,
-        &identity.subject,
-        email,
-        full_name.as_deref(),
-    )
-    .await
-    .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+        .map_err(|error| match error {
+            UserProfileRepositoryError::Sqlx(sqlx::Error::Database(database_error))
+                if database_error.is_unique_violation()
+                    && database_error.constraint() == Some("ix_users_email") =>
+            {
+                ApiError::new(
+                    StatusCode::CONFLICT,
+                    "email_already_registered",
+                    "The verified Apple email is already registered to another account",
+                    request_id.clone(),
+                )
+            }
+            other => internal_error(other, &request_id),
+        })?
+    };
+    crate::write_support::commit(transaction, &request_id).await?;
 
     let tokens = state
         .auth
@@ -117,28 +124,6 @@ fn first_nonempty<'a>(preferred: Option<&'a str>, fallback: Option<&'a str>) -> 
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .or_else(|| fallback.map(str::trim).filter(|value| !value.is_empty()))
-}
-
-fn apple_name(value: Option<&Value>) -> Option<String> {
-    match value {
-        Some(Value::String(name)) => first_nonempty(Some(name), None).map(str::to_owned),
-        Some(Value::Object(name)) => {
-            let first = name
-                .get("firstName")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim();
-            let last = name
-                .get("lastName")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim();
-            let combined = format!("{first} {last}");
-            let combined = combined.trim();
-            (!combined.is_empty()).then(|| combined.to_owned())
-        }
-        _ => None,
-    }
 }
 
 fn validate_identity_field(

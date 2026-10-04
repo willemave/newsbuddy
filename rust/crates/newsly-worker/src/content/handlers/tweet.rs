@@ -12,6 +12,7 @@ use crate::{HandlerExecution, LeaseHealth};
 use super::super::model::{
     ContentFinalizationPlan, ContentMutation, ContentSnapshot, UsageWrite, XUsageWrite,
 };
+use super::super::normalize_external_url;
 use super::ContentWorkerServices;
 use super::analysis::normalized_optional;
 use super::support::{
@@ -26,7 +27,6 @@ pub(super) struct TweetTargetResolution {
     pub(super) resolution_source: &'static str,
     pub(super) resolution_tweet_id: String,
     thread_text: String,
-    linked_tweet_ids: Vec<String>,
     thread_lookup_status: &'static str,
     included_tweets: BTreeMap<String, XTweet>,
     usage: Vec<UsageWrite>,
@@ -254,7 +254,14 @@ async fn finalize_tweet_resolution(
     resolution: TweetTargetResolution,
     usage: Vec<UsageWrite>,
 ) -> HandlerExecution {
-    let processing_text = tweet_processing_text(&tweet);
+    tracing::debug!(
+        content_id,
+        lookup_source,
+        resolution_source = resolution.resolution_source,
+        resolution_tweet_id = %resolution.resolution_tweet_id,
+        thread_lookup_status = resolution.thread_lookup_status,
+        "resolved tweet extraction target"
+    );
     let target_url = resolution
         .selected_article_url
         .clone()
@@ -267,41 +274,7 @@ async fn finalize_tweet_resolution(
         ("discussion_url", Value::String(canonical_url.clone())),
         ("tweet_id", Value::String(tweet.id.clone())),
         ("tweet_url", Value::String(canonical_url)),
-        ("tweet_text", Value::String(tweet.text.clone())),
-        (
-            "tweet_thread_text",
-            Value::String(resolution.thread_text.clone()),
-        ),
-        (
-            "tweet_processing_text",
-            Value::String(processing_text.clone()),
-        ),
-        ("tweet_external_urls", strings_json(&tweet.external_urls)),
-        (
-            "tweet_linked_tweet_ids",
-            strings_json(&resolution.linked_tweet_ids),
-        ),
-        (
-            "tweet_referenced_tweet_types",
-            strings_json(&tweet.referenced_tweet_types),
-        ),
         ("has_video", Value::Bool(tweet.has_video)),
-        (
-            "tweet_resolution_source",
-            Value::String(resolution.resolution_source.to_owned()),
-        ),
-        (
-            "tweet_resolution_tweet_id",
-            Value::String(resolution.resolution_tweet_id),
-        ),
-        (
-            "tweet_thread_lookup_status",
-            Value::String(resolution.thread_lookup_status.to_owned()),
-        ),
-        (
-            "tweet_lookup_source",
-            Value::String(lookup_source.to_owned()),
-        ),
         (
             "tweet_snapshot",
             serde_json::to_value(&tweet).unwrap_or(Value::Null),
@@ -316,61 +289,10 @@ async fn finalize_tweet_resolution(
             .into_iter()
             .map(|(key, value)| (key.to_owned(), value)),
     );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_author",
-        tweet.author_name.as_deref(),
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_author_id",
-        tweet.author_id.as_deref(),
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_author_username",
-        tweet.author_username.as_deref(),
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_created_at",
-        tweet.created_at.as_deref(),
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_conversation_id",
-        tweet.conversation_id.as_deref(),
-    );
-    insert_optional_i64(&mut metadata_updates, "tweet_like_count", tweet.like_count);
-    insert_optional_i64(
-        &mut metadata_updates,
-        "tweet_retweet_count",
-        tweet.retweet_count,
-    );
-    insert_optional_i64(
-        &mut metadata_updates,
-        "tweet_reply_count",
-        tweet.reply_count,
-    );
     insert_optional_i64(
         &mut metadata_updates,
         "video_duration_ms",
         tweet.video_duration_ms,
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_article_title",
-        tweet.article_title.as_deref(),
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_article_text",
-        tweet.article_text.as_deref(),
-    );
-    insert_optional_string(
-        &mut metadata_updates,
-        "tweet_note_tweet_text",
-        tweet.note_tweet_text.as_deref(),
     );
     if resolution.selected_article_url.is_none()
         && tweet.article_text.is_none()
@@ -427,7 +349,6 @@ fn resolve_tweet_without_lookups(
         resolution_source: "tweet_only",
         resolution_tweet_id: tweet.id.clone(),
         thread_text: tweet_processing_text(tweet),
-        linked_tweet_ids: tweet.linked_tweet_ids.clone(),
         thread_lookup_status: "not_attempted",
         included_tweets: BTreeMap::new(),
         usage: Vec::new(),
@@ -486,7 +407,7 @@ async fn resolve_tweet_target(
             resolution_source: "tweet_only",
             resolution_tweet_id: root.id.clone(),
             thread_text: tweet_processing_text(root),
-            linked_tweet_ids: root.linked_tweet_ids.clone(),
+
             thread_lookup_status: "not_attempted",
             included_tweets: included,
             usage,
@@ -519,7 +440,7 @@ async fn resolve_tweet_target(
                         resolution_source: "thread_reply",
                         resolution_tweet_id: tweet_id,
                         thread_text: thread_text(&thread),
-                        linked_tweet_ids: root.linked_tweet_ids.clone(),
+
                         thread_lookup_status: "found",
                         included_tweets: included,
                         usage,
@@ -561,7 +482,7 @@ async fn resolve_tweet_target(
                         resolution_source: "thread_reply",
                         resolution_tweet_id: tweet_id,
                         thread_text: thread_text(&thread),
-                        linked_tweet_ids: root.linked_tweet_ids.clone(),
+
                         thread_lookup_status: "found",
                         included_tweets: included,
                         usage,
@@ -591,7 +512,7 @@ pub(super) fn resolve_from_known_tweets(
     if let Some(url) = root
         .external_urls
         .iter()
-        .find_map(|url| normalized_external_url(url))
+        .find_map(|url| normalize_external_url(url))
     {
         return Some(known_tweet_resolution(
             root,
@@ -607,7 +528,7 @@ pub(super) fn resolve_from_known_tweets(
             resolution_source: "root_tweet",
             resolution_tweet_id: root.id.clone(),
             thread_text: tweet_processing_text(root),
-            linked_tweet_ids: root.linked_tweet_ids.clone(),
+
             thread_lookup_status: "not_needed",
             included_tweets: included,
             usage: Vec::new(),
@@ -618,7 +539,7 @@ pub(super) fn resolve_from_known_tweets(
             && let Some(url) = linked
                 .external_urls
                 .iter()
-                .find_map(|url| normalized_external_url(url))
+                .find_map(|url| normalize_external_url(url))
         {
             let resolution_tweet_id = id.clone();
             return Some(known_tweet_resolution(
@@ -645,7 +566,7 @@ fn known_tweet_resolution(
         resolution_source: source,
         resolution_tweet_id: resolution_tweet_id.to_owned(),
         thread_text: tweet_processing_text(root),
-        linked_tweet_ids: root.linked_tweet_ids.clone(),
+
         thread_lookup_status: "not_needed",
         included_tweets: included,
         usage: Vec::new(),
@@ -665,7 +586,7 @@ fn unresolved_thread(
         resolution_source: "tweet_only",
         resolution_tweet_id: root.id.clone(),
         thread_text: thread_text(&thread),
-        linked_tweet_ids: root.linked_tweet_ids.clone(),
+
         thread_lookup_status: status,
         included_tweets: included,
         usage,
@@ -678,7 +599,7 @@ fn first_thread_target(root: &XTweet, tweets: &[XTweet]) -> Option<(String, Stri
         if let Some(url) = tweet
             .external_urls
             .iter()
-            .find_map(|url| normalized_external_url(url))
+            .find_map(|url| normalize_external_url(url))
         {
             return Some((url, tweet.id.clone(), thread));
         }
@@ -844,18 +765,6 @@ pub(super) fn extract_tweet_id(value: &str) -> Option<String> {
     })
 }
 
-pub(super) fn normalized_external_url(value: &str) -> Option<String> {
-    let mut url = Url::parse(value.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host().is_none() {
-        return None;
-    }
-    if url.scheme() == "http" && url.set_scheme("https").is_err() {
-        return None;
-    }
-    url.set_fragment(None);
-    Some(url.to_string())
-}
-
 fn tweet_target_type(url: &str, has_external_target: bool) -> (String, String) {
     if !has_external_target {
         return ("article".to_owned(), "twitter".to_owned());
@@ -874,16 +783,6 @@ fn tweet_target_type(url: &str, has_external_target: bool) -> (String, String) {
         return ("podcast".to_owned(), platform.to_owned());
     }
     ("article".to_owned(), "twitter".to_owned())
-}
-
-fn strings_json(values: &[String]) -> Value {
-    Value::Array(values.iter().cloned().map(Value::String).collect())
-}
-
-fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<&str>) {
-    if let Some(value) = normalized_optional(value) {
-        map.insert(key.to_owned(), Value::String(value));
-    }
 }
 
 fn insert_optional_i64(map: &mut Map<String, Value>, key: &str, value: Option<i64>) {

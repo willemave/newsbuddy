@@ -10,12 +10,11 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq as _;
 
 use crate::error::ApiError;
-use crate::learning_deck_artifacts::LearningDeckArtifactStore;
 use crate::learning_deck_tokens::hash_learning_deck_token;
 use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
 
-use super::support::{repository_error, token_signer};
+use super::support::repository_error;
 
 const MAX_HOSTED_TOKEN_CHARS: usize = 4_096;
 const MAX_HOSTED_ASSET_PATH_CHARS: usize = 2_048;
@@ -136,48 +135,14 @@ async fn serve_hosted_object(
     if token.is_empty() || token.chars().count() > MAX_HOSTED_TOKEN_CHARS {
         return Err(hosted_access_error(access, &request_id));
     }
-    let signer = token_signer(&request_id)?;
-    let deck = match access {
-        HostedAccess::Private => {
-            let claims = signer
-                .decode_private_token(token)
-                .map_err(|_| hosted_access_error(access, &request_id))?;
-            let deck = load_hosted_deck(state, claims.deck_id, &request_id).await?;
-            if deck.user_id != claims.user_id {
-                return Err(hosted_unavailable_error(access, &request_id));
-            }
-            deck
-        }
-        HostedAccess::Share => {
-            let claims = signer
-                .decode_share_token(token)
-                .map_err(|_| hosted_access_error(access, &request_id))?;
-            let deck = load_hosted_deck(state, claims.deck_id, &request_id).await?;
-            let expected_hash = hash_learning_deck_token(token);
-            if !deck.share_enabled
-                || deck
-                    .share_token_nonce
-                    .as_deref()
-                    .is_none_or(|nonce| !constant_time_text_eq(nonce, &claims.nonce))
-                || deck
-                    .share_token_hash
-                    .as_deref()
-                    .is_none_or(|hash| !constant_time_text_eq(hash, &expected_hash))
-            {
-                return Err(hosted_unavailable_error(access, &request_id));
-            }
-            deck
-        }
-    };
-    if deck.latest_successful_attempt_id.is_none() {
-        return Err(hosted_unavailable_error(access, &request_id));
-    }
+    let deck = authorize_hosted_deck(state, token, access, &request_id).await?;
 
     let (object_key, content_type, maximum_bytes) = match target {
         HostedTarget::Deck => (
             deck.deck_object_key
                 .as_deref()
-                .ok_or_else(|| hosted_object_missing("Learning Deck is not ready", &request_id))?,
+                .ok_or_else(|| hosted_object_missing("Learning Deck is not ready", &request_id))?
+                .into(),
             "text/html; charset=utf-8",
             hosted_byte_limit(
                 "LEARNING_DECK_MAX_INDEX_HTML_BYTES",
@@ -192,7 +157,8 @@ async fn serve_hosted_object(
                 .as_deref()
                 .ok_or_else(|| {
                     hosted_object_missing("Learning Deck source notes are not ready", &request_id)
-                })?,
+                })?
+                .into(),
             "text/html; charset=utf-8",
             hosted_byte_limit(
                 "LEARNING_DECK_MAX_SOURCE_NOTES_BYTES",
@@ -225,11 +191,60 @@ async fn serve_hosted_object(
                 20_000_000,
                 &request_id,
             )?;
-            return read_hosted_response(&object_key, content_type, maximum_bytes, &request_id)
-                .await;
+            (
+                std::borrow::Cow::Owned(object_key),
+                content_type,
+                maximum_bytes,
+            )
         }
     };
-    read_hosted_response(object_key, content_type, maximum_bytes, &request_id).await
+    read_hosted_response(state, &object_key, content_type, maximum_bytes, &request_id).await
+}
+
+async fn authorize_hosted_deck(
+    state: &AppState,
+    token: &str,
+    access: HostedAccess,
+    request_id: &str,
+) -> Result<HostedLearningDeckProjection, ApiError> {
+    let signer = state.learning_deck_token_signer.as_ref();
+    let deck = match access {
+        HostedAccess::Private => {
+            let claims = signer
+                .decode_private_token(token)
+                .map_err(|_| hosted_access_error(access, request_id))?;
+            let deck = load_hosted_deck(state, claims.deck_id, request_id).await?;
+            if deck.user_id != claims.user_id {
+                return Err(hosted_unavailable_error(access, request_id));
+            }
+            deck
+        }
+        HostedAccess::Share => {
+            let claims = signer
+                .decode_share_token(token)
+                .map_err(|_| hosted_access_error(access, request_id))?;
+            let deck = load_hosted_deck(state, claims.deck_id, request_id).await?;
+            let expected_hash = hash_learning_deck_token(token);
+            if !deck.share_enabled
+                || deck
+                    .share_token_nonce
+                    .as_deref()
+                    .is_none_or(|nonce| !constant_time_text_eq(nonce, &claims.nonce))
+                || deck
+                    .share_token_hash
+                    .as_deref()
+                    .is_none_or(|hash| !constant_time_text_eq(hash, &expected_hash))
+            {
+                return Err(hosted_unavailable_error(access, request_id));
+            }
+            deck
+        }
+    };
+    if deck.latest_successful_attempt_id.is_none() {
+        return Err(hosted_unavailable_error(access, request_id));
+    }
+
+    Ok(deck)
 }
 
 async fn load_hosted_deck(
@@ -244,14 +259,14 @@ async fn load_hosted_deck(
 }
 
 async fn read_hosted_response(
+    state: &AppState,
     object_key: &str,
     content_type: &'static str,
     maximum_bytes: usize,
     request_id: &str,
 ) -> Result<Response<Body>, ApiError> {
-    let store = LearningDeckArtifactStore::from_environment()
-        .map_err(|error| internal_error(error, request_id))?;
-    let bytes = store
+    let bytes = state
+        .learning_deck_artifact_store
         .read_bounded(object_key, maximum_bytes)
         .await
         .map_err(|error| internal_error(error, request_id))?

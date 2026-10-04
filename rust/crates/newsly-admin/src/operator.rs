@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use chrono::{DateTime, Duration, Utc};
 use clap::ValueEnum;
 use serde::Serialize;
-use sqlx::{FromRow, PgPool};
+use sqlx::{AssertSqlSafe, FromRow, PgPool};
 use thiserror::Error;
 
 const MAX_WINDOW_HOURS: i64 = 24 * 90;
@@ -13,10 +13,10 @@ const MAX_RECENT_FAILURES: i64 = 200;
 const ERROR_MESSAGE_LIMIT: i32 = 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QueryWindow {
-    pub since: DateTime<Utc>,
-    pub until: DateTime<Utc>,
-    pub window_hours: i64,
+pub(crate) struct QueryWindow {
+    pub(crate) since: DateTime<Utc>,
+    pub(crate) until: DateTime<Utc>,
+    pub(crate) window_hours: i64,
 }
 
 impl QueryWindow {
@@ -27,7 +27,7 @@ impl QueryWindow {
     /// Returns [`OperatorQueryError::InvalidWindowHours`] or
     /// [`OperatorQueryError::WindowTooLarge`] when the requested lookback is outside the
     /// operator limits.
-    pub fn ending_now(window_hours: i64) -> Result<Self, OperatorQueryError> {
+    pub(crate) fn ending_now(window_hours: i64) -> Result<Self, OperatorQueryError> {
         Self::ending_at(Utc::now(), window_hours)
     }
 
@@ -38,7 +38,10 @@ impl QueryWindow {
     /// Returns [`OperatorQueryError::InvalidWindowHours`] or
     /// [`OperatorQueryError::WindowTooLarge`] when the requested lookback is outside the
     /// operator limits.
-    pub fn ending_at(until: DateTime<Utc>, window_hours: i64) -> Result<Self, OperatorQueryError> {
+    pub(crate) fn ending_at(
+        until: DateTime<Utc>,
+        window_hours: i64,
+    ) -> Result<Self, OperatorQueryError> {
         validate_window_hours(window_hours)?;
         Ok(Self {
             since: until - Duration::hours(window_hours),
@@ -53,7 +56,7 @@ impl QueryWindow {
     ///
     /// Returns [`OperatorQueryError::InvalidTimeWindow`] when the bounds are reversed, or
     /// [`OperatorQueryError::WindowTooLarge`] when they span more than the operator limit.
-    pub fn from_bounds(
+    pub(crate) fn from_bounds(
         since: DateTime<Utc>,
         until: DateTime<Utc>,
     ) -> Result<Self, OperatorQueryError> {
@@ -76,24 +79,23 @@ impl QueryWindow {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum UsageGroupBy {
+pub(crate) enum UsageGroupBy {
     User,
     Feature,
     Operation,
+    #[value(alias = "vendor")]
     Provider,
-    Vendor,
     Model,
     Source,
 }
 
 impl UsageGroupBy {
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
             Self::Feature => "feature",
             Self::Operation => "operation",
             Self::Provider => "provider",
-            Self::Vendor => "vendor",
             Self::Model => "model",
             Self::Source => "source",
         }
@@ -101,23 +103,25 @@ impl UsageGroupBy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CountByStatus {
-    pub total: i64,
-    pub by_status: BTreeMap<String, i64>,
+pub(crate) struct CountByStatus {
+    pub(crate) total: i64,
+    pub(crate) by_status: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EventHealth {
-    pub total: i64,
+pub(crate) struct EventHealth {
+    pub(crate) total: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct UsageFreshness {
-    pub latest_record_at: Option<DateTime<Utc>>,
+pub(crate) struct UsageFreshness {
+    pub(crate) latest_record_at: Option<DateTime<Utc>>,
 }
 
 mod health;
-pub use health::{HealthSnapshot, load_health_snapshot};
+#[cfg(test)]
+use health::HealthSnapshot;
+pub(crate) use health::load_health_snapshot;
 
 fn count_by_status(rows: Vec<health::StatusCountRow>) -> CountByStatus {
     let by_status = rows
@@ -131,73 +135,73 @@ fn count_by_status(rows: Vec<health::StatusCountRow>) -> CountByStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
-pub struct QueueTaskBacklog {
-    pub queue_name: String,
-    pub task_type: String,
-    pub pending_count: i64,
-    pub oldest_pending_age_seconds: Option<f64>,
+pub(crate) struct QueueTaskBacklog {
+    pub(crate) queue_name: String,
+    pub(crate) task_type: String,
+    pub(crate) pending_count: i64,
+    pub(crate) oldest_pending_age_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
-pub struct QueueProcessingBacklog {
-    pub queue_name: String,
-    pub task_type: String,
-    pub processing_count: i64,
-    pub oldest_processing_age_seconds: Option<f64>,
+pub(crate) struct QueueProcessingBacklog {
+    pub(crate) queue_name: String,
+    pub(crate) task_type: String,
+    pub(crate) processing_count: i64,
+    pub(crate) oldest_processing_age_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
-pub struct QueueTaskActivity {
-    pub queue_name: String,
-    pub task_type: String,
-    pub enqueued_count: i64,
-    pub completed_count: i64,
-    pub failed_count: i64,
+pub(crate) struct QueueTaskActivity {
+    pub(crate) queue_name: String,
+    pub(crate) task_type: String,
+    pub(crate) enqueued_count: i64,
+    pub(crate) completed_count: i64,
+    pub(crate) failed_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
-pub struct QueueTaskLatency {
-    pub queue_name: String,
-    pub task_type: String,
-    pub sample_count: i64,
-    pub ready_wait_p50_seconds: f64,
-    pub ready_wait_p95_seconds: f64,
-    pub total_wait_p50_seconds: f64,
-    pub total_wait_p95_seconds: f64,
-    pub run_time_p50_seconds: f64,
-    pub run_time_p95_seconds: f64,
+pub(crate) struct QueueTaskLatency {
+    pub(crate) queue_name: String,
+    pub(crate) task_type: String,
+    pub(crate) sample_count: i64,
+    pub(crate) ready_wait_p50_seconds: f64,
+    pub(crate) ready_wait_p95_seconds: f64,
+    pub(crate) total_wait_p50_seconds: f64,
+    pub(crate) total_wait_p95_seconds: f64,
+    pub(crate) run_time_p50_seconds: f64,
+    pub(crate) run_time_p95_seconds: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
-pub struct QueueRetryBucket {
-    pub retry_count: i32,
-    pub pending_count: i64,
+pub(crate) struct QueueRetryBucket {
+    pub(crate) retry_count: i32,
+    pub(crate) pending_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
-pub struct QueueFailureSummary {
-    pub task_type: String,
-    pub error_message: String,
-    pub count: i64,
+pub(crate) struct QueueFailureSummary {
+    pub(crate) task_type: String,
+    pub(crate) error_message: String,
+    pub(crate) count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct QueueHealthSnapshot {
-    pub generated_at: DateTime<Utc>,
-    pub window_hours: i64,
-    pub pending: Vec<QueueTaskBacklog>,
-    pub processing: Vec<QueueProcessingBacklog>,
-    pub activity: Vec<QueueTaskActivity>,
-    pub latency: Vec<QueueTaskLatency>,
-    pub processing_count: i64,
-    pub expired_lease_count: i64,
-    pub retry_buckets: Vec<QueueRetryBucket>,
-    pub recent_failed_count: i64,
-    pub top_failures: Vec<QueueFailureSummary>,
+pub(crate) struct QueueHealthSnapshot {
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) window_hours: i64,
+    pub(crate) pending: Vec<QueueTaskBacklog>,
+    pub(crate) processing: Vec<QueueProcessingBacklog>,
+    pub(crate) activity: Vec<QueueTaskActivity>,
+    pub(crate) latency: Vec<QueueTaskLatency>,
+    pub(crate) processing_count: i64,
+    pub(crate) expired_lease_count: i64,
+    pub(crate) retry_buckets: Vec<QueueRetryBucket>,
+    pub(crate) recent_failed_count: i64,
+    pub(crate) top_failures: Vec<QueueFailureSummary>,
 }
 
 impl QueueHealthSnapshot {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         let mut text = format!(
             "Queue health:\n- processing: {}\n- expired leases: {}\n- recent failures ({}h): {}",
             self.processing_count,
@@ -267,7 +271,7 @@ struct QueueCounts {
 ///
 /// Returns a validation error when the window or result limit exceeds the operator bounds, and
 /// [`OperatorQueryError::Sqlx`] when `PostgreSQL` rejects a query or a result cannot be decoded.
-pub async fn load_queue_health(
+pub(crate) async fn load_queue_health(
     pool: &PgPool,
     window_hours: i64,
     top_errors_limit: i64,
@@ -501,30 +505,30 @@ async fn load_top_failures(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
-pub struct RecentTaskFailure {
-    pub id: i64,
-    pub queue_name: String,
-    pub task_type: String,
-    pub content_id: Option<i64>,
-    pub retry_count: i32,
-    pub executor_runtime: String,
-    pub error_message: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
+pub(crate) struct RecentTaskFailure {
+    pub(crate) id: i64,
+    pub(crate) queue_name: String,
+    pub(crate) task_type: String,
+    pub(crate) content_id: Option<i64>,
+    pub(crate) retry_count: i32,
+    pub(crate) executor_runtime: String,
+    pub(crate) error_message: Option<String>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RecentTaskFailures {
-    pub generated_at: DateTime<Utc>,
-    pub window_hours: i64,
-    pub limit: i64,
-    pub count: usize,
-    pub truncated: bool,
-    pub failures: Vec<RecentTaskFailure>,
+pub(crate) struct RecentTaskFailures {
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) window_hours: i64,
+    pub(crate) limit: i64,
+    pub(crate) count: usize,
+    pub(crate) truncated: bool,
+    pub(crate) failures: Vec<RecentTaskFailure>,
 }
 
 impl RecentTaskFailures {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         if self.failures.is_empty() {
             return format!("No failed tasks found in the last {}h.", self.window_hours);
         }
@@ -562,7 +566,7 @@ impl RecentTaskFailures {
 ///
 /// Returns a validation error when the window or result limit exceeds the operator bounds, and
 /// [`OperatorQueryError::Sqlx`] when `PostgreSQL` rejects the query or a result cannot be decoded.
-pub async fn load_recent_task_failures(
+pub(crate) async fn load_recent_task_failures(
     pool: &PgPool,
     window_hours: i64,
     limit: i64,
@@ -610,47 +614,51 @@ pub async fn load_recent_task_failures(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
+pub(crate) struct UsageAggregate {
+    pub(crate) call_count: i64,
+    pub(crate) input_tokens: i64,
+    pub(crate) cache_read_tokens: i64,
+    pub(crate) cache_write_tokens: i64,
+    pub(crate) output_tokens: i64,
+    pub(crate) total_tokens: i64,
+    pub(crate) request_count: i64,
+    pub(crate) resource_count: i64,
+    pub(crate) cost_usd: Option<f64>,
+    pub(crate) known_cost_usd: f64,
+    pub(crate) public_list_estimate_usd: f64,
+    pub(crate) provider_estimate_usd: f64,
+    pub(crate) non_billable_record_count: i64,
+    pub(crate) unpriced_call_count: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct UsageTotals {
-    pub call_count: i64,
-    pub input_tokens: i64,
-    pub cache_read_tokens: i64,
-    pub cache_write_tokens: i64,
-    pub output_tokens: i64,
-    pub total_tokens: i64,
-    pub request_count: i64,
-    pub resource_count: i64,
-    pub cost_usd: Option<f64>,
-    pub known_cost_usd: f64,
-    pub public_list_estimate_usd: f64,
-    pub provider_estimate_usd: f64,
-    pub non_billable_record_count: i64,
-    pub unpriced_call_count: i64,
-    pub unpriced_reasons: BTreeMap<String, i64>,
-    pub resource_units: BTreeMap<String, i64>,
-    pub providers: BTreeMap<String, i64>,
-    pub models: BTreeMap<String, i64>,
+pub(crate) struct UsageTotals {
+    #[serde(flatten)]
+    pub(crate) aggregate: UsageAggregate,
+    pub(crate) unpriced_reasons: BTreeMap<String, i64>,
+    pub(crate) resource_units: BTreeMap<String, i64>,
+    pub(crate) providers: BTreeMap<String, i64>,
+    pub(crate) models: BTreeMap<String, i64>,
+}
+
+impl std::ops::Deref for UsageTotals {
+    type Target = UsageAggregate;
+
+    fn deref(&self) -> &Self::Target {
+        &self.aggregate
+    }
 }
 
 impl UsageTotals {
     fn render_cost(&self) -> String {
-        self.cost_usd.map_or_else(
-            || {
-                format!(
-                    "cost unknown (${:.4} priced subtotal: ${:.4} public-list estimates, ${:.4} provider estimates; {} non-billable, {} unpriced records)",
-                    self.known_cost_usd,
-                    self.public_list_estimate_usd,
-                    self.provider_estimate_usd,
-                    self.non_billable_record_count,
-                    self.unpriced_call_count
-                )
-            },
-            |cost| format!(
-                "${cost:.4} (${:0.4} public-list estimates, ${:0.4} provider estimates; {} non-billable records)",
-                self.public_list_estimate_usd,
-                self.provider_estimate_usd,
-                self.non_billable_record_count
-            ),
+        newsly_db::render_vendor_usage_cost(
+            self.cost_usd,
+            self.known_cost_usd,
+            self.public_list_estimate_usd,
+            self.provider_estimate_usd,
+            self.non_billable_record_count,
+            self.unpriced_call_count,
         )
     }
 
@@ -680,65 +688,31 @@ impl UsageTotals {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
-pub struct UsageGroup {
-    pub key: String,
-    pub call_count: i64,
-    pub input_tokens: i64,
-    pub cache_read_tokens: i64,
-    pub cache_write_tokens: i64,
-    pub output_tokens: i64,
-    pub total_tokens: i64,
-    pub request_count: i64,
-    pub resource_count: i64,
-    pub cost_usd: Option<f64>,
-    pub known_cost_usd: f64,
-    pub public_list_estimate_usd: f64,
-    pub provider_estimate_usd: f64,
-    pub non_billable_record_count: i64,
-    pub unpriced_call_count: i64,
+pub(crate) struct UsageGroup {
+    pub(crate) key: String,
+    #[serde(flatten)]
+    #[sqlx(flatten)]
+    pub(crate) aggregate: UsageAggregate,
+}
+
+impl std::ops::Deref for UsageGroup {
+    type Target = UsageAggregate;
+
+    fn deref(&self) -> &Self::Target {
+        &self.aggregate
+    }
 }
 
 impl UsageGroup {
     fn totals(&self) -> UsageTotals {
         UsageTotals {
-            call_count: self.call_count,
-            input_tokens: self.input_tokens,
-            cache_read_tokens: self.cache_read_tokens,
-            cache_write_tokens: self.cache_write_tokens,
-            output_tokens: self.output_tokens,
-            total_tokens: self.total_tokens,
-            request_count: self.request_count,
-            resource_count: self.resource_count,
-            cost_usd: self.cost_usd,
-            known_cost_usd: self.known_cost_usd,
-            public_list_estimate_usd: self.public_list_estimate_usd,
-            provider_estimate_usd: self.provider_estimate_usd,
-            non_billable_record_count: self.non_billable_record_count,
-            unpriced_call_count: self.unpriced_call_count,
+            aggregate: self.aggregate.clone(),
             unpriced_reasons: BTreeMap::new(),
             resource_units: BTreeMap::new(),
             providers: BTreeMap::new(),
             models: BTreeMap::new(),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, FromRow)]
-struct UsageTotalsRow {
-    call_count: i64,
-    input_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    output_tokens: i64,
-    total_tokens: i64,
-    request_count: i64,
-    resource_count: i64,
-    cost_usd: Option<f64>,
-    known_cost_usd: f64,
-    public_list_estimate_usd: f64,
-    provider_estimate_usd: f64,
-    non_billable_record_count: i64,
-    unpriced_call_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -749,17 +723,17 @@ struct UsageDimensionCount {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct UsageSummary {
-    pub generated_at: DateTime<Utc>,
-    pub since: DateTime<Utc>,
-    pub until: DateTime<Utc>,
-    pub group_by: String,
-    pub totals: UsageTotals,
-    pub groups: Vec<UsageGroup>,
+pub(crate) struct UsageSummary {
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) since: DateTime<Utc>,
+    pub(crate) until: DateTime<Utc>,
+    pub(crate) group_by: String,
+    pub(crate) totals: UsageTotals,
+    pub(crate) groups: Vec<UsageGroup>,
 }
 
 impl UsageSummary {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         let mut text = format!(
             "Usage summary grouped by {}:\nTotals: {} calls, {}, {}",
             self.group_by,
@@ -797,12 +771,12 @@ impl UsageSummary {
 ///
 /// Returns [`OperatorQueryError::Sqlx`] when `PostgreSQL` rejects a query or a result cannot be
 /// decoded.
-pub async fn load_usage_summary(
+pub(crate) async fn load_usage_summary(
     pool: &PgPool,
     window: QueryWindow,
     group_by: UsageGroupBy,
 ) -> Result<UsageSummary, OperatorQueryError> {
-    let totals = sqlx::query_as::<_, UsageTotalsRow>(
+    let totals = sqlx::query_as::<_, UsageAggregate>(AssertSqlSafe(format!(
         r"
         SELECT
             COUNT(*)::bigint AS call_count,
@@ -813,19 +787,13 @@ pub async fn load_usage_summary(
             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
-                THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
-                ELSE NULL END AS cost_usd,
-            ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
-            ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
-            ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::numeric, 8)::double precision AS provider_estimate_usd,
-            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
-            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
+            {cost_aggregates}
         FROM vendor_usage_records
         WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
           AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
         ",
-    )
+        cost_aggregates = newsly_db::VENDOR_COST_AGGREGATES_SQL,
+    )))
     .bind(window.since)
     .bind(window.until)
     .fetch_one(pool)
@@ -854,20 +822,7 @@ pub async fn load_usage_summary(
         .map(|row| (row.key, row.count))
         .collect();
     let totals = UsageTotals {
-        call_count: totals.call_count,
-        input_tokens: totals.input_tokens,
-        cache_read_tokens: totals.cache_read_tokens,
-        cache_write_tokens: totals.cache_write_tokens,
-        output_tokens: totals.output_tokens,
-        total_tokens: totals.total_tokens,
-        request_count: totals.request_count,
-        resource_count: totals.resource_count,
-        cost_usd: totals.cost_usd,
-        known_cost_usd: totals.known_cost_usd,
-        public_list_estimate_usd: totals.public_list_estimate_usd,
-        provider_estimate_usd: totals.provider_estimate_usd,
-        non_billable_record_count: totals.non_billable_record_count,
-        unpriced_call_count: totals.unpriced_call_count,
+        aggregate: totals,
         unpriced_reasons,
         resource_units,
         providers,
@@ -889,7 +844,7 @@ async fn load_usage_groups(
     window: QueryWindow,
     group_by: UsageGroupBy,
 ) -> Result<Vec<UsageGroup>, sqlx::Error> {
-    sqlx::query_as::<_, UsageGroup>(
+    sqlx::query_as::<_, UsageGroup>(AssertSqlSafe(format!(
         r"
         WITH grouped AS (
             SELECT
@@ -898,7 +853,6 @@ async fn load_usage_groups(
                     WHEN 'feature' THEN COALESCE(feature, 'unknown')
                     WHEN 'operation' THEN COALESCE(operation, 'unknown')
                     WHEN 'provider' THEN COALESCE(provider, 'unknown')
-                    WHEN 'vendor' THEN COALESCE(provider, 'unknown')
                     WHEN 'model' THEN COALESCE(model, 'unknown')
                     WHEN 'source' THEN COALESCE(source, 'unknown')
                     ELSE 'unknown'
@@ -911,14 +865,7 @@ async fn load_usage_groups(
                 COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
                 COALESCE(SUM(request_count), 0)::bigint AS request_count,
                 COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-                CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
-                    THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
-                    ELSE NULL END AS cost_usd,
-                ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
-                ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
-                ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::numeric, 8)::double precision AS provider_estimate_usd,
-                COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
-                COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
+                {cost_aggregates}
             FROM vendor_usage_records
             WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
               AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
@@ -931,7 +878,8 @@ async fn load_usage_groups(
         FROM grouped
         ORDER BY (key = 'unknown'), LOWER(key)
         ",
-    )
+        cost_aggregates = newsly_db::VENDOR_COST_AGGREGATES_SQL,
+    )))
     .bind(window.since)
     .bind(window.until)
     .bind(group_by.as_str())
@@ -1009,7 +957,7 @@ fn validate_limit(limit: i64, maximum: i64) -> Result<(), OperatorQueryError> {
 }
 
 #[derive(Debug, Error)]
-pub enum OperatorQueryError {
+pub(crate) enum OperatorQueryError {
     #[error("window hours must be at least 1")]
     InvalidWindowHours,
     #[error("query window may not exceed {maximum_hours} hours")]

@@ -3,7 +3,6 @@
 #![forbid(unsafe_code)]
 
 mod agent;
-mod api_keys;
 mod audio_episodes;
 mod auth;
 mod briefing;
@@ -37,10 +36,9 @@ pub use agent::{
     AgentLibraryManifestResponse, AgentSearchRequest, AgentSearchResponse, AgentSearchResultKind,
     AgentSearchResultResponse,
 };
-pub use api_keys::{ApiKeyCreateResponse, ApiKeySummaryResponse};
 pub use audio_episodes::{
-    AudioEpisodeDelivery, AudioEpisodeDeliveryQuery, AudioEpisodeListQuery,
-    AudioEpisodeShareResponse, CUSTOM_NARRATION_MAX_SOURCES, CustomNarrationCreateRequest,
+    AudioEpisodeListQuery, AudioEpisodeShareResponse, CUSTOM_NARRATION_MAX_SOURCES,
+    CustomNarrationCreateRequest,
 };
 pub use auth::{
     AccessTokenResponse, AdminLoginRequest, AdminLoginResponse, AppleSignInRequest,
@@ -73,9 +71,7 @@ pub use cli::{
     CliLinkApproveRequest, CliLinkApproveResponse, CliLinkPollResponse, CliLinkStartRequest,
     CliLinkStartResponse, CliLinkStatus,
 };
-pub use client_compat::{
-    NewsItemStatus, NewsItemVisibilityScope, SummaryVersion, TaskStatus, TaskType,
-};
+pub use client_compat::{SummaryVersion, TaskStatus};
 pub use content_bodies::{ChatGptUrlResponse, ContentBodyResponse};
 pub use content_misc::{
     ConvertNewsItemResponse, ConvertNewsResponse, DownloadMoreRequest, DownloadMoreResponse,
@@ -137,9 +133,7 @@ pub use onboarding_flow::{
     AgentOnboardingSuggestionsResponse, OnboardingAudioDiscoverRequest,
     OnboardingAudioDiscoverResponse, OnboardingAudioLanePreview,
     OnboardingAudioLanePreviewResponse, OnboardingAudioLaneTarget, OnboardingCompleteRequest,
-    OnboardingCompleteResponse, OnboardingFastDiscoverRequest, OnboardingProfileRequest,
-    OnboardingProfileResponse, OnboardingSelectedAggregator, OnboardingVoiceParseRequest,
-    OnboardingVoiceParseResponse,
+    OnboardingCompleteResponse, OnboardingSelectedAggregator,
 };
 pub use openai::{AudioTranscriptionHealthResponse, AudioTranscriptionResponse};
 pub use scraper_configs::{
@@ -149,8 +143,7 @@ pub use scraper_configs::{
 };
 pub use share_actions::{
     LlmTaskMode, LlmTaskStatus, ShareActionAgentResult, ShareActionBriefingTarget,
-    ShareActionCandidate, ShareActionChatCandidate, ShareActionCreateRequest,
-    ShareActionPresentationCandidate, ShareActionResponse,
+    ShareActionCandidate, ShareActionCreateRequest, ShareActionResponse,
 };
 pub use stats::{
     BadgeStatsResponse, LongFormStatsResponse, ProcessingCountResponse, UnreadCountsResponse,

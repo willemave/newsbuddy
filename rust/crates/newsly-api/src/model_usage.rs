@@ -2,17 +2,16 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use newsly_agent_runtime::{AgentEvent, AgentEventSink, AgentRuntimeError};
 use newsly_db::{NewAgentModelUsage, record_agent_model_usage};
-use newsly_providers::OnboardingGateway;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
 use crate::AppState;
 
-pub(super) fn onboarding_gateway_with_usage(
+pub(super) fn onboarding_events_with_usage(
     state: &AppState,
     user_id: Option<i64>,
     operation: &str,
-) -> (OnboardingGateway, Arc<ApiAgentUsageSink>) {
+) -> (Arc<dyn AgentEventSink>, Arc<ApiAgentUsageSink>) {
     let usage = Arc::new(ApiAgentUsageSink::new(
         state.database.pool().clone(),
         user_id,
@@ -20,7 +19,7 @@ pub(super) fn onboarding_gateway_with_usage(
         None,
     ));
     let events: Arc<dyn AgentEventSink> = usage.clone();
-    (state.onboarding.with_events(events), usage)
+    (events, usage)
 }
 
 #[derive(Debug)]

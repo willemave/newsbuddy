@@ -1,18 +1,9 @@
+use crate::content_metadata::{RAW_BODY_KEYS, remove_field, runtime_value, set_field};
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
+use newsly_domain::truncate_chars;
 use serde_json::{Map, Value, json};
 use sqlx::{FromRow, Postgres, Transaction};
 use thiserror::Error;
-
-const DOMAIN_KEY: &str = "domain";
-const PROCESSING_KEY: &str = "processing";
-const RAW_BODY_KEYS: [&str; 6] = [
-    "content",
-    "transcript",
-    "content_to_summarize",
-    "file_path",
-    "transcript_path",
-    "full_text",
-];
 
 #[derive(Debug, Clone, FromRow)]
 pub struct MediaContentSnapshot {
@@ -20,13 +11,9 @@ pub struct MediaContentSnapshot {
     pub content_type: String,
     pub url: String,
     pub source_url: Option<String>,
-    pub title: Option<String>,
-    pub source: Option<String>,
     pub platform: Option<String>,
     pub status: String,
     pub content_metadata: Value,
-    pub error_message: Option<String>,
-    pub retry_count: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,13 +107,9 @@ pub async fn prepare_media_content(
             content_type,
             url,
             source_url,
-            title,
-            source,
             platform,
             status,
             COALESCE(content_metadata, '{}'::json) AS content_metadata,
-            error_message,
-            COALESCE(retry_count, 0) AS retry_count
         FROM contents
         WHERE id::bigint = $1
         "#,
@@ -165,40 +148,40 @@ pub async fn apply_media_mutation(
             resolved_episode_title,
         } => {
             upsert_source_body(transaction, content.id, body).await?;
-            set_domain_field(
+            set_field(
                 &mut metadata,
                 "transcription_date",
                 Value::String(utc_string(*transcription_at)),
             );
-            set_domain_field(
+            set_field(
                 &mut metadata,
                 "transcription_service",
                 Value::String(transcription_service.clone()),
             );
-            set_domain_field(&mut metadata, "has_transcript", Value::Bool(true));
+            set_field(&mut metadata, "has_transcript", Value::Bool(true));
             if let Some(language) = detected_language.as_deref().and_then(nonempty) {
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "detected_language",
                     Value::String(language.to_owned()),
                 );
             }
             if let Some(audio_url) = resolved_audio_url.as_deref().and_then(nonempty) {
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "audio_url",
                     Value::String(audio_url.to_owned()),
                 );
             }
             if let Some(feed_url) = resolved_feed_url.as_deref().and_then(nonempty) {
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "feed_url",
                     Value::String(feed_url.to_owned()),
                 );
             }
             if let Some(episode_title) = resolved_episode_title.as_deref().and_then(nonempty) {
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "episode_title",
                     Value::String(episode_title.to_owned()),
@@ -213,7 +196,7 @@ pub async fn apply_media_mutation(
                 .map(|value| truncate_chars(value, 1_000))
                 .or_else(|| compact_excerpt(transcript));
             if let Some(excerpt) = &excerpt {
-                set_domain_field(&mut metadata, "excerpt", Value::String(excerpt.clone()));
+                set_field(&mut metadata, "excerpt", Value::String(excerpt.clone()));
             }
             remove_raw_body_fields(&mut metadata);
             content.search_text = Some(build_search_text(&content, &metadata, excerpt.as_deref()));
@@ -239,20 +222,20 @@ pub async fn apply_media_mutation(
             duration_ms,
             downloaded_at,
         } => {
-            set_domain_field(&mut metadata, "has_video", Value::Bool(true));
+            set_field(&mut metadata, "has_video", Value::Bool(true));
             if let Some(duration_ms) = *duration_ms
                 && duration_ms >= 0
             {
-                set_domain_field(&mut metadata, "video_duration_ms", Value::from(duration_ms));
+                set_field(&mut metadata, "video_duration_ms", Value::from(duration_ms));
             }
-            remove_domain_field(&mut metadata, "tweet_video_skip_reason");
-            remove_domain_field(&mut metadata, "tweet_video_error");
-            set_domain_field(
+            remove_field(&mut metadata, "tweet_video_skip_reason");
+            remove_field(&mut metadata, "tweet_video_error");
+            set_field(
                 &mut metadata,
                 "video_audio_path",
                 Value::String(audio_path.clone()),
             );
-            set_domain_field(
+            set_field(
                 &mut metadata,
                 "tweet_video_downloaded_at",
                 Value::String(utc_string(*downloaded_at)),
@@ -262,10 +245,10 @@ pub async fn apply_media_mutation(
             Some(MediaNextTask::TranscribeTweetVideo)
         }
         MediaMutation::TweetSkipped { disabled } => {
-            set_domain_field(&mut metadata, "has_video", Value::Bool(false));
-            remove_domain_field(&mut metadata, "video_audio_path");
+            set_field(&mut metadata, "has_video", Value::Bool(false));
+            remove_field(&mut metadata, "video_audio_path");
             if *disabled {
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "tweet_video_skip_reason",
                     Value::String("disabled".to_owned()),
@@ -280,9 +263,9 @@ pub async fn apply_media_mutation(
             error_message,
             failed_at,
         } => {
-            set_domain_field(&mut metadata, "has_video", Value::Bool(false));
-            remove_domain_field(&mut metadata, "video_audio_path");
-            set_domain_field(
+            set_field(&mut metadata, "has_video", Value::Bool(false));
+            remove_field(&mut metadata, "video_audio_path");
+            set_field(
                 &mut metadata,
                 "tweet_video_error",
                 json!({
@@ -300,23 +283,23 @@ pub async fn apply_media_mutation(
             transcription_at,
             transcription_service,
         } => {
-            remove_domain_field(&mut metadata, "video_audio_path");
-            set_domain_field(
+            remove_field(&mut metadata, "video_audio_path");
+            set_field(
                 &mut metadata,
                 "video_transcript",
                 Value::String(transcript.clone()),
             );
-            set_domain_field(
+            set_field(
                 &mut metadata,
                 "video_transcription_date",
                 Value::String(utc_string(*transcription_at)),
             );
-            set_domain_field(
+            set_field(
                 &mut metadata,
                 "video_transcription_service",
                 Value::String(transcription_service.clone()),
             );
-            remove_domain_field(&mut metadata, "tweet_video_error");
+            remove_field(&mut metadata, "tweet_video_error");
             "processing".clone_into(&mut content.status);
             content.error_message = None;
             Some(MediaNextTask::Summarize)
@@ -570,61 +553,9 @@ fn metadata_map(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
 }
 
-fn runtime_value<'a>(metadata: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
-    metadata
-        .get(PROCESSING_KEY)
-        .and_then(Value::as_object)
-        .and_then(|processing| processing.get(key))
-        .or_else(|| {
-            metadata
-                .get(DOMAIN_KEY)
-                .and_then(Value::as_object)
-                .and_then(|domain| domain.get(key))
-        })
-        .or_else(|| metadata.get(key))
-}
-
-fn set_domain_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    metadata.insert(key.to_owned(), value.clone());
-    if let Some(processing) = metadata
-        .get_mut(PROCESSING_KEY)
-        .and_then(Value::as_object_mut)
-    {
-        processing.remove(key);
-    }
-    let domain = metadata
-        .entry(DOMAIN_KEY.to_owned())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !domain.is_object() {
-        *domain = Value::Object(Map::new());
-    }
-    domain
-        .as_object_mut()
-        .expect("domain metadata was normalized to an object")
-        .insert(key.to_owned(), value);
-}
-
-fn remove_domain_field(metadata: &mut Map<String, Value>, key: &str) {
-    metadata.remove(key);
-    if let Some(domain) = metadata.get_mut(DOMAIN_KEY).and_then(Value::as_object_mut) {
-        domain.remove(key);
-    }
-    if let Some(processing) = metadata
-        .get_mut(PROCESSING_KEY)
-        .and_then(Value::as_object_mut)
-    {
-        processing.remove(key);
-    }
-}
-
 fn remove_raw_body_fields(metadata: &mut Map<String, Value>) {
     for key in RAW_BODY_KEYS {
-        metadata.remove(key);
-        for namespace in [DOMAIN_KEY, PROCESSING_KEY] {
-            if let Some(values) = metadata.get_mut(namespace).and_then(Value::as_object_mut) {
-                values.remove(key);
-            }
-        }
+        remove_field(metadata, key);
     }
 }
 
@@ -693,10 +624,6 @@ fn nonempty(value: &str) -> Option<&str> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
-}
-
 fn is_terminal_content_status(status: &str) -> bool {
     matches!(status, "completed" | "skipped")
 }
@@ -715,7 +642,7 @@ mod tests {
 
     use super::{
         MediaTranscriptionChunkUsage, build_search_text, record_media_transcription_chunk_usage,
-        remove_domain_field, runtime_value, set_domain_field,
+        remove_field, runtime_value, set_field,
     };
 
     #[sqlx::test]
@@ -806,7 +733,7 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap();
-        set_domain_field(&mut metadata, "has_video", Value::Bool(true));
+        set_field(&mut metadata, "has_video", Value::Bool(true));
         assert_eq!(metadata.get("has_video"), Some(&Value::Bool(true)));
         assert_eq!(
             metadata
@@ -815,7 +742,7 @@ mod tests {
                 .and_then(|domain| domain.get("has_video")),
             Some(&Value::Bool(true))
         );
-        remove_domain_field(&mut metadata, "has_video");
+        remove_field(&mut metadata, "has_video");
         assert!(metadata.get("has_video").is_none());
         assert!(
             metadata

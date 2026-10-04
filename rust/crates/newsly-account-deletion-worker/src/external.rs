@@ -1,28 +1,23 @@
 use std::fmt::{self, Debug, Formatter};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE;
-use fernet::Fernet;
-use object_store::aws::AmazonS3Builder;
+use newsly_providers::IntegrationTokenCipher;
+use object_store::ObjectStoreExt;
 use object_store::path::Path as ObjectPath;
-use object_store::{ClientOptions, ObjectStore, ObjectStoreExt};
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
-use crate::ArtifactStorageConfig;
 use crate::repository::AccountCleanupPlan;
 
 #[derive(Clone)]
 pub struct AccountExternalServices {
     pub x: Arc<dyn XGrantRevoker>,
-    pub objects: Arc<dyn ObjectArtifactStore>,
+    pub objects: Arc<ConfiguredArtifactStore>,
 }
 
 impl Debug for AccountExternalServices {
@@ -50,7 +45,7 @@ pub struct ReqwestXGrantRevoker {
     revoke_url: Url,
     client_id: SecretString,
     client_secret: Option<SecretString>,
-    cipher: Arc<Fernet>,
+    cipher: IntegrationTokenCipher,
 }
 
 impl Debug for ReqwestXGrantRevoker {
@@ -80,11 +75,14 @@ impl ReqwestXGrantRevoker {
         client_secret: Option<SecretString>,
         encryption_key: Option<SecretString>,
     ) -> Result<Self, XRevokeError> {
-        let client_id = client_id.ok_or(XRevokeError::MissingConfiguration("X_CLIENT_ID"))?;
+        let client_id =
+            trimmed_secret(client_id).ok_or(XRevokeError::MissingConfiguration("X_CLIENT_ID"))?;
+        let client_secret = trimmed_secret(client_secret);
         let encryption_key =
             encryption_key.ok_or(XRevokeError::MissingConfiguration("X_TOKEN_ENCRYPTION_KEY"))?;
         let revoke_url = revoke_url(token_url)?;
-        let cipher = Arc::new(build_fernet(&encryption_key)?);
+        let cipher = IntegrationTokenCipher::new(&encryption_key)
+            .map_err(|_| XRevokeError::InvalidEncryptionKey)?;
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
@@ -104,6 +102,13 @@ impl ReqwestXGrantRevoker {
     }
 }
 
+fn trimmed_secret(secret: Option<SecretString>) -> Option<SecretString> {
+    secret.and_then(|secret| {
+        let value = secret.expose_secret().trim();
+        (!value.is_empty()).then(|| SecretString::from(value.to_owned()))
+    })
+}
+
 #[async_trait]
 impl XGrantRevoker for ReqwestXGrantRevoker {
     async fn revoke(
@@ -115,8 +120,7 @@ impl XGrantRevoker for ReqwestXGrantRevoker {
             .cipher
             .decrypt(encrypted_token)
             .map_err(|_| XRevokeError::InvalidEncryptedToken)?;
-        let token = String::from_utf8(decrypted).map_err(|_| XRevokeError::InvalidTokenUtf8)?;
-        let token = token.trim();
+        let token = decrypted.trim();
         if token.is_empty() {
             return Err(XRevokeError::EmptyToken);
         }
@@ -162,86 +166,40 @@ impl XGrantRevoker for UnavailableXGrantRevoker {
     }
 }
 
-#[async_trait]
-pub trait ObjectArtifactStore: Debug + Send + Sync + 'static {
-    async fn delete(&self, key: &str) -> Result<(), ExternalCleanupError>;
-}
-
 #[derive(Clone)]
-pub enum ConfiguredArtifactStore {
-    Local { root: PathBuf },
-    S3 { store: Arc<dyn ObjectStore> },
-}
+pub struct ConfiguredArtifactStore(newsly_providers::ObjectStorageBackend);
 
 impl Debug for ConfiguredArtifactStore {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Local { root } => formatter
-                .debug_struct("LocalArtifactStore")
-                .field("root", root)
-                .finish(),
-            Self::S3 { .. } => formatter
-                .debug_struct("S3ArtifactStore")
-                .finish_non_exhaustive(),
-        }
+        formatter
+            .debug_tuple("ConfiguredArtifactStore")
+            .field(&self.0)
+            .finish()
     }
 }
 
 impl ConfiguredArtifactStore {
     /// Builds the configured local or S3-compatible object deletion boundary.
+    pub const fn new(config: newsly_providers::ObjectStorageBackend) -> Self {
+        Self(config)
+    }
+
+    /// Deletes an account-owned artifact when its key is safe for the configured backend.
     ///
     /// # Errors
     ///
-    /// Returns an error when the S3-compatible store configuration cannot be initialized.
-    pub fn new(config: ArtifactStorageConfig) -> Result<Self, ExternalCleanupError> {
-        match config {
-            ArtifactStorageConfig::Local { root } => Ok(Self::Local { root }),
-            ArtifactStorageConfig::S3Compatible {
-                bucket,
-                endpoint,
-                region,
-                access_key,
-                secret_key,
-                timeout,
-            } => {
-                let mut builder = AmazonS3Builder::from_env()
-                    .with_bucket_name(bucket)
-                    .with_disable_bulk_delete(true)
-                    .with_client_options(ClientOptions::new().with_timeout(timeout));
-                if let Some(endpoint) = endpoint {
-                    builder = builder
-                        .with_allow_http(endpoint.scheme() == "http")
-                        .with_endpoint(endpoint.to_string());
-                }
-                if let Some(region) = region {
-                    builder = builder.with_region(region);
-                }
-                if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
-                    builder = builder
-                        .with_access_key_id(access_key.expose_secret())
-                        .with_secret_access_key(secret_key.expose_secret());
-                }
-                let store = builder
-                    .build()
-                    .map_err(|error| ExternalCleanupError::ObjectStore(error.to_string()))?;
-                Ok(Self::S3 {
-                    store: Arc::new(store),
-                })
-            }
+    /// Returns an error for an unsafe key or when the configured object store cannot delete it.
+    pub async fn delete(&self, key: &str) -> Result<(), ExternalCleanupError> {
+        if !newsly_providers::is_safe_object_key(key) {
+            return Err(ExternalCleanupError::UnsafeObjectKey(key.to_owned()));
         }
-    }
-}
-
-#[async_trait]
-impl ObjectArtifactStore for ConfiguredArtifactStore {
-    async fn delete(&self, key: &str) -> Result<(), ExternalCleanupError> {
-        validate_object_key(key)?;
-        match self {
-            Self::Local { root } => {
-                let path = root.join(key);
-                remove_file_beneath_root(root, &path).await
+        match &self.0 {
+            newsly_providers::ObjectStorageBackend::Local { root } => {
+                newsly_providers::delete_local_object(root, key)
+                    .await
+                    .map_err(|error| ExternalCleanupError::ObjectStore(error.to_string()))
             }
-            Self::S3 { store } => {
+            newsly_providers::ObjectStorageBackend::S3 { store } => {
                 let path = ObjectPath::parse(key)
                     .map_err(|error| ExternalCleanupError::UnsafeObjectKey(error.to_string()))?;
                 match store.delete(&path).await {
@@ -325,22 +283,6 @@ async fn remove_directory_if_present(path: &Path) -> Result<(), ExternalCleanupE
     }
 }
 
-fn validate_object_key(key: &str) -> Result<(), ExternalCleanupError> {
-    let path = Path::new(key);
-    if key.is_empty()
-        || key.len() > 2_048
-        || key.contains('\0')
-        || key.contains('\\')
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(ExternalCleanupError::UnsafeObjectKey(key.to_owned()));
-    }
-    Ok(())
-}
-
 fn revoke_url(token_url: &str) -> Result<Url, XRevokeError> {
     let mut url = token_url
         .parse::<Url>()
@@ -354,16 +296,6 @@ fn revoke_url(token_url: &str) -> Result<Url, XRevokeError> {
     url.set_query(None);
     url.set_fragment(None);
     Ok(url)
-}
-
-fn build_fernet(raw_key: &SecretString) -> Result<Fernet, XRevokeError> {
-    let raw_key = raw_key.expose_secret();
-    if let Some(cipher) = Fernet::new(raw_key) {
-        return Ok(cipher);
-    }
-    let digest = Sha256::digest(raw_key.as_bytes());
-    let derived = URL_SAFE.encode(digest);
-    Fernet::new(&derived).ok_or(XRevokeError::InvalidEncryptionKey)
 }
 
 #[derive(Debug, Error)]
@@ -392,8 +324,6 @@ pub enum XRevokeError {
     InvalidEncryptionKey,
     #[error("X token could not be decrypted")]
     InvalidEncryptedToken,
-    #[error("decrypted X token is not UTF-8")]
-    InvalidTokenUtf8,
     #[error("decrypted X token is empty")]
     EmptyToken,
     #[error("X revocation HTTP client could not be built")]
@@ -410,19 +340,35 @@ pub enum XRevokeError {
 mod tests {
     use std::fs;
 
-    use secrecy::SecretString;
+    use secrecy::{ExposeSecret, SecretString};
     use tempfile::tempdir;
 
-    use super::{
-        ExternalCleanupError, build_fernet, remove_file_beneath_root, revoke_url,
-        validate_object_key,
-    };
+    use super::{ExternalCleanupError, ReqwestXGrantRevoker, remove_file_beneath_root, revoke_url};
 
     #[test]
-    fn persisted_fernet_key_derivation_round_trips() {
-        let cipher = build_fernet(&SecretString::from("human-readable-key".to_owned())).unwrap();
-        let token = cipher.encrypt(b"private-token");
-        assert_eq!(cipher.decrypt(&token).unwrap(), b"private-token");
+    fn revoker_decrypts_provider_tokens_with_trimmed_encoded_and_derived_keys() {
+        for key in [
+            "human-readable-key",
+            "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        ] {
+            let provider =
+                newsly_providers::IntegrationTokenCipher::new(&SecretString::from(key.to_owned()))
+                    .unwrap();
+            let token = provider.encrypt("private-token").unwrap();
+            let revoker = ReqwestXGrantRevoker::new(
+                "https://api.x.com/2/oauth2/token",
+                Some(SecretString::from(" client\n".to_owned())),
+                Some(SecretString::from(" secret\n".to_owned())),
+                Some(SecretString::from(format!("  {key}\n"))),
+            )
+            .unwrap();
+            assert_eq!(revoker.client_id.expose_secret(), "client");
+            assert_eq!(
+                revoker.client_secret.as_ref().unwrap().expose_secret(),
+                "secret"
+            );
+            assert_eq!(revoker.cipher.decrypt(&token).unwrap(), "private-token");
+        }
     }
 
     #[test]
@@ -437,10 +383,12 @@ mod tests {
 
     #[test]
     fn object_keys_reject_root_and_traversal() {
-        assert!(validate_object_key("learning-decks/1/deck.html").is_ok());
-        assert!(validate_object_key("../private").is_err());
-        assert!(validate_object_key("/absolute").is_err());
-        assert!(validate_object_key("").is_err());
+        assert!(newsly_providers::is_safe_object_key(
+            "learning-decks/1/deck.html"
+        ));
+        assert!(!newsly_providers::is_safe_object_key("../private"));
+        assert!(!newsly_providers::is_safe_object_key("/absolute"));
+        assert!(!newsly_providers::is_safe_object_key(""));
     }
 
     #[cfg(unix)]

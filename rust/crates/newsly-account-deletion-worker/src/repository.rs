@@ -375,7 +375,7 @@ async fn null_shared_approver_references(
     user_id: i64,
 ) -> Result<(), sqlx::Error> {
     const UPDATES: &[&str] = &[
-        "UPDATE cli_link_sessions SET approved_by_user_id = NULL WHERE approved_by_user_id::bigint = $1",
+        "DELETE FROM cli_link_sessions WHERE approved_by_user_id::bigint = $1",
         "UPDATE llm_task_actions SET approved_by_user_id = NULL WHERE approved_by_user_id::bigint = $1",
         "UPDATE user_api_keys SET created_by_admin_user_id = NULL WHERE created_by_admin_user_id::bigint = $1",
     ];
@@ -421,6 +421,9 @@ async fn scrub_shared_content_metadata(
             content_metadata::jsonb ->> 'submitted_by_user_id' = $1::text
             OR (content_metadata::jsonb -> 'share_and_chat_user_ids') @> jsonb_build_array($1::bigint)
             OR (content_metadata::jsonb -> 'share_and_chat_requests') @> jsonb_build_array(jsonb_build_object('user_id', $1::bigint))
+            OR content_metadata::jsonb -> 'domain' ->> 'submitted_by_user_id' = $1::text
+            OR (content_metadata::jsonb -> 'domain' -> 'share_and_chat_user_ids') @> jsonb_build_array($1::bigint)
+            OR (content_metadata::jsonb -> 'domain' -> 'share_and_chat_requests') @> jsonb_build_array(jsonb_build_object('user_id', $1::bigint))
             OR content_metadata::jsonb -> 'processing' ->> 'submitted_by_user_id' = $1::text
             OR (content_metadata::jsonb -> 'processing' -> 'share_and_chat_user_ids') @> jsonb_build_array($1::bigint)
             OR (content_metadata::jsonb -> 'processing' -> 'share_and_chat_requests') @> jsonb_build_array(jsonb_build_object('user_id', $1::bigint))
@@ -447,8 +450,10 @@ fn remove_user_references(mut metadata: Value, user_id: i64) -> Value {
         return metadata;
     };
     scrub_metadata_mapping(root, user_id);
-    if let Some(Value::Object(processing)) = root.get_mut("processing") {
-        scrub_metadata_mapping(processing, user_id);
+    for namespace in ["domain", "processing"] {
+        if let Some(Value::Object(mapping)) = root.get_mut(namespace) {
+            scrub_metadata_mapping(mapping, user_id);
+        }
     }
     metadata
 }
@@ -516,10 +521,13 @@ mod tests {
     use serde_json::json;
     use sqlx::PgPool;
 
-    use super::{delete_direct_rows, delete_indirect_rows, remove_user_references};
+    use super::{
+        delete_direct_rows, delete_indirect_rows, null_shared_approver_references,
+        remove_user_references, scrub_shared_content_metadata,
+    };
 
     #[test]
-    fn shared_metadata_scrub_preserves_other_users() {
+    fn metadata_value_scrub_preserves_other_users() {
         let metadata = json!({
             "submitted_by_user_id": 7,
             "share_and_chat_user_ids": [7, 8],
@@ -527,6 +535,11 @@ mod tests {
                 {"user_id": 7, "initial_message": "private"},
                 {"user_id": 8, "initial_message": "keep"}
             ],
+            "domain": {
+                "submitted_by_user_id": 7,
+                "share_and_chat_user_ids": [7, 8],
+                "share_and_chat_requests": [{"user_id": 7}, {"user_id": 8}]
+            },
             "processing": {
                 "submitted_by_user_id": "7",
                 "share_and_chat_user_ids": [7, 8],
@@ -538,9 +551,58 @@ mod tests {
             json!({
                 "share_and_chat_user_ids": [8],
                 "share_and_chat_requests": [{"user_id": 8, "initial_message": "keep"}],
+                "domain": {
+                    "share_and_chat_user_ids": [8],
+                    "share_and_chat_requests": [{"user_id": 8}]
+                },
                 "processing": {
                     "share_and_chat_user_ids": [8],
                     "share_and_chat_requests": [{"user_id": 8}]
+                }
+            })
+        );
+    }
+
+    #[sqlx::test(migrations = "../newsly-db/migrations")]
+    async fn shared_metadata_scrub_preserves_other_users(pool: PgPool) {
+        let metadata = json!({
+            "unrelated": "keep",
+            "domain": {
+                "submitted_by_user_id": 7,
+                "share_and_chat_user_ids": [7, 8],
+                "share_and_chat_requests": [
+                    {"user_id": 7, "initial_message": "private"},
+                    {"user_id": 8, "initial_message": "keep"}
+                ]
+            }
+        });
+        let content_id: i64 = sqlx::query_scalar(
+            "INSERT INTO contents(content_type,url,status,is_aggregate,content_metadata) VALUES('article','https://example.com/shared-deletion','completed',false,$1) RETURNING id::bigint",
+        )
+        .bind(metadata)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        scrub_shared_content_metadata(&mut transaction, 7)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+
+        let cleaned: serde_json::Value =
+            sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id::bigint = $1")
+                .bind(content_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            cleaned,
+            json!({
+                "unrelated": "keep",
+                "domain": {
+                    "share_and_chat_user_ids": [8],
+                    "share_and_chat_requests": [{"user_id": 8, "initial_message": "keep"}]
                 }
             })
         );
@@ -599,8 +661,18 @@ mod tests {
         .await
         .unwrap();
 
+        sqlx::query("INSERT INTO briefing_composition_attempts(attempt_id,task_id,user_id,fingerprint,outcome) VALUES('00000000-0000-0000-0000-000000000002',$1,$2,'fingerprint','accepted')")
+            .bind(task_id).bind(user_id).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO briefing_composition_cooldowns(user_id,fingerprint,retry_after) VALUES($1,'fingerprint',now() + interval '1 day')")
+            .bind(user_id).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO cli_link_sessions(session_id,approve_token_hash,poll_token_hash,status,expires_at,approved_by_user_id,requested_device_name,issued_api_key_plaintext,created_at) VALUES('deletion-session','approve','poll','approved',timezone('UTC',now()) + interval '1 hour',$1,'private device','private key',timezone('UTC',now()))")
+            .bind(user_id).execute(&pool).await.unwrap();
+
         let mut transaction = pool.begin().await.unwrap();
         delete_indirect_rows(&mut transaction, user_id)
+            .await
+            .unwrap();
+        null_shared_approver_references(&mut transaction, user_id)
             .await
             .unwrap();
         delete_direct_rows(&mut transaction, user_id, -1)
@@ -615,6 +687,9 @@ mod tests {
             UNION ALL SELECT 'news_category_candidates', count(*)::bigint FROM news_category_candidates
             UNION ALL SELECT 'news_category_naming_attempts', count(*)::bigint FROM news_category_naming_attempts
             UNION ALL SELECT 'processing_tasks', count(*)::bigint FROM processing_tasks
+            UNION ALL SELECT 'briefing_composition_attempts', count(*)::bigint FROM briefing_composition_attempts
+            UNION ALL SELECT 'briefing_composition_cooldowns', count(*)::bigint FROM briefing_composition_cooldowns
+            UNION ALL SELECT 'cli_link_sessions', count(*)::bigint FROM cli_link_sessions
             ",
         )
         .fetch_all(&pool)

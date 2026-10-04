@@ -59,7 +59,8 @@ use futures_util::FutureExt;
 use newsly_domain::RuntimeOwner;
 use newsly_queue::{
     ClaimRequest, ClaimedTask, OwnedWorkPlan, PrepareWorkOutcome, QueueError, QueueKernel,
-    QueueNotificationWaiter, QueueWakeOutcome, TaskResult, TaskStatus, TaskTransition, TaskType,
+    QueueNotificationWaiter, QueueWakeOutcome, TaskQueue, TaskResult, TaskStatus, TaskTransition,
+    TaskType,
 };
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
@@ -164,6 +165,16 @@ impl HandlerExecution {
             task_result,
             finalizer: Some(Box::new(finalizer)),
         }
+    }
+
+    fn with_default_error(mut self, task_type: TaskType) -> Self {
+        if !self.task_result.success
+            && !self.task_result.deferred
+            && self.task_result.error_message.is_none()
+        {
+            self.task_result.error_message = Some(format!("{task_type} returned false"));
+        }
+        self
     }
 }
 
@@ -391,10 +402,8 @@ impl WorkerKernel {
         if config.claim.runtime_scope.runtime() != RuntimeOwner::Rust {
             return Err(WorkerError::NonRustRuntimeScope);
         }
-        if let Some(task_type) = config.claim.task_type
-            && !handlers.contains(task_type)
-        {
-            return Err(WorkerError::MissingScopedHandler(task_type));
+        if let Some(task_type) = config.claim.task_type {
+            validate_scoped_task(task_type, config.claim.queue_name, &handlers)?;
         }
         match config.claim.runtime_scope.namespace_values() {
             Some(namespaces) => {
@@ -402,9 +411,7 @@ impl WorkerKernel {
                     let task_type = namespace
                         .parse::<TaskType>()
                         .map_err(|_| WorkerError::InvalidExecutorNamespace(namespace.to_owned()))?;
-                    if !handlers.contains(task_type) {
-                        return Err(WorkerError::MissingScopedHandler(task_type));
-                    }
+                    validate_scoped_task(task_type, config.claim.queue_name, &handlers)?;
                 }
             }
             None if config.claim.task_type.is_none() => {
@@ -420,10 +427,6 @@ impl WorkerKernel {
         })
     }
 
-    pub const fn queue(&self) -> &QueueKernel {
-        &self.queue
-    }
-
     /// Runs one prepare/external/finalize attempt.
     ///
     /// No transaction crosses `handler.execute`: claim and owner preflight have committed before
@@ -437,70 +440,57 @@ impl WorkerKernel {
             return Ok(WorkerAttempt::Empty);
         };
 
-        if claim.task_type == TaskType::GenerateAudioEpisode {
-            let attempt_started = Instant::now();
-            let task_id = claim.id;
-            let retry_count = claim.retry_count;
-            let audio_episode_id = claim
-                .payload
-                .get("audio_episode_id")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(-1);
-            let span = tracing::info_span!(
-                "audio_episode_attempt",
+        let attempt_started = Instant::now();
+        let task_id = claim.id;
+        let task_type = claim.task_type;
+        let retry_count = claim.retry_count;
+        let span = tracing::info_span!("worker_attempt", task_id, %task_type, retry_count);
+        async {
+            info!(
                 task_id,
-                audio_episode_id,
+                %task_type,
                 retry_count,
+                stage = "queue_ready_to_claim",
+                elapsed_ms = claim
+                    .started_at
+                    .signed_duration_since(claim.available_at)
+                    .num_milliseconds()
+                    .max(0),
+                succeeded = true,
+                "Worker timing"
             );
-            return async {
+            if let Some(created_at) = claim.created_at {
                 info!(
                     task_id,
-                    audio_episode_id,
+                    %task_type,
                     retry_count,
-                    stage = "queue_ready_to_claim",
+                    stage = "queue_creation_to_claim",
                     elapsed_ms = claim
                         .started_at
-                        .signed_duration_since(claim.available_at)
+                        .signed_duration_since(created_at)
                         .num_milliseconds()
                         .max(0),
                     succeeded = true,
-                    "Audio timing"
+                    "Worker timing"
                 );
-                if let Some(created_at) = claim.created_at {
-                    info!(
-                        task_id,
-                        audio_episode_id,
-                        retry_count,
-                        stage = "queue_creation_to_claim",
-                        elapsed_ms = claim
-                            .started_at
-                            .signed_duration_since(created_at)
-                            .num_milliseconds()
-                            .max(0),
-                        succeeded = true,
-                        "Audio timing"
-                    );
-                }
-
-                let result = self.run_claimed_attempt(claim).await;
-                let (succeeded, outcome) = audio_attempt_outcome(&result);
-                info!(
-                    task_id,
-                    audio_episode_id,
-                    retry_count,
-                    stage = "total_attempt",
-                    elapsed_ms = elapsed_millis(attempt_started),
-                    succeeded,
-                    outcome,
-                    "Audio timing"
-                );
-                result
             }
-            .instrument(span)
-            .await;
-        }
 
-        self.run_claimed_attempt(claim).await
+            let result = self.run_claimed_attempt(claim).await;
+            let (succeeded, outcome) = attempt_outcome(&result, false);
+            info!(
+                task_id,
+                %task_type,
+                retry_count,
+                stage = "total_attempt",
+                elapsed_ms = elapsed_millis(attempt_started),
+                succeeded,
+                outcome,
+                "Worker timing"
+            );
+            result
+        }
+        .instrument(span)
+        .await
     }
 
     async fn run_claimed_attempt(&self, claim: ClaimedTask) -> Result<WorkerAttempt, WorkerError> {
@@ -677,26 +667,18 @@ impl WorkerKernel {
         claim: &ClaimedTask,
         execution: HandlerExecution,
     ) -> Result<WorkerAttempt, WorkerError> {
-        if claim.task_type != TaskType::GenerateAudioEpisode {
-            return self.finalize_attempt_inner(claim, execution).await;
-        }
-
         let started = Instant::now();
         let result = self.finalize_attempt_inner(claim, execution).await;
-        let (succeeded, outcome) = audio_finalization_outcome(&result);
+        let (succeeded, outcome) = attempt_outcome(&result, true);
         info!(
             task_id = claim.id,
-            audio_episode_id = claim
-                .payload
-                .get("audio_episode_id")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(-1),
+            task_type = %claim.task_type,
             retry_count = claim.retry_count,
             stage = "fenced_finalize",
             elapsed_ms = elapsed_millis(started),
             succeeded,
             outcome,
-            "Audio timing"
+            "Worker timing"
         );
         result
     }
@@ -792,6 +774,27 @@ impl WorkerKernel {
     }
 }
 
+fn validate_scoped_task(
+    task_type: TaskType,
+    claimed_queue: Option<TaskQueue>,
+    handlers: &HandlerRegistry,
+) -> Result<(), WorkerError> {
+    if !handlers.contains(task_type) {
+        return Err(WorkerError::MissingScopedHandler(task_type));
+    }
+    let expected_queue = task_type.spec().queue;
+    if let Some(actual_queue) = claimed_queue
+        && actual_queue != expected_queue
+    {
+        return Err(WorkerError::ClaimQueueMismatch {
+            task_type,
+            expected_queue,
+            actual_queue,
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 enum ExecutedTask {
     Finished(HandlerExecution),
@@ -802,29 +805,25 @@ fn elapsed_millis(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-fn audio_attempt_outcome(result: &Result<WorkerAttempt, WorkerError>) -> (bool, &'static str) {
+fn attempt_outcome(
+    result: &Result<WorkerAttempt, WorkerError>,
+    committed: bool,
+) -> (bool, &'static str) {
     match result {
         Ok(WorkerAttempt::Completed(_)) => (true, "completed"),
+        Ok(WorkerAttempt::Retried(_)) if committed => (true, "retry_committed"),
         Ok(WorkerAttempt::Retried(_)) => (false, "retry_scheduled"),
+        Ok(WorkerAttempt::Deferred(_)) if committed => (true, "deferral_committed"),
         Ok(WorkerAttempt::Deferred(_)) => (false, "deferred"),
+        Ok(WorkerAttempt::Failed(_)) if committed => (true, "failure_committed"),
         Ok(WorkerAttempt::Failed(_)) => (false, "failed"),
+        Ok(WorkerAttempt::SkippedInactiveOwner(_)) if committed => {
+            (true, "inactive_owner_committed")
+        }
         Ok(WorkerAttempt::SkippedInactiveOwner(_)) => (false, "inactive_owner"),
         Ok(WorkerAttempt::OwnershipLost { .. }) => (false, "ownership_lost"),
+        Ok(WorkerAttempt::FinalizationRejected { .. }) if committed => (false, "rejected"),
         Ok(WorkerAttempt::FinalizationRejected { .. }) => (false, "finalization_rejected"),
-        Ok(WorkerAttempt::Empty) => (false, "empty"),
-        Err(_) => (false, "worker_error"),
-    }
-}
-
-fn audio_finalization_outcome(result: &Result<WorkerAttempt, WorkerError>) -> (bool, &'static str) {
-    match result {
-        Ok(WorkerAttempt::Completed(_)) => (true, "completed"),
-        Ok(WorkerAttempt::Retried(_)) => (true, "retry_committed"),
-        Ok(WorkerAttempt::Deferred(_)) => (true, "deferral_committed"),
-        Ok(WorkerAttempt::Failed(_)) => (true, "failure_committed"),
-        Ok(WorkerAttempt::SkippedInactiveOwner(_)) => (true, "inactive_owner_committed"),
-        Ok(WorkerAttempt::OwnershipLost { .. }) => (false, "ownership_lost"),
-        Ok(WorkerAttempt::FinalizationRejected { .. }) => (false, "rejected"),
         Ok(WorkerAttempt::Empty) => (false, "empty"),
         Err(_) => (false, "worker_error"),
     }
@@ -838,7 +837,7 @@ async fn finish_finalization(
         newsly_db::settle_failed_task(
             finalization.transaction_mut(),
             claim.id,
-            claim.task_type.as_str(),
+            terminal_task_settlement(claim.task_type),
             claim.content_id,
             claim.owner_user_id,
             &message,
@@ -847,6 +846,35 @@ async fn finish_finalization(
         .map_err(QueueError::from)?;
     }
     finalization.finish().await
+}
+
+const fn terminal_task_settlement(task_type: TaskType) -> newsly_db::TerminalTaskSettlement {
+    use newsly_db::TerminalTaskSettlement as Settlement;
+
+    match task_type {
+        TaskType::Scrape => Settlement::Scrape,
+        TaskType::BackfillFeeds => Settlement::BackfillFeeds,
+        TaskType::AnalyzeUrl
+        | TaskType::ProcessContent
+        | TaskType::ProcessPodcastMedia
+        | TaskType::DownloadTweetVideoAudio
+        | TaskType::TranscribeTweetVideo
+        | TaskType::Summarize => Settlement::Content,
+        TaskType::ProcessNewsItem => Settlement::NewsItem,
+        TaskType::GenerateImage => Settlement::Artwork,
+        TaskType::DigDeeper | TaskType::ChatTurn => Settlement::ChatTurn,
+        TaskType::DiscoverFeeds => Settlement::FeedDiscover,
+        TaskType::OnboardingDiscover => Settlement::OnboardingDiscover,
+        TaskType::GenerateAudioEpisode => Settlement::AudioEpisode,
+        TaskType::RunLlmTask => Settlement::LlmTask,
+        TaskType::EnrichNewsItemArticle
+        | TaskType::FetchNewsItemDiscussion
+        | TaskType::SyncIntegration
+        | TaskType::BriefingRefresh
+        | TaskType::PrepareNewsLens
+        | TaskType::ReclusterNewsLenses
+        | TaskType::DeleteUserAccount => Settlement::None,
+    }
 }
 
 fn classify_transition(transition: TaskTransition) -> WorkerAttempt {
@@ -939,22 +967,6 @@ fn is_nonretryable_prepare_error(error: &QueueError) -> bool {
     )
 }
 
-trait TaskHandlerResultExt {
-    fn with_default_error(self, task_type: TaskType) -> Self;
-}
-
-impl TaskHandlerResultExt for HandlerExecution {
-    fn with_default_error(mut self, task_type: TaskType) -> Self {
-        if !self.task_result.success
-            && !self.task_result.deferred
-            && self.task_result.error_message.is_none()
-        {
-            self.task_result.error_message = Some(format!("{task_type} returned false"));
-        }
-        self
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum WorkerError {
     #[error(transparent)]
@@ -969,6 +981,14 @@ pub enum WorkerError {
     UnboundedClaimScope,
     #[error("executor namespace {0:?} is not a registered task type")]
     InvalidExecutorNamespace(String),
+    #[error(
+        "task {task_type} belongs to queue {expected_queue}, but the worker claims {actual_queue}"
+    )]
+    ClaimQueueMismatch {
+        task_type: TaskType,
+        expected_queue: TaskQueue,
+        actual_queue: TaskQueue,
+    },
     #[error("invalid worker configuration: {0}")]
     InvalidConfig(&'static str),
 }

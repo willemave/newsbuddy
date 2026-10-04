@@ -6,9 +6,6 @@ pub enum BootstrapError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
 
-    #[error("invalid corpus archive: {0}")]
-    InvalidArchive(String),
-
     #[error("{operation} failed for {path}: {source}")]
     Io {
         operation: &'static str,

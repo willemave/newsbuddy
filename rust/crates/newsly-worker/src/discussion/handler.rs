@@ -9,7 +9,7 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
 use super::finalizer::DiscussionFinalizer;
@@ -324,7 +324,7 @@ async fn summarize_with_lease(
     if lease.ownership_lost() {
         return SummaryCall::LeaseLost;
     }
-    let usage_sink = Arc::new(AgentUsageSink::new(
+    let usage_sink = Arc::new(AgentUsageRecorder::new(
         services.pool.clone(),
         AgentUsageAttribution {
             operation: if merge {

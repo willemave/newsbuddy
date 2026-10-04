@@ -1,8 +1,5 @@
-use std::fmt::Write as _;
-
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
@@ -10,6 +7,15 @@ use crate::briefing::BriefingReadMarkProjection;
 use crate::{mark_briefing_sources_read, mark_contents_read, mark_visible_news_items_read};
 
 const PROMPT_VERSION: i32 = 5;
+const AUDIO_EPISODE_COLUMNS: &str = r#"
+    id::bigint AS id, user_id::bigint AS user_id, kind, status, title,
+    source_content_id::bigint AS source_content_id,
+    source_item_ids::jsonb AS source_item_ids,
+    source_snapshot::jsonb AS source_snapshot, script::jsonb AS script, script_text, model,
+    audio_storage_path, audio_content_type, duration_seconds,
+    error_message, share_enabled, started_at, completed_at,
+    created_at, updated_at
+"#;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioEpisodeRecord {
@@ -33,6 +39,28 @@ pub struct AudioEpisodeRecord {
     pub completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl From<AudioEpisodeRecord> for crate::AudioEpisodeProjection {
+    fn from(episode: AudioEpisodeRecord) -> Self {
+        Self {
+            id: episode.id,
+            kind: episode.kind,
+            status: episode.status,
+            title: episode.title,
+            source_content_id: episode.source_content_id,
+            source_item_ids: episode.source_item_ids,
+            source_snapshot: episode.source_snapshot,
+            script_text: episode.script_text,
+            audio_storage_path: episode.audio_storage_path,
+            duration_seconds: episode.duration_seconds,
+            error_message: episode.error_message,
+            created_at: episode.created_at,
+            updated_at: episode.updated_at,
+            episode_group_id: None,
+            chapter_index: None,
+        }
+    }
 }
 
 #[derive(Debug, FromRow)]
@@ -101,7 +129,7 @@ pub async fn upsert_audio_episode(
     input: &NewAudioEpisode<'_>,
 ) -> Result<AudioEpisodeRecord, AudioEpisodeRepositoryError> {
     let input_hash = stable_snapshot_hash(input.source_snapshot)?;
-    let row = sqlx::query_as::<_, AudioEpisodeRow>(
+    let row = sqlx::query_as::<_, AudioEpisodeRow>(AssertSqlSafe(format!(
         r#"
         INSERT INTO audio_episodes (
             user_id, kind, status, title, source_content_id, input_hash,
@@ -135,16 +163,9 @@ pub async fn upsert_audio_episode(
             completed_at = CASE WHEN audio_episodes.status = 'failed' THEN NULL
                                 ELSE audio_episodes.completed_at END,
             updated_at = timezone('UTC', now())
-        RETURNING
-            id::bigint AS id, user_id::bigint AS user_id, kind, status, title,
-            source_content_id::bigint AS source_content_id,
-            source_item_ids::jsonb AS source_item_ids,
-            source_snapshot::jsonb AS source_snapshot, script::jsonb AS script, script_text, model,
-            audio_storage_path, audio_content_type, duration_seconds,
-            error_message, share_enabled, started_at, completed_at,
-            created_at, updated_at
+        RETURNING {AUDIO_EPISODE_COLUMNS}
         "#,
-    )
+    )))
     .bind(input.user_id)
     .bind(input.kind)
     .bind(input.title)
@@ -216,16 +237,9 @@ pub async fn find_shared_audio_episode(
     nonce: &str,
     token_hash: &str,
 ) -> Result<Option<AudioEpisodeRecord>, AudioEpisodeRepositoryError> {
-    Ok(sqlx::query_as::<_, AudioEpisodeRow>(
+    Ok(sqlx::query_as::<_, AudioEpisodeRow>(AssertSqlSafe(format!(
         r#"
-        SELECT
-            id::bigint AS id, user_id::bigint AS user_id, kind, status, title,
-            source_content_id::bigint AS source_content_id,
-            source_item_ids::jsonb AS source_item_ids,
-            source_snapshot::jsonb AS source_snapshot, script::jsonb AS script, script_text, model,
-            audio_storage_path, audio_content_type, duration_seconds,
-            error_message, share_enabled, started_at, completed_at,
-            created_at, updated_at
+        SELECT {AUDIO_EPISODE_COLUMNS}
         FROM audio_episodes
         WHERE id::bigint = $1::bigint
           AND share_enabled IS TRUE
@@ -235,7 +249,7 @@ pub async fn find_shared_audio_episode(
           AND status = 'completed'
           AND btrim(coalesce(audio_storage_path, '')) <> ''
         "#,
-    )
+    )))
     .bind(audio_episode_id)
     .bind(nonce)
     .bind(token_hash)
@@ -249,7 +263,7 @@ pub async fn reset_audio_episode_for_generation(
     user_id: i64,
     audio_episode_id: i64,
 ) -> Result<Option<AudioEpisodeRecord>, AudioEpisodeRepositoryError> {
-    let row = sqlx::query_as::<_, AudioEpisodeRow>(
+    let row = sqlx::query_as::<_, AudioEpisodeRow>(AssertSqlSafe(format!(
         r#"
         UPDATE audio_episodes
         SET status = 'pending', error_message = NULL, started_at = NULL,
@@ -260,16 +274,9 @@ pub async fn reset_audio_episode_for_generation(
               OR status <> 'completed'
                  AND (started_at IS NULL OR started_at < timezone('UTC', now()) - interval '15 minutes')
           )
-        RETURNING
-            id::bigint AS id, user_id::bigint AS user_id, kind, status, title,
-            source_content_id::bigint AS source_content_id,
-            source_item_ids::jsonb AS source_item_ids,
-            source_snapshot::jsonb AS source_snapshot, script::jsonb AS script, script_text, model,
-            audio_storage_path, audio_content_type, duration_seconds,
-            error_message, share_enabled, started_at, completed_at,
-            created_at, updated_at
+        RETURNING {AUDIO_EPISODE_COLUMNS}
         "#,
-    )
+    )))
     .bind(user_id)
     .bind(audio_episode_id)
     .fetch_optional(&mut **transaction)
@@ -670,14 +677,7 @@ pub enum AudioEpisodeReadTrigger {
 fn select_audio_episode_sql(suffix: &str) -> String {
     format!(
         r#"
-        SELECT
-            id::bigint AS id, user_id::bigint AS user_id, kind, status, title,
-            source_content_id::bigint AS source_content_id,
-            source_item_ids::jsonb AS source_item_ids,
-            source_snapshot::jsonb AS source_snapshot, script::jsonb AS script, script_text, model,
-            audio_storage_path, audio_content_type, duration_seconds,
-            error_message, share_enabled, started_at, completed_at,
-            created_at, updated_at
+        SELECT {AUDIO_EPISODE_COLUMNS}
         FROM audio_episodes
         WHERE user_id::bigint = $1::bigint {suffix}
         "#,
@@ -690,12 +690,7 @@ fn stable_snapshot_hash(snapshot: &Value) -> Result<String, serde_json::Error> {
         "source_snapshot": snapshot,
     });
     let bytes = serde_json::to_vec(&payload)?;
-    let digest = Sha256::digest(bytes);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    Ok(encoded)
+    Ok(newsly_domain::sha256_hex(&bytes))
 }
 
 fn json_i64_array(value: Option<&Value>) -> Vec<i64> {

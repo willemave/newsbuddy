@@ -1,11 +1,14 @@
 use std::env;
 use std::fmt::{self, Debug, Formatter};
+use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use newsly_db::DatabaseConfig;
+use crate::queue_process_config::{
+    QueueWorkerProcessConfig, QueueWorkerProcessConfigError, QueueWorkerProcessEnv,
+};
 use newsly_domain::RelationThresholds;
-use newsly_providers::{ModelProvider, ModelSpec, OpenRouterPrivacyPolicy, ProviderCredentials};
+use newsly_providers::{ModelProvider, ModelSpec, ProviderCredentials};
 use secrecy::SecretString;
 use thiserror::Error;
 use url::Url;
@@ -24,29 +27,40 @@ pub enum WorkerLogFormat {
     Pretty,
 }
 
-impl WorkerLogFormat {
-    fn parse(value: &str) -> Result<Self, WorkerConfigError> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "json" => Ok(Self::Json),
-            "pretty" | "text" => Ok(Self::Pretty),
-            _ => Err(WorkerConfigError::InvalidValue {
-                name: "NEWSLY_RUST_LOG_FORMAT",
-                value: value.to_owned(),
-                expected: "json or pretty",
-            }),
+pub(super) fn load_queue_process(
+    application_name: &'static str,
+    default_worker_prefix: &'static str,
+    names: QueueWorkerProcessEnv,
+) -> Result<QueueWorkerProcessConfig, WorkerConfigError> {
+    Ok(QueueWorkerProcessConfig::from_env_with(
+        application_name,
+        default_worker_prefix,
+        names,
+    )?)
+}
+
+impl From<QueueWorkerProcessConfigError> for WorkerConfigError {
+    fn from(error: QueueWorkerProcessConfigError) -> Self {
+        match error {
+            QueueWorkerProcessConfigError::Missing(name)
+            | QueueWorkerProcessConfigError::InvalidUnicode(name) => Self::Missing(name),
+            QueueWorkerProcessConfigError::Empty(name) => Self::Empty(name),
+            QueueWorkerProcessConfigError::InvalidNumber(name, value) => {
+                Self::InvalidNumber(name, value)
+            }
+            QueueWorkerProcessConfigError::Invalid(name) => Self::InvalidValue {
+                name,
+                value: env::var(name).unwrap_or_default(),
+                expected: "a supported value",
+            },
+            QueueWorkerProcessConfigError::Range(name) => Self::InvalidRange(name),
         }
     }
 }
 
 #[derive(Clone)]
 pub struct ContentWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub extractor_url: Url,
     pub extractor_secret: SecretString,
     pub extractor_timeout: Duration,
@@ -54,7 +68,7 @@ pub struct ContentWorkerProcessConfig {
     pub firecrawl_url: Url,
     pub firecrawl_api_key: Option<SecretString>,
     pub firecrawl_timeout: Duration,
-    pub firecrawl_credit_cost_usd: Option<f64>,
+    pub firecrawl_credit_cost_usd: f64,
     pub x_api_base_url: Url,
     pub x_app_bearer_token: Option<SecretString>,
     pub content_body_local_root: PathBuf,
@@ -65,13 +79,7 @@ impl Debug for ContentWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ContentWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("extractor_url", &self.extractor_url)
             .field("extractor_secret", &"[REDACTED]")
             .field("extractor_timeout", &self.extractor_timeout)
@@ -109,39 +117,19 @@ impl ContentWorkerProcessConfig {
     /// storage, or malformed service URLs.
     #[allow(clippy::too_many_lines)]
     pub fn from_env() -> Result<Self, WorkerConfigError> {
-        let database_url = required_secret("DATABASE_URL")?;
-        let mut database = DatabaseConfig::new(database_url.clone(), "newsly-content-worker");
-        database.max_connections = parse_u32("NEWSLY_RUST_WORKER_DATABASE_MAX_CONNECTIONS", 8)?;
-        database.min_connections = parse_u32("NEWSLY_RUST_WORKER_DATABASE_MIN_CONNECTIONS", 0)?;
-        database.acquire_timeout = Duration::from_millis(parse_u64(
-            "NEWSLY_RUST_WORKER_DATABASE_ACQUIRE_TIMEOUT_MS",
-            5_000,
-        )?);
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
-            return Err(WorkerConfigError::InvalidRange(
+        let process = load_queue_process(
+            "newsly-content-worker",
+            "rust-content",
+            QueueWorkerProcessEnv::dedicated(
+                "NEWSLY_RUST_WORKER_DATABASE_MAX_CONNECTIONS",
+                "NEWSLY_RUST_WORKER_DATABASE_MIN_CONNECTIONS",
+                "NEWSLY_RUST_WORKER_DATABASE_ACQUIRE_TIMEOUT_MS",
                 "NEWSLY_RUST_WORKER_DATABASE connection bounds",
-            ));
-        }
-
-        let worker_id = env::var("NEWSLY_RUST_WORKER_ID").unwrap_or_else(|_| {
-            let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
-            format!("rust-content-{host}-{}", std::process::id())
-        });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
-            return Err(WorkerConfigError::InvalidRange("NEWSLY_RUST_WORKER_ID"));
-        }
-
-        let lease_duration =
-            Duration::from_secs(parse_u64("NEWSLY_RUST_WORKER_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
-            return Err(WorkerConfigError::InvalidRange(
+                "NEWSLY_RUST_WORKER_ID",
                 "NEWSLY_RUST_WORKER_LEASE_SECONDS",
-            ));
-        }
-        let max_retries = parse_i32("MAX_TASK_RETRIES", 3)?;
-        if max_retries < 0 {
-            return Err(WorkerConfigError::InvalidRange("MAX_TASK_RETRIES"));
-        }
+                "newsly_worker=info,newsly_queue=info",
+            ),
+        )?;
 
         let extractor_url = parse_url(
             "NEWSLY_DOCUMENT_EXTRACTOR_URL",
@@ -205,16 +193,7 @@ impl ContentWorkerProcessConfig {
         validate_relative_prefix(&content_body_storage_prefix)?;
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter: env::var("RUST_LOG")
-                .unwrap_or_else(|_| "newsly_worker=info,newsly_queue=info".to_owned()),
-            log_format: WorkerLogFormat::parse(
-                &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
-            )?,
+            process,
             extractor_url,
             extractor_secret,
             extractor_timeout,
@@ -231,19 +210,13 @@ impl ContentWorkerProcessConfig {
     }
 
     pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+        self.process.database_url()
     }
 }
 
 #[derive(Clone)]
 pub struct NewsItemWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub extractor_url: Url,
     pub extractor_secret: SecretString,
     pub extractor_timeout: Duration,
@@ -251,7 +224,7 @@ pub struct NewsItemWorkerProcessConfig {
     pub firecrawl_url: Url,
     pub firecrawl_api_key: Option<SecretString>,
     pub firecrawl_timeout: Duration,
-    pub firecrawl_credit_cost_usd: Option<f64>,
+    pub firecrawl_credit_cost_usd: f64,
     pub content_body_local_root: PathBuf,
     pub content_body_storage_prefix: PathBuf,
     pub relation_thresholds: RelationThresholds,
@@ -263,13 +236,7 @@ impl Debug for NewsItemWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("NewsItemWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("extractor_url", &self.extractor_url)
             .field("extractor_secret", &"[REDACTED]")
             .field("extractor_timeout", &self.extractor_timeout)
@@ -309,11 +276,7 @@ impl NewsItemWorkerProcessConfig {
 
         let content = ContentWorkerProcessConfig::from_env()?;
         let ContentWorkerProcessConfig {
-            database_url,
-            mut database,
-            max_retries,
-            log_filter,
-            log_format,
+            mut process,
             extractor_url,
             extractor_secret,
             extractor_timeout,
@@ -326,31 +289,34 @@ impl NewsItemWorkerProcessConfig {
             content_body_storage_prefix,
             ..
         } = content;
-        "newsly-news-item-worker".clone_into(&mut database.application_name);
-        database.max_connections = parse_u32(
+        "newsly-news-item-worker".clone_into(&mut process.database.application_name);
+        process.database.max_connections = parse_u32(
             "NEWSLY_NEWS_ITEM_DATABASE_MAX_CONNECTIONS",
-            database.max_connections,
+            process.database.max_connections,
         )?;
-        database.min_connections = parse_u32(
+        process.database.min_connections = parse_u32(
             "NEWSLY_NEWS_ITEM_DATABASE_MIN_CONNECTIONS",
-            database.min_connections,
+            process.database.min_connections,
         )?;
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
+        if process.database.max_connections == 0
+            || process.database.min_connections > process.database.max_connections
+        {
             return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_NEWS_ITEM_DATABASE connection bounds",
             ));
         }
-        let worker_id = env::var("NEWSLY_NEWS_ITEM_WORKER_ID").unwrap_or_else(|_| {
+        process.worker_id = env::var("NEWSLY_NEWS_ITEM_WORKER_ID").unwrap_or_else(|_| {
             let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
             format!("rust-news-item-{host}-{}", std::process::id())
         });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
+        if process.worker_id.trim().is_empty() || process.worker_id.len() > 100 {
             return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_NEWS_ITEM_WORKER_ID",
             ));
         }
-        let lease_duration = Duration::from_secs(parse_u64("NEWSLY_NEWS_ITEM_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
+        process.lease_duration =
+            Duration::from_secs(parse_u64("NEWSLY_NEWS_ITEM_LEASE_SECONDS", 300)?);
+        if process.lease_duration.is_zero() {
             return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_NEWS_ITEM_LEASE_SECONDS",
             ));
@@ -377,13 +343,7 @@ impl NewsItemWorkerProcessConfig {
         }
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter,
-            log_format,
+            process,
             extractor_url,
             extractor_secret,
             extractor_timeout,
@@ -401,7 +361,7 @@ impl NewsItemWorkerProcessConfig {
     }
 
     pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+        self.process.database_url()
     }
 }
 
@@ -425,13 +385,7 @@ fn validate_production_news_models(
 
 #[derive(Clone)]
 pub struct SummarizationWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub content_body_local_root: PathBuf,
     pub briefing_debounce_seconds: i64,
     pub briefing_batch_minimum: i64,
@@ -441,13 +395,7 @@ impl Debug for SummarizationWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SummarizationWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("content_body_local_root", &self.content_body_local_root)
             .field("briefing_debounce_seconds", &self.briefing_debounce_seconds)
             .field("briefing_batch_minimum", &self.briefing_batch_minimum)
@@ -461,40 +409,19 @@ impl SummarizationWorkerProcessConfig {
     /// The worker accepts only local immutable body pointers. Provider credentials and model
     /// selection are validated by `SummarizationGateway` before the queue loop starts.
     pub fn from_env() -> Result<Self, WorkerConfigError> {
-        let database_url = required_secret("DATABASE_URL")?;
-        let mut database = DatabaseConfig::new(database_url.clone(), "newsly-summarization-worker");
-        database.max_connections = parse_u32("NEWSLY_SUMMARIZATION_DATABASE_MAX_CONNECTIONS", 8)?;
-        database.min_connections = parse_u32("NEWSLY_SUMMARIZATION_DATABASE_MIN_CONNECTIONS", 0)?;
-        database.acquire_timeout = Duration::from_millis(parse_u64(
-            "NEWSLY_SUMMARIZATION_DATABASE_ACQUIRE_TIMEOUT_MS",
-            5_000,
-        )?);
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
-            return Err(WorkerConfigError::InvalidRange(
+        let process = load_queue_process(
+            "newsly-summarization-worker",
+            "rust-summarization",
+            QueueWorkerProcessEnv::dedicated(
+                "NEWSLY_SUMMARIZATION_DATABASE_MAX_CONNECTIONS",
+                "NEWSLY_SUMMARIZATION_DATABASE_MIN_CONNECTIONS",
+                "NEWSLY_SUMMARIZATION_DATABASE_ACQUIRE_TIMEOUT_MS",
                 "NEWSLY_SUMMARIZATION_DATABASE connection bounds",
-            ));
-        }
-
-        let worker_id = env::var("NEWSLY_SUMMARIZATION_WORKER_ID").unwrap_or_else(|_| {
-            let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
-            format!("rust-summarization-{host}-{}", std::process::id())
-        });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
-            return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_SUMMARIZATION_WORKER_ID",
-            ));
-        }
-        let lease_duration =
-            Duration::from_secs(parse_u64("NEWSLY_SUMMARIZATION_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
-            return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_SUMMARIZATION_LEASE_SECONDS",
-            ));
-        }
-        let max_retries = parse_i32("MAX_TASK_RETRIES", 3)?;
-        if max_retries < 0 {
-            return Err(WorkerConfigError::InvalidRange("MAX_TASK_RETRIES"));
-        }
+                "newsly_worker=info,newsly_queue=info,newsly_providers=info",
+            ),
+        )?;
 
         let storage_provider =
             env::var("CONTENT_BODY_STORAGE_PROVIDER").unwrap_or_else(|_| "local".to_owned());
@@ -513,17 +440,7 @@ impl SummarizationWorkerProcessConfig {
         }
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter: env::var("RUST_LOG").unwrap_or_else(|_| {
-                "newsly_worker=info,newsly_queue=info,newsly_providers=info".to_owned()
-            }),
-            log_format: WorkerLogFormat::parse(
-                &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
-            )?,
+            process,
             content_body_local_root: env::var_os("CONTENT_BODY_LOCAL_ROOT")
                 .map_or_else(|| PathBuf::from("./data/content_bodies"), PathBuf::from),
             briefing_debounce_seconds,
@@ -532,19 +449,13 @@ impl SummarizationWorkerProcessConfig {
     }
 
     pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+        self.process.database_url()
     }
 }
 
 #[derive(Clone)]
 pub struct DiscussionWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub content_body_local_root: PathBuf,
     pub content_body_storage_prefix: PathBuf,
 }
@@ -553,13 +464,7 @@ impl Debug for DiscussionWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("DiscussionWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("content_body_local_root", &self.content_body_local_root)
             .field(
                 "content_body_storage_prefix",
@@ -575,40 +480,19 @@ impl DiscussionWorkerProcessConfig {
     /// The worker deliberately supports only immutable local object storage. Provider
     /// credentials and the typed summary model are validated by `ContentMiscGateway`.
     pub fn from_env() -> Result<Self, WorkerConfigError> {
-        let database_url = required_secret("DATABASE_URL")?;
-        let mut database = DatabaseConfig::new(database_url.clone(), "newsly-discussion-worker");
-        database.max_connections = parse_u32("NEWSLY_DISCUSSION_DATABASE_MAX_CONNECTIONS", 8)?;
-        database.min_connections = parse_u32("NEWSLY_DISCUSSION_DATABASE_MIN_CONNECTIONS", 0)?;
-        database.acquire_timeout = Duration::from_millis(parse_u64(
-            "NEWSLY_DISCUSSION_DATABASE_ACQUIRE_TIMEOUT_MS",
-            5_000,
-        )?);
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
-            return Err(WorkerConfigError::InvalidRange(
+        let process = load_queue_process(
+            "newsly-discussion-worker",
+            "rust-discussion",
+            QueueWorkerProcessEnv::dedicated(
+                "NEWSLY_DISCUSSION_DATABASE_MAX_CONNECTIONS",
+                "NEWSLY_DISCUSSION_DATABASE_MIN_CONNECTIONS",
+                "NEWSLY_DISCUSSION_DATABASE_ACQUIRE_TIMEOUT_MS",
                 "NEWSLY_DISCUSSION_DATABASE connection bounds",
-            ));
-        }
-
-        let worker_id = env::var("NEWSLY_DISCUSSION_WORKER_ID").unwrap_or_else(|_| {
-            let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
-            format!("rust-discussion-{host}-{}", std::process::id())
-        });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
-            return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_DISCUSSION_WORKER_ID",
-            ));
-        }
-        let lease_duration =
-            Duration::from_secs(parse_u64("NEWSLY_DISCUSSION_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
-            return Err(WorkerConfigError::InvalidRange(
                 "NEWSLY_DISCUSSION_LEASE_SECONDS",
-            ));
-        }
-        let max_retries = parse_i32("MAX_TASK_RETRIES", 3)?;
-        if max_retries < 0 {
-            return Err(WorkerConfigError::InvalidRange("MAX_TASK_RETRIES"));
-        }
+                "newsly_worker=info,newsly_queue=info,newsly_providers=info",
+            ),
+        )?;
 
         let storage_provider =
             env::var("CONTENT_BODY_STORAGE_PROVIDER").unwrap_or_else(|_| "local".to_owned());
@@ -623,17 +507,7 @@ impl DiscussionWorkerProcessConfig {
         validate_relative_prefix(&content_body_storage_prefix)?;
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter: env::var("RUST_LOG").unwrap_or_else(|_| {
-                "newsly_worker=info,newsly_queue=info,newsly_providers=info".to_owned()
-            }),
-            log_format: WorkerLogFormat::parse(
-                &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
-            )?,
+            process,
             content_body_local_root: env::var_os("CONTENT_BODY_LOCAL_ROOT")
                 .map_or_else(|| PathBuf::from("./data/content_bodies"), PathBuf::from),
             content_body_storage_prefix,
@@ -641,21 +515,14 @@ impl DiscussionWorkerProcessConfig {
     }
 
     pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+        self.process.database_url()
     }
 }
 
 #[derive(Clone)]
 pub struct AudioEpisodeWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub provider_credentials: ProviderCredentials,
-    pub openrouter_policy: OpenRouterPrivacyPolicy,
     pub script_model: String,
     pub script_timeout: Duration,
     pub elevenlabs_api_base: Url,
@@ -675,15 +542,8 @@ impl Debug for AudioEpisodeWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AudioEpisodeWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("provider_credentials", &self.provider_credentials)
-            .field("openrouter_policy", &self.openrouter_policy)
             .field("script_model", &self.script_model)
             .field("script_timeout", &self.script_timeout)
             .field("elevenlabs_api_base", &self.elevenlabs_api_base)
@@ -705,37 +565,19 @@ impl AudioEpisodeWorkerProcessConfig {
     /// Loads fail-closed provider, storage, queue, and `PostgreSQL` settings for the isolated audio
     /// partition worker.
     pub fn from_env() -> Result<Self, WorkerConfigError> {
-        let database_url = required_secret("DATABASE_URL")?;
-        let mut database = DatabaseConfig::new(database_url.clone(), "newsly-audio-worker");
-        database.max_connections = parse_u32("NEWSLY_AUDIO_DATABASE_MAX_CONNECTIONS", 8)?;
-        database.min_connections = parse_u32("NEWSLY_AUDIO_DATABASE_MIN_CONNECTIONS", 0)?;
-        database.acquire_timeout = Duration::from_millis(parse_u64(
-            "NEWSLY_AUDIO_DATABASE_ACQUIRE_TIMEOUT_MS",
-            5_000,
-        )?);
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
-            return Err(WorkerConfigError::InvalidRange(
+        let process = load_queue_process(
+            "newsly-audio-worker",
+            "rust-audio",
+            QueueWorkerProcessEnv::dedicated(
+                "NEWSLY_AUDIO_DATABASE_MAX_CONNECTIONS",
+                "NEWSLY_AUDIO_DATABASE_MIN_CONNECTIONS",
+                "NEWSLY_AUDIO_DATABASE_ACQUIRE_TIMEOUT_MS",
                 "NEWSLY_AUDIO_DATABASE connection bounds",
-            ));
-        }
-        let worker_id = env::var("NEWSLY_AUDIO_WORKER_ID").unwrap_or_else(|_| {
-            let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
-            format!("rust-audio-{host}-{}", std::process::id())
-        });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
-            return Err(WorkerConfigError::InvalidRange("NEWSLY_AUDIO_WORKER_ID"));
-        }
-        let lease_duration =
-            Duration::from_secs(parse_u64("NEWSLY_AUDIO_WORKER_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
-            return Err(WorkerConfigError::InvalidRange(
+                "NEWSLY_AUDIO_WORKER_ID",
                 "NEWSLY_AUDIO_WORKER_LEASE_SECONDS",
-            ));
-        }
-        let max_retries = parse_i32("MAX_TASK_RETRIES", 3)?;
-        if max_retries < 0 {
-            return Err(WorkerConfigError::InvalidRange("MAX_TASK_RETRIES"));
-        }
+                "newsly_worker=info,newsly_queue=info,newsly_providers=info",
+            ),
+        )?;
 
         let script_model =
             env::var("AUDIO_EPISODE_MODEL").unwrap_or_else(|_| "openai:gpt-6-luna".to_owned());
@@ -745,13 +587,7 @@ impl AudioEpisodeWorkerProcessConfig {
                 value: script_model.clone(),
                 expected: "a supported provider:model specification",
             })?;
-        let provider_credentials = ProviderCredentials {
-            openai: optional_trimmed_secret("OPENAI_API_KEY"),
-            anthropic: optional_trimmed_secret("ANTHROPIC_API_KEY"),
-            google: optional_trimmed_secret("GOOGLE_API_KEY")
-                .or_else(|| optional_trimmed_secret("GEMINI_API_KEY")),
-            openrouter: optional_trimmed_secret("OPENROUTER_API_KEY"),
-        };
+        let provider_credentials = ProviderCredentials::from_env();
         if provider_credentials
             .key_for(parsed_model.provider)
             .is_none()
@@ -818,19 +654,8 @@ impl AudioEpisodeWorkerProcessConfig {
         };
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter: env::var("RUST_LOG").unwrap_or_else(|_| {
-                "newsly_worker=info,newsly_queue=info,newsly_providers=info".to_owned()
-            }),
-            log_format: WorkerLogFormat::parse(
-                &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
-            )?,
+            process,
             provider_credentials,
-            openrouter_policy: OpenRouterPrivacyPolicy::default(),
             script_model,
             script_timeout,
             elevenlabs_api_base: parse_url(
@@ -838,7 +663,7 @@ impl AudioEpisodeWorkerProcessConfig {
                 env::var("ELEVENLABS_API_BASE_URL")
                     .unwrap_or_else(|_| DEFAULT_ELEVENLABS_API_BASE_URL.to_owned()),
             )?,
-            elevenlabs_api_key: required_secret_alias("ELEVENLABS_API_KEY", "ELEVENLABS")?,
+            elevenlabs_api_key: required_secret("ELEVENLABS_API_KEY")?,
             host_voice_id,
             guest_voice_id,
             tts_model,
@@ -853,19 +678,13 @@ impl AudioEpisodeWorkerProcessConfig {
     }
 
     pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+        self.process.database_url()
     }
 }
 
 #[derive(Clone)]
 pub struct XSyncWorkerProcessConfig {
-    database_url: SecretString,
-    pub database: DatabaseConfig,
-    pub worker_id: String,
-    pub lease_duration: Duration,
-    pub max_retries: i32,
-    pub log_filter: String,
-    pub log_format: WorkerLogFormat,
+    pub process: QueueWorkerProcessConfig,
     pub sync_enabled: bool,
     pub client_id: Option<SecretString>,
     pub client_secret: Option<SecretString>,
@@ -882,13 +701,7 @@ impl Debug for XSyncWorkerProcessConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("XSyncWorkerProcessConfig")
-            .field("database_url", &"[REDACTED]")
-            .field("database", &self.database)
-            .field("worker_id", &self.worker_id)
-            .field("lease_duration", &self.lease_duration)
-            .field("max_retries", &self.max_retries)
-            .field("log_filter", &self.log_filter)
-            .field("log_format", &self.log_format)
+            .field("process", &self.process)
             .field("sync_enabled", &self.sync_enabled)
             .field("client_id", &self.client_id.as_ref().map(|_| "[REDACTED]"))
             .field(
@@ -924,37 +737,19 @@ impl XSyncWorkerProcessConfig {
     /// Returns a field-specific error for missing enabled-provider secrets, malformed URLs or
     /// numbers, and invalid database, lease, interval, or usage-cost bounds.
     pub fn from_env() -> Result<Self, WorkerConfigError> {
-        let database_url = required_secret("DATABASE_URL")?;
-        let mut database = DatabaseConfig::new(database_url.clone(), "newsly-x-sync-worker");
-        database.max_connections = parse_u32("NEWSLY_X_SYNC_DATABASE_MAX_CONNECTIONS", 8)?;
-        database.min_connections = parse_u32("NEWSLY_X_SYNC_DATABASE_MIN_CONNECTIONS", 0)?;
-        database.acquire_timeout = Duration::from_millis(parse_u64(
-            "NEWSLY_X_SYNC_DATABASE_ACQUIRE_TIMEOUT_MS",
-            5_000,
-        )?);
-        if database.max_connections == 0 || database.min_connections > database.max_connections {
-            return Err(WorkerConfigError::InvalidRange(
+        let process = load_queue_process(
+            "newsly-x-sync-worker",
+            "rust-x-sync",
+            QueueWorkerProcessEnv::dedicated(
+                "NEWSLY_X_SYNC_DATABASE_MAX_CONNECTIONS",
+                "NEWSLY_X_SYNC_DATABASE_MIN_CONNECTIONS",
+                "NEWSLY_X_SYNC_DATABASE_ACQUIRE_TIMEOUT_MS",
                 "NEWSLY_X_SYNC_DATABASE connection bounds",
-            ));
-        }
-
-        let worker_id = env::var("NEWSLY_X_SYNC_WORKER_ID").unwrap_or_else(|_| {
-            let host = env::var("HOSTNAME").unwrap_or_else(|_| "local".to_owned());
-            format!("rust-x-sync-{host}-{}", std::process::id())
-        });
-        if worker_id.trim().is_empty() || worker_id.len() > 100 {
-            return Err(WorkerConfigError::InvalidRange("NEWSLY_X_SYNC_WORKER_ID"));
-        }
-        let lease_duration = Duration::from_secs(parse_u64("NEWSLY_X_SYNC_LEASE_SECONDS", 300)?);
-        if lease_duration.is_zero() {
-            return Err(WorkerConfigError::InvalidRange(
+                "NEWSLY_X_SYNC_WORKER_ID",
                 "NEWSLY_X_SYNC_LEASE_SECONDS",
-            ));
-        }
-        let max_retries = parse_i32("MAX_TASK_RETRIES", 3)?;
-        if max_retries < 0 {
-            return Err(WorkerConfigError::InvalidRange("MAX_TASK_RETRIES"));
-        }
+                "newsly_worker=info,newsly_queue=info,newsly_providers=info",
+            ),
+        )?;
 
         let sync_enabled = parse_bool("X_BOOKMARK_SYNC_ENABLED", false)?;
         let client_id = optional_trimmed_secret("X_CLIENT_ID");
@@ -975,17 +770,7 @@ impl XSyncWorkerProcessConfig {
         }
 
         Ok(Self {
-            database_url,
-            database,
-            worker_id,
-            lease_duration,
-            max_retries,
-            log_filter: env::var("RUST_LOG").unwrap_or_else(|_| {
-                "newsly_worker=info,newsly_queue=info,newsly_providers=info".to_owned()
-            }),
-            log_format: WorkerLogFormat::parse(
-                &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
-            )?,
+            process,
             sync_enabled,
             client_id,
             client_secret,
@@ -1006,20 +791,12 @@ impl XSyncWorkerProcessConfig {
     }
 
     pub const fn database_url(&self) -> &SecretString {
-        &self.database_url
+        self.process.database_url()
     }
 }
 
 fn env_alias(primary: &'static str, fallback: &'static str) -> Option<String> {
     env::var(primary).ok().or_else(|| env::var(fallback).ok())
-}
-
-fn required_secret(name: &'static str) -> Result<SecretString, WorkerConfigError> {
-    let value = env::var(name).map_err(|_| WorkerConfigError::Missing(name))?;
-    if value.is_empty() {
-        return Err(WorkerConfigError::Empty(name));
-    }
-    Ok(SecretString::from(value))
 }
 
 fn required_secret_alias(
@@ -1029,6 +806,14 @@ fn required_secret_alias(
     let value = env_alias(primary, fallback).ok_or(WorkerConfigError::Missing(primary))?;
     if value.is_empty() {
         return Err(WorkerConfigError::Empty(primary));
+    }
+    Ok(SecretString::from(value))
+}
+
+fn required_secret(name: &'static str) -> Result<SecretString, WorkerConfigError> {
+    let value = env::var(name).map_err(|_| WorkerConfigError::Missing(name))?;
+    if value.is_empty() {
+        return Err(WorkerConfigError::Empty(name));
     }
     Ok(SecretString::from(value))
 }
@@ -1072,10 +857,6 @@ fn parse_u32(name: &'static str, default: u32) -> Result<u32, WorkerConfigError>
 }
 
 fn parse_u64(name: &'static str, default: u64) -> Result<u64, WorkerConfigError> {
-    parse_number(name, default)
-}
-
-fn parse_i32(name: &'static str, default: i32) -> Result<i32, WorkerConfigError> {
     parse_number(name, default)
 }
 
@@ -1148,9 +929,9 @@ where
     }
 }
 
-fn parse_optional_f64(name: &'static str) -> Result<Option<f64>, WorkerConfigError> {
+fn parse_optional_f64(name: &'static str) -> Result<f64, WorkerConfigError> {
     let Ok(value) = env::var(name) else {
-        return Ok(Some(0.000_83));
+        return Ok(0.000_83);
     };
     let parsed = value
         .parse::<f64>()
@@ -1158,7 +939,7 @@ fn parse_optional_f64(name: &'static str) -> Result<Option<f64>, WorkerConfigErr
     if !parsed.is_finite() || parsed < 0.0 {
         return Err(WorkerConfigError::InvalidRange(name));
     }
-    Ok(Some(parsed))
+    Ok(parsed)
 }
 
 fn parse_optional_f64_with_default(
@@ -1222,3 +1003,26 @@ pub enum WorkerConfigError {
     )]
     UnsupportedNewsEmbedding(String),
 }
+
+macro_rules! impl_process_deref {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl Deref for $type {
+                type Target = QueueWorkerProcessConfig;
+
+                fn deref(&self) -> &Self::Target {
+                    &self.process
+                }
+            }
+        )+
+    };
+}
+
+impl_process_deref!(
+    ContentWorkerProcessConfig,
+    NewsItemWorkerProcessConfig,
+    SummarizationWorkerProcessConfig,
+    DiscussionWorkerProcessConfig,
+    AudioEpisodeWorkerProcessConfig,
+    XSyncWorkerProcessConfig,
+);

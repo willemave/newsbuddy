@@ -12,26 +12,24 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentOutcome, AgentRequest,
-    AgentRuntimeError, BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall,
-    ToolExecutor, ToolPolicy,
+    AgentEvent, AgentEventSink, AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError,
+    NewslyTranscript, ProviderUsage, ResponseContract, ToolPolicy,
 };
-use reqwest::{StatusCode, Url};
 use schemars::JsonSchema;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Map;
 use thiserror::Error;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::openrouter_embeddings::{OpenRouterEmbeddingClient, OpenRouterEmbeddingError};
+use crate::{ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
+use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
 use newsly_domain::DEFAULT_LENS_EMBEDDING_MODEL as DEFAULT_EMBEDDING_MODEL;
 const DEFAULT_OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1/";
-const MAX_EMBEDDING_BATCH: usize = 128;
-const MAX_EMBEDDING_TEXT_CHARS: usize = 50_000;
-const MAX_EMBEDDING_TOTAL_CHARS: usize = 1_000_000;
-const MAX_PROVIDER_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 const COMPOSITION_SYSTEM_PROMPT: &str = r"Compose one source-grounded personal-news Briefing window.
 
@@ -328,13 +326,9 @@ struct StructuredRunRequest<'a> {
 #[derive(Debug, Clone)]
 pub struct BriefingCompositionGateway {
     engine: RigAgentEngine,
-    client: reqwest::Client,
     model_spec: String,
     naming_model_spec: String,
-    embedding_model: String,
-    embedding_url: Url,
-    openrouter_key: Option<SecretString>,
-    openrouter_policy: OpenRouterPrivacyPolicy,
+    embeddings: OpenRouterEmbeddingClient,
     deadline: Duration,
 }
 
@@ -346,61 +340,42 @@ impl BriefingCompositionGateway {
     /// Returns an error when provider configuration, URLs, or HTTP/model clients are invalid.
     pub fn from_env() -> Result<Self, BriefingCompositionGatewayError> {
         let deadline = Duration::from_secs(
-            env::var("BRIEFING_LLM_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(300)
-                .clamp(15, 600),
+            u64_from_env(
+                "BRIEFING_LLM_TIMEOUT_SECONDS",
+                300,
+                "an unsigned integer number of seconds",
+            )?
+            .clamp(15, 600),
         );
         let embedding_timeout = Duration::from_secs(
-            env::var("BRIEFING_CATEGORY_EMBEDDING_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(30)
-                .clamp(1, 120),
+            u64_from_env(
+                "BRIEFING_CATEGORY_EMBEDDING_TIMEOUT_SECONDS",
+                30,
+                "an unsigned integer number of seconds",
+            )?
+            .clamp(1, 120),
         );
         let client = reqwest::Client::builder()
             .timeout(embedding_timeout)
             .build()?;
         let openrouter_key = secret_env("OPENROUTER_API_KEY");
-        let credentials = ProviderCredentials {
-            openai: secret_env("OPENAI_API_KEY"),
-            anthropic: secret_env("ANTHROPIC_API_KEY"),
-            google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-            openrouter: openrouter_key.clone(),
-        };
-        let openrouter_policy = OpenRouterPrivacyPolicy::default();
-        let engine = RigAgentEngine::new(credentials, openrouter_policy.clone())?;
+        let credentials = ProviderCredentials::from_env();
+        let engine = RigAgentEngine::new(credentials);
         let embedding_spec = env::var("BRIEFING_CATEGORY_EMBEDDING_MODEL")
             .unwrap_or_else(|_| DEFAULT_EMBEDDING_MODEL.to_owned());
-        let embedding_model = embedding_spec
-            .strip_prefix("openrouter:")
-            .filter(|model| !model.trim().is_empty())
-            .ok_or_else(|| {
-                BriefingCompositionGatewayError::UnsupportedEmbeddingModel(embedding_spec.clone())
-            })?
-            .to_owned();
-        let mut base = Url::parse(
+        let embeddings = OpenRouterEmbeddingClient::new(
+            client,
+            &embedding_spec,
             &env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| DEFAULT_OPENROUTER_BASE.to_owned()),
-        )
-        .map_err(|error| BriefingCompositionGatewayError::Url(error.to_string()))?;
-        if !base.path().ends_with('/') {
-            base.set_path(&format!("{}/", base.path().trim_end_matches('/')));
-        }
-        let embedding_url = base
-            .join("embeddings")
-            .map_err(|error| BriefingCompositionGatewayError::Url(error.to_string()))?;
+            openrouter_key,
+        )?;
         Ok(Self {
             engine,
-            client,
             model_spec: env::var("BRIEFING_MODEL")
                 .unwrap_or_else(|_| DEFAULT_BRIEFING_MODEL.to_owned()),
             naming_model_spec: env::var("BRIEFING_CATEGORY_NAMING_MODEL")
                 .unwrap_or_else(|_| DEFAULT_BRIEFING_MODEL.to_owned()),
-            embedding_model,
-            embedding_url,
-            openrouter_key,
-            openrouter_policy,
+            embeddings,
             deadline,
         })
     }
@@ -414,7 +389,7 @@ impl BriefingCompositionGateway {
     }
 
     pub fn embedding_model(&self) -> &str {
-        &self.embedding_model
+        self.embeddings.model()
     }
 
     /// Produces and validates a structured Briefing layout for the requested tier and sources.
@@ -524,86 +499,12 @@ impl BriefingCompositionGateway {
         &self,
         texts: &[String],
     ) -> Result<BriefingEmbeddingBatch, BriefingCompositionGatewayError> {
-        validate_embedding_input(texts)?;
-        if texts.is_empty() {
-            return Ok(BriefingEmbeddingBatch {
-                vectors: Vec::new(),
-                model: self.embedding_model.clone(),
-                usage: ProviderUsage::default(),
-                provider_response_id: None,
-            });
-        }
-        let key = self
-            .openrouter_key
-            .as_ref()
-            .ok_or(BriefingCompositionGatewayError::OpenRouterUnavailable)?;
-        let mut routing = self.openrouter_policy.request_parameters()?;
-        let provider = routing
-            .remove("provider")
-            .unwrap_or_else(|| Value::Object(Map::new()));
-        let response = self
-            .client
-            .post(self.embedding_url.clone())
-            .bearer_auth(key.expose_secret())
-            .json(&EmbeddingRequest {
-                model: &self.embedding_model,
-                input: texts,
-                encoding_format: "float",
-                provider,
-            })
-            .send()
-            .await?;
-        let status = response.status();
-        let request_id = response
-            .headers()
-            .get("x-request-id")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        let bytes = response.bytes().await?;
-        if bytes.len() > MAX_PROVIDER_RESPONSE_BYTES {
-            return Err(BriefingCompositionGatewayError::ResponseTooLarge(
-                bytes.len(),
-            ));
-        }
-        if !status.is_success() {
-            return Err(BriefingCompositionGatewayError::EmbeddingProvider {
-                status,
-                message: String::from_utf8_lossy(&bytes)
-                    .chars()
-                    .take(1_000)
-                    .collect(),
-            });
-        }
-        let payload = serde_json::from_slice::<EmbeddingResponse>(&bytes)?;
-        let mut rows = payload.data;
-        rows.sort_by_key(|row| row.index);
-        if rows.len() != texts.len()
-            || rows
-                .iter()
-                .enumerate()
-                .any(|(expected, row)| row.index != expected)
-        {
-            return Err(BriefingCompositionGatewayError::EmbeddingShape {
-                expected: texts.len(),
-                actual: rows.len(),
-            });
-        }
-        let vectors = rows
-            .into_iter()
-            .map(|row| normalize_vector(row.embedding))
-            .collect::<Result<Vec<_>, _>>()?;
-        let usage = payload.usage.unwrap_or_default();
+        let batch = self.embeddings.embed(texts).await?;
         Ok(BriefingEmbeddingBatch {
-            vectors,
-            model: payload
-                .model
-                .unwrap_or_else(|| self.embedding_model.clone()),
-            usage: ProviderUsage {
-                request_count: 1,
-                input_tokens: usage.prompt_tokens.or(usage.total_tokens).unwrap_or(0),
-                ..ProviderUsage::default()
-            },
-            provider_response_id: payload.id.or(request_id),
+            vectors: batch.vectors,
+            model: batch.model,
+            usage: batch.usage,
+            provider_response_id: batch.provider_response_id,
         })
     }
 
@@ -681,90 +582,11 @@ fn source_links_in_markdown(markdown: &str) -> Vec<String> {
         .collect()
 }
 
-fn validate_embedding_input(texts: &[String]) -> Result<(), BriefingCompositionGatewayError> {
-    if texts.len() > MAX_EMBEDDING_BATCH {
-        return Err(BriefingCompositionGatewayError::TooManyEmbeddingInputs(
-            texts.len(),
-        ));
-    }
-    let mut total = 0_usize;
-    for text in texts {
-        let count = text.chars().count();
-        if count == 0 || count > MAX_EMBEDDING_TEXT_CHARS {
-            return Err(BriefingCompositionGatewayError::InvalidEmbeddingInputLength(count));
-        }
-        total = total.saturating_add(count);
-    }
-    if total > MAX_EMBEDDING_TOTAL_CHARS {
-        return Err(BriefingCompositionGatewayError::EmbeddingInputTooLarge(
-            total,
-        ));
-    }
-    Ok(())
-}
-
-fn normalize_vector(vector: Vec<f64>) -> Result<Vec<f64>, BriefingCompositionGatewayError> {
-    if vector.is_empty() || vector.iter().any(|value| !value.is_finite()) {
-        return Err(BriefingCompositionGatewayError::InvalidEmbedding(
-            "provider returned an empty or non-finite vector".to_owned(),
-        ));
-    }
-    let norm = vector.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if !norm.is_finite() || norm <= 1e-12 {
-        return Err(BriefingCompositionGatewayError::InvalidEmbedding(
-            "provider returned a zero-length vector".to_owned(),
-        ));
-    }
-    Ok(vector.into_iter().map(|value| value / norm).collect())
-}
-
 fn secret_env(name: &str) -> Option<SecretString> {
     env::var(name)
         .ok()
         .filter(|value| !value.trim().is_empty())
         .map(SecretString::from)
-}
-
-#[derive(Debug, Serialize)]
-struct EmbeddingRequest<'a> {
-    model: &'a str,
-    input: &'a [String],
-    encoding_format: &'static str,
-    provider: Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingResponse {
-    id: Option<String>,
-    model: Option<String>,
-    data: Vec<EmbeddingRow>,
-    usage: Option<EmbeddingUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingRow {
-    index: usize,
-    embedding: Vec<f64>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct EmbeddingUsage {
-    prompt_tokens: Option<u64>,
-    total_tokens: Option<u64>,
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async move {
-            Err(AgentRuntimeError::Tool(format!(
-                "Briefing composition does not expose tool {}",
-                call.name
-            )))
-        })
-    }
 }
 
 #[derive(Debug)]
@@ -802,6 +624,8 @@ impl AgentEventSink for ObservedUsage {
 
 #[derive(Debug, Error)]
 pub enum BriefingCompositionGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("{source}")]
     ObservedAgent {
         source: AgentRuntimeError,
@@ -826,30 +650,10 @@ pub enum BriefingCompositionGatewayError {
     InvalidLensName(String),
     #[error("invalid Briefing lens naming batch: {0}")]
     InvalidLensNamingBatch(String),
-    #[error("OpenRouter is required for Briefing event embeddings")]
-    OpenRouterUnavailable,
-    #[error("unsupported Briefing embedding model {0}; expected an openrouter: model")]
-    UnsupportedEmbeddingModel(String),
-    #[error("embedding request has {0} inputs; the maximum is {MAX_EMBEDDING_BATCH}")]
-    TooManyEmbeddingInputs(usize),
-    #[error("embedding input has invalid character length {0}")]
-    InvalidEmbeddingInputLength(usize),
-    #[error("embedding request has {0} total characters; limit is {MAX_EMBEDDING_TOTAL_CHARS}")]
-    EmbeddingInputTooLarge(usize),
-    #[error("Briefing embedding provider returned HTTP {status}: {message}")]
-    EmbeddingProvider { status: StatusCode, message: String },
-    #[error("Briefing provider response has {0} bytes and exceeds the response limit")]
-    ResponseTooLarge(usize),
-    #[error("embedding response shape mismatch: expected {expected} rows, got {actual}")]
-    EmbeddingShape { expected: usize, actual: usize },
-    #[error("invalid Briefing embedding: {0}")]
-    InvalidEmbedding(String),
+    #[error(transparent)]
+    Embedding(#[from] OpenRouterEmbeddingError),
     #[error(transparent)]
     Agent(#[from] AgentRuntimeError),
-    #[error(transparent)]
-    Engine(#[from] crate::RigAgentEngineError),
-    #[error(transparent)]
-    Routing(#[from] crate::OpenRouterRoutingError),
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error("invalid provider URL: {0}")]
@@ -878,6 +682,7 @@ impl BriefingCompositionGatewayError {
             Self::Http(error) => error
                 .status()
                 .is_none_or(|status| status.as_u16() == 429 || status.is_server_error()),
+            Self::Embedding(error) => error.retryable(),
             _ => false,
         }
     }

@@ -2,17 +2,14 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use newsly_db::Database;
-use newsly_domain::{ResourceKey, RuntimeOwner};
 use newsly_providers::ImageGenerationGateway;
-use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
-};
+use newsly_queue::{QueueKernel, TaskType};
+use newsly_worker::HandlerRegistry;
 use newsly_worker::config::ImageWorkerProcessConfig;
 use newsly_worker::image_generation::{GenerateImageHandler, ImageFileStore, ImageWorkerServices};
 use newsly_worker::process::{
-    initialize_observability, notification_database_url, spawn_shutdown_signal,
+    QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
-use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
 pub(crate) async fn main() -> Result<()> {
@@ -43,33 +40,19 @@ pub(crate) async fn main() -> Result<()> {
 
     let mut handlers = HandlerRegistry::new();
     handlers.register(GenerateImageHandler::new(services))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [ResourceKey::new(TaskType::GenerateImage.as_str())?],
-    )?;
-    let mut claim = ClaimRequest::for_queue(config.worker_id.clone(), TaskQueue::Image, scope);
-    claim.task_type = Some(TaskType::GenerateImage);
-    claim.lease_duration = config.lease_duration;
-    let mut worker_config = WorkerConfig::new(claim);
-    worker_config.max_retries = config.max_retries;
-
-    let notification_hub =
-        QueueNotificationHub::spawn(notification_database_url(config.database_url()));
-    let notifications = notification_hub.subscribe();
-    let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
-
-    tracing::info!(
-        worker_id = %config.worker_id,
-        queue = %TaskQueue::Image,
-        task_type = %TaskType::GenerateImage,
-        "Newsly Rust image worker started; only rows stamped for the Rust runtime are claimable"
-    );
-    let run_result = worker.run(shutdown_rx).await;
-    shutdown_task.abort();
-    notification_hub.close().await;
-    database.close().await;
-    let summary = run_result.context("Newsly Rust image worker stopped unexpectedly")?;
-    tracing::info!(?summary, "Newsly Rust image worker stopped");
-    Ok(())
+    run_queue_worker(
+        database,
+        queue,
+        handlers,
+        notification_database_url(config.database_url()),
+        QueueWorkerRunConfig {
+            process_name: "Newsly Rust image worker",
+            worker_id: &config.worker_id,
+            lease_duration: config.lease_duration,
+            max_retries: config.max_retries,
+            task_types: &[TaskType::GenerateImage],
+            task_type_filter: Some(TaskType::GenerateImage),
+        },
+    )
+    .await
 }

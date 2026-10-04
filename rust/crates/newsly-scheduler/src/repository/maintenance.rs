@@ -10,19 +10,27 @@ use crate::{SchedulerConfig, SchedulerJob};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MaintenanceReport {
     pub pipeline: newsly_db::PipelineHealthCounts,
-    pub misrouted: usize,
     pub orphaned_leases: usize,
     /// Complete expired leases remain in-place because the queue kernel claims them directly.
     pub expired_reclaimable: usize,
 }
 
-impl MaintenanceReport {
-    pub fn touched(self) -> usize {
-        self.misrouted + self.orphaned_leases + self.pipeline.total()
-    }
-}
-
 impl SchedulerRepository {
+    /// Secret and diagnostic retention owns independent short transactions so a cleanup failure
+    /// cannot roll back queue repair or hold its task locks while API-key rows are locked.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database error if any independent retention sweep cannot complete.
+    pub async fn prune_security_and_diagnostics(&self) -> Result<(), sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        newsly_db::sweep_expired_cli_links(&mut transaction, Utc::now(), 1_000).await?;
+        transaction.commit().await?;
+        newsly_db::sweep_consumed_refresh_tokens(&self.pool, Utc::now()).await?;
+        newsly_db::pipeline_monitoring::prune_briefing_composition_history(&self.pool).await?;
+        Ok(())
+    }
+
     pub(super) async fn repair_queue(
         &self,
         transaction: &mut Transaction<'static, Postgres>,
@@ -31,49 +39,6 @@ impl SchedulerRepository {
     ) -> Result<MaintenanceReport, SchedulerRepositoryError> {
         let grace_seconds = i64::try_from(orphan_grace.as_secs())
             .map_err(|_| SchedulerRepositoryError::DurationOutOfRange)?;
-        let misrouted = sqlx::query_scalar::<_, i64>(
-            r"
-            WITH task_specs(task_type, expected_queue) AS (
-                VALUES
-                    ('scrape', 'content'),
-                    ('backfill_feeds', 'backfill'),
-                    ('analyze_url', 'content'),
-                    ('process_content', 'content'),
-                    ('enrich_news_item_article', 'content'),
-                    ('process_news_item', 'content'),
-                    ('process_podcast_media', 'media'),
-                    ('download_tweet_video_audio', 'media'),
-                    ('transcribe_tweet_video', 'media'),
-                    ('summarize', 'content'),
-                    ('fetch_news_item_discussion', 'discussion'),
-                    ('generate_image', 'image'),
-                    ('discover_feeds', 'content'),
-                    ('onboarding_discover', 'onboarding'),
-                    ('dig_deeper', 'chat'),
-                    ('chat_turn', 'chat'),
-                    ('sync_integration', 'twitter'),
-                    ('generate_audio_episode', 'audio_episode'),
-                    ('run_llm_task', 'llm'),
-                    ('briefing_refresh', 'llm'),
-                    ('prepare_news_lens', 'llm'),
-                    ('recluster_news_lenses', 'llm'),
-                    ('delete_user_account', 'backfill')
-            ),
-            repaired AS (
-                UPDATE processing_tasks AS task
-                SET queue_name = task_specs.expected_queue
-                FROM task_specs
-                WHERE task.task_type = task_specs.task_type
-                  AND task.status IN ('pending', 'processing')
-                  AND task.queue_name IS DISTINCT FROM task_specs.expected_queue
-                RETURNING task.id
-            )
-            SELECT count(*)::bigint FROM repaired
-            ",
-        )
-        .fetch_one(&mut **transaction)
-        .await?;
-
         // A complete lease, even an old or expired one, is owned by the exact queue claim
         // protocol. Only structurally incomplete processing state is reset after a grace period.
         let orphaned_leases = sqlx::query_scalar::<_, i64>(
@@ -126,7 +91,6 @@ impl SchedulerRepository {
             newsly_db::pipeline_monitoring::observe_health(transaction, alert_threshold).await?;
         Ok(MaintenanceReport {
             pipeline,
-            misrouted: usize::try_from(misrouted).unwrap_or(usize::MAX),
             orphaned_leases: usize::try_from(orphaned_leases).unwrap_or(usize::MAX),
             expired_reclaimable: usize::try_from(expired_reclaimable).unwrap_or(usize::MAX),
         })

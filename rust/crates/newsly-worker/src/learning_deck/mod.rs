@@ -5,5 +5,4 @@ mod finalizer;
 mod handler;
 mod source;
 
-pub(crate) use handler::LearningDeckDispatchOutcome;
 pub use handler::{LearningDeckTaskBuildError, LearningDeckTaskExecutor};

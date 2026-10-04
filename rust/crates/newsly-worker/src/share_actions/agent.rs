@@ -1,26 +1,20 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentOutcome, AgentRequest,
-    AgentRuntimeError, NewslyTranscript, ResponseContract, ToolPolicy,
+    AgentEvent, AgentEventSink, AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError,
+    NewslyTranscript, ResponseContract, ToolPolicy,
 };
 use newsly_contracts::{ShareActionAgentResult, ShareActionBriefingTarget};
 use newsly_db::ShareActionAgentSnapshot;
-use newsly_e2b::{
-    CommandRequest, ControlPlaneConfig, DirectE2bProvider, E2bError, ExecutionTag, FileLimits,
-    NetworkPolicy, OutputLimits, SandboxHandle, SandboxProvider, SandboxUser,
-};
+use newsly_domain::hex_encode;
+use newsly_e2b::{DirectE2bProvider, E2bError, OutputLimits, SandboxHandle};
 use newsly_providers::{
-    FeedValidationError, FeedValidator, OpenRouterPrivacyPolicy, ProviderCredentials,
-    RigAgentEngine, RigAgentEngineError, ValidatedFeed,
+    FeedValidationError, FeedValidator, ProviderCredentials, RigAgentEngine, ValidatedFeed,
 };
 use reqwest::Url;
 use schemars::schema_for;
-use secrecy::SecretString;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -31,7 +25,9 @@ use tokio_util::sync::CancellationToken;
 use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::task_sandbox::{
-    AcquiredTaskSandbox, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
+    AcquiredTaskSandbox, SandboxCommand, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
+    agent_network_policy, allowed_tools, direct_provider, exa_endpoint,
+    run_command as run_sandbox_command, secret_env, secret_env_alias,
 };
 use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
 
@@ -41,10 +37,9 @@ const INPUT_ACTION_SKILL: &str = "input/action-skill.md";
 const INPUT_OUTPUT_SCHEMA: &str = "input/output-schema.json";
 const DEFAULT_MODEL_SPEC: &str = "openai:gpt-6-luna";
 const DEFAULT_TEMPLATE_ID: &str = "newsly-agent";
-const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai/search";
 const MAX_REQUEST_LIMIT: u32 = 50;
 const ADD_FEED_REQUEST_HEADROOM: u32 = 4;
-const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 12] = [
+const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 13] = [
     (
         "e2b.Dockerfile",
         include_bytes!("../../../../../e2b.Dockerfile"),
@@ -64,10 +59,6 @@ const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 12] = [
         include_bytes!("../../../newsly-vm-bootstrap/src/error.rs"),
     ),
     (
-        "rust/crates/newsly-vm-bootstrap/src/feed.rs",
-        include_bytes!("../../../newsly-vm-bootstrap/src/feed.rs"),
-    ),
-    (
         "rust/crates/newsly-vm-bootstrap/src/lib.rs",
         include_bytes!("../../../newsly-vm-bootstrap/src/lib.rs"),
     ),
@@ -80,6 +71,10 @@ const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 12] = [
         include_bytes!("../task_sandbox/lifecycle.rs"),
     ),
     (
+        "rust/crates/newsly-worker/src/task_sandbox/setup.rs",
+        include_bytes!("../task_sandbox/setup.rs"),
+    ),
+    (
         "rust/crates/newsly-worker/src/share_actions/agent.rs",
         include_bytes!("agent.rs"),
     ),
@@ -87,17 +82,10 @@ const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 12] = [
         "rust/crates/newsly-worker/src/task_tools.rs",
         include_bytes!("../task_tools.rs"),
     ),
-];
-const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
-    "10.0.0.0/8",
-    "100.64.0.0/10",
-    "169.254.0.0/16",
-    "172.16.0.0/12",
-    "192.0.0.0/24",
-    "192.168.0.0/16",
-    "198.18.0.0/15",
-    "fc00::/7",
-    "fe80::/10",
+    (
+        "rust/crates/newsly-worker/src/task_tools/schema.rs",
+        include_bytes!("../task_tools/schema.rs"),
+    ),
 ];
 
 const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
@@ -199,16 +187,6 @@ fn canonical_template_revision(template_id: &str) -> String {
     format!("{template_id}-{}", &encoded[..16])
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
-}
-
 #[derive(Debug, Clone)]
 pub struct ShareActionAgentRuntime {
     pool: PgPool,
@@ -226,30 +204,9 @@ impl ShareActionAgentRuntime {
         let config = ShareActionAgentConfig::from_env()?;
         let e2b_key = secret_env_alias(&["LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY"])
             .ok_or(ShareActionAgentBuildError::MissingE2bKey)?;
-        let provider = Arc::new(DirectE2bProvider::new(
-            ControlPlaneConfig::production(e2b_key.clone())?,
-            FileLimits {
-                upload_bytes: 1_000_000,
-                download_bytes: 1_000_000,
-            },
-        )?);
-        let engine = RigAgentEngine::new(
-            ProviderCredentials {
-                openai: secret_env("OPENAI_API_KEY"),
-                anthropic: secret_env("ANTHROPIC_API_KEY"),
-                google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-                openrouter: secret_env("OPENROUTER_API_KEY"),
-            },
-            OpenRouterPrivacyPolicy::default(),
-        )?;
-        let endpoint = env::var("EXA_API_BASE_URL")
-            .ok()
-            .map(|value| value.trim_end_matches('/').to_owned())
-            .map_or_else(
-                || Url::parse(DEFAULT_EXA_API_BASE),
-                |value| Url::parse(&format!("{value}/search")),
-            )
-            .map_err(|_| ShareActionAgentBuildError::InvalidExaUrl)?;
+        let provider = direct_provider(e2b_key, 1_000_000)?;
+        let engine = RigAgentEngine::new(ProviderCredentials::from_env());
+        let endpoint = exa_endpoint().map_err(|_| ShareActionAgentBuildError::InvalidExaUrl)?;
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
         let feed_validator = FeedValidator::new();
@@ -275,7 +232,7 @@ impl ShareActionAgentRuntime {
         })
     }
 
-    pub async fn run(
+    pub(crate) async fn run(
         &self,
         task: &ShareActionAgentSnapshot,
         cancellation: CancellationToken,
@@ -336,7 +293,7 @@ impl ShareActionAgentRuntime {
         self.write_inputs(&tools, task).await?;
 
         let definitions = TaskToolExecutor::definitions();
-        let allowed = allowed_tools(task, &definitions);
+        let allowed = allowed_tools(&task.tool_policy, &definitions);
         let events = Arc::new(ShareActionEvents::new(self.pool.clone(), task));
         let request = AgentRequest {
             feature: format!("share_action.{}", task.mode),
@@ -363,7 +320,8 @@ impl ShareActionAgentRuntime {
             provider_parameters: Map::new(),
         };
 
-        let policy = self.agent_network_policy().await;
+        let policy =
+            agent_network_policy(self.config.public_base_url.as_ref(), true, "share_action").await;
         self.provider
             .update_network(&sandbox.sandbox_id, &policy)
             .await?;
@@ -461,47 +419,8 @@ impl ShareActionAgentRuntime {
             model_provider,
             sandbox_provider: "e2b".to_owned(),
             sandbox_id: sandbox.sandbox_id.as_str().to_owned(),
-            template_revision: acquired.template_revision.clone(),
             events: events.values(),
         })
-    }
-
-    async fn agent_network_policy(&self) -> NetworkPolicy {
-        let mut deny_out = PRIVATE_NETWORK_DENIALS
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if let Some(base_url) = &self.config.public_base_url
-            && let Some(host) = base_url.host_str()
-        {
-            let port = base_url.port_or_known_default().unwrap_or(443);
-            match tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::net::lookup_host((host, port)),
-            )
-            .await
-            {
-                Ok(Ok(addresses)) => {
-                    deny_out.extend(addresses.map(|address| ip_selector(address.ip())));
-                }
-                Ok(Err(error)) => tracing::warn!(
-                    host,
-                    error = %error,
-                    "unable to resolve Newsly origin for Share Action VM egress denial"
-                ),
-                Err(_) => tracing::warn!(
-                    host,
-                    "timed out resolving Newsly origin for Share Action VM egress denial"
-                ),
-            }
-        }
-        deny_out.sort();
-        deny_out.dedup();
-        NetworkPolicy {
-            deny_out,
-            allow_internet_access: Some(true),
-            ..NetworkPolicy::default()
-        }
     }
 
     async fn prepare_workspace(
@@ -552,26 +471,20 @@ impl ShareActionAgentRuntime {
         deadline: Instant,
         cancellation: CancellationToken,
     ) -> Result<(), ShareActionAgentError> {
-        let stream = self
-            .provider
-            .start_process(
-                sandbox,
-                CommandRequest {
-                    command: command.to_owned(),
-                    args,
-                    env: BTreeMap::new(),
-                    cwd,
-                    username: Some(SandboxUser::parse("user")?),
-                    tag: ExecutionTag::new(),
-                    stdin_enabled: false,
-                    absolute_deadline: deadline,
-                    idle_timeout: Duration::from_secs(60),
-                    output_limits: OutputLimits::default(),
-                },
-                cancellation,
-            )
-            .await?;
-        let result = stream.collect_result().await?;
+        let result = run_sandbox_command(
+            &self.provider,
+            sandbox,
+            SandboxCommand {
+                command: command.to_owned(),
+                args,
+                cwd,
+                deadline,
+                idle_timeout: Duration::from_secs(60),
+                output_limits: OutputLimits::default(),
+            },
+            cancellation,
+        )
+        .await?;
         if result.exit_code != 0 {
             return Err(ShareActionAgentError::Bootstrap(format!(
                 "{command} exited with {}: {}",
@@ -618,7 +531,6 @@ pub struct ShareActionAgentRunResult {
     pub model_provider: String,
     pub sandbox_provider: String,
     pub sandbox_id: String,
-    pub template_revision: String,
     pub events: Vec<AgentEvent>,
 }
 
@@ -658,7 +570,7 @@ impl ShareActionEvents {
 impl AgentEventSink for ShareActionEvents {
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
         if let AgentEvent::Usage { observation } = &event {
-            self.usage.publish(observation.as_ref().clone())?;
+            self.usage.record(observation.as_ref().clone())?;
         }
         self.values
             .lock()
@@ -702,9 +614,8 @@ fn mode_prompt(mode: &str) -> Result<&'static str, ShareActionAgentError> {
             include_str!("../../../../assets/prompts/llm_tasks/share_action.add_links.md")
         }
         "add_feed" => include_str!("../../../../assets/prompts/llm_tasks/share_action.add_feed.md"),
-        "chat" => include_str!("../../../../assets/prompts/llm_tasks/share_action.chat.md"),
-        "presentation" => {
-            include_str!("../../../../assets/prompts/llm_tasks/share_action.presentation.md")
+        "chat" | "presentation" => {
+            return Err(ShareActionAgentError::UnsupportedMode(mode.to_owned()));
         }
         "bookmark_only" => {
             include_str!("../../../../assets/prompts/llm_tasks/share_action.bookmark_only.md")
@@ -719,43 +630,6 @@ fn strip_frontmatter(value: &'static str) -> &'static str {
         return value;
     };
     rest.find("\n---\n").map_or(value, |end| &rest[end + 5..])
-}
-
-fn allowed_tools(
-    task: &ShareActionAgentSnapshot,
-    definitions: &[newsly_agent_runtime::ToolDefinition],
-) -> BTreeSet<String> {
-    let files = task.tool_policy.get("files");
-    let files_enabled = policy_enabled(files, true);
-    let read_enabled = files_enabled;
-    let write_enabled = files_enabled
-        && !files
-            .and_then(Value::as_str)
-            .is_some_and(|value| matches!(value, "read" | "read_only" | "readonly"));
-    definitions
-        .iter()
-        .filter(|tool| match tool.name.as_str() {
-            "execute_bash" => policy_enabled(task.tool_policy.get("execute_bash"), true),
-            "web_search" => policy_enabled(task.tool_policy.get("web_search"), true),
-            "read_file" | "list_files" => read_enabled,
-            "write_file" | "edit_file" | "write_knowledge_items" => write_enabled,
-            "search_knowledge" | "read_knowledge_item" => true,
-            _ => false,
-        })
-        .map(|tool| tool.name.clone())
-        .collect()
-}
-
-fn policy_enabled(value: Option<&Value>, default: bool) -> bool {
-    match value {
-        None | Some(Value::Null | Value::Array(_) | Value::Object(_)) => default,
-        Some(Value::Bool(value)) => *value,
-        Some(Value::String(value)) => !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "none" | "disabled" | "off" | "false" | "0"
-        ),
-        Some(Value::Number(value)) => value.as_i64() != Some(0),
-    }
 }
 
 fn request_limit_for_mode(mode: &str, configured_limit: u32) -> u32 {
@@ -784,27 +658,8 @@ fn parse_bounded(
     Ok(value)
 }
 
-fn ip_selector(address: IpAddr) -> String {
-    let prefix = if address.is_ipv4() { 32 } else { 128 };
-    format!("{address}/{prefix}")
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .map(SecretString::from)
-}
-
-fn secret_env_alias(names: &[&str]) -> Option<SecretString> {
-    names.iter().find_map(|name| secret_env(name))
-}
-
 #[derive(Debug, Error)]
 pub enum ShareActionAgentConfigError {
-    #[error("required Share Action worker configuration {0} is missing")]
-    MissingValue(&'static str),
     #[error("invalid Share Action worker configuration in {0}")]
     InvalidValue(&'static str),
 }
@@ -820,8 +675,6 @@ pub enum ShareActionAgentBuildError {
     #[error(transparent)]
     E2b(#[from] E2bError),
     #[error(transparent)]
-    Rig(#[from] RigAgentEngineError),
-    #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
     Lifecycle(#[from] TaskSandboxError),
@@ -832,7 +685,7 @@ pub enum ShareActionAgentBuildError {
 }
 
 #[derive(Debug, Error)]
-pub enum ShareActionAgentError {
+pub(crate) enum ShareActionAgentError {
     #[error("Share Action agent deadline expired")]
     Deadline,
     #[error("Share Action agent was cancelled after losing its queue lease")]
@@ -863,7 +716,7 @@ pub enum ShareActionAgentError {
 }
 
 impl ShareActionAgentError {
-    pub fn retryable(&self) -> bool {
+    pub(crate) fn retryable(&self) -> bool {
         match self {
             Self::SandboxExecution { source, .. } => source.retryable(),
             Self::E2b(error)
@@ -879,7 +732,7 @@ impl ShareActionAgentError {
     }
 
     #[must_use]
-    pub fn sandbox_identity(&self) -> Option<(&str, &str)> {
+    pub(crate) fn sandbox_identity(&self) -> Option<(&str, &str)> {
         match self {
             Self::SandboxExecution {
                 sandbox_provider,
@@ -891,7 +744,7 @@ impl ShareActionAgentError {
     }
 
     #[must_use]
-    pub fn deferral_seconds(&self) -> Option<i64> {
+    pub(crate) fn deferral_seconds(&self) -> Option<i64> {
         match self {
             Self::SandboxExecution { source, .. } => source.deferral_seconds(),
             Self::Cancelled => Some(5),
@@ -920,8 +773,6 @@ mod tests {
             "add_content",
             "add_to_briefing",
             "add_links",
-            "chat",
-            "presentation",
             "bookmark_only",
         ] {
             assert_eq!(request_limit_for_mode(mode, 8), 8, "mode {mode}");

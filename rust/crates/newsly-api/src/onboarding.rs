@@ -1,6 +1,6 @@
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{Extension, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use newsly_contracts::{
@@ -17,10 +17,8 @@ use serde::Deserialize;
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{internal_error, not_found, require_operation, verify_stamp};
+use crate::write_support::{internal_error, not_found};
 use crate::{AppState, request_id_from_headers};
-
-const OPERATION_ID: &str = "tutorialOnboardingComplete";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -91,35 +89,26 @@ pub(super) async fn tutorial_complete(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<OnboardingTutorialResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, OPERATION_ID, &request_id)?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let completed = complete_onboarding_tutorial(&mut transaction, current_user.id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     if !completed {
         return Err(not_found("User", &request_id));
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     Ok(Json(OnboardingTutorialResponse {
         has_completed_new_user_tutorial: true,
     }))
 }
 
-fn present_discovery_status(
+pub(super) fn present_discovery_status(
     status: OnboardingDiscoveryStatusProjection,
 ) -> OnboardingDiscoveryStatusResponse {
     let suggestions = status.suggestions.map(present_suggestions);
@@ -184,16 +173,5 @@ fn present_suggestions(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }

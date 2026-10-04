@@ -458,7 +458,6 @@ pub async fn prepare_feed_discovery_task(
     .bind(favorite_limit.clamp(5, 50))
     .fetch_all(&mut *transaction)
     .await?;
-    let seed_content_ids = favorites.iter().map(|row| row.id).collect::<Vec<_>>();
     let run_id = if let Some(run_id) = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint
@@ -482,13 +481,11 @@ pub async fn prepare_feed_discovery_task(
             SET status = 'processing',
                 error_message = NULL,
                 completed_at = NULL,
-                seed_content_ids = $2,
-                discovery_retry_count = $3
+                discovery_retry_count = $2
             WHERE id::bigint = $1
             "#,
         )
         .bind(run_id)
-        .bind(serde_json::to_value(&seed_content_ids)?)
         .bind(retry_count)
         .execute(&mut *transaction)
         .await?;
@@ -499,8 +496,6 @@ pub async fn prepare_feed_discovery_task(
             INSERT INTO feed_discovery_runs (
                 user_id,
                 status,
-                direction_summary,
-                seed_content_ids,
                 created_at,
                 discovery_task_id,
                 discovery_retry_count
@@ -508,18 +503,14 @@ pub async fn prepare_feed_discovery_task(
             VALUES (
                 $1::bigint::integer,
                 'processing',
-                $2,
-                $3,
                 timezone('UTC', now()),
-                $4::bigint::integer,
-                $5
+                $2::bigint::integer,
+                $3
             )
             RETURNING id::bigint
             "#,
         )
         .bind(user_id)
-        .bind(format!("rust:{trigger}"))
-        .bind(serde_json::to_value(&seed_content_ids)?)
         .bind(task_id)
         .bind(retry_count)
         .fetch_one(&mut *transaction)
@@ -629,7 +620,6 @@ pub async fn complete_feed_discovery_task(
                 score,
                 status,
                 config,
-                metadata,
                 created_at,
                 updated_at
             )
@@ -644,7 +634,6 @@ pub async fn complete_feed_discovery_task(
                 $8,
                 $9,
                 json_build_object('feed_url', $5),
-                '{}'::json,
                 timezone('UTC', now()),
                 timezone('UTC', now())
             )
@@ -672,19 +661,14 @@ pub async fn complete_feed_discovery_task(
         r#"
         UPDATE feed_discovery_runs
         SET status = 'completed',
-            direction_summary = $2,
             completed_at = timezone('UTC', now()),
-            error_message = $3,
+            error_message = $2,
             discovery_task_id = NULL,
             discovery_retry_count = NULL
         WHERE id::bigint = $1
         "#,
     )
     .bind(snapshot.run_id)
-    .bind(format!(
-        "Saved Knowledge source discovery ({})",
-        snapshot.trigger
-    ))
     .bind(empty_reason)
     .execute(&mut **transaction)
     .await?;
@@ -986,7 +970,6 @@ struct FeedOptionRow {
     site_url: Option<String>,
     feed_url: String,
     title: Option<String>,
-    description: Option<String>,
     rationale: Option<String>,
 }
 
@@ -1063,7 +1046,6 @@ async fn load_weekly_seed(
             suggestion.site_url,
             suggestion.feed_url,
             suggestion.title,
-            suggestion.description,
             suggestion.rationale
         FROM feed_discovery_suggestions AS suggestion
         JOIN latest_run ON latest_run.id = suggestion.run_id
@@ -1148,7 +1130,6 @@ fn build_feed_option(
         "feed_url": feed_url,
         "feed_type": feed_type,
         "feed_format": if row.suggestion_type == "atom" { "atom" } else { "rss" },
-        "description": clean(row.description, 600),
         "rationale": clean(row.rationale, 600),
         "evidence_url": site_url,
         "is_subscribed": false,
@@ -1346,8 +1327,6 @@ pub enum OnboardingTaskRepositoryError {
     Sqlx(#[from] sqlx::Error),
     #[error("onboarding transcript serialization failed")]
     Json(#[from] serde_json::Error),
-    #[error("the onboarding user is missing or inactive")]
-    UserMissingOrInactive,
 }
 
 #[cfg(test)]

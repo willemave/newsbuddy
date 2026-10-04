@@ -1,3 +1,4 @@
+use crate::news_visibility::{SUBSCRIBED_AGGREGATORS_CTE, visible_news_predicate};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -14,7 +15,6 @@ pub use narration::{prepare_briefing_narration, retry_briefing_narration};
 const DEFAULT_MASTHEAD_TITLE: &str = "The Unread Times";
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
 const BRIEFING_NARRATION_KIND: &str = "briefing_narration";
-const PUBLIC_AUDIO_EPISODE_ERROR_MESSAGE: &str = "Couldn't prepare audio. Please try again.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingStateProjection {
@@ -393,7 +393,11 @@ pub async fn load_briefing_index(
     .into_iter()
     .map(|row| segment_metadata_from_row(&row))
     .collect::<Vec<_>>();
-    let source_keys = dedupe_source_keys(segments.iter().flat_map(|segment| &segment.source_keys));
+    let source_keys = dedupe_source_keys(
+        segments
+            .iter()
+            .flat_map(|segment| segment.source_keys.iter().cloned()),
+    );
     let read_source_keys = read_source_keys_pool(pool, user_id, &source_keys).await?;
     let pending_lens_keys = sqlx::query_scalar::<_, String>(
         r#"
@@ -470,8 +474,11 @@ pub async fn load_briefing_lens_page(
         }
     }
     let segment_count = metadata.len();
-    let all_source_keys =
-        dedupe_source_keys(metadata.iter().flat_map(|segment| &segment.source_keys));
+    let all_source_keys = dedupe_source_keys(
+        metadata
+            .iter()
+            .flat_map(|segment| segment.source_keys.iter().cloned()),
+    );
     let read_source_keys = read_source_keys_pool(pool, user_id, &all_source_keys).await?;
     let is_paged = limit.is_some() || cursor.is_some();
     let fetch_limit = if is_paged {
@@ -519,8 +526,11 @@ pub async fn load_briefing_lens_page(
         .take(fetch_limit)
         .map(segment_from_row)
         .collect::<Vec<_>>();
-    let page_source_keys =
-        dedupe_source_keys(segments.iter().flat_map(|segment| &segment.source_keys));
+    let page_source_keys = dedupe_source_keys(
+        segments
+            .iter()
+            .flat_map(|segment| segment.source_keys.iter().cloned()),
+    );
     let sources = load_sources(pool, user_id, &page_source_keys).await?;
     Ok(Some(BriefingLensPageProjection {
         state: load_state(pool, user_id).await?,
@@ -539,7 +549,7 @@ pub async fn mark_briefing_sources_read(
     user_id: i64,
     source_keys: &[String],
 ) -> Result<BriefingReadMarkProjection, BriefingRepositoryError> {
-    let version = ensure_and_lock_state(transaction, user_id).await?;
+    let version = ensure_briefing_state_version(transaction, user_id).await?;
     mark_sources_locked(transaction, user_id, source_keys, version).await
 }
 
@@ -548,7 +558,7 @@ pub async fn mark_briefing_lens_read(
     user_id: i64,
     lens_key: &str,
 ) -> Result<Option<BriefingReadMarkProjection>, BriefingRepositoryError> {
-    let version = ensure_and_lock_state(transaction, user_id).await?;
+    let version = ensure_briefing_state_version(transaction, user_id).await?;
     let lens_id = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint FROM briefing_lenses
@@ -573,7 +583,7 @@ pub async fn mark_briefing_lens_read(
     .bind(user_id)
     .fetch_all(&mut **transaction)
     .await?;
-    let source_keys = dedupe_owned_source_keys(raw_keys.iter().flat_map(json_string_array));
+    let source_keys = dedupe_source_keys(raw_keys.iter().flat_map(json_string_array));
     let read_keys = read_source_keys_transaction(transaction, user_id, &source_keys).await?;
     let keys_to_mark = source_keys
         .into_iter()
@@ -582,13 +592,6 @@ pub async fn mark_briefing_lens_read(
     mark_sources_locked(transaction, user_id, &keys_to_mark, version)
         .await
         .map(Some)
-}
-
-pub async fn ensure_briefing_state_version(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-) -> Result<i32, BriefingRepositoryError> {
-    ensure_and_lock_state(transaction, user_id).await
 }
 
 pub async fn load_briefing_refresh_task(
@@ -715,10 +718,6 @@ pub async fn load_briefing_narration<'e>(
     .into_iter()
     .map(Into::into)
     .collect())
-}
-
-pub const fn public_audio_episode_error_message() -> &'static str {
-    PUBLIC_AUDIO_EPISODE_ERROR_MESSAGE
 }
 
 async fn load_state(
@@ -856,13 +855,9 @@ async fn load_sources(
         }
     }
     if !news_ids.is_empty() {
-        let rows = sqlx::query_as::<_, NewsSourceRow>(
+        let rows = sqlx::query_as::<_, NewsSourceRow>(sqlx::AssertSqlSafe(format!(
             r#"
-            WITH subscribed_aggregators AS MATERIALIZED (
-                SELECT config::jsonb AS config
-                FROM user_scraper_configs
-                WHERE user_id = $1::bigint AND scraper_type = 'aggregator' AND is_active IS TRUE
-            )
+            {SUBSCRIBED_AGGREGATORS_CTE}
             SELECT news.id::bigint AS id, news.summary_text,
                    news.summary_key_points::jsonb AS summary_key_points,
                    news.raw_metadata::jsonb AS raw_metadata, news.article_url,
@@ -881,20 +876,10 @@ async fn load_sources(
             LEFT JOIN news_item_discussions AS discussion
               ON discussion.news_item_id = news.id
             WHERE news.id::bigint = ANY($2::bigint[])
-              AND (
-                  (news.visibility_scope = 'user' AND news.owner_user_id::bigint = $1)
-                  OR (
-                      news.visibility_scope = 'global'
-                      AND EXISTS (
-                          SELECT 1 FROM subscribed_aggregators AS subscription
-                          WHERE aggregator_config_admits(
-                              subscription.config, news.platform, news.raw_metadata
-                          )
-                      )
-                  )
-              )
+              AND {visibility}
             "#,
-        )
+            visibility = visible_news_predicate("news")
+        )))
         .bind(user_id)
         .bind(&news_ids)
         .fetch_all(pool)
@@ -1034,7 +1019,11 @@ const fn read_news_keys_sql() -> &'static str {
     "#
 }
 
-async fn ensure_and_lock_state(
+/// Ensure the user's briefing state exists and lock its current version.
+///
+/// # Errors
+/// Returns an error when the state cannot be inserted or locked.
+pub async fn ensure_briefing_state_version(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
 ) -> Result<i32, BriefingRepositoryError> {
@@ -1224,7 +1213,7 @@ fn segment_metadata_from_row(row: &SegmentMetadataRow) -> BriefingSegmentMetadat
     }
 }
 
-fn parse_source_ids(source_keys: &[String]) -> (Vec<i64>, Vec<i64>) {
+pub(crate) fn parse_source_ids(source_keys: &[String]) -> (Vec<i64>, Vec<i64>) {
     let mut content_ids = BTreeSet::new();
     let mut news_ids = BTreeSet::new();
     for key in source_keys {
@@ -1253,15 +1242,7 @@ fn parse_source_ids(source_keys: &[String]) -> (Vec<i64>, Vec<i64>) {
     )
 }
 
-fn dedupe_source_keys<'a>(keys: impl IntoIterator<Item = &'a String>) -> Vec<String> {
-    let mut seen = HashSet::new();
-    keys.into_iter()
-        .filter(|key| seen.insert((*key).clone()))
-        .cloned()
-        .collect()
-}
-
-fn dedupe_owned_source_keys(keys: impl IntoIterator<Item = String>) -> Vec<String> {
+fn dedupe_source_keys(keys: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut seen = HashSet::new();
     keys.into_iter()
         .filter(|key| seen.insert(key.clone()))

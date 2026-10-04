@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
-use newsly_contracts::{FeedHistoryItem, FeedHistoryResponse};
+use newsly_contracts::{FeedHistoryItem, FeedHistoryResponse, ScraperType};
 use newsly_db::list_scraper_configs as load_scraper_configs;
 use serde::Deserialize;
 use serde_json::Value;
@@ -56,11 +56,18 @@ pub(super) async fn feed_history(
     {
         return Err(bad_request("Invalid feed history query", &request_id));
     }
-    let types = ["substack", "atom", "youtube", "podcast_rss"].map(str::to_owned);
-    let configs = load_scraper_configs(state.database.pool(), user.id, Some(&types))
+    let types = ScraperType::ALL
+        .into_iter()
+        .filter(|kind| kind.supports_feed_history())
+        .map(|kind| kind.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let configs = load_scraper_configs(state.database.pool(), user.id, None)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    if !configs.iter().any(|config| config.id == config_id) {
+    if !configs
+        .iter()
+        .any(|config| config.id == config_id && types.contains(&config.scraper_type))
+    {
         return Err(not_found_error("Feed not found", &request_id));
     }
     let mut rows = newsly_db::load_feed_history(

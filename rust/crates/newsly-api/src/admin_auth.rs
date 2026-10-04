@@ -1,5 +1,5 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::header::{CACHE_CONTROL, REFERRER_POLICY, SET_COOKIE, X_CONTENT_TYPE_OPTIONS};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
@@ -10,12 +10,9 @@ use newsly_contracts::{AdminLoginRequest, AdminLoginResponse};
 
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
-const LOGIN_PAGE_OPERATION_ID: &str = "adminLoginPage";
-const LOGIN_OPERATION_ID: &str = "adminLogin";
-const LOGOUT_OPERATION_ID: &str = "adminLogout";
 const ADMIN_LOGIN_PAGE: &str = include_str!("../templates/admin_login.html");
 
 pub(super) fn router() -> Router<AppState> {
@@ -35,12 +32,15 @@ pub(super) fn router() -> Router<AppState> {
     )
 )]
 pub(super) async fn login_page(
-    headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _headers: HeaderMap,
+    _stamp: RouteOwnershipStamp,
 ) -> Result<Response, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, LOGIN_PAGE_OPERATION_ID, &request_id)?;
-    let mut response = Html(ADMIN_LOGIN_PAGE).into_response();
+    let mut response = Html(format!(
+        "{}{}",
+        crate::admin_shell::admin_shell("Newsly Operator Login"),
+        ADMIN_LOGIN_PAGE
+    ))
+    .into_response();
     response
         .headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -74,11 +74,10 @@ pub(super) async fn login_page(
 pub(super) async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
     payload: Result<Json<AdminLoginRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, LOGIN_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if !state.auth.verify_admin_password(&payload.password) {
         return Err(ApiError::new(
@@ -126,10 +125,9 @@ pub(super) async fn login(
 pub(super) async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
 ) -> Result<Response, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, LOGOUT_OPERATION_ID, &request_id)?;
     let secure = if state.secure_admin_cookie {
         "; Secure"
     } else {

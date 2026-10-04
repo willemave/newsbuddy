@@ -885,48 +885,6 @@ struct APIContentBodyResponse: Codable {
     }
 }
 
-struct APINarrationResponse: Codable {
-    let targetType: APINarrationTargetType
-    let targetId: Int
-    let title: String
-    let narrationText: String
-
-    init(
-        targetType: APINarrationTargetType,
-        targetId: Int,
-        title: String,
-        narrationText: String
-    ) {
-        self.targetType = targetType
-        self.targetId = targetId
-        self.title = title
-        self.narrationText = narrationText
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case targetType = "target_type"
-        case targetId = "target_id"
-        case title = "title"
-        case narrationText = "narration_text"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        targetType = try container.decode(APINarrationTargetType.self, forKey: .targetType)
-        targetId = try container.decode(Int.self, forKey: .targetId)
-        title = try container.decode(String.self, forKey: .title)
-        narrationText = try container.decode(String.self, forKey: .narrationText)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(targetType, forKey: .targetType)
-        try container.encode(targetId, forKey: .targetId)
-        try container.encode(title, forKey: .title)
-        try container.encode(narrationText, forKey: .narrationText)
-    }
-}
-
 struct APISubmissionStatusListResponse: Codable {
     let submissions: [APISubmissionStatusResponse]
     let meta: APIPaginationMetadata
@@ -954,30 +912,6 @@ struct APISubmissionStatusListResponse: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(submissions, forKey: .submissions)
         try container.encode(meta, forKey: .meta)
-    }
-}
-
-struct APIPodcastEpisodeSearchResponse: Codable {
-    let results: [APIPodcastEpisodeSearchResultResponse]
-
-    init(
-        results: [APIPodcastEpisodeSearchResultResponse] = []
-    ) {
-        self.results = results
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case results = "results"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        results = try container.decode([APIPodcastEpisodeSearchResultResponse].self, forKey: .results)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(results, forKey: .results)
     }
 }
 
@@ -1287,36 +1221,6 @@ struct APIKnowledgeMutationResponse: Codable {
     }
 }
 
-struct APIChatGPTUrlResponse: Codable {
-    let chatUrl: String
-    let truncated: Bool
-
-    init(
-        chatUrl: String,
-        truncated: Bool
-    ) {
-        self.chatUrl = chatUrl
-        self.truncated = truncated
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case chatUrl = "chat_url"
-        case truncated = "truncated"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        chatUrl = try container.decode(String.self, forKey: .chatUrl)
-        truncated = try container.decode(Bool.self, forKey: .truncated)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(chatUrl, forKey: .chatUrl)
-        try container.encode(truncated, forKey: .truncated)
-    }
-}
-
 struct APIConvertNewsResponse: Codable {
     let status: String
     let newContentId: Int
@@ -1392,30 +1296,6 @@ struct APIBadgeStatsResponse: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(unread, forKey: .unread)
         try container.encode(processing, forKey: .processing)
-    }
-}
-
-struct APILongFormStatsResponse: Codable {
-    let unreadCount: Int
-
-    init(
-        unreadCount: Int
-    ) {
-        self.unreadCount = unreadCount
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case unreadCount = "unread_count"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        unreadCount = try container.decode(Int.self, forKey: .unreadCount)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(unreadCount, forKey: .unreadCount)
     }
 }
 
@@ -2105,183 +1985,6 @@ struct APICreateChatSessionResponse: Codable {
     }
 }
 
-struct APICouncilStartRequest: Codable {
-    let message: String
-
-    init(
-        message: String
-    ) {
-        self.message = message
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case message = "message"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        message = try container.decode(String.self, forKey: .message)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(message, forKey: .message)
-    }
-}
-
-struct APICouncilSelectRequest: Codable {
-    let childSessionId: Int
-
-    init(
-        childSessionId: Int
-    ) {
-        self.childSessionId = childSessionId
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case childSessionId = "child_session_id"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        childSessionId = try container.decode(Int.self, forKey: .childSessionId)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(childSessionId, forKey: .childSessionId)
-    }
-}
-
-struct APICouncilRetryRequest: Codable {
-    let childSessionId: Int
-
-    init(
-        childSessionId: Int
-    ) {
-        self.childSessionId = childSessionId
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case childSessionId = "child_session_id"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        childSessionId = try container.decode(Int.self, forKey: .childSessionId)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(childSessionId, forKey: .childSessionId)
-    }
-}
-
-struct APIJobStatusResponse: Codable {
-    let id: Int
-    let taskType: String
-    let status: String
-    let queueName: String
-    let contentId: Int?
-    let payload: [String: AnyCodable]
-    let retryCount: Int
-    let createdAt: Date?
-    let startedAt: Date?
-    let completedAt: Date?
-    let errorMessage: String?
-
-    init(
-        id: Int,
-        taskType: String,
-        status: String,
-        queueName: String,
-        contentId: Int?,
-        payload: [String: AnyCodable] = [:],
-        retryCount: Int = 0,
-        createdAt: Date?,
-        startedAt: Date?,
-        completedAt: Date?,
-        errorMessage: String?
-    ) {
-        self.id = id
-        self.taskType = taskType
-        self.status = status
-        self.queueName = queueName
-        self.contentId = contentId
-        self.payload = payload
-        self.retryCount = retryCount
-        self.createdAt = createdAt
-        self.startedAt = startedAt
-        self.completedAt = completedAt
-        self.errorMessage = errorMessage
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id = "id"
-        case taskType = "task_type"
-        case status = "status"
-        case queueName = "queue_name"
-        case contentId = "content_id"
-        case payload = "payload"
-        case retryCount = "retry_count"
-        case createdAt = "created_at"
-        case startedAt = "started_at"
-        case completedAt = "completed_at"
-        case errorMessage = "error_message"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        taskType = try container.decode(String.self, forKey: .taskType)
-        status = try container.decode(String.self, forKey: .status)
-        queueName = try container.decode(String.self, forKey: .queueName)
-        contentId = try container.decode(Int?.self, forKey: .contentId)
-        payload = try container.decode([String: AnyCodable].self, forKey: .payload)
-        retryCount = try container.decode(Int.self, forKey: .retryCount)
-        if let createdAtRaw = try container.decode(String?.self, forKey: .createdAt) {
-            guard let createdAtParsed = ServerDate.parse(createdAtRaw) else {
-                throw DecodingError.dataCorruptedError(forKey: .createdAt, in: container, debugDescription: "Unparseable date for createdAt")
-            }
-            createdAt = createdAtParsed
-        } else {
-            createdAt = nil
-        }
-        if let startedAtRaw = try container.decode(String?.self, forKey: .startedAt) {
-            guard let startedAtParsed = ServerDate.parse(startedAtRaw) else {
-                throw DecodingError.dataCorruptedError(forKey: .startedAt, in: container, debugDescription: "Unparseable date for startedAt")
-            }
-            startedAt = startedAtParsed
-        } else {
-            startedAt = nil
-        }
-        if let completedAtRaw = try container.decode(String?.self, forKey: .completedAt) {
-            guard let completedAtParsed = ServerDate.parse(completedAtRaw) else {
-                throw DecodingError.dataCorruptedError(forKey: .completedAt, in: container, debugDescription: "Unparseable date for completedAt")
-            }
-            completedAt = completedAtParsed
-        } else {
-            completedAt = nil
-        }
-        errorMessage = try container.decode(String?.self, forKey: .errorMessage)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(taskType, forKey: .taskType)
-        try container.encode(status, forKey: .status)
-        try container.encode(queueName, forKey: .queueName)
-        try container.encode(contentId, forKey: .contentId)
-        try container.encode(payload, forKey: .payload)
-        try container.encode(retryCount, forKey: .retryCount)
-        try container.encode(createdAt.map(ServerDate.format), forKey: .createdAt)
-        try container.encode(startedAt.map(ServerDate.format), forKey: .startedAt)
-        try container.encode(completedAt.map(ServerDate.format), forKey: .completedAt)
-        try container.encode(errorMessage, forKey: .errorMessage)
-    }
-}
-
 struct APICustomNarrationCreateRequest: Codable {
     let contentIds: [Int]
     let newsItemIds: [Int]
@@ -2570,7 +2273,7 @@ struct APIBriefingIndexResponse: Codable {
     }
 }
 
-struct APIBriefingFirstRunTierProgress: Codable {
+struct APIBriefingFirstRunTierProgress: Codable, Equatable {
     let tier: String
     let sourceNames: [String]
     let discovered: Int
@@ -3344,30 +3047,6 @@ struct APIBriefingNarrationRequest: Codable {
     }
 }
 
-struct APILegacyBriefingNarrationRequest: Codable {
-    let lensKey: String
-
-    init(
-        lensKey: String
-    ) {
-        self.lensKey = lensKey
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case lensKey = "lens_key"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        lensKey = try container.decode(String.self, forKey: .lensKey)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(lensKey, forKey: .lensKey)
-    }
-}
-
 struct APIBriefingNarrationResponse: Codable {
     let episodeGroupId: String
     let lensKey: String
@@ -3913,271 +3592,6 @@ struct APIIntegrationDisconnectResponse: Codable {
     }
 }
 
-struct APIUserLlmIntegrationResponse: Codable {
-    let provider: APIUserLlmProvider
-    let configured: Bool
-    let updatedAt: Date?
-
-    init(
-        provider: APIUserLlmProvider,
-        configured: Bool,
-        updatedAt: Date?
-    ) {
-        self.provider = provider
-        self.configured = configured
-        self.updatedAt = updatedAt
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case provider = "provider"
-        case configured = "configured"
-        case updatedAt = "updated_at"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        provider = try container.decode(APIUserLlmProvider.self, forKey: .provider)
-        configured = try container.decode(Bool.self, forKey: .configured)
-        if let updatedAtRaw = try container.decode(String?.self, forKey: .updatedAt) {
-            guard let updatedAtParsed = ServerDate.parse(updatedAtRaw) else {
-                throw DecodingError.dataCorruptedError(forKey: .updatedAt, in: container, debugDescription: "Unparseable date for updatedAt")
-            }
-            updatedAt = updatedAtParsed
-        } else {
-            updatedAt = nil
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(provider, forKey: .provider)
-        try container.encode(configured, forKey: .configured)
-        try container.encode(updatedAt.map(ServerDate.format), forKey: .updatedAt)
-    }
-}
-
-struct APIUpsertUserLlmIntegrationRequest: Codable {
-    let apiKey: String
-
-    init(
-        apiKey: String
-    ) {
-        self.apiKey = apiKey
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case apiKey = "api_key"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        apiKey = try container.decode(String.self, forKey: .apiKey)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(apiKey, forKey: .apiKey)
-    }
-}
-
-struct APIUserLlmIntegrationTestResponse: Codable {
-    let provider: APIUserLlmProvider
-    let ok: Bool
-
-    init(
-        provider: APIUserLlmProvider,
-        ok: Bool
-    ) {
-        self.provider = provider
-        self.ok = ok
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case provider = "provider"
-        case ok = "ok"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        provider = try container.decode(APIUserLlmProvider.self, forKey: .provider)
-        ok = try container.decode(Bool.self, forKey: .ok)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(provider, forKey: .provider)
-        try container.encode(ok, forKey: .ok)
-    }
-}
-
-struct APIDeleteUserLlmIntegrationResponse: Codable {
-    let status: APIDeleteStatus
-    let provider: String
-
-    init(
-        status: APIDeleteStatus = .deleted,
-        provider: String
-    ) {
-        self.status = status
-        self.provider = provider
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case status = "status"
-        case provider = "provider"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        status = try container.decode(APIDeleteStatus.self, forKey: .status)
-        provider = try container.decode(String.self, forKey: .provider)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(status, forKey: .status)
-        try container.encode(provider, forKey: .provider)
-    }
-}
-
-struct APIOnboardingProfileRequest: Codable {
-    let firstName: String
-    let interestTopics: [String]
-
-    init(
-        firstName: String,
-        interestTopics: [String] = []
-    ) {
-        self.firstName = firstName
-        self.interestTopics = interestTopics
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case firstName = "first_name"
-        case interestTopics = "interest_topics"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        firstName = try container.decode(String.self, forKey: .firstName)
-        interestTopics = try container.decode([String].self, forKey: .interestTopics)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(firstName, forKey: .firstName)
-        try container.encode(interestTopics, forKey: .interestTopics)
-    }
-}
-
-struct APIOnboardingProfileResponse: Codable {
-    let profileSummary: String
-    let inferredTopics: [String]
-    let candidateSources: [String]
-
-    init(
-        profileSummary: String,
-        inferredTopics: [String] = [],
-        candidateSources: [String] = []
-    ) {
-        self.profileSummary = profileSummary
-        self.inferredTopics = inferredTopics
-        self.candidateSources = candidateSources
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case profileSummary = "profile_summary"
-        case inferredTopics = "inferred_topics"
-        case candidateSources = "candidate_sources"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        profileSummary = try container.decode(String.self, forKey: .profileSummary)
-        inferredTopics = try container.decode([String].self, forKey: .inferredTopics)
-        candidateSources = try container.decode([String].self, forKey: .candidateSources)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(profileSummary, forKey: .profileSummary)
-        try container.encode(inferredTopics, forKey: .inferredTopics)
-        try container.encode(candidateSources, forKey: .candidateSources)
-    }
-}
-
-struct APIOnboardingVoiceParseRequest: Codable {
-    let transcript: String
-    let locale: String?
-
-    init(
-        transcript: String,
-        locale: String? = nil
-    ) {
-        self.transcript = transcript
-        self.locale = locale
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case transcript = "transcript"
-        case locale = "locale"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        transcript = try container.decode(String.self, forKey: .transcript)
-        locale = try container.decodeIfPresent(String.self, forKey: .locale)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(transcript, forKey: .transcript)
-        try container.encodeIfPresent(locale, forKey: .locale)
-    }
-}
-
-struct APIOnboardingVoiceParseResponse: Codable {
-    let firstName: String?
-    let interestTopics: [String]
-    let confidence: Double?
-    let missingFields: [String]
-
-    init(
-        firstName: String?,
-        interestTopics: [String] = [],
-        confidence: Double?,
-        missingFields: [String] = []
-    ) {
-        self.firstName = firstName
-        self.interestTopics = interestTopics
-        self.confidence = confidence
-        self.missingFields = missingFields
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case firstName = "first_name"
-        case interestTopics = "interest_topics"
-        case confidence = "confidence"
-        case missingFields = "missing_fields"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        firstName = try container.decode(String?.self, forKey: .firstName)
-        interestTopics = try container.decode([String].self, forKey: .interestTopics)
-        confidence = try container.decode(Double?.self, forKey: .confidence)
-        missingFields = try container.decode([String].self, forKey: .missingFields)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(firstName, forKey: .firstName)
-        try container.encode(interestTopics, forKey: .interestTopics)
-        try container.encode(confidence, forKey: .confidence)
-        try container.encode(missingFields, forKey: .missingFields)
-    }
-}
-
 struct APIOnboardingAudioDiscoverRequest: Codable {
     let transcript: String
     let locale: String?
@@ -4253,36 +3667,6 @@ struct APIOnboardingAudioDiscoverResponse: Codable {
         try container.encode(topicSummary, forKey: .topicSummary)
         try container.encode(inferredTopics, forKey: .inferredTopics)
         try container.encode(lanes, forKey: .lanes)
-    }
-}
-
-struct APIOnboardingFastDiscoverRequest: Codable {
-    let profileSummary: String
-    let inferredTopics: [String]
-
-    init(
-        profileSummary: String,
-        inferredTopics: [String] = []
-    ) {
-        self.profileSummary = profileSummary
-        self.inferredTopics = inferredTopics
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case profileSummary = "profile_summary"
-        case inferredTopics = "inferred_topics"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        profileSummary = try container.decode(String.self, forKey: .profileSummary)
-        inferredTopics = try container.decode([String].self, forKey: .inferredTopics)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(profileSummary, forKey: .profileSummary)
-        try container.encode(inferredTopics, forKey: .inferredTopics)
     }
 }
 
@@ -4635,63 +4019,39 @@ struct APIAudioTranscriptionResponse: Codable {
     }
 }
 
-struct APIAudioTranscriptionHealthResponse: Codable {
-    let available: Bool
-
-    init(
-        available: Bool
-    ) {
-        self.available = available
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case available = "available"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        available = try container.decode(Bool.self, forKey: .available)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(available, forKey: .available)
-    }
-}
-
 struct APIAppleSignInRequest: Codable {
     let idToken: String
-    let email: String?
     let fullName: String?
+    let nonce: String?
 
     init(
         idToken: String,
-        email: String? = nil,
-        fullName: String? = nil
+        fullName: String? = nil,
+        nonce: String? = nil
     ) {
         self.idToken = idToken
-        self.email = email
         self.fullName = fullName
+        self.nonce = nonce
     }
 
     enum CodingKeys: String, CodingKey {
         case idToken = "id_token"
-        case email = "email"
         case fullName = "full_name"
+        case nonce = "nonce"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         idToken = try container.decode(String.self, forKey: .idToken)
-        email = try container.decodeIfPresent(String.self, forKey: .email)
         fullName = try container.decodeIfPresent(String.self, forKey: .fullName)
+        nonce = try container.decodeIfPresent(String.self, forKey: .nonce)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(idToken, forKey: .idToken)
-        try container.encodeIfPresent(email, forKey: .email)
         try container.encodeIfPresent(fullName, forKey: .fullName)
+        try container.encodeIfPresent(nonce, forKey: .nonce)
     }
 }
 
@@ -5239,7 +4599,6 @@ struct APICliLinkApproveResponse: Codable {
 
 struct APISubmitContentRequest: Codable {
     let url: String
-    let contentType: APIContentType?
     let title: String?
     let platform: String?
     let instruction: String?
@@ -5251,7 +4610,6 @@ struct APISubmitContentRequest: Codable {
 
     init(
         url: String,
-        contentType: APIContentType? = nil,
         title: String? = nil,
         platform: String? = nil,
         instruction: String? = nil,
@@ -5262,7 +4620,6 @@ struct APISubmitContentRequest: Codable {
         saveToKnowledgeAndMarkRead: Bool = false
     ) {
         self.url = url
-        self.contentType = contentType
         self.title = title
         self.platform = platform
         self.instruction = instruction
@@ -5275,7 +4632,6 @@ struct APISubmitContentRequest: Codable {
 
     enum CodingKeys: String, CodingKey {
         case url = "url"
-        case contentType = "content_type"
         case title = "title"
         case platform = "platform"
         case instruction = "instruction"
@@ -5289,7 +4645,6 @@ struct APISubmitContentRequest: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         url = try container.decode(String.self, forKey: .url)
-        contentType = try container.decodeIfPresent(APIContentType.self, forKey: .contentType)
         title = try container.decodeIfPresent(String.self, forKey: .title)
         platform = try container.decodeIfPresent(String.self, forKey: .platform)
         instruction = try container.decodeIfPresent(String.self, forKey: .instruction)
@@ -5303,7 +4658,6 @@ struct APISubmitContentRequest: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(url, forKey: .url)
-        try container.encodeIfPresent(contentType, forKey: .contentType)
         try container.encodeIfPresent(title, forKey: .title)
         try container.encodeIfPresent(platform, forKey: .platform)
         try container.encodeIfPresent(instruction, forKey: .instruction)
@@ -6227,78 +5581,6 @@ struct APISubmissionStatusResponse: Codable {
     }
 }
 
-struct APIPodcastEpisodeSearchResultResponse: Codable {
-    let title: String
-    let episodeUrl: String
-    let podcastTitle: String?
-    let source: String?
-    let snippet: String?
-    let feedUrl: String?
-    let publishedAt: String?
-    let provider: String?
-    let score: Double?
-
-    init(
-        title: String,
-        episodeUrl: String,
-        podcastTitle: String?,
-        source: String?,
-        snippet: String?,
-        feedUrl: String?,
-        publishedAt: String?,
-        provider: String?,
-        score: Double?
-    ) {
-        self.title = title
-        self.episodeUrl = episodeUrl
-        self.podcastTitle = podcastTitle
-        self.source = source
-        self.snippet = snippet
-        self.feedUrl = feedUrl
-        self.publishedAt = publishedAt
-        self.provider = provider
-        self.score = score
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case title = "title"
-        case episodeUrl = "episode_url"
-        case podcastTitle = "podcast_title"
-        case source = "source"
-        case snippet = "snippet"
-        case feedUrl = "feed_url"
-        case publishedAt = "published_at"
-        case provider = "provider"
-        case score = "score"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        title = try container.decode(String.self, forKey: .title)
-        episodeUrl = try container.decode(String.self, forKey: .episodeUrl)
-        podcastTitle = try container.decode(String?.self, forKey: .podcastTitle)
-        source = try container.decode(String?.self, forKey: .source)
-        snippet = try container.decode(String?.self, forKey: .snippet)
-        feedUrl = try container.decode(String?.self, forKey: .feedUrl)
-        publishedAt = try container.decode(String?.self, forKey: .publishedAt)
-        provider = try container.decode(String?.self, forKey: .provider)
-        score = try container.decode(Double?.self, forKey: .score)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(title, forKey: .title)
-        try container.encode(episodeUrl, forKey: .episodeUrl)
-        try container.encode(podcastTitle, forKey: .podcastTitle)
-        try container.encode(source, forKey: .source)
-        try container.encode(snippet, forKey: .snippet)
-        try container.encode(feedUrl, forKey: .feedUrl)
-        try container.encode(publishedAt, forKey: .publishedAt)
-        try container.encode(provider, forKey: .provider)
-        try container.encode(score, forKey: .score)
-    }
-}
-
 struct APIMixedSearchFeedResultResponse: Codable {
     let id: String
     let title: String
@@ -6374,6 +5656,78 @@ struct APIMixedSearchFeedResultResponse: Codable {
         try container.encode(rationale, forKey: .rationale)
         try container.encode(evidenceUrl, forKey: .evidenceUrl)
         try container.encode(isSubscribed, forKey: .isSubscribed)
+    }
+}
+
+struct APIPodcastEpisodeSearchResultResponse: Codable {
+    let title: String
+    let episodeUrl: String
+    let podcastTitle: String?
+    let source: String?
+    let snippet: String?
+    let feedUrl: String?
+    let publishedAt: String?
+    let provider: String?
+    let score: Double?
+
+    init(
+        title: String,
+        episodeUrl: String,
+        podcastTitle: String?,
+        source: String?,
+        snippet: String?,
+        feedUrl: String?,
+        publishedAt: String?,
+        provider: String?,
+        score: Double?
+    ) {
+        self.title = title
+        self.episodeUrl = episodeUrl
+        self.podcastTitle = podcastTitle
+        self.source = source
+        self.snippet = snippet
+        self.feedUrl = feedUrl
+        self.publishedAt = publishedAt
+        self.provider = provider
+        self.score = score
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title = "title"
+        case episodeUrl = "episode_url"
+        case podcastTitle = "podcast_title"
+        case source = "source"
+        case snippet = "snippet"
+        case feedUrl = "feed_url"
+        case publishedAt = "published_at"
+        case provider = "provider"
+        case score = "score"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        episodeUrl = try container.decode(String.self, forKey: .episodeUrl)
+        podcastTitle = try container.decode(String?.self, forKey: .podcastTitle)
+        source = try container.decode(String?.self, forKey: .source)
+        snippet = try container.decode(String?.self, forKey: .snippet)
+        feedUrl = try container.decode(String?.self, forKey: .feedUrl)
+        publishedAt = try container.decode(String?.self, forKey: .publishedAt)
+        provider = try container.decode(String?.self, forKey: .provider)
+        score = try container.decode(Double?.self, forKey: .score)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(episodeUrl, forKey: .episodeUrl)
+        try container.encode(podcastTitle, forKey: .podcastTitle)
+        try container.encode(source, forKey: .source)
+        try container.encode(snippet, forKey: .snippet)
+        try container.encode(feedUrl, forKey: .feedUrl)
+        try container.encode(publishedAt, forKey: .publishedAt)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(score, forKey: .score)
     }
 }
 
@@ -6750,7 +6104,7 @@ struct APIChatSessionSummary: Codable {
         lastMessagePreview: String?,
         lastMessageRole: String?,
         councilMode: Bool = false,
-        activeChildSessionId: Int?
+        activeChildSessionId: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -6853,8 +6207,8 @@ struct APIChatSessionSummary: Codable {
         hasMessages = try container.decode(Bool.self, forKey: .hasMessages)
         lastMessagePreview = try container.decode(String?.self, forKey: .lastMessagePreview)
         lastMessageRole = try container.decode(String?.self, forKey: .lastMessageRole)
-        councilMode = try container.decode(Bool.self, forKey: .councilMode)
-        activeChildSessionId = try container.decode(Int?.self, forKey: .activeChildSessionId)
+        councilMode = try container.decodeIfPresent(Bool.self, forKey: .councilMode) ?? false
+        activeChildSessionId = try container.decodeIfPresent(Int.self, forKey: .activeChildSessionId) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -6918,7 +6272,7 @@ struct APIChatMessage: Codable {
         error: String?,
         feedOptions: [APIAssistantFeedOption] = [],
         councilCandidates: [APICouncilCandidate] = [],
-        activeCouncilChildSessionId: Int?
+        activeCouncilChildSessionId: Int? = nil
     ) {
         self.id = id
         self.sourceMessageId = sourceMessageId
@@ -6972,7 +6326,7 @@ struct APIChatMessage: Codable {
         error = try container.decode(String?.self, forKey: .error)
         feedOptions = try container.decodeIfPresent([APIAssistantFeedOption].self, forKey: .feedOptions) ?? []
         councilCandidates = try container.decodeIfPresent([APICouncilCandidate].self, forKey: .councilCandidates) ?? []
-        activeCouncilChildSessionId = try container.decode(Int?.self, forKey: .activeCouncilChildSessionId)
+        activeCouncilChildSessionId = try container.decodeIfPresent(Int.self, forKey: .activeCouncilChildSessionId) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -7692,7 +7046,7 @@ struct APIUserResponse: Codable {
         isAdmin = try container.decode(Bool.self, forKey: .isAdmin)
         isActive = try container.decode(Bool.self, forKey: .isActive)
         twitterUsername = try container.decode(String?.self, forKey: .twitterUsername)
-        councilPersonas = try container.decode([APICouncilPersonaConfig].self, forKey: .councilPersonas)
+        councilPersonas = try container.decodeIfPresent([APICouncilPersonaConfig].self, forKey: .councilPersonas) ?? []
         hasXBookmarkSync = try container.decode(Bool.self, forKey: .hasXBookmarkSync)
         hasCompletedOnboarding = try container.decode(Bool.self, forKey: .hasCompletedOnboarding)
         hasCompletedNewUserTutorial = try container.decode(Bool.self, forKey: .hasCompletedNewUserTutorial)

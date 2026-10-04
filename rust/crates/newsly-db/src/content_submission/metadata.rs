@@ -1,24 +1,8 @@
 use serde_json::{Map, Value};
 
 use super::SELF_SUBMISSION_SOURCE;
-
-const PROCESSING_FIELDS: &[&str] = &[
-    "subscribe_to_feed",
-    "feed_subscription",
-    "detected_feed",
-    "all_detected_feeds",
-    "share_and_chat_user_ids",
-    "share_and_chat_requests",
-    "submitted_by_user_id",
-    "submitted_via",
-    "platform_hint",
-    "content_to_summarize",
-    "processing_errors",
-    "canonical_content_id",
-    "tweet_enrichment",
-    "tweet_only",
-    "deck_source_only",
-];
+pub(super) use crate::content_metadata::set_field;
+pub(super) use crate::content_metadata::{json_truthy, runtime_metadata, summary_is_readable};
 
 pub(super) fn build_new_metadata(
     user_id: i64,
@@ -28,18 +12,21 @@ pub(super) fn build_new_metadata(
     share_and_chat: bool,
     chat_initial_message: Option<&str>,
 ) -> Map<String, Value> {
-    let mut metadata = Map::from_iter([("source".to_owned(), Value::from(SELF_SUBMISSION_SOURCE))]);
-    set_processing_field(&mut metadata, "submitted_by_user_id", Value::from(user_id));
-    set_processing_field(
+    let mut metadata = crate::content_metadata::initialize_metadata(Map::from_iter([(
+        "source".to_owned(),
+        Value::from(SELF_SUBMISSION_SOURCE),
+    )]));
+    set_field(&mut metadata, "submitted_by_user_id", Value::from(user_id));
+    set_field(
         &mut metadata,
         "submitted_via",
         Value::from(submission_channel),
     );
     if subscribe_to_feed {
-        set_processing_field(&mut metadata, "subscribe_to_feed", Value::Bool(true));
+        set_field(&mut metadata, "subscribe_to_feed", Value::Bool(true));
     }
     if let Some(platform) = platform {
-        set_processing_field(&mut metadata, "platform_hint", Value::from(platform));
+        set_field(&mut metadata, "platform_hint", Value::from(platform));
     }
     if share_and_chat {
         metadata = append_share_and_chat_request(metadata, user_id, chat_initial_message);
@@ -49,60 +36,6 @@ pub(super) fn build_new_metadata(
 
 pub(super) fn metadata_object(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
-}
-
-fn normalize_metadata_shape(mut metadata: Map<String, Value>) -> Map<String, Value> {
-    let mut domain = metadata
-        .get("domain")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let mut processing = metadata
-        .get("processing")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    for (key, value) in &metadata {
-        if matches!(key.as_str(), "domain" | "processing") {
-            continue;
-        }
-        if PROCESSING_FIELDS.contains(&key.as_str()) {
-            processing
-                .entry(key.clone())
-                .or_insert_with(|| value.clone());
-        } else {
-            domain.entry(key.clone()).or_insert_with(|| value.clone());
-        }
-    }
-    metadata.insert("domain".to_owned(), Value::Object(domain));
-    metadata.insert("processing".to_owned(), Value::Object(processing));
-    metadata
-}
-
-pub(super) fn runtime_metadata(metadata: &Map<String, Value>) -> Map<String, Value> {
-    let normalized = normalize_metadata_shape(metadata.clone());
-    let mut runtime = normalized
-        .get("domain")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    if let Some(processing) = normalized.get("processing").and_then(Value::as_object) {
-        runtime.extend(processing.clone());
-    }
-    runtime
-}
-
-pub(super) fn set_processing_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    let mut normalized = normalize_metadata_shape(std::mem::take(metadata));
-    let mut processing = normalized
-        .get("processing")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    processing.insert(key.to_owned(), value.clone());
-    normalized.insert("processing".to_owned(), Value::Object(processing));
-    normalized.insert(key.to_owned(), value);
-    *metadata = normalized;
 }
 
 pub(super) fn processing_flag(metadata: &Map<String, Value>, key: &str) -> Option<Value> {
@@ -125,7 +58,7 @@ pub(super) fn append_share_and_chat_request(
     user_id: i64,
     initial_message: Option<&str>,
 ) -> Map<String, Value> {
-    let mut normalized = normalize_metadata_shape(metadata);
+    let mut normalized = metadata;
     let mut user_ids = extract_share_and_chat_user_ids(&normalized);
     if !user_ids.contains(&user_id) {
         user_ids.push(user_id);
@@ -140,12 +73,12 @@ pub(super) fn append_share_and_chat_request(
         .map(Value::Object)
         .collect::<Vec<_>>();
     requests.push(Value::Object(request));
-    set_processing_field(
+    set_field(
         &mut normalized,
         "share_and_chat_user_ids",
         Value::Array(user_ids.into_iter().map(Value::from).collect()),
     );
-    set_processing_field(
+    set_field(
         &mut normalized,
         "share_and_chat_requests",
         Value::Array(requests),
@@ -231,51 +164,6 @@ fn coerce_i64_like_python(value: &Value) -> Option<i64> {
         Value::String(value) => value.trim().parse().ok(),
         Value::Null | Value::Array(_) | Value::Object(_) => None,
     }
-}
-
-pub(super) fn json_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(value) => *value,
-        Value::Number(value) => value.as_f64().is_some_and(|value| value != 0.0),
-        Value::String(value) => !value.is_empty(),
-        Value::Array(value) => !value.is_empty(),
-        Value::Object(value) => !value.is_empty(),
-    }
-}
-
-pub(super) fn summary_is_readable(runtime: &Map<String, Value>, content_type: &str) -> bool {
-    let Some(summary) = runtime.get("summary") else {
-        return false;
-    };
-    if content_type == "podcast" {
-        return json_truthy(summary);
-    }
-    let Some(summary) = summary.as_object() else {
-        return json_truthy(summary);
-    };
-    if runtime.get("summary_kind").and_then(Value::as_str) == Some("longform_artifact")
-        && summary.get("artifact").is_some_and(Value::is_object)
-    {
-        return summary.get("feed_preview").is_some_and(Value::is_object)
-            || runtime.get("feed_preview").is_some_and(Value::is_object)
-            || summary.get("one_line").is_some_and(json_truthy);
-    }
-    [
-        "one_line",
-        "overview",
-        "summary",
-        "hook",
-        "takeaway",
-        "editorial_narrative",
-        "bullet_points",
-        "key_points",
-        "points",
-        "insights",
-        "artifact",
-    ]
-    .iter()
-    .any(|key| summary.get(*key).is_some_and(json_truthy))
 }
 
 #[cfg(test)]

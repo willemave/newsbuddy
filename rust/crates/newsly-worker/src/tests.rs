@@ -5,12 +5,14 @@ use newsly_queue::{
     ClaimRequest, ClaimRuntimeScope, EnqueueRequest, QueueKernel, TaskQueue, TaskResult, TaskType,
 };
 use serde_json::json;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::{
     FinalizerErrorDisposition, HandlerExecution, HandlerFinalizerFuture, HandlerFuture,
     HandlerInterruptionPolicy, HandlerRegistry, LeaseHealth, TaskFinalizer, TaskHandler,
-    WorkerAttempt, WorkerConfig, WorkerKernel, heartbeat_interval, heartbeat_retry_interval,
+    WorkerAttempt, WorkerConfig, WorkerError, WorkerKernel, heartbeat_interval,
+    heartbeat_retry_interval,
 };
 
 #[derive(Debug)]
@@ -81,6 +83,39 @@ fn handlers_cancel_on_interruption_unless_they_explicitly_opt_into_draining() {
         handler.interruption_policy(),
         HandlerInterruptionPolicy::Cancel
     );
+}
+
+#[tokio::test]
+async fn worker_rejects_a_task_scope_claimed_from_the_wrong_queue() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgresql://localhost/newsly")
+        .expect("test URL should be valid");
+    let queue = QueueKernel::new(pool);
+    let scope = ClaimRuntimeScope::namespaces(
+        RuntimeOwner::Rust,
+        [ResourceKey::new(TaskType::Scrape.as_str()).expect("namespace should be valid")],
+    )
+    .expect("scope should be valid");
+    let claim = ClaimRequest::for_queue("wrong-queue", TaskQueue::Media, scope);
+    let config = WorkerConfig::new(claim);
+    let mut handlers = HandlerRegistry::new();
+    handlers
+        .register(FailingHandler {
+            disposition: FinalizerErrorDisposition::Retryable,
+        })
+        .expect("handler should register");
+
+    let error = WorkerKernel::new(queue, handlers, config, None)
+        .expect_err("content task must not be claimed from media queue");
+
+    assert!(matches!(
+        error,
+        WorkerError::ClaimQueueMismatch {
+            task_type: TaskType::Scrape,
+            expected_queue: TaskQueue::Content,
+            actual_queue: TaskQueue::Media,
+        }
+    ));
 }
 
 async fn worker_with_failing_finalizer(
@@ -593,7 +628,7 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
         worker_with_failing_finalizer(&pool, 0, FinalizerErrorDisposition::Retryable).await;
     let user_id: i64 = sqlx::query_scalar("INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('terminal-workflows', 'workflows@example.test', FALSE, TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
     let session_id: i64 = sqlx::query_scalar("INSERT INTO chat_sessions (user_id, council_mode, is_hidden_from_history) VALUES ($1::integer, FALSE, FALSE) RETURNING id::bigint").bind(user_id).fetch_one(&pool).await.unwrap();
-    let message_id: i64 = sqlx::query_scalar("INSERT INTO chat_messages (session_id, message_list, status, stream_generation) VALUES ($1::integer, '[]', 'processing', 0) RETURNING id::bigint").bind(session_id).fetch_one(&pool).await.unwrap();
+    let message_id: i64 = sqlx::query_scalar("INSERT INTO chat_messages (session_id, message_list, status, stream_generation) VALUES ($1::integer, $2, 'processing', 0) RETURNING id::bigint").bind(session_id).bind(serde_json::json!({"version":1,"stream_generation":0,"messages":[]}).to_string()).fetch_one(&pool).await.unwrap();
     let episode_id: i64 = sqlx::query_scalar("INSERT INTO audio_episodes (user_id, kind, status, title, input_hash, source_item_ids, source_snapshot, prompt_version, audio_content_type, share_enabled, started_at) VALUES ($1::integer, 'briefing', 'processing', 'Test', 'hash', '[]', '{}', 1, 'audio/mpeg', FALSE, timezone('UTC', now())) RETURNING id::bigint").bind(user_id).fetch_one(&pool).await.unwrap();
     let run_id: i64 = sqlx::query_scalar("INSERT INTO onboarding_discovery_runs (user_id, status, created_at, discovery_task_id, discovery_retry_count) VALUES ($1::integer, 'processing', now(), $2, 0) RETURNING id::bigint").bind(user_id).bind(task_id).fetch_one(&pool).await.unwrap();
     let weekly_id: i64 = sqlx::query_scalar("INSERT INTO feed_discovery_runs (user_id, status, discovery_task_id, discovery_retry_count) VALUES ($1::integer, 'processing', $2, 1) RETURNING id::bigint").bind(user_id).bind(task_id).fetch_one(&pool).await.unwrap();
@@ -605,17 +640,17 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
         .await
         .unwrap();
     let mut tx = pool.begin().await.unwrap();
-    for kind in [
-        "chat_turn",
-        "generate_audio_episode",
-        "onboarding_discover",
-        "discover_feeds",
-        "generate_image",
+    for settlement in [
+        newsly_db::TerminalTaskSettlement::ChatTurn,
+        newsly_db::TerminalTaskSettlement::AudioEpisode,
+        newsly_db::TerminalTaskSettlement::OnboardingDiscover,
+        newsly_db::TerminalTaskSettlement::FeedDiscover,
+        newsly_db::TerminalTaskSettlement::Artwork,
     ] {
         newsly_db::settle_failed_task(
             &mut tx,
             task_id,
-            kind,
+            settlement,
             Some(content_id),
             Some(user_id),
             "deadline",
@@ -667,7 +702,7 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
     newsly_db::settle_failed_task(
         &mut tx,
         task_id,
-        "discover_feeds",
+        newsly_db::TerminalTaskSettlement::FeedDiscover,
         None,
         Some(user_id),
         "deadline",

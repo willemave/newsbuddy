@@ -97,8 +97,7 @@ async fn execute_backfill(
             },
         );
     }
-    let mut results = Vec::new();
-    if let Some(plan) = prepared.plans.into_iter().next() {
+    let result = if let Some(plan) = prepared.plans.into_iter().next() {
         let content_type = if plan.scraper_type == "podcast_rss" {
             "podcast"
         } else {
@@ -114,7 +113,7 @@ async fn execute_backfill(
                     ));
                 }
             };
-        let result = services
+        let fetch = services
             .provider
             .fetch_feed(&FeedScrapeTarget {
                 known_urls,
@@ -129,9 +128,14 @@ async fn execute_backfill(
             })
             .await
             .map_err(ScrapeFailure::from);
-        results.push(FeedFetchOutcome { plan, result });
-    }
-    for outcome in &results {
+        Some(FeedFetchOutcome {
+            plan,
+            result: fetch,
+        })
+    } else {
+        None
+    };
+    if let Some(outcome) = &result {
         match &outcome.result {
             Ok(result) if !result.item_errors.is_empty() => tracing::warn!(
                 config_id = outcome.plan.id,
@@ -148,55 +152,42 @@ async fn execute_backfill(
             Ok(_) => {}
         }
     }
-    let successes = results
-        .iter()
-        .filter(|outcome| outcome.result.as_ref().is_ok_and(feed_outcome_succeeded))
-        .count();
-    let mut task_result = if successes > 0 {
-        TaskResult::ok()
-    } else {
-        let retryable = results.iter().any(|outcome| {
-            outcome
-                .result
-                .as_ref()
-                .err()
-                .is_some_and(|error| error.retryable)
-        });
-        TaskResult::fail(
-            Some(format!(
-                "All onboarding feed backfills failed for config IDs {:?}",
-                results
-                    .iter()
-                    .filter(|outcome| {
-                        outcome
-                            .result
-                            .as_ref()
-                            .map_or(true, |result| !feed_outcome_succeeded(result))
-                    })
-                    .map(|outcome| outcome.plan.id)
-                    .collect::<Vec<_>>()
-            )),
-            retryable,
-        )
-    };
-    task_result.retry_delay_seconds = results
-        .iter()
-        .filter_map(|outcome| {
-            outcome
-                .result
-                .as_ref()
-                .err()
-                .and_then(|error| error.retry_after)
-        })
-        .max();
+    let task_result = backfill_task_result(result.as_ref());
     HandlerExecution::with_finalizer(
         task_result,
         FeedBackfillFinalizer {
             queue: services.queue.clone(),
             request,
-            results,
+            result,
         },
     )
+}
+
+fn backfill_task_result(outcome: Option<&FeedFetchOutcome>) -> TaskResult {
+    let Some(outcome) = outcome else {
+        return TaskResult::ok();
+    };
+    if outcome.result.as_ref().is_ok_and(feed_outcome_succeeded) {
+        return TaskResult::ok();
+    }
+    let retryable = outcome
+        .result
+        .as_ref()
+        .err()
+        .is_some_and(|error| error.retryable);
+    let mut task_result = TaskResult::fail(
+        Some(format!(
+            "Onboarding feed backfill failed for config ID {}",
+            outcome.plan.id
+        )),
+        retryable,
+    );
+    task_result.retry_delay_seconds = outcome
+        .result
+        .as_ref()
+        .err()
+        .and_then(|error| error.retry_after);
+    task_result
 }
 
 #[derive(Debug, Clone)]
@@ -367,7 +358,7 @@ fn feed_outcome_succeeded(outcome: &ScrapeProviderOutcome) -> bool {
 struct FeedBackfillFinalizer {
     queue: QueueKernel,
     request: FeedBackfillRequest,
-    results: Vec<FeedFetchOutcome>,
+    result: Option<FeedFetchOutcome>,
 }
 
 impl FeedBackfillFinalizer {
@@ -396,18 +387,10 @@ impl FeedBackfillFinalizer {
         let mut successful_ids = BTreeSet::<i64>::new();
         let mut process_requests = Vec::new();
         let mut changed_ids = BTreeSet::new();
-        for outcome in &self.results {
-            if !configs_still_match(
-                transaction,
-                self.request.user_id,
-                std::slice::from_ref(&outcome.plan),
-            )
-            .await?
-            {
+        if let Some(outcome) = &self.result {
+            if !config_still_matches(transaction, self.request.user_id, &outcome.plan).await? {
                 changed_ids.insert(outcome.plan.id);
-                continue;
-            }
-            let Ok(provider_outcome) = &outcome.result else {
+            } else if outcome.result.is_err() {
                 newsly_db::record_source_health(
                     transaction,
                     &format!("config:{}", outcome.plan.id),
@@ -417,78 +400,37 @@ impl FeedBackfillFinalizer {
                     Some("feed_fetch_failed"),
                 )
                 .await?;
-                continue;
-            };
-            if !feed_outcome_succeeded(provider_outcome) {
-                newsly_db::record_source_health(
-                    transaction,
-                    &format!("config:{}", outcome.plan.id),
-                    Some(outcome.plan.id),
-                    0,
-                    0,
-                    Some("source_items_rejected"),
-                )
-                .await?;
-                continue;
+            } else if let Ok(provider_outcome) = &outcome.result {
+                if feed_outcome_succeeded(provider_outcome) {
+                    let (successful, processed_count, content_ids) = persist_provider_outcome(
+                        transaction,
+                        self.request.user_id,
+                        self.request.first_edition_run_id,
+                        outcome,
+                        provider_outcome,
+                    )
+                    .await?;
+                    if successful {
+                        successful_ids.insert(outcome.plan.id);
+                    }
+                    processed_counts.insert(outcome.plan.id, processed_count);
+                    process_requests.extend(content_ids.into_iter().map(|content_id| {
+                        let mut request = EnqueueRequest::new(TaskType::ProcessContent);
+                        request.content_id = Some(content_id);
+                        request
+                    }));
+                } else {
+                    newsly_db::record_source_health(
+                        transaction,
+                        &format!("config:{}", outcome.plan.id),
+                        Some(outcome.plan.id),
+                        0,
+                        0,
+                        Some("source_items_rejected"),
+                    )
+                    .await?;
+                }
             }
-
-            let entries = provider_outcome
-                .items
-                .iter()
-                .cloned()
-                .filter_map(|item| match item {
-                    ScrapedItem::Content(entry) => Some(FeedBackfillEntry {
-                        url: entry.url,
-                        source_url: entry.source_url,
-                        title: entry.title,
-                        source: entry.source,
-                        platform: entry.platform,
-                        metadata: entry.metadata,
-                        published_at: entry.published_at,
-                        content_type: entry.content_type,
-                    }),
-                    ScrapedItem::News(_) => None,
-                })
-                .collect::<Vec<_>>();
-            let persisted = persist_feed_backfill(
-                transaction,
-                self.request.user_id,
-                FeedBackfillOrigin::Background,
-                &entries,
-            )
-            .await?;
-            newsly_db::record_source_health(
-                transaction,
-                &format!("config:{}", outcome.plan.id),
-                Some(outcome.plan.id),
-                i64::try_from(persisted.saved + persisted.duplicates).unwrap_or(i64::MAX),
-                i64::try_from(persisted.saved).unwrap_or(i64::MAX),
-                (persisted.rejected > 0 || !provider_outcome.item_errors.is_empty())
-                    .then_some("source_items_rejected"),
-            )
-            .await?;
-            if persisted.saved + persisted.duplicates > 0 || persisted.rejected == 0 {
-                successful_ids.insert(outcome.plan.id);
-            }
-            processed_counts.insert(
-                outcome.plan.id,
-                i64::try_from(persisted.saved.saturating_add(persisted.duplicates))
-                    .unwrap_or(i64::MAX),
-            );
-            if let Some(run_id) = self.request.first_edition_run_id {
-                newsly_db::first_edition_progress::attach_content(
-                    transaction,
-                    run_id,
-                    self.request.user_id,
-                    &persisted.admitted_content_ids,
-                )
-                .await?;
-            }
-            process_requests.extend(persisted.content_ids.into_iter().map(|content_id| {
-                let mut request = EnqueueRequest::new(TaskType::ProcessContent);
-                request.content_id = Some(content_id);
-                request
-            }));
         }
         if !process_requests.is_empty() {
             self.queue
@@ -502,7 +444,7 @@ impl FeedBackfillFinalizer {
             .copied()
             .filter(|id| {
                 !changed_ids.contains(id)
-                    && !self.results.iter().any(|outcome| {
+                    && !self.result.as_ref().is_some_and(|outcome| {
                         outcome.plan.id == *id
                             && outcome
                                 .result
@@ -534,7 +476,12 @@ impl FeedBackfillFinalizer {
                 true,
             )));
         }
-        if successful_ids.is_empty() && self.results.iter().any(|outcome| outcome.result.is_ok()) {
+        if successful_ids.is_empty()
+            && self
+                .result
+                .as_ref()
+                .is_some_and(|outcome| outcome.result.is_ok())
+        {
             return Ok(TaskFinalizerResult::Override(TaskResult::fail(
                 Some("No usable feed entries could be persisted".to_owned()),
                 false,
@@ -542,6 +489,63 @@ impl FeedBackfillFinalizer {
         }
         Ok(TaskFinalizerResult::Keep)
     }
+}
+
+async fn persist_provider_outcome(
+    transaction: &mut Transaction<'static, Postgres>,
+    user_id: i64,
+    first_edition_run_id: Option<i64>,
+    outcome: &FeedFetchOutcome,
+    provider_outcome: &ScrapeProviderOutcome,
+) -> Result<(bool, i64, Vec<i64>), Box<dyn Error + Send + Sync>> {
+    let entries = provider_outcome
+        .items
+        .iter()
+        .cloned()
+        .filter_map(|item| match item {
+            ScrapedItem::Content(entry) => Some(FeedBackfillEntry {
+                url: entry.url,
+                source_url: entry.source_url,
+                title: entry.title,
+                source: entry.source,
+                platform: entry.platform,
+                metadata: entry.metadata,
+                published_at: entry.published_at,
+                content_type: entry.content_type,
+            }),
+            ScrapedItem::News(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let persisted = persist_feed_backfill(
+        transaction,
+        user_id,
+        FeedBackfillOrigin::Background,
+        &entries,
+    )
+    .await?;
+    newsly_db::record_source_health(
+        transaction,
+        &format!("config:{}", outcome.plan.id),
+        Some(outcome.plan.id),
+        i64::try_from(persisted.saved + persisted.duplicates).unwrap_or(i64::MAX),
+        i64::try_from(persisted.saved).unwrap_or(i64::MAX),
+        (persisted.rejected > 0 || !provider_outcome.item_errors.is_empty())
+            .then_some("source_items_rejected"),
+    )
+    .await?;
+    let successful = persisted.saved + persisted.duplicates > 0 || persisted.rejected == 0;
+    let processed_count =
+        i64::try_from(persisted.saved.saturating_add(persisted.duplicates)).unwrap_or(i64::MAX);
+    if let Some(run_id) = first_edition_run_id {
+        newsly_db::first_edition_progress::attach_content(
+            transaction,
+            run_id,
+            user_id,
+            &persisted.admitted_content_ids,
+        )
+        .await?;
+    }
+    Ok((successful, processed_count, persisted.content_ids))
 }
 
 impl TaskFinalizer for FeedBackfillFinalizer {
@@ -553,35 +557,24 @@ impl TaskFinalizer for FeedBackfillFinalizer {
     }
 }
 
-async fn configs_still_match(
+async fn config_still_matches(
     transaction: &mut Transaction<'static, Postgres>,
     user_id: i64,
-    plans: &[FeedConfigPlan],
+    plan: &FeedConfigPlan,
 ) -> Result<bool, sqlx::Error> {
-    if plans.is_empty() {
-        return Ok(true);
-    }
-    let ids = plans.iter().map(|plan| plan.id).collect::<Vec<_>>();
-    let rows = sqlx::query_as::<_, FeedConfigRow>(
+    let row = sqlx::query_as::<_, FeedConfigRow>(
         r"
         SELECT id::bigint AS id, scraper_type, display_name, feed_url, config::jsonb AS config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND is_active IS TRUE AND id::bigint = ANY($2::bigint[])
-        ORDER BY id
+        WHERE user_id::bigint = $1 AND is_active IS TRUE AND id::bigint = $2
         FOR UPDATE
         ",
     )
     .bind(user_id)
-    .bind(ids)
-    .fetch_all(&mut **transaction)
+    .bind(plan.id)
+    .fetch_optional(&mut **transaction)
     .await?;
-    let current = rows
-        .iter()
-        .map(|row| (row.id, config_fingerprint(row)))
-        .collect::<BTreeMap<_, _>>();
-    Ok(plans
-        .iter()
-        .all(|plan| current.get(&plan.id) == Some(&plan.fingerprint)))
+    Ok(row.is_some_and(|row| config_fingerprint(&row) == plan.fingerprint))
 }
 
 async fn record_first_edition_progress(

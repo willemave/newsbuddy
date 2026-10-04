@@ -9,11 +9,10 @@ use newsly_agent_runtime::{
 };
 use newsly_db::search_agent_knowledge;
 use newsly_e2b::{
-    BoxByteStream, CommandRequest, DirectE2bProvider, E2bError, ExecutionTag, ExitStatus,
-    OutputLimits, SandboxHandle, SandboxPath, SandboxProvider, SandboxUser, WorkspacePath,
+    BoxByteStream, CommandEvent, CommandRequest, DirectE2bProvider, E2bError, ExecutionTag,
+    ExitStatus, OutputLimits, SandboxHandle, SandboxPath, SandboxUser, WorkspacePath,
 };
 use reqwest::Url;
-use schemars::{JsonSchema, schema_for};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,8 +22,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::content_body_store::ContentBodyStore;
 use crate::knowledge_tools::{
-    KnowledgeReferenceInput, ReadKnowledgeInput, authorized_knowledge_items, knowledge_body_prefix,
+    ReadKnowledgeInput, authorized_knowledge_items, knowledge_body_prefix,
     read_authorized_knowledge_item, sha256_hex,
+};
+
+mod schema;
+use schema::{
+    EditFileInput, ExecuteBashInput, ListFilesInput, ReadFileInput, SearchKnowledgeInput,
+    WebSearchInput, WriteFileInput, WriteKnowledgeInput, tool_definition,
 };
 
 mod exa_usage;
@@ -99,6 +104,25 @@ impl TaskToolExecutor {
     }
 
     pub(crate) fn definitions() -> Vec<newsly_agent_runtime::ToolDefinition> {
+        let mut definitions = Self::sandbox_definitions();
+        definitions.extend([
+            tool_definition::<WebSearchInput>(
+                "web_search",
+                "Search the public web and return bounded title, URL, and snippet records.",
+            ),
+            tool_definition::<SearchKnowledgeInput>(
+                "search_knowledge",
+                "Search the user's canonical Knowledge library and return typed references.",
+            ),
+            tool_definition::<ReadKnowledgeInput>(
+                "read_knowledge_item",
+                "Read one authorized Knowledge item through the host without using the sandbox.",
+            ),
+        ]);
+        definitions
+    }
+
+    pub(crate) fn sandbox_definitions() -> Vec<newsly_agent_runtime::ToolDefinition> {
         vec![
             tool_definition::<ExecuteBashInput>(
                 "execute_bash",
@@ -119,18 +143,6 @@ impl TaskToolExecutor {
             tool_definition::<ListFilesInput>(
                 "list_files",
                 "List files recursively below a workspace-relative directory.",
-            ),
-            tool_definition::<WebSearchInput>(
-                "web_search",
-                "Search the public web and return bounded title, URL, and snippet records.",
-            ),
-            tool_definition::<SearchKnowledgeInput>(
-                "search_knowledge",
-                "Search the user's canonical Knowledge library and return typed references.",
-            ),
-            tool_definition::<ReadKnowledgeInput>(
-                "read_knowledge_item",
-                "Read one authorized Knowledge item through the host without using the sandbox.",
             ),
             tool_definition::<WriteKnowledgeInput>(
                 "write_knowledge_items",
@@ -173,23 +185,55 @@ impl TaskToolExecutor {
                     idle_timeout: timeout.min(Duration::from_secs(60)),
                     output_limits: output_limits(self.max_output_chars),
                 };
-                let stream = self
+                let mut stream = self
                     .provider
                     .start_process(&self.sandbox, request, self.cancellation.child_token())
                     .await
                     .map_err(tool_error)?;
-                let result = stream.collect_result().await.map_err(tool_error)?;
-                let _ = events.publish(AgentEvent::ToolProgress {
-                    id: call.id.clone(),
-                    text: format!("command exited with {}", result.exit_code),
-                });
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+                let mut terminal = None;
+                while let Some(event) = stream.next().await {
+                    match event.map_err(tool_error)? {
+                        CommandEvent::Stdout { text, .. } | CommandEvent::Pty { text, .. } => {
+                            stdout.push_str(&text);
+                            events.publish(AgentEvent::ToolProgress {
+                                id: call.id.clone(),
+                                text: tail_chars(&text, 2_000),
+                            })?;
+                        }
+                        CommandEvent::Stderr { text, .. } => {
+                            stderr.push_str(&text);
+                            events.publish(AgentEvent::ToolProgress {
+                                id: call.id.clone(),
+                                text: format!("stderr: {}", tail_chars(&text, 1_990)),
+                            })?;
+                        }
+                        CommandEvent::Exited {
+                            status,
+                            exit_code,
+                            error,
+                            ..
+                        } => terminal = Some((status, exit_code, error)),
+                        CommandEvent::Started { .. }
+                        | CommandEvent::KeepAlive { .. }
+                        | CommandEvent::TransportDisconnected { .. } => {}
+                    }
+                }
+                let Some((status, exit_code, error)) = terminal else {
+                    return Err(AgentRuntimeError::Tool(
+                        "command stream ended without a terminal event".to_owned(),
+                    ));
+                };
                 Ok(ToolOutput {
-                    is_error: result.exit_code != 0,
+                    is_error: exit_code != 0,
                     content: json!({
-                        "ok": result.exit_code == 0,
-                        "stdout": result.output.stdout,
-                        "stderr": result.output.stderr,
-                        "exit_code": result.exit_code,
+                        "ok": exit_code == 0,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "status": format!("{status:?}").to_ascii_lowercase(),
+                        "exit_code": exit_code,
+                        "error": error,
                     }),
                 })
             }
@@ -674,6 +718,22 @@ pub(crate) struct ExaSearchUsage {
     pub(crate) known_estimated_cost_usd: f64,
 }
 
+impl From<newsly_providers::ExaSearchUsage> for ExaSearchUsage {
+    fn from(usage: newsly_providers::ExaSearchUsage) -> Self {
+        Self {
+            request_count: usage.request_count,
+            result_count: usage.result_count,
+            summary_count: usage.summary_count,
+            text_count: usage.text_count,
+            summary_requested: false,
+            text_requested: true,
+            livecrawl_fallback: false,
+            estimated_cost_usd: usage.estimated_cost_usd,
+            known_estimated_cost_usd: usage.known_estimated_cost_usd,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ExaSearchOutcome {
     pub(crate) results: Vec<ExaSearchResult>,
@@ -836,83 +896,13 @@ pub(crate) enum ExaSearchError {
     Request(#[from] reqwest::Error),
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ExecuteBashInput {
-    command: String,
-    timeout_seconds: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct WriteFileInput {
-    path: String,
-    text: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct EditFileInput {
-    path: String,
-    old_text: String,
-    new_text: String,
-    #[serde(default)]
-    replace_all: bool,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ReadFileInput {
-    path: String,
-    max_bytes: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ListFilesInput {
-    path: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct WebSearchInput {
-    query: String,
-    num_results: Option<usize>,
-    category: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct SearchKnowledgeInput {
-    query: String,
-    limit: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct WriteKnowledgeInput {
-    references: Vec<KnowledgeReferenceInput>,
-    directory: Option<String>,
-}
-
-fn tool_definition<T: JsonSchema>(
-    name: &str,
-    description: &str,
-) -> newsly_agent_runtime::ToolDefinition {
-    newsly_agent_runtime::ToolDefinition {
-        name: name.to_owned(),
-        description: description.to_owned(),
-        input_schema: schema_for!(T),
-    }
-}
-
 fn parse_arguments<T: for<'de> Deserialize<'de>>(call: &ToolCall) -> Result<T, AgentRuntimeError> {
     serde_json::from_value(call.arguments.clone()).map_err(|error| {
         AgentRuntimeError::Tool(format!("invalid {} arguments: {error}", call.name))
     })
 }
 
-fn output_limits(maximum_chars: usize) -> OutputLimits {
+pub(crate) fn output_limits(maximum_chars: usize) -> OutputLimits {
     let channel = maximum_chars.saturating_mul(4).clamp(4_000, 800_000);
     OutputLimits {
         stdout_bytes: channel,
@@ -920,6 +910,15 @@ fn output_limits(maximum_chars: usize) -> OutputLimits {
         combined_bytes: channel.saturating_mul(2),
         event_bytes: channel,
         channel_capacity: 32,
+    }
+}
+
+fn tail_chars(value: &str, maximum: usize) -> String {
+    let count = value.chars().count();
+    if count <= maximum {
+        value.to_owned()
+    } else {
+        value.chars().skip(count - maximum).collect()
     }
 }
 

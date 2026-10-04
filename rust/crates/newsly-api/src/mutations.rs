@@ -1,5 +1,5 @@
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -16,13 +16,8 @@ use newsly_db::{
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
-
-const FEEDBACK_OPERATION_ID: &str = "createFeedback";
-const ANALYTICS_OPERATION_ID: &str = "postAnalyticsContentInteraction";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -51,11 +46,10 @@ pub(super) async fn create_feedback(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<SubmitFeedbackRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SubmitFeedbackResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, FEEDBACK_OPERATION_ID, &request_id)?;
     let Json(mut payload) = decode_json(payload, &request_id)?;
     payload.message = clean_required(&payload.message, 4_000, "Feedback message", &request_id)?;
     payload.source = clean_required(&payload.source, 64, "Feedback source", &request_id)?;
@@ -65,13 +59,8 @@ pub(super) async fn create_feedback(
     payload.os_version = clean_optional(payload.os_version, 128, "os_version", &request_id)?;
     payload.device_model = clean_optional(payload.device_model, 128, "device_model", &request_id)?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let feedback_id = insert_feedback(
         &mut transaction,
         &NewFeedback {
@@ -87,10 +76,7 @@ pub(super) async fn create_feedback(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok((
         StatusCode::CREATED,
         Json(SubmitFeedbackResponse {
@@ -122,11 +108,10 @@ pub(super) async fn record_content_interaction(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<RecordContentInteractionRequest>, JsonRejection>,
 ) -> Result<Json<RecordContentInteractionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, ANALYTICS_OPERATION_ID, &request_id)?;
     let Json(mut payload) = decode_json(payload, &request_id)?;
     payload.interaction_id =
         clean_required(&payload.interaction_id, 64, "interaction_id", &request_id)?;
@@ -139,13 +124,8 @@ pub(super) async fn record_content_interaction(
     payload.surface = clean_optional(payload.surface, 64, "surface", &request_id)?;
     let occurred_at = payload.occurred_at.unwrap_or_else(Utc::now).naive_utc();
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let result = insert_content_interaction(
         &mut transaction,
         &NewContentInteraction {
@@ -168,10 +148,7 @@ pub(super) async fn record_content_interaction(
         ),
         InteractionRepositoryError::Sqlx(source) => internal_error(source, &request_id),
     })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(RecordContentInteractionResponse {
         status: OperationStatus::Success,
         recorded: result.recorded,

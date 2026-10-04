@@ -4,7 +4,7 @@ use newsly_db::AssistantScreenContext;
 
 use super::prompts::{ChatPromptError, assistant_instruction};
 
-const DEFAULT_TOOLS: [&str; 16] = [
+const DEFAULT_TOOLS: [&str; 17] = [
     "search_web",
     "find_feed_options",
     "search_knowledge",
@@ -15,6 +15,7 @@ const DEFAULT_TOOLS: [&str; 16] = [
     "list_unread_news_items",
     "add_item_to_feed",
     "subscribe_to_feed",
+    "subscribe_to_aggregator",
     "save_to_knowledge",
     "remove_from_knowledge",
     "mark_content_read",
@@ -241,6 +242,8 @@ fn feed_finder(value: &str) -> bool {
             "newsletters",
             "podcast",
             "podcasts",
+            "aggregator",
+            "aggregators",
         ],
     ) && contains_any(
         value,
@@ -251,6 +254,7 @@ fn feed_finder(value: &str) -> bool {
             "discover",
             "recommend",
             "subscribe",
+            "follow",
         ],
     )
 }
@@ -328,4 +332,28 @@ fn weekly_discovery_action(value: &str, context: &AssistantScreenContext) -> boo
         && [" add ", " subscribe ", " follow "]
             .into_iter()
             .any(|marker| format!(" {value} ").contains(marker))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aggregator_requests_route_to_feed_discovery_with_aggregator_subscription() {
+        let context: AssistantScreenContext =
+            serde_json::from_value(serde_json::json!({"screen_type": "knowledge"})).unwrap();
+        for prompt in [
+            "What news aggregators can I follow?",
+            "Find aggregators for AI research",
+        ] {
+            let route = route_assistant_turn(prompt, &context).unwrap();
+            assert_eq!(
+                route.instruction,
+                Some(assistant_instruction("turn_feed_finder").unwrap()),
+                "{prompt}"
+            );
+            assert!(route.allowed_tools.contains("find_feed_options"));
+            assert!(route.allowed_tools.contains("subscribe_to_aggregator"));
+        }
+    }
 }

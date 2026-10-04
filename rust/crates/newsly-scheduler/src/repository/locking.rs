@@ -72,7 +72,6 @@ pub(super) async fn mark_tick_completed(
         "skipped": report.skipped,
         "detail": report.detail,
         "maintenance": report.maintenance.as_ref().map(|maintenance| json!({
-            "misrouted": maintenance.misrouted,
             "orphaned_leases": maintenance.orphaned_leases,
             "expired_reclaimable": maintenance.expired_reclaimable,
         })),

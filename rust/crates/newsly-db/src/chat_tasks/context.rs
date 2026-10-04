@@ -8,6 +8,7 @@ use super::{
     TOKEN_CHARS_PER_TOKEN, Transaction, Utc, Value, decode_transcript, json,
     preparation::{fallback_nonempty, load_content, load_session_for_update},
 };
+use newsly_domain::truncate_chars;
 
 pub(super) async fn load_history(
     transaction: &mut Transaction<'_, Postgres>,
@@ -148,7 +149,9 @@ pub(super) async fn get_or_create_dig_deeper_session(
     user_id: i64,
     content: &ContentRow,
 ) -> Result<SessionRow, ChatTaskRepositoryError> {
-    let title = content_display_title(content);
+    let title =
+        crate::chat::content_display_title(content.title.as_deref(), &content.content_metadata)
+            .unwrap_or_else(|| "Untitled".to_owned());
     let existing_id = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint
@@ -179,16 +182,23 @@ pub(super) async fn get_or_create_dig_deeper_session(
             .await?
             .ok_or(ChatTaskRepositoryError::SessionDisappeared);
     }
-    let context_snapshot = format!(
-        "Screen Type: {KNOWLEDGE_SESSION_TYPE}\nScreen Title: Knowledge\nVisible Content:\n- [{}] {} ({}) — {}\n{}\nUser ID: {user_id}",
-        content.id,
-        title,
-        content.source.as_deref().unwrap_or("unknown"),
-        content.url,
-        content_short_summary(&content.content_metadata)
-            .map(|summary| format!("  Short Summary: {summary}"))
-            .unwrap_or_default(),
-    );
+    let context_snapshot = crate::chat::build_screen_context_snapshot(
+        transaction,
+        user_id,
+        &super::AssistantScreenContext {
+            screen_type: KNOWLEDGE_SESSION_TYPE.to_owned(),
+            screen_title: Some("Knowledge".to_owned()),
+            content_id: Some(content.id),
+            news_item_id: None,
+            visible_content_ids: Vec::new(),
+            visible_news_item_ids: Vec::new(),
+            selected_topic: None,
+            query: None,
+            note: None,
+            assistant_action: None,
+        },
+    )
+    .await?;
     let session_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO chat_sessions (
@@ -320,42 +330,13 @@ pub(super) fn lifecycle_is_valid(
     if session.is_archived {
         return false;
     }
-    !session.is_hidden_from_history
-        && context.session.visible_session_id == session.id
+    context.session.visible_session_id == session.id
         && context.session.effective_session_id == session.id
 }
 
 pub(super) fn content_display_title(content: &ContentRow) -> String {
-    let summary = content.content_metadata.get("summary");
-    let title = summary
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("title"))
-        .and_then(Value::as_str)
-        .or(content.title.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    title
-        .map(|value| truncate_chars(value, 500))
-        .or_else(|| content_short_summary(&content.content_metadata))
-        .map_or_else(
-            || "this content".to_owned(),
-            |value| truncate_chars(&value, 120),
-        )
-}
-
-pub(super) fn content_short_summary(metadata: &Value) -> Option<String> {
-    match metadata.get("summary") {
-        Some(Value::String(value)) => clean_owned(value),
-        Some(Value::Object(summary)) => ["one_line", "overview", "summary", "hook", "takeaway"]
-            .into_iter()
-            .find_map(|field| {
-                summary
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .and_then(clean_owned)
-            }),
-        _ => None,
-    }
+    crate::chat::content_display_title(content.title.as_deref(), &content.content_metadata)
+        .unwrap_or_else(|| "this content".to_owned())
 }
 
 pub(super) fn fallback_content_body(metadata: &Value) -> Option<String> {
@@ -392,10 +373,6 @@ pub(super) fn compact_text(value: &str, maximum: usize) -> String {
             truncate_chars(&compact, maximum.saturating_sub(3)).trim_end()
         )
     }
-}
-
-pub(super) fn truncate_chars(value: &str, maximum: usize) -> String {
-    value.chars().take(maximum).collect()
 }
 
 pub(super) fn status_entry(status: &str, workflow_state: &str, note: &str) -> Value {

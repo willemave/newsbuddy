@@ -11,6 +11,8 @@ use newsly_providers::{
 };
 use thiserror::Error;
 
+use super::{EMBEDDING_PROVIDER, centroid_model, nonempty, split_model_spec};
+
 const LENS_NAMING_ATTEMPTS: usize = 2;
 
 pub(super) async fn plan_semantic_lenses(
@@ -25,7 +27,7 @@ pub(super) async fn plan_semantic_lenses(
         return Ok(empty_plan(seed));
     }
     let vector_size = source_vectors.first().map_or(0, Vec::len);
-    let centroid_model = format!("openrouter:{}", gateway.embedding_model());
+    let centroid_model = centroid_model(gateway.embedding_model());
     // A compatible durable centroid already is the routing vector. Embedding its
     // display profile on every arrival wastes provider work and is never used.
     let mut vectors: Vec<Option<Vec<f64>>> = snapshot
@@ -53,7 +55,7 @@ pub(super) async fn plan_semantic_lenses(
                     });
                 }
                 usage.push(BriefingLensAssignmentUsage {
-                    provider: "openrouter".to_owned(),
+                    provider: EMBEDDING_PROVIDER.to_owned(),
                     model: batch.model,
                     provider_response_id: batch.provider_response_id,
                     usage: batch.usage,
@@ -165,7 +167,7 @@ pub(super) async fn plan_semantic_lenses(
                     &cluster.candidates[..cluster.candidates.len().min(config.news_window_max)],
                 )
                 .await?;
-                let (provider, fallback_model) = split_model_spec(gateway.model_spec());
+                let (provider, fallback_model) = split_model_spec(gateway.naming_model_spec());
                 usage.push(BriefingLensAssignmentUsage {
                     provider: provider.to_owned(),
                     model: nonempty(&generated.model)
@@ -215,25 +217,19 @@ pub(super) async fn plan_semantic_lenses(
                 .iter()
                 .any(|key| key == "misc")
             {
-                Some("misc".to_owned())
-            } else if active_count < config.max_news_lenses {
-                misc_plan = Some(misc_lens(next_position));
-                active_count += 1;
-                Some("misc".to_owned())
+                "misc".to_owned()
             } else {
-                Some(lenses[lens_index].key.clone())
+                lenses[lens_index].key.clone()
             };
-            if let Some(key) = fallback_key {
-                for candidate in &cluster.candidates {
-                    if key == lenses[lens_index].key {
-                        lenses[lens_index].update_centroid(
-                            &candidate.vector,
-                            config.centroid_max_weight,
-                            &centroid_model,
-                        );
-                    }
-                    assignments.push(assignment(&candidate.pending, key.clone()));
+            for candidate in &cluster.candidates {
+                if fallback_key == lenses[lens_index].key {
+                    lenses[lens_index].update_centroid(
+                        &candidate.vector,
+                        config.centroid_max_weight,
+                        &centroid_model,
+                    );
                 }
+                assignments.push(assignment(&candidate.pending, fallback_key.clone()));
             }
         }
     }
@@ -260,8 +256,7 @@ pub(super) async fn plan_semantic_lenses(
         let misc_active = snapshot
             .active_news_lens_keys
             .iter()
-            .any(|key| key == "misc")
-            || misc_plan.is_some();
+            .any(|key| key == "misc");
         if misc_active || active_count < config.max_news_lenses {
             if !misc_active {
                 misc_plan = Some(misc_lens(next_position));
@@ -336,7 +331,7 @@ pub(super) async fn plan_nonsemantic_lenses(
                 .collect::<Vec<_>>(),
         )
         .await?;
-        let (provider, fallback_model) = split_model_spec(gateway.model_spec());
+        let (provider, fallback_model) = split_model_spec(gateway.naming_model_spec());
         usage.push(BriefingLensAssignmentUsage {
             provider: provider.to_owned(),
             model: nonempty(&generated.model)
@@ -821,7 +816,7 @@ fn assign_capped_remaining(
             }
             continue;
         };
-        if score >= config.category_absorb_similarity {
+        if score >= config.category_absorb_similarity || !misc_active {
             let key = lenses[index].key.clone();
             lenses[index].update_centroid(
                 &candidate.vector,
@@ -829,16 +824,8 @@ fn assign_capped_remaining(
                 centroid_model,
             );
             assignments.push(assignment(&candidate.pending, key));
-        } else if misc_active {
-            assignments.push(assignment(&candidate.pending, "misc".to_owned()));
         } else {
-            let key = lenses[index].key.clone();
-            lenses[index].update_centroid(
-                &candidate.vector,
-                config.centroid_max_weight,
-                centroid_model,
-            );
-            assignments.push(assignment(&candidate.pending, key));
+            assignments.push(assignment(&candidate.pending, "misc".to_owned()));
         }
     }
 }
@@ -932,14 +919,6 @@ fn mean_vector(vectors: &[Vec<f64>]) -> Vec<f64> {
     }
     let count = valid.len() as f64;
     totals.into_iter().map(|total| total / count).collect()
-}
-
-fn split_model_spec(spec: &str) -> (&str, &str) {
-    spec.split_once(':').unwrap_or(("openai", spec))
-}
-
-fn nonempty(value: &str) -> Option<&str> {
-    (!value.trim().is_empty()).then_some(value)
 }
 
 #[derive(Debug, Error)]

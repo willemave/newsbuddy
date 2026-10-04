@@ -16,6 +16,27 @@ pub enum ScraperType {
 }
 
 impl ScraperType {
+    pub const ALL: [Self; 6] = [
+        Self::Substack,
+        Self::Atom,
+        Self::PodcastRss,
+        Self::Youtube,
+        Self::Reddit,
+        Self::Aggregator,
+    ];
+
+    pub const fn supports_backfill(self) -> bool {
+        matches!(self, Self::Substack | Self::Atom | Self::PodcastRss)
+    }
+
+    pub const fn requires_feed_probe(self) -> bool {
+        self.supports_backfill()
+    }
+
+    pub const fn supports_feed_history(self) -> bool {
+        self.supports_backfill() || matches!(self, Self::Youtube)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Substack => "substack",
@@ -25,6 +46,17 @@ impl ScraperType {
             Self::Reddit => "reddit",
             Self::Aggregator => "aggregator",
         }
+    }
+}
+
+impl std::str::FromStr for ScraperType {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == value)
+            .ok_or("Unsupported scraper_type")
     }
 }
 
@@ -136,4 +168,24 @@ pub struct FeedHistoryItem {
 pub struct FeedHistoryResponse {
     pub items: Vec<FeedHistoryItem>,
     pub next_offset: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScraperType;
+
+    #[test]
+    fn scraper_types_parse_wire_values_and_preserve_feed_capabilities() {
+        for kind in ScraperType::ALL {
+            assert_eq!(kind.as_str().parse::<ScraperType>(), Ok(kind));
+            assert_eq!(serde_json::to_value(kind).unwrap(), kind.as_str());
+        }
+        assert!("rss".parse::<ScraperType>().is_err());
+        assert!("YouTube".parse::<ScraperType>().is_err());
+        assert!(ScraperType::Atom.supports_backfill());
+        assert!(ScraperType::PodcastRss.requires_feed_probe());
+        assert!(!ScraperType::Youtube.supports_backfill());
+        assert!(ScraperType::Youtube.supports_feed_history());
+        assert!(!ScraperType::Aggregator.supports_feed_history());
+    }
 }

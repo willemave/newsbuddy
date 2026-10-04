@@ -322,15 +322,6 @@ pub enum ProcessSelector {
     Tag(ExecutionTag),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProcessInfo {
-    pub pid: u32,
-    pub tag: Option<ExecutionTag>,
-    pub command: String,
-    pub args: Vec<String>,
-    pub cwd: Option<String>,
-}
-
 #[derive(Clone, Debug)]
 pub struct CommandRequest {
     pub command: String,

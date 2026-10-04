@@ -67,8 +67,6 @@ string_enum!(ContentStatus {
 pub struct SubmitContentRequest {
     /// URL to submit (HTTP/HTTPS only).
     pub url: String,
-    /// Optional content-type hint. New records are still persisted as unknown until analysis.
-    pub content_type: Option<ContentType>,
     /// Optional title supplied by the client or share sheet.
     #[schemars(length(max = 500))]
     #[schema(max_length = 500)]

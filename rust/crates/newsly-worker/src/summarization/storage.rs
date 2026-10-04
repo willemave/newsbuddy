@@ -1,7 +1,6 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use tokio::fs;
 
 use super::model::SummaryBodyPointer;
 
@@ -26,6 +25,9 @@ impl SummarizationBodyStore {
                 .map_err(SummarizationBodyStoreError::CurrentDirectory)?
                 .join(root)
         };
+        if !newsly_providers::is_safe_storage_root(&root) {
+            return Err(SummarizationBodyStoreError::UnsafeStorageKey);
+        }
         Ok(Self { root })
     }
 
@@ -47,13 +49,33 @@ impl SummarizationBodyStore {
         }
         let key = Path::new(&pointer.storage_key);
         validate_relative_path(key)?;
-        let bytes = fs::read(self.root.join(key))
-            .await
-            .map_err(SummarizationBodyStoreError::Read)?;
-        if bytes.len() > MAX_SUMMARY_SOURCE_BYTES {
-            return Err(SummarizationBodyStoreError::BodyTooLarge(bytes.len()));
+        let slice = newsly_providers::read_local_object(
+            &self.root,
+            &pointer.storage_key,
+            MAX_SUMMARY_SOURCE_BYTES,
+        )
+        .await
+        .map_err(|error| match error {
+            newsly_providers::LocalStorageError::UnsafePath(_) => {
+                SummarizationBodyStoreError::UnsafeStorageKey
+            }
+            newsly_providers::LocalStorageError::File { source, .. } => {
+                SummarizationBodyStoreError::Read(source)
+            }
+        })?
+        .ok_or_else(|| {
+            SummarizationBodyStoreError::Read(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "source object not found",
+            ))
+        })?;
+        if slice.truncated {
+            return Err(SummarizationBodyStoreError::BodyTooLarge(
+                MAX_SUMMARY_SOURCE_BYTES.saturating_add(1),
+            ));
         }
-        let body = String::from_utf8(bytes).map_err(SummarizationBodyStoreError::InvalidUtf8)?;
+        let body =
+            String::from_utf8(slice.bytes).map_err(SummarizationBodyStoreError::InvalidUtf8)?;
         if body.trim().is_empty() {
             return Err(SummarizationBodyStoreError::EmptyBody);
         }
@@ -62,11 +84,9 @@ impl SummarizationBodyStore {
 }
 
 fn validate_relative_path(path: &Path) -> Result<(), SummarizationBodyStoreError> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
+    if !path
+        .to_str()
+        .is_some_and(newsly_providers::is_safe_object_key)
     {
         return Err(SummarizationBodyStoreError::UnsafeStorageKey);
     }

@@ -1,6 +1,6 @@
 //! Bounded nightly maintenance; external work is separate from queue finalization.
 use super::BriefingRefreshWorkerServices;
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::{HandlerExecution, HandlerFuture, HandlerInterruptionPolicy, LeaseHealth, TaskHandler};
 use chrono::Utc;
 use newsly_db::news_category_reclustering::{
@@ -256,7 +256,7 @@ async fn execute(
                     return Ok(lease_lost());
                 }
                 let attempt = uuid::Uuid::new_v4();
-                let usage_sink = Arc::new(AgentUsageSink::new(
+                let usage_sink = Arc::new(AgentUsageRecorder::new(
                     services.pool.clone(),
                     AgentUsageAttribution {
                         operation: "briefing.review_lens_names".to_owned(),

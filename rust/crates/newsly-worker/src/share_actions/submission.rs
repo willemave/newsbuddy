@@ -3,9 +3,9 @@ use newsly_db::{
     ScraperConfigRepositoryError, SubmissionTaskResolution, apply_content_submission,
     apply_validated_feed_subscription,
 };
+use newsly_domain::sha256_hex;
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
 
@@ -31,7 +31,6 @@ pub(crate) struct AppliedShareFeedSubscription {
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)] // Mirrors the shared submission's independent decisions.
 pub(crate) struct ShareSubmissionPolicy {
-    pub subscribe_to_feed: bool,
     pub share_and_chat: bool,
     pub save_to_knowledge_and_mark_read: bool,
     pub deck_source_only: bool,
@@ -40,7 +39,6 @@ pub(crate) struct ShareSubmissionPolicy {
 impl ShareSubmissionPolicy {
     pub(crate) const fn content_saved() -> Self {
         Self {
-            subscribe_to_feed: false,
             share_and_chat: false,
             save_to_knowledge_and_mark_read: true,
             deck_source_only: false,
@@ -49,7 +47,6 @@ impl ShareSubmissionPolicy {
 
     pub(crate) const fn deck_source() -> Self {
         Self {
-            subscribe_to_feed: false,
             share_and_chat: false,
             save_to_knowledge_and_mark_read: true,
             deck_source_only: true,
@@ -58,7 +55,6 @@ impl ShareSubmissionPolicy {
 
     pub(crate) const fn content_inbox() -> Self {
         Self {
-            subscribe_to_feed: false,
             share_and_chat: false,
             save_to_knowledge_and_mark_read: false,
             deck_source_only: false,
@@ -67,7 +63,6 @@ impl ShareSubmissionPolicy {
 
     pub(crate) const fn chat() -> Self {
         Self {
-            subscribe_to_feed: false,
             share_and_chat: true,
             save_to_knowledge_and_mark_read: true,
             deck_source_only: false,
@@ -82,18 +77,74 @@ pub(crate) async fn submit_content_action(
     input: &ContentActionInput,
     policy: ShareSubmissionPolicy,
 ) -> Result<SubmittedShareContent, ShareSubmissionError> {
-    submit(
+    let normalized_platform = input.platform.as_deref().map(str::to_ascii_lowercase);
+    let applied = apply_content_submission(
         transaction,
-        queue,
-        user_id,
-        &input.url,
-        input.title.as_deref(),
-        input.platform.as_deref(),
-        input.instruction.as_deref(),
-        input.chat_initial_message.as_deref(),
-        policy,
+        &ContentSubmissionInput {
+            url: &input.url,
+            title: input.title.as_deref(),
+            platform: normalized_platform.as_deref(),
+            instruction: input.instruction.as_deref(),
+            crawl_links: false,
+            subscribe_to_feed: false,
+            share_and_chat: policy.share_and_chat,
+            chat_initial_message: input.chat_initial_message.as_deref(),
+            save_to_knowledge_and_mark_read: policy.save_to_knowledge_and_mark_read,
+            deck_source_only: policy.deck_source_only,
+            user_id,
+            submitted_via: "share_action",
+        },
     )
-    .await
+    .await?;
+
+    let mut task_id = None;
+    if let SubmissionTaskResolution::Reuse(existing_task_id) = applied.task_resolution {
+        queue
+            .grant_access_in_transaction(transaction, existing_task_id, user_id)
+            .await?;
+        task_id = Some(existing_task_id);
+    }
+
+    let mut requests = Vec::new();
+    if applied.enqueue_dig_deeper {
+        requests.push(dig_deeper_request(
+            applied.content_id,
+            user_id,
+            input.chat_initial_message.as_deref(),
+        ));
+    }
+    let analyze_index = if applied.task_resolution == SubmissionTaskResolution::EnqueueAnalyze {
+        let index = requests.len();
+        requests.push(analyze_request(
+            &applied,
+            input.instruction.as_deref(),
+            user_id,
+        ));
+        Some(index)
+    } else {
+        None
+    };
+    if applied.enqueue_generated_image {
+        let mut request = EnqueueRequest::new(TaskType::GenerateImage);
+        request.content_id = Some(applied.content_id);
+        requests.push(request);
+    }
+    if !requests.is_empty() {
+        let enqueued = queue
+            .enqueue_many_in_transaction(transaction, requests)
+            .await?;
+        if let Some(index) = analyze_index {
+            task_id = enqueued.task_ids.get(index).copied();
+            if task_id.is_none() {
+                return Err(ShareSubmissionError::MissingAnalysisTask);
+            }
+        }
+    }
+    Ok(SubmittedShareContent {
+        content_id: applied.content_id,
+        task_id,
+        already_exists: applied.already_exists,
+    })
 }
 
 pub(crate) async fn apply_validated_feed_action(
@@ -152,101 +203,14 @@ pub(crate) async fn apply_validated_feed_action(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn submit(
-    transaction: &mut Transaction<'_, Postgres>,
-    queue: &QueueKernel,
-    user_id: i64,
-    url: &str,
-    title: Option<&str>,
-    platform: Option<&str>,
-    instruction: Option<&str>,
-    chat_initial_message: Option<&str>,
-    policy: ShareSubmissionPolicy,
-) -> Result<SubmittedShareContent, ShareSubmissionError> {
-    let normalized_platform = platform.map(str::to_ascii_lowercase);
-    let applied = apply_content_submission(
-        transaction,
-        &ContentSubmissionInput {
-            url,
-            title,
-            platform: normalized_platform.as_deref(),
-            instruction,
-            crawl_links: false,
-            subscribe_to_feed: policy.subscribe_to_feed,
-            share_and_chat: policy.share_and_chat,
-            chat_initial_message,
-            save_to_knowledge_and_mark_read: policy.save_to_knowledge_and_mark_read,
-            deck_source_only: policy.deck_source_only,
-            user_id,
-            submitted_via: "share_action",
-        },
-    )
-    .await?;
-
-    let mut task_id = None;
-    if let SubmissionTaskResolution::Reuse(existing_task_id) = applied.task_resolution {
-        queue
-            .grant_access_in_transaction(transaction, existing_task_id, user_id)
-            .await?;
-        task_id = Some(existing_task_id);
-    }
-
-    let mut requests = Vec::new();
-    if applied.enqueue_dig_deeper {
-        requests.push(dig_deeper_request(
-            applied.content_id,
-            user_id,
-            chat_initial_message,
-        ));
-    }
-    let analyze_index = if applied.task_resolution == SubmissionTaskResolution::EnqueueAnalyze {
-        let index = requests.len();
-        requests.push(analyze_request(
-            &applied,
-            instruction,
-            policy.subscribe_to_feed,
-            user_id,
-        ));
-        Some(index)
-    } else {
-        None
-    };
-    if applied.enqueue_generated_image {
-        let mut request = EnqueueRequest::new(TaskType::GenerateImage);
-        request.content_id = Some(applied.content_id);
-        requests.push(request);
-    }
-    if !requests.is_empty() {
-        let enqueued = queue
-            .enqueue_many_in_transaction(transaction, requests)
-            .await?;
-        if let Some(index) = analyze_index {
-            task_id = enqueued.task_ids.get(index).copied();
-            if task_id.is_none() {
-                return Err(ShareSubmissionError::MissingAnalysisTask);
-            }
-        }
-    }
-    Ok(SubmittedShareContent {
-        content_id: applied.content_id,
-        task_id,
-        already_exists: applied.already_exists,
-    })
-}
-
 fn analyze_request(
     applied: &AppliedContentSubmission,
     instruction: Option<&str>,
-    subscribe_to_feed: bool,
     user_id: i64,
 ) -> EnqueueRequest {
     let mut payload = Map::from_iter([("content_id".to_owned(), Value::from(applied.content_id))]);
     if let Some(instruction) = instruction {
         payload.insert("instruction".to_owned(), Value::from(instruction));
-    }
-    if subscribe_to_feed {
-        payload.insert("subscribe_to_feed".to_owned(), Value::Bool(true));
     }
     let mut request = EnqueueRequest::new(TaskType::AnalyzeUrl);
     request.content_id = Some(applied.content_id);
@@ -265,26 +229,16 @@ fn dig_deeper_request(
     if let Some(message) = initial_message {
         payload.insert("initial_message".to_owned(), Value::from(message));
     }
-    let digest = Sha256::digest(initial_message.unwrap_or_default().as_bytes());
+    let digest = sha256_hex(initial_message.unwrap_or_default().as_bytes());
     let mut request = EnqueueRequest::new(TaskType::DigDeeper);
     request.content_id = Some(content_id);
     request.payload = Some(payload);
     request.dedupe_key = Some(format!(
         "dig_deeper|user:{user_id}|content:{content_id}|message:{}",
-        &hex_encode(&digest)[..16]
+        &digest[..16]
     ));
     request.owner_user_id = Some(user_id);
     request
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
 }
 
 #[derive(Debug, Error)]
@@ -295,8 +249,6 @@ pub enum ShareSubmissionError {
     ScraperConfig(#[from] ScraperConfigRepositoryError),
     #[error(transparent)]
     Queue(#[from] QueueError),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
     #[error("content submission queue omitted the analysis task id")]
     MissingAnalysisTask,
     #[error("validated Share feed input is missing feed_type or feed_format")]

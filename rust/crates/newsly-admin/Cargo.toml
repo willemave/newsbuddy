@@ -13,6 +13,7 @@ chrono.workspace = true
 clap.workspace = true
 futures-util.workspace = true
 newsly-db = { path = "../newsly-db" }
+newsly-contracts = { path = "../newsly-contracts" }
 newsly-domain = { path = "../newsly-domain" }
 newsly-queue = { path = "../newsly-queue" }
 secrecy.workspace = true

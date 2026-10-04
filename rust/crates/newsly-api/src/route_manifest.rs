@@ -140,9 +140,12 @@ pub(crate) enum RouteManifestError {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::Method;
+    use std::collections::{HashMap, HashSet};
 
-    use super::RouteManifest;
+    use axum::http::Method;
+    use matchit::Router;
+
+    use super::{RouteManifest, RoutePolicy};
 
     #[test]
     fn embedded_manifest_matches_literal_and_parameterized_routes() {
@@ -167,5 +170,111 @@ mod tests {
                 .operation_id(),
             "searchContents"
         );
+    }
+
+    #[test]
+    fn embedded_manifest_matches_axum_openapi_routes() {
+        const METHODS: &[&str] = &[
+            "delete", "get", "head", "options", "patch", "post", "put", "trace",
+        ];
+        const UNFENCED_HEALTH: &[(&str, &str)] =
+            &[("GET", "/health/live"), ("GET", "/health/ready")];
+
+        let manifest = RouteManifest::embedded().unwrap();
+        let document = serde_json::to_value(crate::openapi_document()).unwrap();
+        let paths = document["paths"].as_object().unwrap();
+        let mut openapi_routes = HashSet::new();
+        let mut matchers: HashMap<String, Router<String>> = HashMap::new();
+
+        for (path, path_item) in paths {
+            for method in METHODS {
+                let Some(operation) = path_item.get(*method) else {
+                    continue;
+                };
+                let operation_id = operation["operationId"].as_str().unwrap().to_owned();
+                let method = method.to_ascii_uppercase();
+                openapi_routes.insert((method.clone(), path.clone(), operation_id.clone()));
+                matchers
+                    .entry(method)
+                    .or_default()
+                    .insert(path, operation_id)
+                    .unwrap();
+            }
+        }
+
+        let manifest_routes = manifest
+            .routes
+            .iter()
+            .map(|route| {
+                (
+                    route.method.clone(),
+                    route.path.clone(),
+                    route.operation_id.clone(),
+                )
+            })
+            .collect::<HashSet<_>>();
+        let expected = openapi_routes
+            .iter()
+            .filter(|(method, path, _)| {
+                !UNFENCED_HEALTH.contains(&(method.as_str(), path.as_str()))
+            })
+            .cloned()
+            .collect::<HashSet<_>>();
+        assert_eq!(manifest_routes, expected);
+
+        for route in &manifest.routes {
+            let concrete = concrete_path(&route.path);
+            let matched = matchers[&route.method].at(&concrete).unwrap();
+            assert_eq!(matched.value, &route.operation_id, "{concrete}");
+            let method = route.method.parse::<Method>().unwrap();
+            assert_eq!(
+                manifest
+                    .find(&method, &concrete)
+                    .map(RoutePolicy::operation_id),
+                Some(matched.value.as_str()),
+                "{concrete}"
+            );
+        }
+
+        assert_eq!(
+            manifest
+                .find(&Method::GET, "/api/content/search")
+                .map(RoutePolicy::operation_id),
+            Some("searchContents")
+        );
+        assert_eq!(
+            manifest
+                .find(&Method::GET, "/api/scrapers")
+                .map(RoutePolicy::operation_id),
+            Some("listScraperConfigs")
+        );
+        assert_eq!(
+            manifest
+                .find(&Method::GET, "/admin/")
+                .map(RoutePolicy::operation_id),
+            Some("adminDashboard")
+        );
+        assert!(manifest.find(&Method::GET, "/health/live").is_none());
+        assert!(manifest.find(&Method::GET, "/health/ready").is_none());
+        assert!(manifest.find(&Method::GET, "/api/unknown").is_none());
+        assert!(
+            manifest
+                .find(&Method::POST, "/api/content/search")
+                .is_none()
+        );
+    }
+
+    fn concrete_path(template: &str) -> String {
+        template
+            .split('/')
+            .map(|segment| {
+                if segment.starts_with('{') && segment.ends_with('}') {
+                    "123"
+                } else {
+                    segment
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
     }
 }

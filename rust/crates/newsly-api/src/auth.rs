@@ -16,7 +16,6 @@ use newsly_contracts::AccessTokenResponse;
 use newsly_db::{find_user_by_api_key, find_user_by_id, is_api_key_token};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -70,7 +69,6 @@ impl Debug for AuthConfig {
 
 pub(crate) struct AuthConfigInput {
     pub jwt_secret: SecretString,
-    pub jwt_algorithm: String,
     pub admin_password: SecretString,
     pub admin_session_lifetime: Duration,
     pub access_token_lifetime: Duration,
@@ -90,12 +88,10 @@ impl AuthConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`AuthConfigError::UnsupportedAlgorithm`] unless the configured JWT signing
-    /// algorithm is exactly `HS256`.
+    /// Returns an error for invalid credentials or token lifetimes.
     pub(crate) fn new(input: AuthConfigInput) -> Result<Self, AuthConfigError> {
         let AuthConfigInput {
             jwt_secret,
-            jwt_algorithm,
             admin_password,
             admin_session_lifetime,
             access_token_lifetime,
@@ -109,9 +105,6 @@ impl AuthConfig {
             apple_key_id,
             apple_private_key,
         } = input;
-        if jwt_algorithm != "HS256" {
-            return Err(AuthConfigError::UnsupportedAlgorithm(jwt_algorithm));
-        }
         if admin_password.expose_secret().is_empty() {
             return Err(AuthConfigError::InvalidAdminPassword);
         }
@@ -176,6 +169,15 @@ impl AuthConfig {
             apple_client_id: apple_client_id.into(),
             apple_revocation,
         })
+    }
+
+    pub(crate) fn learning_deck_token_signer(
+        &self,
+    ) -> Result<
+        crate::learning_deck_tokens::LearningDeckTokenSigner,
+        crate::learning_deck_tokens::LearningDeckTokenError,
+    > {
+        crate::learning_deck_tokens::LearningDeckTokenSigner::from_secret(self.jwt_secret.clone())
     }
 
     fn decoding_key(&self) -> DecodingKey {
@@ -397,6 +399,7 @@ impl AuthConfig {
     pub(crate) async fn verify_apple_identity(
         &self,
         id_token: &str,
+        expected_nonce: Option<&str>,
     ) -> Result<VerifiedAppleIdentity, AppleIdentityError> {
         let header = decode_header(id_token)?;
         if header.alg != Algorithm::RS256 {
@@ -413,10 +416,12 @@ impl AuthConfig {
         if claims.sub.trim().is_empty() {
             return Err(AppleIdentityError::MissingSubject);
         }
+        if let Some(expected_nonce) = expected_nonce {
+            verify_apple_nonce(claims.nonce.as_deref(), expected_nonce)?;
+        }
         Ok(VerifiedAppleIdentity {
             subject: claims.sub,
             email: claims.email,
-            name: claims.name,
         })
     }
 
@@ -534,6 +539,23 @@ impl AuthConfig {
     }
 }
 
+fn verify_apple_nonce(
+    claimed_nonce: Option<&str>,
+    raw_nonce: &str,
+) -> Result<(), AppleIdentityError> {
+    if raw_nonce.trim().is_empty() {
+        return Err(AppleIdentityError::InvalidNonce);
+    }
+    let expected = newsly_domain::hex_encode(&Sha256::digest(raw_nonce.as_bytes()));
+    let matches = claimed_nonce
+        .is_some_and(|claimed| bool::from(claimed.as_bytes().ct_eq(expected.as_bytes())));
+    if matches {
+        Ok(())
+    } else {
+        Err(AppleIdentityError::InvalidNonce)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CachedAppleJwks {
     fetched_at: Instant,
@@ -600,7 +622,7 @@ struct OwnedReplayPayload {
 struct AppleClaims {
     sub: String,
     email: Option<String>,
-    name: Option<Value>,
+    nonce: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -638,7 +660,6 @@ struct AppleTokenRevokeForm<'a> {
 pub(crate) struct VerifiedAppleIdentity {
     pub subject: String,
     pub email: Option<String>,
-    pub name: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -751,8 +772,6 @@ fn invalid_credentials(request_id: String) -> ApiError {
 
 #[derive(Debug, Error)]
 pub enum AuthConfigError {
-    #[error("unsupported JWT_ALGORITHM {0:?}; Newsly authentication requires HS256")]
-    UnsupportedAlgorithm(String),
     #[error("ADMIN_PASSWORD must be nonempty")]
     InvalidAdminPassword,
     #[error("admin, access, and refresh token lifetimes must be nonzero")]
@@ -807,6 +826,8 @@ pub(crate) enum AppleIdentityError {
     MissingKeyId,
     #[error("Apple identity token is missing its subject")]
     MissingSubject,
+    #[error("Apple identity token nonce does not match the sign-in request")]
+    InvalidNonce,
     #[error("Apple signing key {0:?} is unknown")]
     UnknownKey(String),
     #[error("Apple JWKS response exceeded its size limit")]
@@ -858,7 +879,8 @@ async fn bounded_apple_body(response: reqwest::Response) -> Result<Vec<u8>, Appl
 
 #[cfg(test)]
 mod tests {
-    use super::bearer_token;
+    use super::{AppleIdentityError, bearer_token, verify_apple_nonce};
+    use sha2::Digest as _;
 
     #[test]
     fn bearer_parser_is_case_insensitive_and_rejects_extra_parts() {
@@ -866,5 +888,26 @@ mod tests {
         assert_eq!(bearer_token("bearer token"), Some("token"));
         assert_eq!(bearer_token("Basic token"), None);
         assert_eq!(bearer_token("Bearer token extra"), None);
+    }
+
+    #[test]
+    fn apple_nonce_requires_the_sha256_of_the_raw_nonce() {
+        let raw_nonce = "newsly-test-nonce";
+        let expected = newsly_domain::hex_encode(&sha2::Sha256::digest(raw_nonce.as_bytes()));
+
+        assert!(verify_apple_nonce(Some(&expected), raw_nonce).is_ok());
+        assert!(matches!(
+            verify_apple_nonce(None, raw_nonce),
+            Err(AppleIdentityError::InvalidNonce)
+        ));
+        assert!(matches!(
+            verify_apple_nonce(Some("different"), raw_nonce),
+            Err(AppleIdentityError::InvalidNonce)
+        ));
+        let empty_hash = newsly_domain::hex_encode(&sha2::Sha256::digest(b""));
+        assert!(matches!(
+            verify_apple_nonce(Some(&empty_hash), ""),
+            Err(AppleIdentityError::InvalidNonce)
+        ));
     }
 }

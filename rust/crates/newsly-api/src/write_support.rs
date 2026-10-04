@@ -26,18 +26,6 @@ pub(super) fn decode_json<T>(
     })
 }
 
-pub(super) fn require_operation(
-    stamp: &RouteOwnershipStamp,
-    operation_id: &str,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    if stamp.operation_id == operation_id {
-        Ok(())
-    } else {
-        Err(stale_owner(request_id))
-    }
-}
-
 pub(super) async fn verify_stamp(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     stamp: &RouteOwnershipStamp,
@@ -51,6 +39,45 @@ pub(super) async fn verify_stamp(
             }
             RouteWriteFenceError::Sqlx(source) => internal_error(source, request_id),
         })
+}
+
+pub(super) async fn verify_route_now(
+    pool: &sqlx::PgPool,
+    stamp: &RouteOwnershipStamp,
+    request_id: &str,
+) -> Result<(), ApiError> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| internal_error(error, request_id))?;
+    verify_stamp(&mut transaction, stamp, request_id).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| internal_error(error, request_id))
+}
+
+pub(super) async fn begin_fenced<'a>(
+    pool: &'a sqlx::PgPool,
+    stamp: &RouteOwnershipStamp,
+    request_id: &str,
+) -> Result<sqlx::Transaction<'a, sqlx::Postgres>, ApiError> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| internal_error(error, request_id))?;
+    verify_stamp(&mut transaction, stamp, request_id).await?;
+    Ok(transaction)
+}
+
+pub(super) async fn commit(
+    transaction: sqlx::Transaction<'_, sqlx::Postgres>,
+    request_id: &str,
+) -> Result<(), ApiError> {
+    transaction
+        .commit()
+        .await
+        .map_err(|error| internal_error(error, request_id))
 }
 
 pub(super) fn bad_request(message: impl Into<String>, request_id: &str) -> ApiError {

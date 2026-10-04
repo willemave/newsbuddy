@@ -18,6 +18,11 @@ pub(crate) struct PublicDocument {
     pub body: Vec<u8>,
 }
 
+pub(crate) struct PublicResponse {
+    pub effective_url: PublicUrl,
+    pub response: reqwest::Response,
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum PublicHttpError {
     #[error("public source validation failed")]
@@ -46,63 +51,101 @@ pub(crate) async fn fetch_public(
 ) -> Result<PublicDocument, PublicHttpError> {
     // Includes DNS, every redirect, and body streaming, rather than restarting per hop.
     tokio::time::timeout(timeout, async {
-        let mut current = PublicUrl::parse(url)?;
-        for hop in 0..=MAX_REDIRECTS {
-            let addresses = current.resolve_public_addresses().await?;
-            let client = pinned_client(&current, &addresses, timeout)?;
-            let response = client
-                .get(current.as_url().clone())
-                .header(header::USER_AGENT, user_agent)
-                .header(header::ACCEPT, accept)
-                .send()
-                .await?;
-            if response.status().is_redirection() {
-                if hop == MAX_REDIRECTS {
-                    return Err(PublicHttpError::Redirect);
-                }
-                let location = response
+        let PublicResponse {
+            effective_url,
+            response,
+        } = send_public(
+            url,
+            timeout,
+            Duration::from_secs(5),
+            user_agent,
+            Some(accept),
+            MAX_REDIRECTS,
+            false,
+        )
+        .await?;
+        if response.status().is_client_error() || response.status().is_server_error() {
+            return Err(PublicHttpError::Status {
+                status: response.status(),
+                retry_after: response
                     .headers()
-                    .get(header::LOCATION)
+                    .get(header::RETRY_AFTER)
                     .and_then(|value| value.to_str().ok())
-                    .ok_or(PublicHttpError::Redirect)?;
-                current = redirect_target(&current, location)?;
-                continue;
-            }
-            if response.status().is_client_error() || response.status().is_server_error() {
-                return Err(PublicHttpError::Status {
-                    status: response.status(),
-                    retry_after: response
-                        .headers()
-                        .get(header::RETRY_AFTER)
-                        .and_then(|value| value.to_str().ok())
-                        .and_then(retry_after_seconds),
-                });
-            }
-            if max_bytes.is_some_and(|limit| {
-                response
-                    .content_length()
-                    .is_some_and(|size| exceeds_response_limit(size, Some(limit)))
-            }) {
-                return Err(PublicHttpError::TooLarge);
-            }
-            let mut body = Vec::new();
-            let mut chunks = response.bytes_stream();
-            while let Some(chunk) = chunks.next().await {
-                let chunk = chunk?;
-                if max_bytes.is_some_and(|limit| body.len().saturating_add(chunk.len()) > limit) {
-                    return Err(PublicHttpError::TooLarge);
-                }
-                body.extend_from_slice(&chunk);
-            }
-            return Ok(PublicDocument {
-                effective_url: current,
-                body,
+                    .and_then(retry_after_seconds),
             });
         }
-        Err(PublicHttpError::Redirect)
+        if max_bytes.is_some_and(|limit| {
+            response
+                .content_length()
+                .is_some_and(|size| exceeds_response_limit(size, Some(limit)))
+        }) {
+            return Err(PublicHttpError::TooLarge);
+        }
+        let mut body = Vec::new();
+        let mut chunks = response.bytes_stream();
+        while let Some(chunk) = chunks.next().await {
+            let chunk = chunk?;
+            if max_bytes.is_some_and(|limit| body.len().saturating_add(chunk.len()) > limit) {
+                return Err(PublicHttpError::TooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(PublicDocument {
+            effective_url,
+            body,
+        })
     })
     .await
     .map_err(|_| PublicHttpError::Deadline)?
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_public(
+    url: &str,
+    timeout: Duration,
+    connect_timeout: Duration,
+    user_agent: &str,
+    accept: Option<&str>,
+    max_redirects: usize,
+    https_only: bool,
+) -> Result<PublicResponse, PublicHttpError> {
+    let mut current = PublicUrl::parse(url)?;
+    require_scheme(&current, https_only)?;
+    for hop in 0..=max_redirects {
+        let addresses = current.resolve_public_addresses().await?;
+        let client = pinned_client(&current, &addresses, timeout, connect_timeout)?;
+        let mut request = client
+            .get(current.as_url().clone())
+            .header(header::USER_AGENT, user_agent);
+        if let Some(accept) = accept {
+            request = request.header(header::ACCEPT, accept);
+        }
+        let response = request.send().await?;
+        if !response.status().is_redirection() {
+            return Ok(PublicResponse {
+                effective_url: current,
+                response,
+            });
+        }
+        if hop == max_redirects {
+            return Err(PublicHttpError::Redirect);
+        }
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or(PublicHttpError::Redirect)?;
+        current = redirect_target(&current, location)?;
+        require_scheme(&current, https_only)?;
+    }
+    Err(PublicHttpError::Redirect)
+}
+
+fn require_scheme(url: &PublicUrl, https_only: bool) -> Result<(), PublicHttpError> {
+    if https_only && url.as_url().scheme() != "https" {
+        return Err(PublicHttpError::Redirect);
+    }
+    Ok(())
 }
 
 fn redirect_target(current: &PublicUrl, location: &str) -> Result<PublicUrl, PublicHttpError> {
@@ -117,11 +160,12 @@ fn pinned_client(
     url: &PublicUrl,
     addresses: &[SocketAddr],
     timeout: Duration,
+    connect_timeout: Duration,
 ) -> Result<Client, reqwest::Error> {
     let mut builder = Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(5).min(timeout))
+        .connect_timeout(connect_timeout.min(timeout))
         .timeout(timeout);
     if let Some(host) = url.as_url().host_str() {
         builder = builder.resolve_to_addrs(host, addresses);
@@ -172,7 +216,13 @@ mod tests {
         ))
         .unwrap();
         // Test only: the production caller obtains these from resolve_public_addresses.
-        let client = pinned_client(&url, &[address], Duration::from_secs(2)).unwrap();
+        let client = pinned_client(
+            &url,
+            &[address],
+            Duration::from_secs(2),
+            Duration::from_secs(1),
+        )
+        .unwrap();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = [0; 2048];
@@ -206,6 +256,16 @@ mod tests {
             redirect_target(&url, "/new").unwrap().as_str(),
             "https://example.com/new"
         );
+    }
+
+    #[test]
+    fn https_only_dispatch_rejects_downgrades() {
+        let https = PublicUrl::parse("https://example.com/image").unwrap();
+        let http = redirect_target(&https, "http://example.com/image").unwrap();
+        assert!(require_scheme(&https, true).is_ok());
+        assert!(require_scheme(&http, true).is_err());
+        assert!(PublicUrl::parse("https://127.0.0.1/image.png").is_err());
+        assert!(PublicUrl::parse("https://user:secret@example.com/image.png").is_err());
     }
     #[test]
     fn retry_after_accepts_seconds_and_http_dates_without_negative_delays() {

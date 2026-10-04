@@ -43,18 +43,6 @@ pub enum BriefingFirstRunSourceOutcome {
     Unavailable,
 }
 
-impl TryFrom<&str> for BriefingFirstRunSourceOutcome {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "processed" => Ok(Self::Processed),
-            "unavailable" => Ok(Self::Unavailable),
-            other => Err(format!("unsupported first-run source outcome {other:?}")),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BriefingRunKind {

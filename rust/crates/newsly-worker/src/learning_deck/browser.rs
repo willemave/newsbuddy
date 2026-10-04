@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use newsly_e2b::{
-    CommandRequest, DirectE2bProvider, ExecutionTag, OutputLimits, SandboxHandle, SandboxProvider,
-    SandboxUser,
+    CommandRequest, DirectE2bProvider, ExecutionTag, OutputLimits, SandboxHandle, SandboxUser,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

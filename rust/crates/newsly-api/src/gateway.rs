@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Response, StatusCode};
+use axum::extract::{FromRequestParts, Request, State};
+use axum::http::{HeaderMap, HeaderName, Method, Response, StatusCode, request::Parts};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use newsly_db::{OwnershipRepository, OwnershipRepositoryError};
@@ -18,10 +18,6 @@ use crate::error::ApiError;
 use crate::route_manifest::RouteManifest;
 use crate::{AppState, request_id_from_headers};
 
-const OWNERSHIP_VERSION_HEADER: HeaderName = HeaderName::from_static("x-newsly-ownership-version");
-const OWNERSHIP_RESOURCE_HEADER: HeaderName =
-    HeaderName::from_static("x-newsly-ownership-resource");
-const OWNERSHIP_OWNER_HEADER: HeaderName = HeaderName::from_static("x-newsly-ownership-owner");
 const CLIENT_HEADER: HeaderName = HeaderName::from_static("x-newsly-client");
 const CLIENT_VERSION_HEADER: HeaderName = HeaderName::from_static("x-newsly-client-version");
 const CLIENT_BUILD_HEADER: HeaderName = HeaderName::from_static("x-newsly-client-build");
@@ -262,6 +258,32 @@ pub(crate) struct RouteOwnershipStamp {
     pub version: i64,
 }
 
+impl RouteOwnershipStamp {
+    pub(crate) fn missing(headers: &HeaderMap) -> ApiError {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "ownership_stamp_missing",
+            "Route ownership was not resolved",
+            request_id_from_headers(headers),
+        )
+    }
+}
+
+impl<S> FromRequestParts<S> for RouteOwnershipStamp
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Self>()
+            .cloned()
+            .ok_or_else(|| Self::missing(&parts.headers))
+    }
+}
+
 impl Drop for WritePermit {
     fn drop(&mut self) {
         self.barriers.leave(&self.operation_id);
@@ -280,7 +302,6 @@ pub(crate) async fn ownership_gateway(
     mut request: Request,
     next: Next,
 ) -> Response<Body> {
-    strip_incoming_ownership_headers(request.headers_mut());
     let Some(route) = state
         .gateway
         .manifest
@@ -349,10 +370,6 @@ pub(crate) async fn ownership_gateway(
         None
     };
 
-    if let Err(error) = add_ownership_headers(request.headers_mut(), &ownership) {
-        tracing::error!(error = %error, "could not encode route ownership headers");
-        return unavailable_response(request.headers(), is_write).into_response();
-    }
     request.extensions_mut().insert(RouteOwnershipStamp {
         operation_id: route.operation_id().to_owned(),
         owner: ownership.active_owner,
@@ -430,8 +447,7 @@ fn bounded_header(headers: &HeaderMap, name: &HeaderName) -> Option<String> {
 }
 
 /// Returns the typed not-found envelope for routes that are not explicitly implemented in Rust.
-pub(crate) async fn not_found_fallback(mut request: Request) -> Response<Body> {
-    strip_incoming_ownership_headers(request.headers_mut());
+pub(crate) async fn not_found_fallback(request: Request) -> Response<Body> {
     ApiError::new(
         StatusCode::NOT_FOUND,
         "not_found",
@@ -453,31 +469,6 @@ fn unavailable_response(headers: &HeaderMap, is_write: bool) -> ApiError {
         request_id_from_headers(headers),
     )
     .with_retryable(true)
-}
-
-fn add_ownership_headers(
-    headers: &mut HeaderMap,
-    ownership: &OwnershipRecord,
-) -> Result<(), axum::http::header::InvalidHeaderValue> {
-    headers.insert(
-        OWNERSHIP_VERSION_HEADER,
-        HeaderValue::from_str(&ownership.active_version.get().to_string())?,
-    );
-    headers.insert(
-        OWNERSHIP_RESOURCE_HEADER,
-        HeaderValue::from_str(ownership.resource_key.as_str())?,
-    );
-    headers.insert(
-        OWNERSHIP_OWNER_HEADER,
-        HeaderValue::from_static(ownership.active_owner.as_str()),
-    );
-    Ok(())
-}
-
-fn strip_incoming_ownership_headers(headers: &mut HeaderMap) {
-    headers.remove(&OWNERSHIP_VERSION_HEADER);
-    headers.remove(&OWNERSHIP_RESOURCE_HEADER);
-    headers.remove(&OWNERSHIP_OWNER_HEADER);
 }
 
 fn is_write_method(method: &Method) -> bool {
@@ -503,9 +494,13 @@ enum OwnershipResolveError {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{HeaderMap, HeaderValue};
+    use axum::body::{Body, to_bytes};
+    use axum::extract::FromRequestParts;
+    use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
+    use axum::response::IntoResponse;
+    use serde_json::Value;
 
-    use super::{CLIENT_HEADER, MAX_CLIENT_TELEMETRY_CHARS, bounded_header};
+    use super::{CLIENT_HEADER, MAX_CLIENT_TELEMETRY_CHARS, RouteOwnershipStamp, bounded_header};
 
     #[test]
     fn client_telemetry_is_trimmed_and_bounded() {
@@ -527,5 +522,24 @@ mod tests {
         headers.insert(CLIENT_HEADER.clone(), HeaderValue::from_static("   "));
 
         assert_eq!(bounded_header(&headers, &CLIENT_HEADER), None);
+    }
+
+    #[tokio::test]
+    async fn missing_ownership_stamp_returns_typed_internal_error() {
+        let request = Request::builder()
+            .header("x-request-id", "request-123")
+            .body(Body::empty())
+            .unwrap();
+        let (mut parts, _) = request.into_parts();
+
+        let error = RouteOwnershipStamp::from_request_parts(&mut parts, &())
+            .await
+            .unwrap_err();
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), 16 * 1024).await.unwrap();
+        let envelope: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(envelope["code"], "ownership_stamp_missing");
+        assert_eq!(envelope["request_id"], "request-123");
     }
 }

@@ -60,7 +60,7 @@ Resolve ordinal references such as "the first two", "both", or "the podcast" fro
 
 ## Turn Feed Finder
 <!-- prompt-section: turn_feed_finder -->
-Present source recommendations and their supporting evidence for review; distinguish validated feeds from unvalidated search results. Distinguish podcast shows from individual episodes. Leave subscriptions unchanged unless the user explicitly requests an action.
+Present source recommendations and their supporting evidence for review; distinguish validated feeds from unvalidated search results. Distinguish podcast shows from individual episodes. Name matching built-in Newsly aggregators as aggregators and say which ones the user already follows. Leave subscriptions unchanged unless the user explicitly requests an action; when they ask to follow a built-in aggregator, use its aggregator key.
 <!-- /prompt-section -->
 
 ## Turn Markdown Library

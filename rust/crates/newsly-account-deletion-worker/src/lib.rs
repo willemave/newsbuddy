@@ -12,9 +12,9 @@ mod handler;
 mod registry;
 mod repository;
 
-pub use config::{AccountDeletionProcessConfig, ArtifactStorageConfig, ProcessConfigError};
+pub use config::{AccountDeletionProcessConfig, ProcessConfigError};
 pub use external::{
-    AccountExternalServices, ConfiguredArtifactStore, ObjectArtifactStore, ReqwestXGrantRevoker,
+    AccountExternalServices, ConfiguredArtifactStore, ReqwestXGrantRevoker,
     UnavailableXGrantRevoker, XGrantRevoker,
 };
 pub use handler::{AccountDeletionHandler, AccountDeletionServices};

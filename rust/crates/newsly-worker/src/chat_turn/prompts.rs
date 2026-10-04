@@ -1,6 +1,8 @@
-use newsly_db::{ChatContentMaterial, ChatTaskSnapshot, ChatTurnKind};
+use newsly_db::{ChatContentMaterial, ChatTaskSnapshot};
 use serde_json::Value;
 use thiserror::Error;
+
+use super::agent::ChatAgentRunKind;
 
 const ARTICLE_PROMPT: &str = include_str!("../../../../assets/prompts/chat/article.md");
 const ASSISTANT_PROMPT: &str =
@@ -15,12 +17,13 @@ const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
 
 pub(super) fn system_prompt(
     snapshot: &ChatTaskSnapshot,
+    kind: ChatAgentRunKind,
     content_body: Option<&str>,
     turn_instruction: Option<&str>,
 ) -> Result<String, ChatPromptError> {
     let mut parts = Vec::new();
-    match snapshot.context.kind {
-        ChatTurnKind::Article => {
+    match kind {
+        ChatAgentRunKind::Article => {
             parts.push(section(ARTICLE_PROMPT, "system")?.to_owned());
             parts.push(SANDBOX_INSTRUCTIONS.to_owned());
             let context = article_context(snapshot, content_body);
@@ -31,7 +34,7 @@ pub(super) fn system_prompt(
                 ));
             }
         }
-        ChatTurnKind::Assistant => {
+        ChatAgentRunKind::Assistant => {
             parts.push(section(ASSISTANT_PROMPT, "system")?.to_owned());
             parts.push(SANDBOX_INSTRUCTIONS.to_owned());
             let context = snapshot
@@ -44,9 +47,6 @@ pub(super) fn system_prompt(
             if let Some(instruction) = turn_instruction {
                 parts.push(instruction.to_owned());
             }
-        }
-        ChatTurnKind::DeepResearch => {
-            return Err(ChatPromptError::UnsupportedKind);
         }
     }
     Ok(parts.join("\n\n"))
@@ -198,6 +198,4 @@ fn truncate(value: &str, maximum: usize) -> String {
 pub(super) enum ChatPromptError {
     #[error("chat prompt section {0} is missing")]
     MissingSection(String),
-    #[error("deep research does not use a Rig system prompt")]
-    UnsupportedKind,
 }

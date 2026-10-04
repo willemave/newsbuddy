@@ -1,12 +1,14 @@
+use newsly_domain::truncate_chars;
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 use crate::chat_tasks::{
-    AssistantScreenContext, ChatTurnKind, ChatTurnProcessingContext, ChatTurnSessionSnapshot,
+    AssistantScreenContext, ChatTaskRepositoryError, ChatTurnKind, ChatTurnProcessingContext,
+    ChatTurnSessionSnapshot,
 };
 use crate::chat_transcripts::{
     ChatTranscriptError, DisplayMessageProjection, RenderMetadataProjection, StoredChatMessage,
@@ -145,7 +147,7 @@ pub struct StageAssistantTurnInput<'a> {
     pub user_id: i64,
     pub session_id: Option<i64>,
     pub user_prompt: &'a str,
-    pub screen_context: &'a Value,
+    pub screen_context: &'a AssistantScreenContext,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,28 +165,26 @@ pub enum StageChatTurnOutcome {
     NotFound,
     Forbidden,
     Archived,
-    Hidden,
     NewsItemNotFound,
     UserInactive,
 }
 
 #[derive(Debug, Clone, FromRow)]
-struct ChatSessionRow {
-    id: i64,
-    user_id: i64,
-    content_id: Option<i64>,
-    news_item_id: Option<i64>,
-    title: Option<String>,
-    session_type: Option<String>,
-    topic: Option<String>,
-    context_snapshot: Option<String>,
-    is_hidden_from_history: bool,
-    llm_model: String,
-    llm_provider: String,
-    created_at: NaiveDateTime,
-    updated_at: Option<NaiveDateTime>,
-    last_message_at: Option<NaiveDateTime>,
-    is_archived: bool,
+pub(crate) struct ChatSessionRow {
+    pub(crate) id: i64,
+    pub(crate) user_id: i64,
+    pub(crate) content_id: Option<i64>,
+    pub(crate) news_item_id: Option<i64>,
+    pub(crate) title: Option<String>,
+    pub(crate) session_type: Option<String>,
+    pub(crate) topic: Option<String>,
+    pub(crate) context_snapshot: Option<String>,
+    pub(crate) llm_model: String,
+    pub(crate) llm_provider: String,
+    pub(crate) created_at: NaiveDateTime,
+    pub(crate) updated_at: Option<NaiveDateTime>,
+    pub(crate) last_message_at: Option<NaiveDateTime>,
+    pub(crate) is_archived: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -272,7 +272,6 @@ pub async fn list_chat_sessions(
         r"
         WHERE user_id::bigint = $1
           AND is_archived = FALSE
-          AND is_hidden_from_history = FALSE
           AND ($2::bigint IS NULL OR content_id::bigint = $2)
           AND ($3::bigint IS NULL OR news_item_id::bigint = $3)
           AND (
@@ -342,11 +341,8 @@ pub async fn get_chat_session_detail(
     }
 
     let active_feed_urls = load_active_feed_urls(pool, user_id).await?;
-    let parent_rows = load_message_rows(pool, session_id, None).await?;
-    let parent_stored = parent_rows
-        .iter()
-        .map(StoredChatMessage::from)
-        .collect::<Vec<_>>();
+    let rows = load_message_rows(pool, session_id).await?;
+    let parent_stored = rows.iter().map(StoredChatMessage::from).collect::<Vec<_>>();
     let messages = display_messages(&parent_stored, session_id, &active_feed_urls)
         .into_iter()
         .map(Into::into)
@@ -419,16 +415,20 @@ pub async fn create_chat_session(
         || input.content_id.is_some()
         || input.news_item_id.is_some()
     {
-        let context = json!({
-            "screen_type": KNOWLEDGE_SESSION_TYPE,
-            "screen_title": "Knowledge",
-            "content_id": input.content_id,
-            "news_item_id": input.news_item_id,
-            "visible_content_ids": [],
-            "visible_news_item_ids": [],
-            "selected_topic": input.topic,
-            "note": input.initial_message.map(|value| truncate_chars(value, 500)),
-        });
+        let context = AssistantScreenContext {
+            screen_type: KNOWLEDGE_SESSION_TYPE.to_owned(),
+            screen_title: Some("Knowledge".to_owned()),
+            content_id: input.content_id,
+            news_item_id: input.news_item_id,
+            visible_content_ids: Vec::new(),
+            visible_news_item_ids: Vec::new(),
+            selected_topic: input.topic.map(str::to_owned),
+            query: None,
+            note: input
+                .initial_message
+                .map(|value| truncate_chars(value, 500)),
+            assistant_action: None,
+        };
         Some(build_screen_context_snapshot(transaction, input.user_id, &context).await?)
     } else {
         None
@@ -548,26 +548,30 @@ pub async fn stage_chat_message(
     if session.is_archived {
         return Ok(StageChatTurnOutcome::Archived);
     }
-    if session.is_hidden_from_history {
-        return Ok(StageChatTurnOutcome::Hidden);
-    }
 
     let (kind, source, screen_context) = if session.session_type.as_deref() == Some("deep_research")
     {
         (ChatTurnKind::DeepResearch, "realtime", None)
     } else if is_assistant_session_type(session.session_type.as_deref()) {
-        let context = json!({
-            "screen_type": session.session_type.as_deref().unwrap_or("unknown"),
-            "screen_title": session.title,
-            "content_id": session.content_id,
-            "news_item_id": session.news_item_id,
-            "visible_content_ids": [],
-            "visible_news_item_ids": [],
-            "selected_topic": Value::Null,
-            "query": Value::Null,
-            "note": Value::Null,
-            "assistant_action": Value::Null,
-        });
+        let context = AssistantScreenContext {
+            screen_type: session
+                .session_type
+                .as_deref()
+                .unwrap_or("unknown")
+                .to_owned(),
+            screen_title: session
+                .title
+                .as_deref()
+                .map(|value| truncate_chars(value, 200)),
+            content_id: session.content_id,
+            news_item_id: session.news_item_id,
+            visible_content_ids: Vec::new(),
+            visible_news_item_ids: Vec::new(),
+            selected_topic: None,
+            query: None,
+            note: None,
+            assistant_action: None,
+        };
         (ChatTurnKind::Assistant, "assistant", Some(context))
     } else {
         (ChatTurnKind::Article, "realtime", None)
@@ -594,7 +598,8 @@ pub async fn stage_assistant_turn(
     transaction: &mut Transaction<'_, Postgres>,
     input: &StageAssistantTurnInput<'_>,
 ) -> Result<StageChatTurnOutcome, ChatRepositoryError> {
-    let primary_news_id = json_positive_i64(input.screen_context, "news_item_id");
+    input.screen_context.validate()?;
+    let primary_news_id = input.screen_context.news_item_id;
     let primary_news = if let Some(news_item_id) = primary_news_id {
         let item =
             load_visible_news_in_transaction(transaction, input.user_id, news_item_id).await?;
@@ -608,9 +613,9 @@ pub async fn stage_assistant_turn(
 
     let context_snapshot =
         build_screen_context_snapshot(transaction, input.user_id, input.screen_context).await?;
-    let content_id = json_positive_i64(input.screen_context, "content_id");
-    let selected_topic = json_string(input.screen_context, "selected_topic");
-    let screen_title = json_string(input.screen_context, "screen_title");
+    let content_id = input.screen_context.content_id;
+    let selected_topic = input.screen_context.selected_topic.clone();
+    let screen_title = input.screen_context.screen_title.clone();
 
     let session = if let Some(session_id) = input.session_id {
         let Some(mut row) = load_session_for_update(transaction, session_id).await? else {
@@ -621,9 +626,6 @@ pub async fn stage_assistant_turn(
         }
         if row.is_archived {
             return Ok(StageChatTurnOutcome::Archived);
-        }
-        if row.is_hidden_from_history {
-            return Ok(StageChatTurnOutcome::Hidden);
         }
 
         let mut title = screen_title
@@ -674,7 +676,8 @@ pub async fn stage_assistant_turn(
         if let Some(content_id) = content_id
             && let Some(content) = load_content_in_transaction(transaction, content_id).await?
         {
-            title = content.title.unwrap_or(title);
+            title = content_display_title(content.title.as_deref(), &content.content_metadata)
+                .unwrap_or(title);
         } else if let Some(news) = &primary_news {
             title = news_title(news);
         } else if let Some(derived) = derive_chat_session_title(input.user_prompt) {
@@ -737,10 +740,12 @@ pub async fn get_chat_message_status(
     user_id: i64,
     message_id: i64,
 ) -> Result<ChatRecordAccess<ChatMessageStatusProjection>, ChatRepositoryError> {
-    let row = sqlx::query_as::<_, ChatMessageRow>(MESSAGE_PROJECTION_BY_ID_SQL)
-        .bind(message_id)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query_as::<_, ChatMessageRow>(AssertSqlSafe(format!(
+        "{MESSAGE_PROJECTION_SQL} WHERE id::bigint = $1"
+    )))
+    .bind(message_id)
+    .fetch_optional(pool)
+    .await?;
     let Some(row) = row else {
         return Ok(ChatRecordAccess::NotFound);
     };
@@ -836,8 +841,11 @@ async fn stage_session_turn(
     user_prompt: &str,
     kind: ChatTurnKind,
     source: &str,
-    screen_context: Option<&Value>,
+    screen_context: Option<&AssistantScreenContext>,
 ) -> Result<StagedChatTurn, ChatRepositoryError> {
+    if let Some(context) = screen_context {
+        context.validate()?;
+    }
     let now = Utc::now();
     let transcript = processing_transcript(user_prompt, now);
     let message_list = serde_json::to_string(&transcript)?;
@@ -855,15 +863,12 @@ async fn stage_session_turn(
             session.llm_provider.clone(),
         )
     };
-    let screen_context = screen_context
-        .map(|value| serde_json::from_value::<AssistantScreenContext>(value.clone()))
-        .transpose()?;
     let processing_context = serde_json::to_value(ChatTurnProcessingContext::new(
         kind,
         user_prompt,
         source,
         snapshot,
-        screen_context,
+        screen_context.cloned(),
     ))?;
 
     let inserted = sqlx::query_as::<_, InsertedMessageRow>(
@@ -1068,26 +1073,22 @@ fn news_presentation(news: &NewsPresentationRow) -> ArticlePresentation {
 }
 
 fn content_title(content: &ContentPresentationRow) -> String {
-    let metadata = content.content_metadata.as_object();
-    let summary = metadata
-        .and_then(|value| value.get("summary"))
-        .and_then(Value::as_object);
-    let title = summary
+    content_display_title(content.title.as_deref(), &content.content_metadata)
+        .unwrap_or_else(|| "Untitled".to_owned())
+}
+
+pub(crate) fn content_display_title(title: Option<&str>, metadata: &Value) -> Option<String> {
+    let summary = metadata.get("summary");
+    let summary_title = summary
         .and_then(|value| value.get("title"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            summary
-                .and_then(|value| value.get("feed_preview"))
-                .and_then(Value::as_object)
-                .and_then(|value| value.get("title"))
-                .and_then(Value::as_str)
-        })
-        .or(content.title.as_deref())
-        .filter(|value| !value.trim().is_empty());
-    title
-        .map(|value| truncate_chars(value.trim(), 500))
-        .or_else(|| extract_short_summary(metadata.and_then(|value| value.get("summary"))))
-        .map_or_else(|| "Untitled".to_owned(), |value| summarize_as_title(&value))
+        .and_then(Value::as_str);
+    let feed_title = summary
+        .and_then(|value| value.get("feed_preview"))
+        .and_then(|value| value.get("title"))
+        .and_then(Value::as_str);
+    first_non_empty([summary_title, feed_title, title])
+        .or_else(|| extract_short_summary(summary))
+        .map(|value| summarize_as_title(&value))
 }
 
 fn news_title(news: &NewsPresentationRow) -> String {
@@ -1118,13 +1119,13 @@ fn news_title(news: &NewsPresentationRow) -> String {
         .unwrap_or_else(|| "Untitled News Item".to_owned())
 }
 
-fn extract_short_summary(value: Option<&Value>) -> Option<String> {
+pub(crate) fn extract_short_summary(value: Option<&Value>) -> Option<String> {
     match value {
-        Some(Value::String(value)) if !value.is_empty() => Some(value.clone()),
+        Some(Value::String(value)) if !value.trim().is_empty() => Some(value.clone()),
         Some(Value::Object(summary)) => {
             for field in ["one_line", "overview", "summary", "hook", "takeaway"] {
                 if let Some(value) = summary.get(field).and_then(Value::as_str)
-                    && !value.is_empty()
+                    && !value.trim().is_empty()
                 {
                     return Some(value.to_owned());
                 }
@@ -1136,41 +1137,50 @@ fn extract_short_summary(value: Option<&Value>) -> Option<String> {
                 .and_then(Value::as_object)
                 .and_then(|value| value.get("overview"))
                 .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
+                .filter(|value| !value.trim().is_empty())
                 .map(str::to_owned)
         }
         _ => None,
     }
 }
 
-async fn build_screen_context_snapshot(
+pub(crate) async fn build_screen_context_snapshot(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
-    context: &Value,
-) -> Result<String, ChatRepositoryError> {
-    let screen_type = json_string(context, "screen_type").unwrap_or_else(|| "unknown".to_owned());
+    context: &AssistantScreenContext,
+) -> Result<String, sqlx::Error> {
+    let screen_type =
+        clean_context_text(Some(&context.screen_type)).unwrap_or_else(|| "unknown".to_owned());
     let mut lines = vec![format!("Screen Type: {screen_type}")];
     append_context_line(
         &mut lines,
         "Screen Title",
-        json_string(context, "screen_title"),
+        clean_context_text(context.screen_title.as_deref()),
     );
     append_context_line(
         &mut lines,
         "Selected Topic",
-        json_string(context, "selected_topic"),
+        clean_context_text(context.selected_topic.as_deref()),
     );
-    append_context_line(&mut lines, "Query", json_string(context, "query"));
-    append_context_line(&mut lines, "Client Note", json_string(context, "note"));
+    append_context_line(
+        &mut lines,
+        "Query",
+        clean_context_text(context.query.as_deref()),
+    );
+    append_context_line(
+        &mut lines,
+        "Client Note",
+        clean_context_text(context.note.as_deref()),
+    );
     append_context_line(
         &mut lines,
         "Assistant Action",
-        json_string(context, "assistant_action"),
+        clean_context_text(context.assistant_action.as_deref()),
     );
 
     let mut content_ids = Vec::new();
-    push_unique_positive(&mut content_ids, json_positive_i64(context, "content_id"));
-    for id in json_i64_array(context, "visible_content_ids") {
+    push_unique_positive(&mut content_ids, context.content_id);
+    for id in context.visible_content_ids.iter().copied() {
         push_unique_positive(&mut content_ids, Some(id));
     }
     if !content_ids.is_empty() {
@@ -1197,13 +1207,12 @@ async fn build_screen_context_snapshot(
             ) {
                 lines.push(format!("  Short Summary: {summary}"));
             }
-            let excerpt_limit = if screen_type == "learning_deck"
-                && json_positive_i64(context, "content_id") == Some(content_id)
-            {
-                1_800
-            } else {
-                420
-            };
+            let excerpt_limit =
+                if screen_type == "learning_deck" && context.content_id == Some(content_id) {
+                    1_800
+                } else {
+                    420
+                };
             if let Some(excerpt) = content_excerpt(&content.content_metadata, excerpt_limit) {
                 lines.push(format!("  Transcript Excerpt: {excerpt}"));
             }
@@ -1211,11 +1220,8 @@ async fn build_screen_context_snapshot(
     }
 
     let mut news_item_ids = Vec::new();
-    push_unique_positive(
-        &mut news_item_ids,
-        json_positive_i64(context, "news_item_id"),
-    );
-    for id in json_i64_array(context, "visible_news_item_ids") {
+    push_unique_positive(&mut news_item_ids, context.news_item_id);
+    for id in context.visible_news_item_ids.iter().copied() {
         push_unique_positive(&mut news_item_ids, Some(id));
     }
     if !news_item_ids.is_empty() {
@@ -1279,7 +1285,7 @@ async fn load_session(
     .await
 }
 
-async fn load_session_for_update(
+pub(crate) async fn load_session_for_update(
     transaction: &mut Transaction<'_, Postgres>,
     session_id: i64,
 ) -> Result<Option<ChatSessionRow>, sqlx::Error> {
@@ -1338,24 +1344,22 @@ async fn load_visible_news_in_transaction(
 async fn load_message_rows(
     pool: &PgPool,
     session_id: i64,
-    min_message_id_exclusive: Option<i64>,
 ) -> Result<Vec<ChatMessageRow>, sqlx::Error> {
     sqlx::query_as::<_, ChatMessageRow>(AssertSqlSafe(format!(
         "{}\n{}",
         MESSAGE_PROJECTION_SQL,
         r"
         WHERE session_id::bigint = $1
-          AND ($2::bigint IS NULL OR id::bigint > $2)
         ORDER BY created_at, id
         "
     )))
     .bind(session_id)
-    .bind(min_message_id_exclusive)
     .fetch_all(pool)
     .await
 }
 
-async fn load_active_feed_urls(
+/// Canonical feed URLs of the user's active subscriptions, including `aggregator://<key>`.
+pub async fn load_active_feed_urls(
     pool: &PgPool,
     user_id: i64,
 ) -> Result<BTreeSet<String>, sqlx::Error> {
@@ -1416,7 +1420,7 @@ async fn content_awaiting_first_chat_turn(
     .await
 }
 
-async fn lock_active_user(
+pub(crate) async fn lock_active_user(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
 ) -> Result<bool, sqlx::Error> {
@@ -1495,28 +1499,11 @@ fn is_assistant_session_type(value: Option<&str>) -> bool {
     )
 }
 
-fn json_string(value: &Value, field: &str) -> Option<String> {
+fn clean_context_text(value: Option<&str>) -> Option<String> {
     value
-        .get(field)
-        .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-}
-
-fn json_positive_i64(value: &Value, field: &str) -> Option<i64> {
-    value
-        .get(field)
-        .and_then(Value::as_i64)
-        .filter(|value| *value > 0)
-}
-
-fn json_i64_array(value: &Value, field: &str) -> Vec<i64> {
-    value
-        .get(field)
-        .and_then(Value::as_array)
-        .map(|values| values.iter().filter_map(Value::as_i64).collect())
-        .unwrap_or_default()
 }
 
 fn push_unique_positive(values: &mut Vec<i64>, value: Option<i64>) {
@@ -1584,10 +1571,6 @@ fn first_non_empty<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Opt
         .map(str::to_owned)
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
-}
-
 fn value_as_display_text(value: &Value) -> String {
     match value {
         Value::String(value) => value.clone(),
@@ -1605,7 +1588,6 @@ const SESSION_PROJECTION_SQL: &str = r"
         session_type,
         topic,
         context_snapshot,
-        is_hidden_from_history,
         llm_model,
         llm_provider,
         created_at,
@@ -1678,25 +1660,6 @@ const MESSAGE_PROJECTION_SQL: &str = r"
     FROM chat_messages
 ";
 
-const MESSAGE_PROJECTION_BY_ID_SQL: &str = r"
-    SELECT
-        id::bigint AS id,
-        session_id::bigint AS session_id,
-        message_list,
-        render_metadata,
-        created_at,
-        status,
-        error,
-        partial_text,
-        stream_generation,
-        stream_revision,
-        stream_updated_at,
-        tool_progress,
-        tool_progress_revision
-    FROM chat_messages
-    WHERE id::bigint = $1
-";
-
 #[derive(Debug, Error)]
 pub enum ChatRepositoryError {
     #[error("chat database operation failed")]
@@ -1705,8 +1668,13 @@ pub enum ChatRepositoryError {
     Transcript(#[from] ChatTranscriptError),
     #[error("chat transcript serialization failed")]
     Json(#[from] serde_json::Error),
+    #[error("chat screen context is invalid")]
+    InvalidScreenContext(#[from] ChatTaskRepositoryError),
     #[error("inserted chat session could not be reloaded")]
     InsertedSessionMissing,
     #[error("chat message has unsupported status {0}")]
     InvalidMessageStatus(String),
 }
+
+#[cfg(test)]
+mod screen_context_tests;

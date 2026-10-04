@@ -1,19 +1,13 @@
 //! Vectors for the exact text consumed by personalized news lens assignment.
 use crate::BriefingRefreshSource;
-use chrono::NaiveDateTime;
+use crate::briefing_refresh::SourceNewsRow;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use sqlx::{FromRow, PgConnection};
+use sqlx::PgConnection;
 
 pub const ENCODER_VERSION: i32 = 1;
 
 pub fn input_hash(text: &str) -> String {
-    use std::fmt::Write;
-    let mut output = String::with_capacity(64);
-    for byte in Sha256::digest(text.as_bytes()) {
-        write!(output, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    output
+    newsly_domain::sha256_hex(text.as_bytes())
 }
 
 #[derive(Debug, Clone)]
@@ -71,49 +65,24 @@ pub async fn save(
     Ok(true)
 }
 
-#[derive(FromRow)]
-struct NewsRow {
-    id: i64,
-    summary_text: Option<String>,
-    summary_key_points: Value,
-    raw_metadata: Value,
-    article_url: Option<String>,
-    canonical_story_url: Option<String>,
-    canonical_item_url: Option<String>,
-    published_at: Option<NaiveDateTime>,
-    processed_at: Option<NaiveDateTime>,
-    ingested_at: NaiveDateTime,
-    created_at: NaiveDateTime,
-}
-
 pub async fn source(
     connection: &mut PgConnection,
     id: i64,
 ) -> Result<Option<BriefingRefreshSource>, sqlx::Error> {
-    let row = sqlx::query_as::<_, NewsRow>("SELECT id::bigint, summary_text, summary_key_points::jsonb, raw_metadata::jsonb, article_url, canonical_story_url, canonical_item_url, published_at, processed_at, ingested_at, created_at FROM news_items WHERE id::bigint = $1 AND status = 'ready' AND representative_news_item_id IS NULL")
+    let row = sqlx::query_as::<_, SourceNewsRow>("SELECT id::bigint, summary_text, summary_key_points::jsonb, raw_metadata::jsonb, article_url, canonical_story_url, canonical_item_url, published_at, processed_at, ingested_at, created_at FROM news_items WHERE id::bigint = $1 AND status = 'ready' AND representative_news_item_id IS NULL")
         .bind(id).fetch_optional(connection).await?;
-    Ok(row.map(|r| {
-        crate::briefing_refresh::sources::source_from_news(
-            r.id,
-            r.summary_text.as_deref(),
-            &r.summary_key_points,
-            &r.raw_metadata,
-            r.article_url.as_deref(),
-            r.canonical_story_url.as_deref(),
-            r.canonical_item_url.as_deref(),
-            r.published_at,
-            r.processed_at,
-            r.ingested_at,
-            r.created_at,
-        )
-    }))
+    Ok(row.map(|r| crate::briefing_refresh::sources::source_from_news(&r)))
 }
 
-pub async fn record_usage(
-    connection: &mut PgConnection,
+pub async fn record_usage<'executor, E>(
+    executor: E,
     task_id: i64,
+    user_id: Option<i64>,
     usage: &crate::BriefingLensAssignmentUsage,
-) -> Result<(), sqlx::Error> {
+) -> Result<(), sqlx::Error>
+where
+    E: sqlx::Executor<'executor, Database = sqlx::Postgres>,
+{
     fn tokens(n: u64) -> i32 {
         i32::try_from(n).unwrap_or(i32::MAX)
     }
@@ -126,11 +95,11 @@ pub async fn record_usage(
             INSERT INTO vendor_usage_records (
                 provider, model, feature, operation, source, request_id, task_id, user_id,
                 request_count, input_tokens, cache_read_tokens, cache_write_tokens,
-                output_tokens, total_tokens, currency, pricing_version, metadata, created_at
+                output_tokens, total_tokens, currency, metadata, created_at
             )
             VALUES (
                 $1, $2, $3, $4, 'queue', $5, $6::bigint::integer, $7::bigint::integer,
-                $8, $9, $10, $11, $12, $13, 'USD', '2026-08-02', '{}'::jsonb,
+                $8, $9, $10, $11, $12, $13, 'USD', '{}'::jsonb,
                 timezone('UTC', clock_timestamp())
             )
             "#,
@@ -141,14 +110,14 @@ pub async fn record_usage(
     .bind(&usage.operation)
     .bind(&usage.provider_response_id)
     .bind(task_id)
-    .bind(Option::<i64>::None)
+    .bind(user_id)
     .bind(tokens(usage.usage.request_count))
     .bind(tokens(usage.usage.input_tokens))
     .bind(tokens(usage.usage.cached_input_tokens))
     .bind(tokens(usage.usage.cache_write_tokens))
     .bind(tokens(usage.usage.output_tokens))
     .bind(tokens(total_tokens))
-    .execute(&mut *connection)
+    .execute(executor)
     .await?;
     Ok(())
 }

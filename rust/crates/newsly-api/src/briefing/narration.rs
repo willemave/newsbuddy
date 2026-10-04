@@ -1,10 +1,11 @@
 //! Narration commands and observation keep immutable edition identity separate from lens selection.
 
+use crate::audio_episode_presentation::present_audio_episode;
 use std::time::Instant;
 
 use axum::Json;
-use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::rejection::{JsonRejection, PathRejection};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use newsly_contracts::{
     AudioEpisodeResponse, BriefingNarrationRequest, BriefingNarrationResponse,
@@ -17,14 +18,12 @@ use newsly_db::{
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
 use serde_json::json;
 
-use super::presentation::{present_audio_episode, present_narration};
-use super::{NarrationDeliveryQuery, queue_error, validation_error};
+use super::presentation::present_narration;
+use super::{queue_error, validation_error};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error, not_found, verify_stamp};
 use crate::{AppState, request_id_from_headers};
 
 #[cfg(test)]
@@ -33,7 +32,6 @@ mod tests;
 
 const LEGACY_NARRATION_OPERATION_ID: &str = "narrationBriefing";
 const NARRATION_OPERATION_ID: &str = "chapteredBriefingNarration";
-const RETRY_OPERATION_ID: &str = "retryBriefingNarration";
 
 #[utoipa::path(
     post,
@@ -41,7 +39,6 @@ const RETRY_OPERATION_ID: &str = "retryBriefingNarration";
     operation_id = "narrationBriefing",
     tag = "briefing",
     request_body = LegacyBriefingNarrationRequest,
-    params(("delivery" = Option<String>, Query, description = "background or stream")),
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = AudioEpisodeResponse),
@@ -57,8 +54,7 @@ pub(crate) async fn legacy_narration(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<LegacyBriefingNarrationRequest>, JsonRejection>,
 ) -> Result<Json<AudioEpisodeResponse>, ApiError> {
     let payload = payload.map(|Json(payload)| {
@@ -74,7 +70,6 @@ pub(crate) async fn legacy_narration(
         &stamp,
         LEGACY_NARRATION_OPERATION_ID,
         false,
-        query,
         payload,
     )
     .await?;
@@ -93,7 +88,6 @@ pub(crate) async fn legacy_narration(
     operation_id = "chapteredBriefingNarration",
     tag = "briefing",
     request_body = BriefingNarrationRequest,
-    params(("delivery" = Option<String>, Query, description = "background or stream")),
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = BriefingNarrationResponse),
@@ -109,8 +103,7 @@ pub(crate) async fn chaptered_narration(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<BriefingNarrationRequest>, JsonRejection>,
 ) -> Result<Json<BriefingNarrationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
@@ -121,7 +114,6 @@ pub(crate) async fn chaptered_narration(
         &stamp,
         NARRATION_OPERATION_ID,
         true,
-        query,
         payload,
     )
     .await?;
@@ -191,19 +183,10 @@ async fn create_narration(
     stamp: &RouteOwnershipStamp,
     operation_id: &str,
     chaptered: bool,
-    query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
     payload: Result<Json<BriefingNarrationRequest>, JsonRejection>,
 ) -> Result<Vec<AudioEpisodeProjection>, ApiError> {
     let started = Instant::now();
     let request_id = request_id_from_headers(headers);
-    require_operation(stamp, operation_id, &request_id)?;
-    let Query(query) = query.map_err(|error| validation_error(error.body_text(), &request_id))?;
-    if !matches!(query.delivery.as_str(), "background" | "stream") {
-        return Err(validation_error(
-            "delivery must be background or stream",
-            &request_id,
-        ));
-    }
     let Json(payload) = decode_json(payload, &request_id)?;
     let selection = narration_selection(payload, chaptered).ok_or_else(|| {
         validation_error(
@@ -341,18 +324,12 @@ pub(crate) async fn retry_narration(
     headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<BriefingNarrationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, RETRY_OPERATION_ID, &request_id)?;
     let Path(group_id) = path.map_err(|error| validation_error(error.body_text(), &request_id))?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let episodes = retry_briefing_narration(&mut transaction, current_user.id, &group_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
@@ -367,9 +344,6 @@ pub(crate) async fn retry_narration(
         &request_id,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     present_narration(episodes, &request_id).map(Json)
 }

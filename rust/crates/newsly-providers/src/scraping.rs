@@ -8,6 +8,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::provider_env::{ProviderEnvError, u64_from_env};
 use crate::public_http::{MAX_SOURCE_RESPONSE_BYTES, PublicHttpError, fetch_public};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
@@ -125,14 +126,16 @@ pub struct ScrapeGateway {
 }
 
 impl ScrapeGateway {
-    /// Creates the scraper provider gateway from environment configuration.
-    ///
     /// # Errors
-    ///
     /// Returns an error when the bounded HTTP client cannot be constructed.
     pub fn from_env() -> Result<Self, ScrapeGatewayError> {
-        let timeout =
-            Duration::from_secs(env_u64("SCRAPER_HTTP_TIMEOUT_SECONDS", 30).clamp(5, 120));
+        let timeout = u64_from_env(
+            "SCRAPER_HTTP_TIMEOUT_SECONDS",
+            30,
+            "unsigned integer seconds",
+        )?
+        .clamp(5, 120);
+        let timeout = Duration::from_secs(timeout);
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(timeout)
@@ -962,13 +965,6 @@ fn secret_env(name: &str) -> Option<SecretString> {
     clean_env(name).map(SecretString::from)
 }
 
-fn env_u64(name: &str, default: u64) -> u64 {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(default)
-}
-
 #[derive(Debug, Deserialize)]
 struct HackerNewsStory {
     #[serde(rename = "type")]
@@ -1043,6 +1039,8 @@ impl From<ScrapeGatewayError> for ScrapeFailure {
 
 #[derive(Debug, Error)]
 pub enum ScrapeGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("source returned HTTP {status}")]
     HttpStatus {
         status: StatusCode,
@@ -1073,6 +1071,7 @@ pub enum ScrapeGatewayError {
 impl ScrapeGatewayError {
     pub fn diagnostic_code(&self) -> &'static str {
         match self {
+            Self::Config(_) => "invalid_configuration",
             Self::HttpStatus { .. } => "http_status",
             Self::Deadline => "http_timeout",
             Self::Http(error) if error.is_timeout() => "http_timeout",
@@ -1115,7 +1114,8 @@ impl ScrapeGatewayError {
             | Self::Deadline
             | Self::Feed(_)
             | Self::Html(_) => true,
-            Self::Url(_)
+            Self::Config(_)
+            | Self::Url(_)
             | Self::PublicUrl(_)
             | Self::ResponseTooLarge
             | Self::TooManyRedirects

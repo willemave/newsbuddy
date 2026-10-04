@@ -94,6 +94,28 @@ pub async fn list_agent_library_content(
     pool: &PgPool,
     user_id: i64,
 ) -> Result<Vec<AgentLibraryContentProjection>, AgentLibraryRepositoryError> {
+    load_library_content(pool, user_id, None).await
+}
+
+/// Load one authorized exportable item without scanning or rendering its sibling documents.
+pub async fn find_agent_library_content(
+    pool: &PgPool,
+    user_id: i64,
+    content_id: i64,
+) -> Result<Option<AgentLibraryContentProjection>, AgentLibraryRepositoryError> {
+    if content_id <= 0 {
+        return Err(AgentLibraryRepositoryError::InvalidInput);
+    }
+    Ok(load_library_content(pool, user_id, Some(content_id))
+        .await?
+        .pop())
+}
+
+async fn load_library_content(
+    pool: &PgPool,
+    user_id: i64,
+    content_id: Option<i64>,
+) -> Result<Vec<AgentLibraryContentProjection>, AgentLibraryRepositoryError> {
     if user_id <= 0 {
         return Err(AgentLibraryRepositoryError::InvalidUserId);
     }
@@ -105,6 +127,7 @@ pub async fn list_agent_library_content(
                 min(save.saved_at) AS saved_at
             FROM content_knowledge_saves AS save
             WHERE save.user_id::bigint = $1
+              AND ($2::bigint IS NULL OR save.content_id::bigint = $2)
             GROUP BY save.content_id
         ),
         chats AS (
@@ -114,6 +137,7 @@ pub async fn list_agent_library_content(
                 min(session.created_at) AT TIME ZONE 'UTC' AS saved_at
             FROM chat_sessions AS session
             WHERE session.user_id::bigint = $1
+              AND ($2::bigint IS NULL OR session.content_id::bigint = $2)
               AND session.content_id IS NOT NULL
               AND session.is_archived = false
             GROUP BY session.content_id
@@ -163,6 +187,7 @@ pub async fn list_agent_library_content(
         "#,
     )
     .bind(user_id)
+    .bind(content_id)
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
@@ -256,7 +281,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use sqlx::PgPool;
 
-    use super::list_agent_library_content;
+    use super::{find_agent_library_content, list_agent_library_content};
 
     #[sqlx::test]
     async fn library_content_decodes_knowledge_and_chat_saved_timestamps(pool: PgPool) {
@@ -326,6 +351,26 @@ mod tests {
             .expect("library timestamps should decode");
 
         assert_eq!(rows.len(), 2);
+        assert_eq!(
+            find_agent_library_content(&pool, user_id, knowledge_content_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .content_id,
+            knowledge_content_id
+        );
+        assert!(
+            find_agent_library_content(&pool, user_id + 1, knowledge_content_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            find_agent_library_content(&pool, user_id, chat_content_id + 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let knowledge = rows
             .iter()
             .find(|row| row.content_id == knowledge_content_id)

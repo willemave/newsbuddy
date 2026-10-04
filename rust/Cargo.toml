@@ -11,6 +11,7 @@ repository = "https://github.com/willem/news_app"
 
 [workspace.dependencies]
 anyhow = "=1.0.104"
+async-trait = "=0.1.92"
 async-openai = { version = "=0.41.3", default-features = false, features = ["responses", "embedding", "image", "audio", "rustls-no-provider"] }
 axum = { version = "=0.8.9", features = ["http1", "json", "multipart", "tokio", "tracing"] }
 base64 = "=0.22.1"
@@ -22,7 +23,6 @@ futures-util = "=0.3.34"
 fernet = "=0.2.2"
 feed-rs = { version = "=2.4.0", default-features = false }
 quick-xml = "=0.41.0"
-flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 getrandom = "=0.3.4"
 hostname = "=0.4.2"
 jsonwebtoken = { version = "=11.0.0", default-features = false, features = ["rust_crypto", "use_pem"] }
@@ -45,7 +45,7 @@ schemars = { version = "=1.2.2", features = ["chrono04", "derive", "uuid1"] }
 scraper = "=0.27.0"
 secrecy = "=0.10.3"
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
 sha1 = "=0.10.7"
 sha2 = "=0.11.0"
 sqlx = { version = "=0.9.0", default-features = false, features = [
@@ -61,7 +61,6 @@ sqlx = { version = "=0.9.0", default-features = false, features = [
 ] }
 subtle = "=2.6.1"
 tempfile = "=3.27.0"
-tar = { version = "=0.4.46", default-features = false }
 thiserror = "=2.0.20"
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 tokio-util = "=0.7.19"
@@ -71,6 +70,7 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "js
 toml = "=0.9.8"
 utoipa = { version = "=5.5.0", features = ["axum_extras", "chrono", "preserve_order", "repr", "uuid"] }
 uuid = { version = "=1.26.0", features = ["serde", "v4"] }
+url = "=2.5.8"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

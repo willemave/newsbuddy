@@ -27,6 +27,44 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-04 — `main` — Integrated release preparation
+
+- **Status:** Release preparation in progress; commit, push and production deployment requested through build-test-deploy.
+- **Scope:** Existing council retirement, cross-stack simplification, Knowledge source activity/composer, modal typography and local operations tooling. Preserve machine-local database artifacts outside Git.
+- **Decisions:** Use the checked-in canonical local release gate and exact-SHA image workflow. Retain installed-client, schema, metadata backfill and physical-device retirement gates. Apple distribution is outside this request. Pin the existing Buildx v3 revision so its verified current inputs pass the required older actionlint metadata check.
+- **Validation:** Fresh architecture/module/wire/contract and mocked deploy/setup/sync/env/Maestro checks pass. Production baseline is healthy on `33cb30b3`; read-only Opus 5.5 final verification is running. Exact integrated release gates and production proof remain outstanding.
+- **Remaining:** Resolve council maintenance cutover selection, finish independent review, run deterministic and authorized live gates, rebuild the changed E2B template, push the tested SHA and independently verify production.
+- **Commits:** Prepared as topical runtime/contracts, native client and operations changes.
+
+### 2026-10-04 — `main` — Oracle Fable review guidance
+
+- **Status:** Complete locally.
+- **Scope:** `AGENTS.md` and the machine-local Oracle Fable skill/global Codex guidance.
+- **Changes:** Extend read-only Claude Opus 5.5 consultation to consequential planning and brainstorming, plus verification of substantial implementations; pass the expectations to delegated agents. Keep routine local edits exempt and require tests and evidence alongside advisory review.
+- **Validation:** Skill validator passes. Live Claude Code smoke review returned `claude-opus-5-5` in model usage, identified a seeded task-claim ownership bug, reported no permission denials, and preserved the fixture.
+- **Remaining:** None in scope. New Codex sessions load the updated global guidance.
+- **Commits:** Uncommitted.
+
+### 2026-10-04 — `main` — Readable modal typography and deck focus simplification
+
+- **Status:** Complete locally.
+- **Scope:** App-owned iOS sheets, shared modal text tokens and visual fixtures.
+- **Decisions:** Modal body/actions use 17pt text, supporting copy uses 15pt, and quiet metadata uses 13pt with Dynamic Type scaling. Remove deck focus suggestion chips; preserve typing and dictation. Mini sheets scroll instead of shrinking labels or clipping expanded content.
+- **Changes:** Apply modal fonts across creation/actions, sharing, filters, source editing/addition, Settings, feedback, CLI/X configuration, Briefing chapter/dig sheets, preparation/submission/feed status and debug token entry. Shared form/section components accept a caller font so main screens keep their existing type. Larger-text action sheets open at the large detent and prioritize scrolling. Preparation status also scrolls. Extract Content Detail sheet rendering to keep its existing large expression within Swift compiler limits. K21 removes preset deck focus suggestions; the iOS coding guide records modal typography.
+- **Validation:** Final app/Share Extension simulator build passes. On Newsly Regression 20260722 (iOS 26.5), scheme `newsly`, inspected deck, Share, Download, Knowledge actions, feedback and filter fixtures; verified light/dark surfaces, absence of deck suggestion buttons, maximum accessibility sizing and scroll reachability of the bottom Download option. Screenshots: `/tmp/newsly-modal-type-evidence`. Swift parse, iOS wire guard, modal small-font inventory and full diff check pass.
+- **Remaining:** None in scope. No provider calls, commit, push or deployment.
+- **Commits:** Uncommitted.
+
+### 2026-10-04 — `main` — Learning Deck creation sheet layout
+
+- **Status:** Complete locally.
+- **Scope:** iOS Learning Deck creation sheet and backend-free visual fixture.
+- **Decisions:** Put the title in the navigation bar, scroll the form, replace the expanding editor/glass inset with a compact multiline focus field, and use a large sheet plus untruncated source title at accessibility text sizes. K21 records reachable creation controls.
+- **Validation:** Reproduced the toolbar/title overlap on Newsly Regression 20260722 (iOS 26.5), scheme `newsly`. Verified light/dark medium sheets, keyboard entry with reachable Create, suggestion selection, fake dictation append, Create/Cancel dismissal, and maximum accessibility text with horizontally reachable suggestions. Initial shared-checkout builds passed. The exact final sheet builds and renders from `/tmp/newsly-deck-modal-validation`; that temporary copy changes only the unrelated `hasStalledKnowledgePreparation` extension visibility to work around the concurrent build error. The shared source was preserved. Screenshots: `/tmp/newsly-deck-modal-evidence`. iOS wire guard and scoped diff check pass.
+- **Final validation:** The concurrent owner corrected the unrelated visibility error; final shared-checkout app/Share Extension build now passes and the rebuilt app launches in Simulator. No unrelated source changes were made for this repair.
+- **Remaining:** None in the scoped UI repair. No paid generation, commit, push or deployment.
+- **Commits:** Uncommitted.
+
 ### 2026-09-27 — `main` — Briefing inset figure wrap fixes
 
 - **Status:** Complete
@@ -2898,6 +2936,15 @@ Use this append-only log to preserve implementation context across sessions and 
 - Validation: complete canonical clean-commit gate, including paid provider/E2B live smoke, followed by exact-SHA GitHub deployment and independent runtime/ingress/migration proof. Evidence will be recorded under ignored `test-results/` directories.
 - Known remaining limitation: shared-story clustering still exposes only the representative platform; cross-aggregator overlap can hide a paper from subscribers to the other source. This pre-existing design issue remains outside this release.
 
+### 2026-10-02 — `main` — Knowledge swipe actions: review fixes
+
+- **Status:** Complete
+- **Scope:** Follow-up to `637a81c7`: `KnowledgeSource`, `KnowledgeChatViewModel`, `CustomNarrationLibraryViewModel`, new `Views/KnowledgeSourceActions.swift`, `KnowledgeView`/`KnowledgeTimelineView`, `ChatSessionRoute`, law K19.
+- **Decisions:** `enum KnowledgeSource { content, news }` replaces the `{ id, isNews }` key and all ad hoc news/content branching. View models take a source rather than a `ContentSummary`. Source chat and council now look up an existing chat on the server (`existingSourceChat`, backed by `getSessionForContent`/`getSessionForNewsItem`), the same lookup the detail screen uses, instead of searching the loaded chat page. Source actions, the swipe-action modifier, row markers and the hint modifier live in `KnowledgeSourceActions.swift`. `KnowledgeSavedContentButton` no longer carries hint state. The hint uses one offset value and reports completion only after it closes. The council prompt moved to `ChatSessionRoute`. Narration creation has an in-flight guard. Rows expose their existing deep dives to VoiceOver.
+- **Validation:** 46 focused iOS tests pass. Checked in the simulator against the local API: the hint opens and closes, the first full-swipe Chat starts a new chat with the composer focused, and a second swipe reopens the same session.
+- **Remaining:** Row markers still come from the loaded first pages of chats, decks and narrations. Complete markers would need the Knowledge list endpoint to return per-source deep-dive flags. Temporary local test data was removed.
+- **Commits:** Uncommitted
+
 ### 2026-10-02 — `main` — Remove council from chat
 
 - **Status:** Complete locally (uncommitted; not deployed; no production mutation).
@@ -2914,6 +2961,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 357 tests in the affected Rust API/contracts/DB/worker crates passed, including 11 isolated PostgreSQL retirement tests. Warning-denied Clippy passed for those crates/all targets. iOS Simulator build and 33 focused chat view-model/message tests passed; mocked deployment harness, formatting, shell syntax and diff checks passed. Contract drift checking found only the concurrent scraper `aggregator` enum addition missing from generated OpenAPI/Swift artifacts; left that unrelated work untouched.
 - **Remaining:** No commit, push, deployment or production mutation. Compatibility removal and historical schema contraction retain the documented later conditions.
 
+### 2026-10-02 — `main` — Knowledge composer rotating placeholder
+
+- **Status:** Complete
+- **Scope:** iOS Knowledge composer placeholder (`KnowledgeComposerPlaceholder`, `KnowledgeTimelineView`). Preserve concurrent council-removal edits in the same file.
+- **Decisions:** Replace the static "Ask anything…" prompt with an overlay that rolls through "Ask anything…" and discovery asks (news sources, podcasts, newsletters) backed by the chat `find_feed_options` tool. Hold each for 3s with `AppMotion.emphasized` and a push-from-bottom transition; Reduce Motion crossfades. Pause while the field is focused or the tab is hidden; E2E launches hold the first prompt so visual baselines stay deterministic. Use the `onSurfaceTertiary` role instead of the system placeholder grey, per the iOS color-role guideline. The field keeps its "Ask Knowledge" accessibility label and the decorative overlay is hidden from VoiceOver.
+- **Validation:** iOS Simulator Debug build passed. Simulator recording confirmed the rotation and transition order.
+- **Remaining:** Typed-text vs placeholder alignment not checked on device (simulator shut down mid-check). No commit.
+- **Commits:** Uncommitted
+
+
 ### 2026-10-02 — `main` — Council removal: strict review fixes
 
 - **Status:** Complete locally; no commit, push or deployment.
@@ -2921,9 +2978,66 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** Keep the deploy CLI, backup reuse/freshness and fail-closed restoration rules. Both HTTP-staged and worker-created chat contexts use the same typed constructor/Serde encoder while retaining bounded legacy decoding. Migration fixtures must include council-kind follow-ups with child effective IDs, parent visible IDs, hidden/persona fields, and absent/null run metadata.
 - **Validation:** All 354 tests in the affected Rust API/DB/worker crates passed, including 11 isolated PostgreSQL retirement tests. Warning-denied Clippy passed for those crates/all targets. Public contract drift checks, Rust formatting, shell syntax and diff checks passed. Mocked deployment coverage passed normal sequencing, cutover pre/post-stop preflight/backup/migration/public failures, reversible baseline preflight/missing-backup failures, and an empty writer-restoration set under Bash 3. Tests are split into behavioral coverage (440 lines) and coherent legacy fixtures (568 lines).
 
+
 ### 2026-10-03 — `main` — Commit council retirement
 
 - **Scope:** Commit the council retirement, cleanup and strict review fixes on local `main`; preserve concurrent Knowledge and aggregator edits. The checkout is already on `main`, so no separate branch merge is necessary.
 - **Validation:** The scoped staged snapshot passed 348 Rust tests (including 11 isolated PostgreSQL retirement tests), warning-denied Clippy, contract drift checks, Rust formatting, shell syntax, the mocked deployment harness, and a native iOS build with 69 focused tests. Module-size guardrails passed against that snapshot; commit checks use the snapshot because unrelated working-tree aggregator additions exceed their current limits. A fresh disposable Simulator resolved the original Simulator launch failures.
 - **Decisions:** Remove the size-guard entry for the deleted council module. Synchronize the generated feed enum with the aggregator variant already present in the committed public contract; leave concurrent aggregator behavior and Knowledge changes uncommitted.
 - **Remaining:** No push, deployment or production mutation. The documented maintenance cutover remains required for deployment.
+
+
+### 2026-10-03 — `main` — Simplification report implementation
+
+- **Status:** In progress locally; no commit, push, deployment or production mutation.
+- **Scope:** Implement `outputs/simplification-review-2026-10-02.md`, preserving concurrent Knowledge and aggregator work. Per-finding progress and explicit gates are tracked in `outputs/simplification-implementation-2026-10-03.md`.
+- **Decisions:** Start with auth, CLI-link secret lifecycle, account-owned diagnostics, provider redirect/routing/retry correctness and safe state-sync ordering. Keep installed-client, device, product and staged-schema removals gated. Four Opus 5.5 consultations reviewed security retention, typed assistant context, provider transports, worker bootstrap, route ownership, storage and iOS state/composition; enforce independent bounded cleanup transactions, refresh-expiry margin, poll-only retry and exact queue configuration preservation.
+- **Validation:** Initial integrated workspace checkpoint passed 696 tests (two ignored), and warning-denied affected-crate Clippy passed. Latest integrated Rust checkpoint passes 712 tests (eight ignored) across 49 suites, including 162 isolated DB tests and local HTTP fixtures; full workspace warning-denied Clippy passed before the next worker slice. Public contracts regenerated after removing unused roots and submission hints. Native Simulator build and test-target build pass; 49 focused Briefing/Markdown/typography tests and 10 Tweet voice tests pass. Earlier 30 contract/Share Extension tests pass; final integrated/native checks continue.
+- **Tweet payload:** New processing updates keep canonical tweet_snapshot/tweet_snapshot_included plus identity, media and dispatch flags; unread/snapshot-covered flat tweet fields are no longer written. Legacy flat reads remain until an eligible-row snapshot inventory/backfill establishes safe removal. Inline agent usage stores event counts; full deck diagnostics remain detached.
+- **Compatibility:** The first local generated client tolerating absent inert council fields was produced 2026-10-03. The compatibility window begins when that client ships, not with this unshipped local build.
+- **Later slices:** Shared DB action/news rows, metadata readability, source-ID/message/truncation/hash helpers and onboarding presenters; startup-built shared storage with bounded canonical local reading; server-derived submission provenance; canonical admin shell and dashboard retirement; typed scraper capabilities and shared catalog-priced token usage; shared iOS dictation/list mutation state, composition services and Markdown renderer. Preserve product-visible and installed-client behavior unless the report explicitly gates removal.
+- **Remaining:** Finish ungated report findings, regenerate/check contracts, complete native validation, resolve combined checks and update the finding ledger. No authorization for product retirements or production changes has been inferred.
+
+### 2026-10-03 — `main` — Simplification implementation checkpoint
+
+- **Status:** In progress; uncommitted.
+- **Changes:** Unified iOS action/credential/model mappings and feed/podcast source screens. Removed write-only onboarding/briefing/enrichment timestamps and counters while keeping required schema literals and debugging data; the later schema-drop clock starts only after shipping. Shared chat title/summary and typed snapshot construction replace duplicate paths, with account IDs omitted from new model snapshots. Existing dig-deeper chat reuse remains unchanged.
+- **Validation:** DB 164 tests, worker news 5 and briefing 30, admin 22 and CLI 52 pass before the newest chat title changes; combined affected Rust Clippy and architecture/module guards pass. Native build and broad focused tests pass. Markdown citation delegate tests and screenshot pass; the native UI bridge timed out before interaction proof.
+- **Remaining:** Complete current cursor/provider and metadata review slices, final integrated checks and ledger audit. No commit, push, deployment or production mutation.
+
+### 2026-10-03 — `main` — Canonical metadata and final client slices
+
+- **Status:** In progress locally, uncommitted.
+- **Decisions:** Six read-only Opus 5.5 reviews now complete. Content metadata has one DB-owned per-field writer and read policy; retain root SQL mirrors and the worker root-first adapter until production divergence inventory/backfill and later SQL/index/eval migration. X re-sync locks before merging and resolving canonical destinations. Shared content API/model snapshots omit submitter identities and first chat messages; account deletion scrubs every namespace.
+- **Changes:** Remaining client source/model/credential/view/equality simplifications and canonical Maestro record/compare flows are implemented; the seeded manifest and runner own flow variables. Audio routes share a fallible source projection with logged invalid-row omission in lists.
+- **Validation:** Latest full DB suite passes 171 tests, including canonical X snapshot concurrency. Shared chat title/snapshot tests (3) and audio presenter tests (2) pass. Native test-target build, focused client tests, codegen tests, wire guard and fake Maestro runner contract pass.
+- **Remaining:** Final combined Rust/contract/native gates; physical-device Keychain evidence, live Maestro argument shape, native Markdown interaction proof, and production/client/product/staged-schema gates remain explicit in the ledger. No commit, push, deployment or production mutation.
+
+### 2026-10-03 — `main` — Simplification report: final local validation
+
+- **Status:** All ungated source findings implemented locally; uncommitted. Every one of the report's 245 findings has one entry in `outputs/simplification-implementation-2026-10-03.md`.
+- **Final changes:** Backfill now carries one optional outcome through finalization. iOS constructs one credential/API/auth/service/speech graph with required dependencies and isolated test factories; the Share Extension retains its own process root. The Rust operator has payload-free transcript inventory and default-dry-run, attributed, bounded CAS backfill with strict round-trip validation, processing-row exclusion and same-batch partial-run resume.
+- **Review:** Eight read-only Claude Opus 5.5 consultations covered security/retention, provider/runtime boundaries, route/storage contracts, cursor/title/audio policy, metadata concurrency/privacy, transcript conversion and both iOS composition slices. Verified material findings include indexed transcript paging, exact-byte concurrency fencing, snapshot-before-backfill and one credential session for all auth operations.
+- **Validation:** Full Rust workspace: 734 passed, zero failed, eight ignored across 49 suites (176 DB tests). Full workspace/all-target warning-denied Clippy passes. Final native suite: 682 passed, zero failed, two skipped lifecycle tests; app and Share Extension builds and 22 focused composition suites pass. Architecture/module-size (808 files, 20 ratchets), Swift wire boundaries, contract drift, mocked deploy/setup/sync/env/Maestro runner checks and isolated launch fixture (11 stories) pass. Diff/format checks are clean.
+- **Read-only production evidence:** 49 root/domain tweet-snapshot conflicts and 15 included-snapshot conflicts among 31,584 contents; zero domain submitter-identity rows. 302 bare-array transcripts are a lower bound, so the converter remains. Zero stored LLM integration rows and zero Share Action awaiting-approval tasks do not decide product retirement. Shared provider numeric settings are absent, so defaults apply; storage is local, legacy extractor/X/E2B aliases remain and DATABASE_URL is SQLAlchemy-prefixed. Workers use production environment with DEBUG absent. No values or transcript payloads were exposed.
+- **Remaining:** Installed-client windows, physical-device Keychain proof, native Markdown tap/selection/accessibility proof (UI bridge unavailable), Maestro argument-domain proof (tool not installed), authorized production snapshots/backfills/config cutovers, two-shipping-release schema drops, E2B template rebuild with release, and explicit BYOK/Share approval/runtime-transition product decisions. Retain the category replay baseline until its shadow evaluation ends. The source ledger names each condition. No commit, push, deployment or production mutation.
+
+### 2026-10-04 — `main` — Consolidate source-linked Knowledge activity
+
+- **Status:** Complete locally.
+- **Scope:** iOS Knowledge timeline projection, saved rows, related chat/deck actions, and focused regressions.
+- **Decisions:** Keep one saved-source row for its chats and decks, stable source identity, and newest related activity ordering; keep standalone artifacts visible when the saved source is absent. Show deck/chat activity in the source row and retain open/delete/regenerate controls.
+- **Changes:** Group related chats/decks under the saved source, keep all related records available through row menus, and open existing decks from the swipe action. Pass explicit presentation values into the row so ID-only chat equality cannot retain stale answering artwork. Updated Knowledge laws and added a backend-free visual fixture.
+- **Validation:** `newsly` and Share Extension build on iPhone 17 Pro / iOS 26.4. 31 focused projection/lifecycle/source-marker tests pass; one native UI regression passes generating → ready → generating again → failed. Simulator snapshots verify one row per saved source, progress labels/spinners, terminal states, and deck/chat menu open callbacks. Light/dark screenshots saved under `test-results/knowledge-source-activity/`; scoped diff check passes.
+- **Remaining:** None for this local change; no commit, push, deployment, or device distribution requested.
+- **Commits:** Uncommitted.
+
+### 2026-10-04 — `main` — Knowledge source activity cleanup and strict review
+
+- **Status:** Complete locally.
+- **Scope:** This session's source-linked Knowledge row implementation, fixture, and regression coverage; unrelated checkout changes remain outside review.
+- **Changes:** Require one source entry and a shared related-action menu, compute row presentation once, and order deck activity by the latest deck/run creation or update. Active deck status takes precedence over completed decks. The visual fixture renders standalone artifacts so duplicate-row assertions can fail; deck fixtures distinguish fresh failure from a failed regeneration with a prior successful viewer.
+- **Review:** Independent read-only correctness and maintainability passes identified and verified these fixes. Final correctness review found no remaining high-confidence scoped findings.
+- **Validation:** App build passes; 36 focused unit tests and two native UI tests pass on iPhone 17 Pro / iOS 26.4, covering activity ordering, terminal states, duplicate rows, processing redraws, and related-item open/delete menus. Diff check passes. An initial test build encountered a concurrent unrelated detail-view compiler error; the owning task fixed it and the final run passed.
+- **Remaining:** None for this local scope. No commit, push, deployment, or device distribution requested.
+- **Commits:** Uncommitted.

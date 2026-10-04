@@ -1,6 +1,3 @@
-use std::env;
-use std::sync::OnceLock;
-
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -12,22 +9,24 @@ use newsly_contracts::{
     AgentLibraryManifestResponse, AgentSearchRequest, AgentSearchResponse, AgentSearchResultKind,
     AgentSearchResultResponse,
 };
-use newsly_db::{AgentLibraryContentProjection, list_agent_library_content};
+use newsly_db::{
+    AgentLibraryContentProjection, find_agent_library_content, list_agent_library_content,
+};
 use newsly_providers::{
-    BriefingDigGateway, BriefingDigGatewayError, BriefingWebSearchResult, ContentMiscGatewayError,
-    ExaSearchUsage, PodcastEpisodeHit,
+    BriefingDigGatewayError, BriefingWebSearchResult, ContentMiscGatewayError, ExaSearchUsage,
+    PodcastEpisodeHit,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::auth::AuthenticatedUser;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
+use newsly_domain::hex_encode;
 
-static SEARCH_GATEWAY: OnceLock<Result<BriefingDigGateway, String>> = OnceLock::new();
+const MAX_SLUG_LENGTH: usize = 80;
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -72,7 +71,8 @@ pub(super) async fn search_agent(
         ));
     }
 
-    let web = search_gateway(&request_id)?
+    let web = state
+        .briefing_dig
         .search_limit(query, payload.limit)
         .await
         .map_err(|error| search_provider_error(&error, &request_id))?;
@@ -116,7 +116,6 @@ pub(super) struct AgentLibraryManifestQuery {
         (status = 200, description = "Successful Response", body = AgentLibraryManifestResponse),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 503, description = "Personal markdown library disabled", body = newsly_contracts::ErrorEnvelope),
         (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
     )
 )]
@@ -127,7 +126,6 @@ pub(super) async fn get_agent_library_manifest(
     current_user: AuthenticatedUser,
 ) -> Result<Json<AgentLibraryManifestResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_personal_markdown(&request_id)?;
     let Query(query) = query.map_err(|rejection| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -166,7 +164,6 @@ pub(super) struct AgentLibraryFileQuery {
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Library document not found", body = newsly_contracts::ErrorEnvelope),
         (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 503, description = "Personal markdown library disabled", body = newsly_contracts::ErrorEnvelope),
         (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
     )
 )]
@@ -177,7 +174,6 @@ pub(super) async fn get_agent_library_file(
     current_user: AuthenticatedUser,
 ) -> Result<Json<AgentLibraryFileResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_personal_markdown(&request_id)?;
     let Query(query) = query.map_err(|rejection| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -194,19 +190,38 @@ pub(super) async fn get_agent_library_file(
             request_id,
         ));
     }
-    let document = render_library_documents(&state, current_user.id, true, &request_id)
+    let not_found = || {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Library document not found",
+            request_id.clone(),
+        )
+    };
+    let (content_id, variant) = parse_library_path(&query.path).ok_or_else(not_found)?;
+    let row = find_agent_library_content(state.database.pool(), current_user.id, content_id)
+        .await
+        .map_err(|error| internal_error(error, &request_id))?
+        .ok_or_else(not_found)?;
+    if library_path(&row, variant) != query.path {
+        return Err(not_found());
+    }
+    let document = render_library_variant(&state, current_user.id, &row, variant, &request_id)
         .await?
-        .into_iter()
-        .find(|document| document.relative_path == query.path)
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "Library document not found",
-                request_id.clone(),
-            )
-        })?;
+        .ok_or_else(not_found)?;
     Ok(Json(document.file()))
+}
+
+fn parse_library_path(path: &str) -> Option<(i64, AgentLibraryDocumentVariant)> {
+    let (stem, id) = path.strip_suffix(".md")?.rsplit_once("__c")?;
+    let id = id.parse::<i64>().ok().filter(|id| *id > 0)?;
+    let (_, variant) = stem.rsplit_once("__")?;
+    let variant = match variant {
+        "source" => AgentLibraryDocumentVariant::Source,
+        "summary" => AgentLibraryDocumentVariant::Summary,
+        _ => return None,
+    };
+    Some((id, variant))
 }
 
 #[derive(Debug, Clone)]
@@ -254,44 +269,61 @@ async fn render_library_documents(
         .map_err(|error| internal_error(error, request_id))?;
     let mut documents = Vec::with_capacity(rows.len() * usize::from(include_source) + rows.len());
     for row in rows {
-        let rendered_stored =
-            load_pointer_text(state, row.rendered_body.as_ref(), request_id).await?;
-        let source_stored = if include_source {
-            load_pointer_text(state, row.source_body.as_ref(), request_id).await?
-        } else {
-            None
-        };
         if include_source
-            && let Some(body) = source_stored.or_else(|| fallback_source(&row))
-            && !body.trim().is_empty()
-        {
-            documents.push(render_document(
+            && let Some(document) = render_library_variant(
+                state,
                 user_id,
                 &row,
                 AgentLibraryDocumentVariant::Source,
-                body.trim(),
-                row.source_body
-                    .as_ref()
-                    .and_then(|pointer| pointer.updated_at)
-                    .or(row.updated_at),
-            ));
-        }
-        if let Some(body) = rendered_stored.or_else(|| fallback_summary(&row))
-            && !body.trim().is_empty()
+                request_id,
+            )
+            .await?
         {
-            documents.push(render_document(
-                user_id,
-                &row,
-                AgentLibraryDocumentVariant::Summary,
-                body.trim(),
-                row.rendered_body
-                    .as_ref()
-                    .and_then(|pointer| pointer.updated_at)
-                    .or(row.updated_at),
-            ));
+            documents.push(document);
+        }
+        if let Some(document) = render_library_variant(
+            state,
+            user_id,
+            &row,
+            AgentLibraryDocumentVariant::Summary,
+            request_id,
+        )
+        .await?
+        {
+            documents.push(document);
         }
     }
     Ok(documents)
+}
+
+async fn render_library_variant(
+    state: &AppState,
+    user_id: i64,
+    row: &AgentLibraryContentProjection,
+    variant: AgentLibraryDocumentVariant,
+    request_id: &str,
+) -> Result<Option<RenderedDocument>, ApiError> {
+    let pointer = match variant {
+        AgentLibraryDocumentVariant::Source => row.source_body.as_ref(),
+        AgentLibraryDocumentVariant::Summary => row.rendered_body.as_ref(),
+    };
+    let body = load_pointer_text(state, pointer, request_id)
+        .await?
+        .or_else(|| match variant {
+            AgentLibraryDocumentVariant::Source => fallback_source(row),
+            AgentLibraryDocumentVariant::Summary => fallback_summary(row),
+        });
+    Ok(body.filter(|body| !body.trim().is_empty()).map(|body| {
+        render_document(
+            user_id,
+            row,
+            variant,
+            body.trim(),
+            pointer
+                .and_then(|pointer| pointer.updated_at)
+                .or(row.updated_at),
+        )
+    }))
 }
 
 async fn load_pointer_text(
@@ -309,6 +341,32 @@ async fn load_pointer_text(
         .map_err(|error| internal_error(error, request_id))
 }
 
+fn library_path(
+    row: &AgentLibraryContentProjection,
+    variant: AgentLibraryDocumentVariant,
+) -> String {
+    let source = content_source(row);
+    let title = clean(row.title.as_deref()).unwrap_or_else(|| "Untitled".to_owned());
+    let date = content_date(row);
+    let variant_name = library_variant_name(variant);
+    format!(
+        "{}/{}/{}__{}__{}__c{}.md",
+        slug(&row.content_type, None),
+        slug(&source, None),
+        slug(&title, Some(MAX_SLUG_LENGTH)),
+        date.format("%Y-%m-%d"),
+        variant_name,
+        row.content_id,
+    )
+}
+
+const fn library_variant_name(variant: AgentLibraryDocumentVariant) -> &'static str {
+    match variant {
+        AgentLibraryDocumentVariant::Source => "source",
+        AgentLibraryDocumentVariant::Summary => "summary",
+    }
+}
+
 fn render_document(
     user_id: i64,
     row: &AgentLibraryContentProjection,
@@ -319,19 +377,7 @@ fn render_document(
     let source = content_source(row);
     let title = clean(row.title.as_deref()).unwrap_or_else(|| "Untitled".to_owned());
     let date = content_date(row);
-    let variant_name = match variant {
-        AgentLibraryDocumentVariant::Source => "source",
-        AgentLibraryDocumentVariant::Summary => "summary",
-    };
-    let relative_path = format!(
-        "{}/{}/{}__{}__{}__c{}.md",
-        slug(&row.content_type, None),
-        slug(&source, None),
-        slug(&title, Some(max_slug_length())),
-        date.format("%Y-%m-%d"),
-        variant_name,
-        row.content_id,
-    );
+    let relative_path = library_path(row, variant);
     let mut reasons = Vec::new();
     if row.saved_to_knowledge {
         reasons.push("saved_to_knowledge");
@@ -358,7 +404,7 @@ fn render_document(
         row.content_id,
         user_id,
         yaml_string(&row.content_type),
-        yaml_string(variant_name),
+        yaml_string(library_variant_name(variant)),
         yaml_string(&title),
         yaml_string(&source),
         yaml_string(&row.url),
@@ -528,35 +574,6 @@ fn yaml_optional_datetime(value: Option<DateTime<Utc>>) -> String {
     )
 }
 
-fn max_slug_length() -> usize {
-    env::var("PERSONAL_MARKDOWN_MAX_SLUG_LENGTH")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| (16..=160).contains(value))
-        .unwrap_or(80)
-}
-
-fn require_personal_markdown(request_id: &str) -> Result<(), ApiError> {
-    let enabled = env::var("PERSONAL_MARKDOWN_ENABLED")
-        .ok()
-        .is_none_or(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        });
-    if enabled {
-        Ok(())
-    } else {
-        Err(ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "personal_markdown_disabled",
-            "Personal markdown library is disabled",
-            request_id,
-        ))
-    }
-}
-
 async fn record_exa_search_usage(
     state: &AppState,
     user_id: i64,
@@ -576,51 +593,23 @@ async fn record_exa_search_usage(
         "cost_reason": usage.estimated_cost_usd.is_none().then_some("Exa response omitted a valid costDollars.total estimate"),
         "cost_source_url": "https://docs.exa.ai/reference/search"
     });
-    if let Err(error) = sqlx::query(
-        r"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id, user_id,
-            request_count, resource_count, cost_usd, currency, pricing_version,
-            cost_basis, metadata, idempotency_key, created_at
-        ) VALUES (
-            'exa', 'search', 'agent_search', $1, 'api', $2, $3::bigint::integer,
-            $4, $5, $6, 'USD', $7,
-            $8, $9,
-            concat('exa:', $1::text, ':', $2::text), timezone('UTC', clock_timestamp())
-        )
-        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-        ",
+    if let Err(error) = newsly_db::record_exa_search_usage(
+        state.database.pool(),
+        &newsly_db::NewExaSearchUsage {
+            request_id,
+            user_id,
+            feature: "agent_search",
+            operation,
+            request_count: usage.request_count,
+            result_count: usage.result_count,
+            estimated_cost_usd: usage.estimated_cost_usd,
+            metadata,
+        },
     )
-    .bind(operation)
-    .bind(request_id)
-    .bind(user_id)
-    .bind(i32::try_from(usage.request_count).unwrap_or(i32::MAX))
-    .bind(i32::try_from(usage.result_count).unwrap_or(i32::MAX))
-    .bind(usage.estimated_cost_usd)
-    .bind(usage.estimated_cost_usd.map(|_| "exa-response-estimate"))
-    .bind(usage.estimated_cost_usd.map(|_| "provider_estimate"))
-    .bind(metadata)
-    .execute(state.database.pool())
     .await
     {
         tracing::error!(error = %error, operation, request_id, "failed to record Exa search usage");
     }
-}
-
-fn search_gateway(request_id: &str) -> Result<&'static BriefingDigGateway, ApiError> {
-    SEARCH_GATEWAY
-        .get_or_init(|| BriefingDigGateway::from_env().map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|message| {
-            tracing::error!(error = %message, "agent search gateway configuration failed");
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "search_unavailable",
-                "External search is unavailable",
-                request_id,
-            )
-            .with_retryable(true)
-        })
 }
 
 fn search_provider_error(error: &BriefingDigGatewayError, request_id: &str) -> ApiError {
@@ -688,4 +677,31 @@ fn present_podcast(hit: PodcastEpisodeHit) -> AgentSearchResultResponse {
 
 const fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn library_path_selects_one_positive_content_id_and_known_variant() {
+        assert_eq!(
+            parse_library_path("article/example/title__2026-10-03__source__c42.md"),
+            Some((42, AgentLibraryDocumentVariant::Source))
+        );
+        assert_eq!(
+            parse_library_path("article/example/title__2026-10-03__summary__c42.md"),
+            Some((42, AgentLibraryDocumentVariant::Summary))
+        );
+        for path in [
+            "title__source__c0.md",
+            "title__source__c-1.md",
+            "title__source__c42x.md",
+            "title__unknown__c42.md",
+            "title__source__c42.txt",
+            "title__source__c9223372036854775808.md",
+        ] {
+            assert!(parse_library_path(path).is_none(), "{path}");
+        }
+    }
 }

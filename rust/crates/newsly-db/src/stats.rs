@@ -1,3 +1,4 @@
+use crate::news_visibility::{SUBSCRIBED_AGGREGATORS_CTE, visible_news_predicate};
 use std::time::Duration;
 
 use newsly_domain::AGGREGATOR_KEY_NAMES;
@@ -16,14 +17,8 @@ pub async fn get_unread_counts(
     user_id: i64,
 ) -> Result<UnreadCountsProjection, StatsRepositoryError> {
     Ok(sqlx::query_as::<_, UnreadCountsProjection>(
-        r#"
-        WITH subscribed_aggregators AS MATERIALIZED (
-            SELECT config::jsonb AS config
-            FROM user_scraper_configs
-            WHERE user_id = $1::bigint
-              AND scraper_type = 'aggregator'
-              AND is_active IS TRUE
-        ), content_counts AS (
+        sqlx::AssertSqlSafe(format!(r#"
+        {SUBSCRIBED_AGGREGATORS_CTE}, content_counts AS (
             SELECT c.content_type, count(*)::bigint AS item_count
             FROM contents AS c
             WHERE c.status = 'completed'
@@ -51,24 +46,13 @@ pub async fn get_unread_counts(
                   WHERE nrs.news_item_id = n.id
                     AND nrs.user_id::bigint = $1::bigint
               )
-              AND (
-                  (n.visibility_scope = 'user' AND n.owner_user_id::bigint = $1::bigint)
-                  OR (
-                      n.visibility_scope = 'global'
-                      AND EXISTS (
-                          SELECT 1 FROM subscribed_aggregators AS subscription
-                          WHERE aggregator_config_admits(
-                              subscription.config, n.platform, n.raw_metadata
-                          )
-                      )
-                  )
-              )
+              AND {visibility}
         )
         SELECT
             coalesce((SELECT item_count FROM content_counts WHERE content_type = 'article'), 0)::bigint AS article,
             coalesce((SELECT item_count FROM content_counts WHERE content_type = 'podcast'), 0)::bigint AS podcast,
             coalesce((SELECT item_count FROM news_count), 0)::bigint AS news
-        "#,
+        "#, visibility = visible_news_predicate("n"))),
     )
     .bind(user_id)
     .fetch_one(pool)
@@ -89,15 +73,10 @@ pub async fn get_processing_counts(
     checkout_timeout: Duration,
 ) -> Result<ProcessingCountsProjection, StatsRepositoryError> {
     let timeout_seconds = i64::try_from(checkout_timeout.as_secs()).unwrap_or(i64::MAX);
-    Ok(sqlx::query_as::<_, ProcessingCountsProjection>(
-        r#"
-        WITH subscribed_aggregators AS MATERIALIZED (
-            SELECT config::jsonb AS config
-            FROM user_scraper_configs
-            WHERE user_id = $1::bigint
-              AND scraper_type = 'aggregator'
-              AND is_active IS TRUE
-        ), long_form AS (
+    Ok(
+        sqlx::query_as::<_, ProcessingCountsProjection>(sqlx::AssertSqlSafe(format!(
+            r#"
+        {SUBSCRIBED_AGGREGATORS_CTE}, long_form AS (
             SELECT count(*)::bigint AS item_count
             FROM contents AS c
             WHERE EXISTS (
@@ -141,18 +120,7 @@ pub async fn get_processing_counts(
             SELECT count(*)::bigint AS item_count
             FROM news_items AS n
             WHERE n.status IN ('new', 'processing')
-              AND (
-                  (n.visibility_scope = 'user' AND n.owner_user_id::bigint = $1::bigint)
-                  OR (
-                      n.visibility_scope = 'global'
-                      AND EXISTS (
-                          SELECT 1 FROM subscribed_aggregators AS subscription
-                          WHERE aggregator_config_admits(
-                              subscription.config, n.platform, n.raw_metadata
-                          )
-                      )
-                  )
-              )
+              AND {visibility}
         ), active_sources AS (
             SELECT DISTINCT source_key
             FROM (
@@ -197,12 +165,14 @@ pub async fn get_processing_counts(
             crawls.item_count::bigint AS news_crawl_count
         FROM long_form, news, crawls
         "#,
+            visibility = visible_news_predicate("n")
+        )))
+        .bind(user_id)
+        .bind(timeout_seconds)
+        .bind(AGGREGATOR_KEY_NAMES.as_slice())
+        .fetch_one(pool)
+        .await?,
     )
-    .bind(user_id)
-    .bind(timeout_seconds)
-    .bind(AGGREGATOR_KEY_NAMES.as_slice())
-    .fetch_one(pool)
-    .await?)
 }
 
 pub async fn get_long_form_unread_count(

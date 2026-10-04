@@ -9,28 +9,25 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-async-trait = "=0.1.92"
-base64.workspace = true
-fernet.workspace = true
+async-trait.workspace = true
 newsly-db = { path = "../newsly-db" }
 newsly-domain = { path = "../newsly-domain" }
-newsly-e2b = { path = "../newsly-e2b" }
+newsly-providers = { path = "../newsly-providers" }
 newsly-queue = { path = "../newsly-queue" }
 newsly-worker = { path = "../newsly-worker" }
-object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }
+object_store.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-url = "=2.5.8"
+url.workspace = true
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-tempfile = "=3.27.0"
+tempfile.workspace = true

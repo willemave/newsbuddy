@@ -8,48 +8,6 @@ use utoipa::ToSchema;
 use crate::{OnboardingDiscoveryLaneStatus, OnboardingFastDiscoverResponse};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct OnboardingProfileRequest {
-    #[schemars(length(min = 1, max = 120))]
-    #[schema(min_length = 1, max_length = 120)]
-    pub first_name: String,
-    #[serde(default)]
-    #[schemars(length(max = 12))]
-    #[schema(max_items = 12)]
-    pub interest_topics: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct OnboardingProfileResponse {
-    pub profile_summary: String,
-    #[serde(default)]
-    pub inferred_topics: Vec<String>,
-    #[serde(default)]
-    pub candidate_sources: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct OnboardingVoiceParseRequest {
-    #[schemars(length(min = 3, max = 6_000))]
-    #[schema(min_length = 3, max_length = 6_000)]
-    pub transcript: String,
-    #[schemars(length(max = 20))]
-    #[schema(max_length = 20)]
-    pub locale: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct OnboardingVoiceParseResponse {
-    pub first_name: Option<String>,
-    #[serde(default)]
-    pub interest_topics: Vec<String>,
-    #[schemars(range(min = 0.0, max = 1.0))]
-    #[schema(minimum = 0.0, maximum = 1.0)]
-    pub confidence: Option<f64>,
-    #[serde(default)]
-    pub missing_fields: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct OnboardingAudioDiscoverRequest {
     #[schemars(length(min = 3, max = 8_000))]
     #[schema(min_length = 3, max_length = 8_000)]
@@ -101,17 +59,6 @@ pub struct OnboardingAudioLanePreviewResponse {
     #[serde(default)]
     pub used_fallback: bool,
     pub fallback_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-pub struct OnboardingFastDiscoverRequest {
-    #[schemars(length(min = 3))]
-    #[schema(min_length = 3)]
-    pub profile_summary: String,
-    #[serde(default)]
-    #[schemars(length(max = 12))]
-    #[schema(max_items = 12)]
-    pub inferred_topics: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

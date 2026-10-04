@@ -165,11 +165,3 @@ fn google_default_base_matches_auth_transport() {
         "https://us-central1-aiplatform.googleapis.com"
     );
 }
-
-#[test]
-fn runware_download_requires_public_https_url() {
-    assert!(public_https_url("https://cdn.example.com/image.png").is_ok());
-    assert!(public_https_url("http://cdn.example.com/image.png").is_err());
-    assert!(public_https_url("https://127.0.0.1/image.png").is_err());
-    assert!(public_https_url("https://user:secret@example.com/image.png").is_err());
-}

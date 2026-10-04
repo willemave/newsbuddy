@@ -2,12 +2,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use newsly_db::Database;
-use newsly_domain::{ResourceKey, RuntimeOwner};
 use newsly_extraction::{DocumentExtractorClient, DocumentExtractorConfig};
 use newsly_providers::NewsItemGateway;
-use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
-};
+use newsly_queue::{QueueKernel, TaskType};
+use newsly_worker::HandlerRegistry;
 use newsly_worker::config::NewsItemWorkerProcessConfig;
 use newsly_worker::content::{ContentExtractionRuntime, FirecrawlClient};
 use newsly_worker::news_item::{
@@ -15,9 +13,8 @@ use newsly_worker::news_item::{
     ProcessNewsItemHandler,
 };
 use newsly_worker::process::{
-    initialize_observability, notification_database_url, spawn_shutdown_signal,
+    QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
-use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
 pub(crate) async fn main() -> Result<()> {
@@ -75,37 +72,19 @@ pub(crate) async fn main() -> Result<()> {
     let mut handlers = HandlerRegistry::new();
     handlers.register(EnrichNewsItemArticleHandler::new(Arc::clone(&services)))?;
     handlers.register(ProcessNewsItemHandler::new(services))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [
-            ResourceKey::new(TaskType::EnrichNewsItemArticle.as_str())?,
-            ResourceKey::new(TaskType::ProcessNewsItem.as_str())?,
-        ],
-    )?;
-    let mut claim = ClaimRequest::for_queue(config.worker_id.clone(), TaskQueue::Content, scope);
-    claim.lease_duration = config.lease_duration;
-    let mut worker_config = WorkerConfig::new(claim);
-    worker_config.max_retries = config.max_retries;
-
-    let notification_hub =
-        QueueNotificationHub::spawn(notification_database_url(config.database_url()));
-    let notifications = notification_hub.subscribe();
-    let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
-
-    tracing::info!(
-        worker_id = %config.worker_id,
-        queue = %TaskQueue::Content,
-        task_types = "enrich_news_item_article,process_news_item",
-        embedding_model = %std::env::var("NEWS_EMBEDDING_MODEL")
-            .unwrap_or_else(|_| "openrouter:qwen/qwen3-embedding-8b".to_owned()),
-        "Newsly Rust news-item worker started; only rows stamped for the Rust runtime are claimable"
-    );
-    let run_result = worker.run(shutdown_rx).await;
-    shutdown_task.abort();
-    notification_hub.close().await;
-    database.close().await;
-    let summary = run_result.context("Newsly Rust news-item worker stopped unexpectedly")?;
-    tracing::info!(?summary, "Newsly Rust news-item worker stopped");
-    Ok(())
+    run_queue_worker(
+        database,
+        queue,
+        handlers,
+        notification_database_url(config.database_url()),
+        QueueWorkerRunConfig {
+            process_name: "Newsly Rust news-item worker",
+            worker_id: &config.worker_id,
+            lease_duration: config.lease_duration,
+            max_retries: config.max_retries,
+            task_types: &[TaskType::EnrichNewsItemArticle, TaskType::ProcessNewsItem],
+            task_type_filter: None,
+        },
+    )
+    .await
 }

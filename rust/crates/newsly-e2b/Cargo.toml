@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 async-stream = "=0.3.6"
-async-trait = "=0.1.92"
+async-trait.workspace = true
 base64.workspace = true
 buffa = { version = "=0.9.1", features = ["json"] }
 bytes = { version = "=1.11.1", features = ["serde"] }
@@ -29,9 +29,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream = "=0.1.18"
-tokio-util = "=0.7.19"
+tokio-util.workspace = true
 tracing.workspace = true
-url = { version = "=2.5.8", features = ["serde"] }
+url = { workspace = true, features = ["serde"] }
 uuid.workspace = true
 webpki-roots = "=1.0.6"
 

@@ -18,7 +18,7 @@ pub struct FirecrawlClient {
     endpoint: Url,
     api_key: Option<SecretString>,
     http: Client,
-    cost_usd: Option<f64>,
+    cost_usd: f64,
 }
 
 impl Debug for FirecrawlClient {
@@ -53,7 +53,7 @@ impl FirecrawlClient {
         endpoint: Url,
         api_key: Option<SecretString>,
         timeout: Duration,
-        cost_usd: Option<f64>,
+        cost_usd: f64,
     ) -> Result<Self, FirecrawlError> {
         if !matches!(endpoint.scheme(), "http" | "https")
             || endpoint.host().is_none()
@@ -171,7 +171,7 @@ impl FirecrawlClient {
             title: clean_optional(metadata.title, 500),
             published_at,
             status_code: status.as_u16(),
-            cost_usd: self.cost_usd,
+            cost_usd: Some(self.cost_usd),
         })
     }
 }

@@ -14,10 +14,10 @@ use newsly_db::{
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::learning_deck_tokens::LearningDeckTokenSigner;
-use crate::write_support::{internal_error, require_operation};
+use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
 
-use super::support::{deck_error, external_url, repository_error, token_signer, valid_deck_id};
+use super::support::{deck_error, external_url, repository_error, valid_deck_id};
 
 pub(super) enum PrivateDeckTarget {
     Viewer,
@@ -29,13 +29,11 @@ pub(super) async fn private_deck_url(
     state: &AppState,
     headers: &HeaderMap,
     user_id: i64,
-    stamp: &RouteOwnershipStamp,
+    _stamp: &RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
-    operation_id: &str,
     target: PrivateDeckTarget,
 ) -> Result<Json<LearningDeckUrlResponse>, ApiError> {
     let request_id = request_id_from_headers(headers);
-    require_operation(stamp, operation_id, &request_id)?;
     let deck_id = valid_deck_id(path, &request_id)?;
     let deck = load_learning_deck(state.database.pool(), user_id, deck_id)
         .await
@@ -54,7 +52,9 @@ pub(super) async fn private_deck_url(
             &request_id,
         ));
     }
-    let signed = token_signer(&request_id)?
+    let signed = state
+        .learning_deck_token_signer
+        .as_ref()
         .private_token(deck.id, user_id, Utc::now())
         .map_err(|error| internal_error(error, &request_id))?;
     let suffix = match target {
@@ -81,7 +81,11 @@ pub(super) async fn load_and_present_deck(
         .await
         .map_err(|error| repository_error(error, request_id))?
         .ok_or_else(|| deck_error(StatusCode::NOT_FOUND, "Learning Deck not found", request_id))?;
-    present_deck(projection, &token_signer(request_id)?, request_id)
+    present_deck(
+        projection,
+        state.learning_deck_token_signer.as_ref(),
+        request_id,
+    )
 }
 
 pub(super) fn present_deck(

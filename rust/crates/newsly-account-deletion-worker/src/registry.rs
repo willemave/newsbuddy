@@ -19,7 +19,7 @@ const fn owned_relation(
     }
 }
 
-/// Explicit catalog registry. Its fixture test compares this set with every non-retired baseline
+/// Explicit catalog registry. Its `PostgreSQL` test compares this set with every migrated
 /// `user_id` and `owner_user_id` column, including historical tables such as
 /// `daily_news_digests` that no longer have an active domain model.
 pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
@@ -53,6 +53,18 @@ pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
         "audio_episodes",
         "user_id",
         "DELETE FROM audio_episodes WHERE user_id::bigint = $1",
+    ),
+    // Delete tasks first: record_attempt holds a share lock on its task, so task deletion
+    // drains in-flight attempt writes before these account-owned diagnostic rows are removed.
+    owned_relation(
+        "briefing_composition_attempts",
+        "user_id",
+        "DELETE FROM briefing_composition_attempts WHERE user_id = $1",
+    ),
+    owned_relation(
+        "briefing_composition_cooldowns",
+        "user_id",
+        "DELETE FROM briefing_composition_cooldowns WHERE user_id = $1",
     ),
     owned_relation(
         "briefing_lenses",
@@ -200,54 +212,46 @@ pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
 mod tests {
     use std::collections::BTreeSet;
 
-    use serde::Deserialize;
+    use sqlx::PgPool;
 
     use super::USER_OWNED_RELATIONS;
 
-    #[derive(Debug, Deserialize)]
-    struct CatalogInventory {
-        columns: Vec<CatalogColumn>,
-    }
+    // These shared attribution columns are cleared (or their session deleted) separately.
+    // All other direct account references must be represented in the deletion registry.
+    const SHARED_USER_REFERENCES: &[(&str, &str)] = &[
+        ("cli_link_sessions", "approved_by_user_id"),
+        ("llm_task_actions", "approved_by_user_id"),
+        ("user_api_keys", "created_by_admin_user_id"),
+    ];
 
-    #[derive(Debug, Deserialize)]
-    struct CatalogColumn {
-        relation: String,
-        name: String,
-    }
-
-    #[test]
-    fn registry_covers_every_direct_user_or_owner_column() {
-        let inventory: CatalogInventory = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../newsly-db/baseline/catalog-inventory.json"
-        )))
-        .unwrap();
-        let mut discovered = inventory
-            .columns
-            .into_iter()
-            .filter(|column| matches!(column.name.as_str(), "user_id" | "owner_user_id"))
-            // The immutable Alembic baseline predates the SQLx migration that retires this table.
-            .filter(|column| column.relation != "agent_data_files")
-            .map(|column| (column.relation, column.name))
-            .collect::<BTreeSet<_>>();
-        // The immutable baseline inventory predates these SQLx-owned tables.
-        discovered.extend([
-            ("task_sandbox_sessions".to_owned(), "user_id".to_owned()),
-            (
-                "user_news_category_schedule".to_owned(),
-                "user_id".to_owned(),
-            ),
-            (
-                "news_category_maintenance_runs".to_owned(),
-                "user_id".to_owned(),
-            ),
-            ("news_category_candidates".to_owned(), "user_id".to_owned()),
-        ]);
-        let registered = USER_OWNED_RELATIONS
+    #[sqlx::test(migrations = "../newsly-db/migrations")]
+    async fn registry_covers_every_direct_user_or_owner_column(pool: PgPool) {
+        let discovered = sqlx::query_as::<_, (String, String)>(
+            "SELECT column_name.table_name, column_name.column_name
+             FROM information_schema.columns AS column_name
+             JOIN information_schema.tables AS relation
+               ON relation.table_schema = column_name.table_schema
+              AND relation.table_name = column_name.table_name
+             WHERE column_name.table_schema = 'public'
+               AND relation.table_type = 'BASE TABLE'
+               AND column_name.column_name LIKE '%user_id'
+               AND column_name.data_type IN ('integer', 'bigint')",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let mut registered = USER_OWNED_RELATIONS
             .iter()
             .map(|relation| (relation.relation.to_owned(), relation.column.to_owned()))
             .collect::<BTreeSet<_>>();
         assert_eq!(USER_OWNED_RELATIONS.len(), registered.len());
+        registered.extend(
+            SHARED_USER_REFERENCES
+                .iter()
+                .map(|(relation, column)| ((*relation).to_owned(), (*column).to_owned())),
+        );
         assert_eq!(registered, discovered);
     }
 

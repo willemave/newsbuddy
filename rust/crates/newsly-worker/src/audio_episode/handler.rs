@@ -19,7 +19,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use tracing::info;
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
 use super::finalizer::AudioEpisodeFinalizer;
@@ -443,7 +443,7 @@ async fn prepare_script(
         return prepared_script(script, text, model, "cache", None)
             .map_err(GenerationStageError::Input);
     }
-    let usage_events = Arc::new(AgentUsageSink::new(
+    let usage_events = Arc::new(AgentUsageRecorder::new(
         services.pool.clone(),
         AgentUsageAttribution {
             operation: "audio_episodes.generate_script".to_owned(),

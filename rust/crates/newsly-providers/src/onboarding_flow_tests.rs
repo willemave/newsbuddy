@@ -2,6 +2,17 @@ use super::{
     AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, OnboardingGateway, OnboardingLaneTarget,
     onboarding_provider_parameters,
 };
+use newsly_agent_runtime::{AgentEvent, AgentEventSink, AgentRuntimeError};
+use std::sync::Arc;
+
+#[derive(Debug)]
+struct TestEvents;
+
+impl AgentEventSink for TestEvents {
+    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
+        Ok(())
+    }
+}
 
 #[test]
 fn onboarding_uses_luna_priority_with_low_reasoning() {
@@ -32,6 +43,7 @@ async fn live_luna_priority_audio_plan_satisfies_the_product_contract() {
         .build_audio_plan_with_metadata(
             "I follow AI engineering, startup strategy, and product leadership.",
             Some("en-US"),
+            Arc::new(TestEvents),
         )
         .await;
 

@@ -1,28 +1,22 @@
-use std::collections::BTreeMap;
-
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDate;
 use newsly_contracts::{ContentListResponse, ContentType, PaginationMetadata, SavedSource};
 use newsly_db::{
     ContentCardProjection, ContentFeedCursor, ContentFeedPage, ContentFeedReadFilter,
     list_content_feed, list_knowledge_content, list_recently_read_content, search_visible_content,
 };
 use percent_encoding::percent_decode_str;
-use serde::Deserialize;
-use serde_json::Value;
-use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthenticatedUser;
 use crate::content_read::presentation;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
-use crate::write_support::internal_error;
+use crate::pagination_cursor::{self, InvalidCursor};
+use crate::write_support::{bad_request, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 pub(super) fn router() -> Router<AppState> {
@@ -111,12 +105,9 @@ pub(super) async fn list_contents(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(present_page(
-        page,
-        query.limit,
-        &filters,
-        SavedSourcePolicy::Metadata,
-    )))
+    let response = present_page(page, query.limit, &filters, SavedSourcePolicy::Metadata)
+        .map_err(|error| internal_error(error, &request_id))?;
+    Ok(Json(response))
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,12 +167,9 @@ pub(super) async fn get_recently_read(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(present_page(
-        page,
-        query.limit,
-        &filters,
-        SavedSourcePolicy::Metadata,
-    )))
+    let response = present_page(page, query.limit, &filters, SavedSourcePolicy::Metadata)
+        .map_err(|error| internal_error(error, &request_id))?;
+    Ok(Json(response))
 }
 
 #[derive(Debug, Deserialize)]
@@ -244,12 +232,9 @@ pub(super) async fn get_knowledge_library(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(present_page(
-        page,
-        query.limit,
-        &filters,
-        SavedSourcePolicy::Knowledge,
-    )))
+    let response = present_page(page, query.limit, &filters, SavedSourcePolicy::Knowledge)
+        .map_err(|error| internal_error(error, &request_id))?;
+    Ok(Json(response))
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,8 +245,6 @@ pub(super) struct SearchQuery {
     #[serde(default = "default_limit")]
     limit: usize,
     cursor: Option<String>,
-    #[serde(default)]
-    offset: usize,
 }
 
 #[utoipa::path(
@@ -273,8 +256,7 @@ pub(super) struct SearchQuery {
         ("q" = String, Query, min_length = 2, max_length = 200),
         ("type" = Option<String>, Query, description = "all, article, podcast, or news"),
         ("limit" = Option<usize>, Query, minimum = 1, maximum = 100),
-        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
-        ("offset" = Option<usize>, Query, deprecated, description = "Deprecated offset")
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor")
     ),
     security(("HTTPBearer" = [])),
     responses(
@@ -294,7 +276,8 @@ pub(super) async fn search_contents(
     let request_id = request_id_from_headers(&headers);
     let Query(query) = parse_query(query, &request_id)?;
     validate_limit(query.limit, &request_id)?;
-    if !(2..=200).contains(&query.q.chars().count()) {
+    let normalized_query = query.q.trim();
+    if !(2..=200).contains(&normalized_query.chars().count()) {
         return Err(validation_error(
             "q must contain between 2 and 200 characters",
             &request_id,
@@ -310,33 +293,30 @@ pub(super) async fn search_contents(
             ));
         }
     };
-    let filters = search_filters(&query.q, &query.r#type);
+    let filters = search_filters(normalized_query, &query.r#type);
     let cursor = decode_optional_cursor(query.cursor.as_deref(), &filters, &request_id)?;
     let page = search_visible_content(
         state.database.pool(),
         current_user.id,
-        &query.q,
+        normalized_query,
         content_type,
         cursor.as_ref(),
-        query.offset,
+        0,
         query.limit,
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(present_page(
-        page,
-        query.limit,
-        &filters,
-        SavedSourcePolicy::Metadata,
-    )))
+    let response = present_page(page, query.limit, &filters, SavedSourcePolicy::Metadata)
+        .map_err(|error| internal_error(error, &request_id))?;
+    Ok(Json(response))
 }
 
 fn present_page(
     mut page: ContentFeedPage,
     limit: usize,
-    filters: &Value,
+    filters: &CursorBinding,
     saved_source_policy: SavedSourcePolicy,
-) -> ContentListResponse {
+) -> Result<ContentListResponse, InvalidCursor> {
     let has_more = page.items.len() > limit;
     if has_more {
         page.items.truncate(limit);
@@ -344,7 +324,8 @@ fn present_page(
     let next_cursor = has_more
         .then(|| page.items.last())
         .flatten()
-        .map(|last| encode_cursor(last, filters));
+        .map(|last| encode_cursor(last, filters))
+        .transpose()?;
     let contents = page
         .items
         .into_iter()
@@ -372,7 +353,7 @@ fn present_page(
         })
         .collect::<Vec<_>>();
     let page_size = contents.len();
-    ContentListResponse {
+    Ok(ContentListResponse {
         contents,
         available_dates: page.available_dates,
         content_types: public_content_types(),
@@ -382,7 +363,7 @@ fn present_page(
             page_size,
             total: None,
         },
-    }
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -472,45 +453,44 @@ fn decode_query_component(value: &str, request_id: &str) -> Result<String, ApiEr
 
 fn decode_optional_cursor(
     cursor: Option<&str>,
-    filters: &Value,
+    filters: &CursorBinding,
     request_id: &str,
 ) -> Result<Option<ContentFeedCursor>, ApiError> {
     cursor
         .map(|cursor| decode_cursor(cursor, filters))
         .transpose()
-        .map_err(|message| bad_request(message, request_id))
+        .map_err(|error| bad_request(error.to_string(), request_id))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CursorPayload {
     last_id: i64,
     last_created_at: String,
-    #[serde(default)]
-    filters_hash: Option<String>,
+    filters_hash: String,
     #[serde(default)]
     last_rank: Option<f64>,
 }
 
-fn decode_cursor(cursor: &str, filters: &Value) -> Result<ContentFeedCursor, &'static str> {
-    let decoded = URL_SAFE
-        .decode(cursor)
-        .or_else(|_| URL_SAFE_NO_PAD.decode(cursor))
-        .map_err(|_| "Invalid pagination cursor")?;
-    let payload: CursorPayload =
-        serde_json::from_slice(&decoded).map_err(|_| "Invalid pagination cursor")?;
-    if payload.last_id <= 0 {
-        return Err("Invalid pagination cursor");
-    }
-    if payload
-        .filters_hash
-        .as_deref()
-        .is_some_and(|value| !value.is_empty() && value != filters_hash(filters))
+#[derive(Debug)]
+struct CursorBinding {
+    filters_hash: String,
+    rank_required: bool,
+}
+
+fn decode_cursor(
+    cursor: &str,
+    filters: &CursorBinding,
+) -> Result<ContentFeedCursor, InvalidCursor> {
+    let payload: CursorPayload = pagination_cursor::decode(cursor)?;
+    if payload.last_id <= 0
+        || payload.filters_hash != filters.filters_hash
+        || payload.last_rank.is_some_and(|rank| !rank.is_finite())
+        || (filters.rank_required && payload.last_rank.is_none())
     {
-        return Err("Invalid pagination cursor for filters");
+        return Err(InvalidCursor);
     }
-    let last_timestamp =
-        parse_cursor_datetime(&payload.last_created_at).ok_or("Invalid pagination cursor")?;
+    let last_timestamp = pagination_cursor::decode_timestamp(&payload.last_created_at)?;
     Ok(ContentFeedCursor {
         last_id: payload.last_id,
         last_timestamp,
@@ -518,161 +498,162 @@ fn decode_cursor(cursor: &str, filters: &Value) -> Result<ContentFeedCursor, &'s
     })
 }
 
-fn encode_cursor(item: &ContentCardProjection, filters: &Value) -> String {
-    let mut payload = BTreeMap::new();
-    payload.insert("filters_hash", Value::String(filters_hash(filters)));
-    payload.insert(
-        "last_created_at",
-        Value::String(
-            item.sort_timestamp
-                .naive_utc()
-                .format("%Y-%m-%dT%H:%M:%S%.f")
-                .to_string(),
-        ),
-    );
-    payload.insert("last_id", Value::from(item.content.id));
-    if let Some(rank) = item.search_rank.and_then(serde_json::Number::from_f64) {
-        payload.insert("last_rank", Value::Number(rank));
+fn encode_cursor(
+    item: &ContentCardProjection,
+    filters: &CursorBinding,
+) -> Result<String, InvalidCursor> {
+    if item.content.id <= 0
+        || item.search_rank.is_some_and(|rank| !rank.is_finite())
+        || (filters.rank_required && item.search_rank.is_none())
+    {
+        return Err(InvalidCursor);
     }
-    let payload = payload
-        .into_iter()
-        .map(|(key, value)| (key.to_owned(), value))
-        .collect();
-    URL_SAFE.encode(cursor_compatibility_json(&Value::Object(payload)).as_bytes())
+    pagination_cursor::encode(&CursorPayload {
+        last_id: item.content.id,
+        last_created_at: pagination_cursor::encode_timestamp(item.sort_timestamp.naive_utc()),
+        filters_hash: filters.filters_hash.clone(),
+        last_rank: item.search_rank,
+    })
 }
 
-fn parse_cursor_datetime(value: &str) -> Option<NaiveDateTime> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|value| value.naive_utc())
-        .ok()
-        .or_else(|| {
-            [
-                "%Y-%m-%dT%H:%M:%S%.f",
-                "%Y-%m-%d %H:%M:%S%.f",
-                "%Y-%m-%dT%H:%M:%S",
-                "%Y-%m-%d %H:%M:%S",
-            ]
-            .into_iter()
-            .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
-        })
+fn filter_hash<T: Serialize>(filters: &T) -> String {
+    let bytes = serde_json::to_vec(filters).expect("cursor filters are serializable");
+    newsly_domain::sha256_hex(&bytes)
 }
 
-fn filters_hash(filters: &Value) -> String {
-    hex_encode(&Sha256::digest(
-        cursor_compatibility_json(filters).as_bytes(),
-    ))
+fn normalized_content_types(content_types: &[String]) -> Vec<String> {
+    let mut values = content_types.to_vec();
+    values.sort();
+    values.dedup();
+    values
 }
 
-fn list_filters(content_types: &[String], date: Option<&str>, read_filter: &str) -> Value {
-    filter_object([
-        (
-            "content_type",
-            (!content_types.is_empty()).then(|| {
-                let mut values = content_types.to_vec();
-                values.sort();
-                Value::Array(values.into_iter().map(Value::String).collect())
-            }),
-        ),
-        ("date", date.map(|value| Value::String(value.to_owned()))),
-        ("read_filter", Some(Value::String(read_filter.to_owned()))),
-    ])
+#[derive(Serialize)]
+struct ListFilters<'a> {
+    route: &'static str,
+    content_type: Vec<String>,
+    date: Option<&'a str>,
+    read_filter: &'a str,
 }
 
-fn recent_filters(content_types: &[String], date: Option<&str>) -> Value {
-    filter_object([
-        (
-            "content_type",
-            (!content_types.is_empty()).then(|| {
-                let mut values = content_types.to_vec();
-                values.sort();
-                Value::Array(values.into_iter().map(Value::String).collect())
-            }),
-        ),
-        ("date", date.map(|value| Value::String(value.to_owned()))),
-    ])
+fn list_filters(content_types: &[String], date: Option<&str>, read_filter: &str) -> CursorBinding {
+    CursorBinding {
+        filters_hash: filter_hash(&ListFilters {
+            route: "content_list",
+            content_type: normalized_content_types(content_types),
+            date,
+            read_filter,
+        }),
+        rank_required: false,
+    }
 }
 
-fn knowledge_filters(query: Option<&str>) -> Value {
-    filter_object([("q", query.map(|value| Value::String(value.to_owned())))])
+#[derive(Serialize)]
+struct RecentFilters<'a> {
+    route: &'static str,
+    content_type: Vec<String>,
+    date: Option<&'a str>,
 }
 
-fn search_filters(query: &str, content_type: &str) -> Value {
-    filter_object([
-        ("q", Some(Value::String(query.to_owned()))),
-        ("type", Some(Value::String(content_type.to_owned()))),
-    ])
+fn recent_filters(content_types: &[String], date: Option<&str>) -> CursorBinding {
+    CursorBinding {
+        filters_hash: filter_hash(&RecentFilters {
+            route: "recently_read",
+            content_type: normalized_content_types(content_types),
+            date,
+        }),
+        rank_required: false,
+    }
 }
 
-fn filter_object<const N: usize>(entries: [(&str, Option<Value>); N]) -> Value {
-    Value::Object(
-        entries
-            .into_iter()
-            .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value)))
-            .collect(),
-    )
+#[derive(Serialize)]
+struct KnowledgeFilters<'a> {
+    route: &'static str,
+    q: Option<&'a str>,
 }
 
-fn cursor_compatibility_json(value: &Value) -> String {
-    match value {
-        Value::Object(object) => format!(
-            "{{{}}}",
-            object
-                .iter()
-                .map(|(key, value)| format!(
-                    "{}: {}",
-                    serde_json::to_string(key).expect("JSON key serialization is infallible"),
-                    cursor_compatibility_json(value)
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Array(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(cursor_compatibility_json)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        other => serde_json::to_string(other).expect("JSON value serialization is infallible"),
+fn knowledge_filters(query: Option<&str>) -> CursorBinding {
+    CursorBinding {
+        filters_hash: filter_hash(&KnowledgeFilters {
+            route: "knowledge",
+            q: query,
+        }),
+        rank_required: query.is_some(),
+    }
+}
+
+#[derive(Serialize)]
+struct SearchFilters<'a> {
+    route: &'static str,
+    q: &'a str,
+    content_type: &'a str,
+}
+
+fn search_filters(query: &str, content_type: &str) -> CursorBinding {
+    CursorBinding {
+        filters_hash: filter_hash(&SearchFilters {
+            route: "search",
+            q: query,
+            content_type,
+        }),
+        rank_required: true,
     }
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
-}
-
-fn bad_request(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::BAD_REQUEST,
-        "bad_request",
-        message,
-        request_id.to_owned(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{cursor_compatibility_json, filters_hash, list_filters};
+    use super::*;
 
     #[test]
-    fn filter_hash_preserves_the_installed_cursor_format() {
-        let filters = list_filters(&["podcast".to_owned(), "article".to_owned()], None, "all");
-        assert_eq!(
-            cursor_compatibility_json(&filters),
-            r#"{"content_type": ["article", "podcast"], "read_filter": "all"}"#
+    fn filter_hash_is_order_independent_and_route_bound() {
+        let first = list_filters(&["podcast".to_owned(), "article".to_owned()], None, "all");
+        let reordered = list_filters(
+            &[
+                "article".to_owned(),
+                "podcast".to_owned(),
+                "article".to_owned(),
+            ],
+            None,
+            "all",
         );
-        assert_eq!(filters_hash(&filters).len(), 64);
+        assert_eq!(first.filters_hash, reordered.filters_hash);
+        let hashes = [
+            first.filters_hash,
+            recent_filters(&[], None).filters_hash,
+            knowledge_filters(None).filters_hash,
+            search_filters("query", "all").filters_hash,
+        ];
+        assert_eq!(
+            hashes
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn bound_cursor_rejects_missing_hash_rank_and_nonpositive_id() {
+        let filters = search_filters("query", "all");
+        let missing_hash = pagination_cursor::encode(&serde_json::json!({
+            "last_id": 1,
+            "last_created_at": "2026-01-02T03:04:05.000000Z",
+            "last_rank": 0.3
+        }))
+        .expect("fixture encodes");
+        assert!(decode_cursor(&missing_hash, &filters).is_err());
+
+        let invalid = CursorPayload {
+            last_id: 0,
+            last_created_at: "2026-01-02T03:04:05.000000Z".to_owned(),
+            filters_hash: filters.filters_hash.clone(),
+            last_rank: None,
+        };
+        let invalid = pagination_cursor::encode(&invalid).expect("fixture encodes");
+        assert!(decode_cursor(&invalid, &filters).is_err());
     }
 }

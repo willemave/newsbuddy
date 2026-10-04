@@ -290,13 +290,12 @@ async fn upsert_fixture_user(
         r#"
         INSERT INTO users (
             apple_id, email, full_name, is_admin, is_active,
-            has_completed_new_user_tutorial, has_completed_live_voice_onboarding,
-            has_completed_onboarding, reading_experience,
+            has_completed_new_user_tutorial, has_completed_onboarding, reading_experience,
             created_at, updated_at
         )
         VALUES (
             $1, $2, $3, FALSE, TRUE,
-            TRUE, TRUE, TRUE, 'briefing',
+            TRUE, TRUE, 'briefing',
             timezone('UTC', now()), timezone('UTC', now())
         )
         ON CONFLICT (apple_id) DO UPDATE SET
@@ -304,7 +303,6 @@ async fn upsert_fixture_user(
             full_name = EXCLUDED.full_name,
             is_active = TRUE,
             has_completed_new_user_tutorial = TRUE,
-            has_completed_live_voice_onboarding = TRUE,
             has_completed_onboarding = TRUE,
             reading_experience = 'briefing',
             updated_at = timezone('UTC', now())
@@ -476,15 +474,13 @@ async fn seed_briefing(
     sqlx::query(
         r#"
         INSERT INTO briefing_states (
-            user_id, version, masthead_title, masthead_deck, last_append_at, last_sweep_at
+            user_id, version, masthead_title, masthead_deck
         )
-        VALUES ($1::bigint::integer, 1, 'Briefing', $2, timezone('UTC', now()), timezone('UTC', now()))
+        VALUES ($1::bigint::integer, 1, 'Briefing', $2)
         ON CONFLICT (user_id) DO UPDATE SET
             version = 1,
             masthead_title = EXCLUDED.masthead_title,
-            masthead_deck = EXCLUDED.masthead_deck,
-            last_append_at = EXCLUDED.last_append_at,
-            last_sweep_at = EXCLUDED.last_sweep_at
+            masthead_deck = EXCLUDED.masthead_deck
         "#,
     )
     .bind(user_id)
@@ -587,12 +583,11 @@ async fn seed_chat(
         r#"
         INSERT INTO chat_sessions (
             user_id, content_id, title, session_type, topic, llm_model, llm_provider,
-            created_at, updated_at, last_message_at, is_archived, council_mode,
-            is_hidden_from_history
+            created_at, updated_at, last_message_at, is_archived
         )
         VALUES (
             $1::bigint::integer, $2::bigint::integer, $3, 'knowledge_chat', 'Async reliability',
-            'openai:gpt-5.6-terra', 'openai', $4, $4, $4, FALSE, FALSE, FALSE
+            'openai:gpt-5.6-terra', 'openai', $4, $4, $4, FALSE
         )
         RETURNING id::bigint
         "#,

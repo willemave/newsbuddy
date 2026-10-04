@@ -12,7 +12,8 @@ mod snapshot;
 pub use naming::{cached_naming, record_naming_attempt};
 
 pub use publication::{apply_partition, load_candidate, save_candidate};
-pub use snapshot::{load_snapshot, lock_snapshot_inputs};
+pub use snapshot::load_snapshot;
+use snapshot::lock_snapshot_inputs;
 
 #[derive(Debug, Clone)]
 pub struct NewsCategoryStory {

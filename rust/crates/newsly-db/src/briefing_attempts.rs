@@ -36,7 +36,7 @@ pub async fn record_attempt(
     }
     if let Some(usage) = usage {
         let count = |value: u64| i32::try_from(value).unwrap_or(i32::MAX);
-        sqlx::query("INSERT INTO vendor_usage_records(provider,model,feature,operation,source,request_id,task_id,user_id,request_count,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,total_tokens,currency,pricing_version,metadata,created_at) VALUES($1,$2,'briefing_compose',$3,'queue',$4,$5,$6,$7,$8,$9,$10,$11,$12,'USD','2026-08-02',$13,timezone('UTC',clock_timestamp()))")
+        sqlx::query("INSERT INTO vendor_usage_records(provider,model,feature,operation,source,request_id,task_id,user_id,request_count,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,total_tokens,currency,metadata,created_at) VALUES($1,$2,'briefing_compose',$3,'queue',$4,$5,$6,$7,$8,$9,$10,$11,$12,'USD',$13,timezone('UTC',clock_timestamp()))")
             .bind(&usage.provider).bind(&usage.model).bind(&usage.operation).bind(&usage.provider_response_id).bind(task_id as i32).bind(user_id as i32)
             .bind(count(usage.usage.request_count)).bind(count(usage.usage.input_tokens)).bind(count(usage.usage.cached_input_tokens)).bind(count(usage.usage.cache_write_tokens)).bind(count(usage.usage.output_tokens)).bind(count(usage.usage.input_tokens.saturating_add(usage.usage.output_tokens)))
             .bind(serde_json::json!({"attempt_id":attempt_id,"fingerprint":fingerprint,"outcome":outcome})).execute(&mut *tx).await?;

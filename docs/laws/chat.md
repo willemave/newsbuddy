@@ -41,3 +41,5 @@ CH19. A content list requested for a specific show or publication preserves that
 CH20. New OpenAI chat sessions and missing-model chat fallbacks use Sol. Existing explicit model selections remain attached to their sessions; this default does not change summarization or other cheap-model work.
 
 CH21. Content retrieval applies source ownership and read/saved filters before paging. Ambiguous followed-source names are surfaced explicitly. Saved content can be browsed without an exact keyword, empty search results remain empty, and returned counts describe the same accessible set as the page.
+
+CH22. Content-grounded chat titles use the first nonblank summary title, feed-preview title, stored title, or short summary, including an artifact overview. Display titles collapse whitespace and bound long text with an ellipsis. New screen-context snapshots contain source context without an account ID line.

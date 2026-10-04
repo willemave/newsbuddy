@@ -11,23 +11,28 @@ use crate::config::RuntimeConfig;
 const MAX_ERROR_BODY_BYTES: usize = 1 << 20;
 const CLIENT_NAME: &str = "rust_cli";
 
-pub type QueryParameters = Vec<(String, String)>;
+pub(crate) type QueryParameters = Vec<(String, String)>;
 
-#[derive(Debug, Clone, Error, PartialEq)]
+#[derive(Debug, Clone, Error, PartialEq, Serialize)]
 #[error("{message}")]
-pub struct ApiError {
-    pub message: String,
-    pub status_code: Option<u16>,
-    pub code: Option<String>,
-    pub details: Option<Box<Value>>,
-    pub retryable: Option<bool>,
-    pub request_id: Option<String>,
+pub(crate) struct ApiError {
+    pub(crate) message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) details: Option<Box<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) request_id: Option<String>,
 }
 
 impl ApiError {
-    pub fn local(message: impl Into<String>) -> Self {
+    pub(crate) fn local(message: impl std::fmt::Display) -> Self {
         Self {
-            message: message.into(),
+            message: message.to_string(),
             status_code: None,
             code: None,
             details: None,
@@ -36,19 +41,23 @@ impl ApiError {
         }
     }
 
-    pub fn local_with_details(message: impl Into<String>, details: Value) -> Self {
+    pub(crate) fn local_with_details(message: impl std::fmt::Display, details: Value) -> Self {
         Self {
             details: Some(Box::new(details)),
             ..Self::local(message)
         }
     }
 
-    pub fn is_status(&self, status: StatusCode) -> bool {
+    pub(crate) fn is_status(&self, status: StatusCode) -> bool {
         self.status_code == Some(status.as_u16())
     }
 
-    fn replace_message_for_status(mut self, status: StatusCode, message: &'static str) -> Self {
-        if self.is_status(status) {
+    fn replace_fallback_message_for_status(
+        mut self,
+        status: StatusCode,
+        message: &'static str,
+    ) -> Self {
+        if self.is_status(status) && self.retryable.is_none() {
             message.clone_into(&mut self.message);
         }
         self
@@ -56,7 +65,7 @@ impl ApiError {
 }
 
 #[derive(Debug, Clone)]
-pub struct Client {
+pub(crate) struct Client {
     base_url: Url,
     api_key: Option<String>,
     version: Option<String>,
@@ -69,7 +78,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the server URL or HTTP client configuration is invalid.
-    pub fn new(
+    pub(crate) fn new(
         config: &RuntimeConfig,
         timeout: Duration,
         client_version: impl Into<String>,
@@ -104,7 +113,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn get_job(&self, job_id: i64) -> Result<Value, ApiError> {
+    pub(crate) async fn get_job(&self, job_id: i64) -> Result<Value, ApiError> {
         self.request_json(Method::GET, &format!("/api/jobs/{job_id}"), true, &[], None)
             .await
     }
@@ -114,7 +123,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when request encoding, transport, or response decoding fails.
-    pub async fn search_agent<T>(&self, request: &T) -> Result<Value, ApiError>
+    pub(crate) async fn search_agent<T>(&self, request: &T) -> Result<Value, ApiError>
     where
         T: Serialize + ?Sized,
     {
@@ -126,7 +135,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when request encoding, transport, or response decoding fails.
-    pub async fn start_onboarding<T>(&self, request: &T) -> Result<Value, ApiError>
+    pub(crate) async fn start_onboarding<T>(&self, request: &T) -> Result<Value, ApiError>
     where
         T: Serialize + ?Sized,
     {
@@ -139,7 +148,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn get_onboarding(&self, run_id: i64) -> Result<Value, ApiError> {
+    pub(crate) async fn get_onboarding(&self, run_id: i64) -> Result<Value, ApiError> {
         self.request_json(
             Method::GET,
             &format!("/api/agent/onboarding/{run_id}"),
@@ -155,7 +164,11 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when request encoding, transport, or response decoding fails.
-    pub async fn complete_onboarding<T>(&self, run_id: i64, request: &T) -> Result<Value, ApiError>
+    pub(crate) async fn complete_onboarding<T>(
+        &self,
+        run_id: i64,
+        request: &T,
+    ) -> Result<Value, ApiError>
     where
         T: Serialize + ?Sized,
     {
@@ -168,12 +181,15 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn list_content(&self, query: &[(String, String)]) -> Result<Value, ApiError> {
-        self.request_json(Method::GET, "/api/content/", true, query, None)
-            .await
-            .map_err(|error| {
-                error.replace_message_for_status(StatusCode::NOT_FOUND, "content route not found")
-            })
+    pub(crate) async fn list_content(&self, query: &[(String, String)]) -> Result<Value, ApiError> {
+        self.request_json_with_not_found(
+            Method::GET,
+            "/api/content/",
+            query,
+            None,
+            "content route not found",
+        )
+        .await
     }
 
     /// List saved Knowledge content with the supplied pagination parameters.
@@ -181,21 +197,18 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn list_knowledge_content(
+    pub(crate) async fn list_knowledge_content(
         &self,
         query: &[(String, String)],
     ) -> Result<Value, ApiError> {
-        self.request_json(
+        self.request_json_with_not_found(
             Method::GET,
             "/api/content/knowledge/list",
-            true,
             query,
             None,
+            "Knowledge route not found",
         )
         .await
-        .map_err(|error| {
-            error.replace_message_for_status(StatusCode::NOT_FOUND, "Knowledge route not found")
-        })
     }
 
     /// Fetch one canonical content item.
@@ -203,18 +216,15 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn get_content(&self, content_id: i64) -> Result<Value, ApiError> {
-        self.request_json(
+    pub(crate) async fn get_content(&self, content_id: i64) -> Result<Value, ApiError> {
+        self.request_json_with_not_found(
             Method::GET,
             &format!("/api/content/{content_id}"),
-            true,
             &[],
             None,
+            "content not found",
         )
         .await
-        .map_err(|error| {
-            error.replace_message_for_status(StatusCode::NOT_FOUND, "content not found")
-        })
     }
 
     /// Submit a URL for processing.
@@ -222,15 +232,16 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when request encoding, transport, or response decoding fails.
-    pub async fn submit_content<T>(&self, request: &T) -> Result<Value, ApiError>
+    pub(crate) async fn submit_content<T>(&self, request: &T) -> Result<Value, ApiError>
     where
         T: Serialize + ?Sized,
     {
-        self.post_authenticated("/api/content/submit", request)
-            .await
-            .map_err(|error| {
-                error.replace_message_for_status(StatusCode::NOT_FOUND, "submit route not found")
-            })
+        self.post_authenticated_with_not_found(
+            "/api/content/submit",
+            request,
+            "submit route not found",
+        )
+        .await
     }
 
     /// List visible content submission statuses.
@@ -238,24 +249,18 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn list_content_submission_statuses(
+    pub(crate) async fn list_content_submission_statuses(
         &self,
         query: &[(String, String)],
     ) -> Result<Value, ApiError> {
-        self.request_json(
+        self.request_json_with_not_found(
             Method::GET,
             "/api/content/submissions/list",
-            true,
             query,
             None,
+            "submission status route not found",
         )
         .await
-        .map_err(|error| {
-            error.replace_message_for_status(
-                StatusCode::NOT_FOUND,
-                "submission status route not found",
-            )
-        })
     }
 
     /// List visible news items.
@@ -263,12 +268,18 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn list_news_items(&self, query: &[(String, String)]) -> Result<Value, ApiError> {
-        self.request_json(Method::GET, "/api/news/items", true, query, None)
-            .await
-            .map_err(|error| {
-                error.replace_message_for_status(StatusCode::NOT_FOUND, "news route not found")
-            })
+    pub(crate) async fn list_news_items(
+        &self,
+        query: &[(String, String)],
+    ) -> Result<Value, ApiError> {
+        self.request_json_with_not_found(
+            Method::GET,
+            "/api/news/items",
+            query,
+            None,
+            "news route not found",
+        )
+        .await
     }
 
     /// Fetch one canonical news item.
@@ -276,18 +287,15 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn get_news_item(&self, news_item_id: i64) -> Result<Value, ApiError> {
-        self.request_json(
+    pub(crate) async fn get_news_item(&self, news_item_id: i64) -> Result<Value, ApiError> {
+        self.request_json_with_not_found(
             Method::GET,
             &format!("/api/news/items/{news_item_id}"),
-            true,
             &[],
             None,
+            "news item not found",
         )
         .await
-        .map_err(|error| {
-            error.replace_message_for_status(StatusCode::NOT_FOUND, "news item not found")
-        })
     }
 
     /// Convert a news item into an article.
@@ -295,18 +303,18 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn convert_news_item_to_article(&self, news_item_id: i64) -> Result<Value, ApiError> {
-        self.request_json(
+    pub(crate) async fn convert_news_item_to_article(
+        &self,
+        news_item_id: i64,
+    ) -> Result<Value, ApiError> {
+        self.request_json_with_not_found(
             Method::POST,
             &format!("/api/news/items/{news_item_id}/convert-to-article"),
-            true,
             &[],
             None,
+            "news item not found",
         )
         .await
-        .map_err(|error| {
-            error.replace_message_for_status(StatusCode::NOT_FOUND, "news item not found")
-        })
     }
 
     /// Mark news items as read.
@@ -314,15 +322,16 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn mark_news_items_read(
+    pub(crate) async fn mark_news_items_read(
         &self,
         request: &BulkMarkReadRequest,
     ) -> Result<Value, ApiError> {
-        self.post_authenticated("/api/news/items/mark-read", request)
-            .await
-            .map_err(|error| {
-                error.replace_message_for_status(StatusCode::NOT_FOUND, "news items not found")
-            })
+        self.post_authenticated_with_not_found(
+            "/api/news/items/mark-read",
+            request,
+            "news items not found",
+        )
+        .await
     }
 
     /// List configured scraper sources.
@@ -330,7 +339,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn list_sources(&self, query: &[(String, String)]) -> Result<Value, ApiError> {
+    pub(crate) async fn list_sources(&self, query: &[(String, String)]) -> Result<Value, ApiError> {
         self.request_json(Method::GET, "/api/scrapers/", true, query, None)
             .await
     }
@@ -340,7 +349,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when request encoding, transport, or response decoding fails.
-    pub async fn subscribe_source<T>(&self, request: &T) -> Result<Value, ApiError>
+    pub(crate) async fn subscribe_source<T>(&self, request: &T) -> Result<Value, ApiError>
     where
         T: Serialize + ?Sized,
     {
@@ -353,7 +362,10 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn start_cli_link(&self, device_name: Option<&str>) -> Result<Value, ApiError> {
+    pub(crate) async fn start_cli_link(
+        &self,
+        device_name: Option<&str>,
+    ) -> Result<Value, ApiError> {
         let request = serde_json::to_value(CliLinkStartRequest {
             device_name: device_name
                 .filter(|name| !name.trim().is_empty())
@@ -379,7 +391,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn poll_cli_link(
+    pub(crate) async fn poll_cli_link(
         &self,
         session_id: &str,
         poll_token: &str,
@@ -400,7 +412,10 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn get_library_manifest(&self, include_source: bool) -> Result<Value, ApiError> {
+    pub(crate) async fn get_library_manifest(
+        &self,
+        include_source: bool,
+    ) -> Result<Value, ApiError> {
         let query = vec![("include_source".to_owned(), include_source.to_string())];
         self.request_json(
             Method::GET,
@@ -417,7 +432,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when the request fails or the response is invalid.
-    pub async fn get_library_file(&self, relative_path: &str) -> Result<Value, ApiError> {
+    pub(crate) async fn get_library_file(&self, relative_path: &str) -> Result<Value, ApiError> {
         let query = vec![("path".to_owned(), relative_path.to_owned())];
         self.request_json(Method::GET, "/api/agent/library/file", true, &query, None)
             .await
@@ -431,6 +446,35 @@ impl Client {
             .map_err(|error| ApiError::local(format!("POST {path} encode request: {error}")))?;
         self.request_json(Method::POST, path, true, &[], Some(&body))
             .await
+    }
+
+    async fn post_authenticated_with_not_found<T>(
+        &self,
+        path: &str,
+        body: &T,
+        fallback: &'static str,
+    ) -> Result<Value, ApiError>
+    where
+        T: Serialize + ?Sized,
+    {
+        self.post_authenticated(path, body).await.map_err(|error| {
+            error.replace_fallback_message_for_status(StatusCode::NOT_FOUND, fallback)
+        })
+    }
+
+    async fn request_json_with_not_found(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<&Value>,
+        fallback: &'static str,
+    ) -> Result<Value, ApiError> {
+        self.request_json(method, path, true, query, body)
+            .await
+            .map_err(|error| {
+                error.replace_fallback_message_for_status(StatusCode::NOT_FOUND, fallback)
+            })
     }
 
     async fn request_json(
@@ -594,6 +638,25 @@ mod tests {
         assert_eq!(error.status_code, Some(502));
         assert_eq!(error.code, None);
         assert_eq!(error.retryable, None);
+    }
+
+    #[test]
+    fn friendly_not_found_text_does_not_replace_server_message() {
+        let body = serde_json::to_vec(&json!({
+            "code": "not_found",
+            "message": "server detail",
+            "details": null,
+            "retryable": false,
+            "request_id": "request-1"
+        }))
+        .unwrap();
+        let structured = decode_api_error(StatusCode::NOT_FOUND, &body)
+            .replace_fallback_message_for_status(StatusCode::NOT_FOUND, "friendly fallback");
+        assert_eq!(structured.message, "server detail");
+
+        let fallback = decode_api_error(StatusCode::NOT_FOUND, b"not json")
+            .replace_fallback_message_for_status(StatusCode::NOT_FOUND, "friendly fallback");
+        assert_eq!(fallback.message, "friendly fallback");
     }
 
     #[test]

@@ -141,10 +141,3 @@ fn layout_rejects_unknown_source_links() {
     };
     assert!(layout.validate("news", &[source(1)]).is_err());
 }
-
-#[test]
-fn embedding_vectors_are_normalized() {
-    let vector = normalize_vector(vec![3.0, 4.0]).expect("valid vector");
-    assert!((vector[0] - 0.6).abs() < 1e-12);
-    assert!((vector[1] - 0.8).abs() < 1e-12);
-}

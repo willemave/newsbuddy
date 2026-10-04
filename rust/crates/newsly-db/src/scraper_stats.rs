@@ -45,12 +45,13 @@ pub async fn get_scraper_config_stats(
     pool: &PgPool,
     user_id: i64,
     configs: &[ScraperConfigProjection],
+    attribution_configs: &[ScraperConfigProjection],
 ) -> Result<HashMap<i64, ScraperConfigStatsProjection>, ScraperStatsRepositoryError> {
     if configs.is_empty() {
         return Ok(HashMap::new());
     }
     let content_rows = load_content_rows(pool, user_id).await?;
-    let index = ConfigIndex::new(configs);
+    let index = ConfigIndex::new(attribution_configs);
     let allowed_content = AllowedContent::new(configs);
     let mut working = configs
         .iter()
@@ -385,27 +386,36 @@ impl ConfigIndex {
 
     pub(super) fn match_content(&self, content: &ContentStatsRow) -> Option<i64> {
         let metadata = content.content_metadata.as_object();
-        if let Some(config_id) = metadata
-            .and_then(|value| value.get("feed_config_id"))
-            .and_then(coerce_config_id)
-            .filter(|config_id| self.ids.contains(config_id))
-        {
+        self.match_values(
+            metadata
+                .and_then(|value| value.get("feed_config_id"))
+                .and_then(coerce_config_id),
+            metadata
+                .and_then(|value| value.get("feed_url"))
+                .and_then(Value::as_str),
+            content.source.as_deref().or_else(|| {
+                metadata
+                    .and_then(|value| value.get("source"))
+                    .and_then(Value::as_str)
+            }),
+        )
+    }
+
+    pub(super) fn match_values(
+        &self,
+        config_id: Option<i64>,
+        feed_url: Option<&str>,
+        source: Option<&str>,
+    ) -> Option<i64> {
+        if let Some(config_id) = config_id.filter(|config_id| self.ids.contains(config_id)) {
             return Some(config_id);
         }
-        if let Some(feed_url) = metadata
-            .and_then(|value| value.get("feed_url"))
-            .and_then(Value::as_str)
-            .and_then(|value| normalized_feed_url(Some(value)))
+        if let Some(feed_url) = normalized_feed_url(feed_url)
             && let Some(matches) = self.feed_urls.get(&feed_url)
             && matches.len() == 1
         {
             return matches.first().copied();
         }
-        let source = content.source.as_deref().or_else(|| {
-            metadata
-                .and_then(|value| value.get("source"))
-                .and_then(Value::as_str)
-        });
         let source = source?.trim().to_lowercase();
         if source.is_empty() {
             return None;
@@ -522,7 +532,9 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
 
-    use super::estimate_next_expected_at;
+    use serde_json::json;
+
+    use super::{ConfigIndex, ScraperConfigProjection, estimate_next_expected_at};
 
     #[test]
     fn expected_interval_uses_at_most_four_recent_samples() {
@@ -535,6 +547,30 @@ mod tests {
         assert_eq!(
             predicted,
             Some(Utc.with_ymd_and_hms(2026, 3, 7, 8, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn full_config_index_rejects_ambiguous_fallbacks_but_keeps_explicit_ids() {
+        let config = |id| ScraperConfigProjection {
+            id,
+            user_id: 7,
+            scraper_type: "atom".to_owned(),
+            display_name: Some("Shared".to_owned()),
+            feed_url: Some("https://example.com/feed/".to_owned()),
+            config: json!({"feed_url": "https://example.com/feed"}),
+            is_active: true,
+            created_at: Utc::now(),
+        };
+        let index = ConfigIndex::new(&[config(11), config(12)]);
+
+        assert_eq!(
+            index.match_values(None, Some("https://example.com/feed"), Some("Shared")),
+            None
+        );
+        assert_eq!(
+            index.match_values(Some(12), Some("https://example.com/feed"), Some("Shared")),
+            Some(12)
         );
     }
 }

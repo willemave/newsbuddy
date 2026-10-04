@@ -2,8 +2,7 @@ mod metadata;
 
 use metadata::{
     append_share_and_chat_request, build_new_metadata, json_truthy, metadata_object,
-    processing_flag, runtime_metadata, set_processing_field, submission_user_id,
-    summary_is_readable,
+    processing_flag, runtime_metadata, set_field, submission_user_id, summary_is_readable,
 };
 use serde_json::{Map, Value};
 use sqlx::{FromRow, Postgres, Transaction};
@@ -115,7 +114,7 @@ pub async fn apply_content_submission(
             input.chat_initial_message,
         );
         if input.deck_source_only {
-            set_processing_field(&mut metadata, "deck_source_only", Value::Bool(true));
+            set_field(&mut metadata, "deck_source_only", Value::Bool(true));
         }
         match insert_content(transaction, input, metadata).await? {
             Some(inserted) => (inserted, false),
@@ -318,7 +317,7 @@ async fn update_existing_content(
         ) == Some(Value::Bool(true))
     {
         let mut metadata = metadata_object(&content.content_metadata);
-        set_processing_field(&mut metadata, "deck_source_only", Value::Bool(false));
+        set_field(&mut metadata, "deck_source_only", Value::Bool(false));
         content.content_metadata = Value::Object(metadata);
         if content.status == "completed" {
             "new".clone_into(&mut content.status);
@@ -327,9 +326,9 @@ async fn update_existing_content(
 
     if input.subscribe_to_feed {
         let mut metadata = metadata_object(&content.content_metadata);
-        set_processing_field(&mut metadata, "subscribe_to_feed", Value::Bool(true));
+        set_field(&mut metadata, "subscribe_to_feed", Value::Bool(true));
         if submission_user_id(&metadata).is_none() {
-            set_processing_field(
+            set_field(
                 &mut metadata,
                 "submitted_by_user_id",
                 Value::from(input.user_id),
@@ -339,7 +338,7 @@ async fn update_existing_content(
             .as_ref()
             .is_some_and(json_truthy)
         {
-            set_processing_field(
+            set_field(
                 &mut metadata,
                 "submitted_via",
                 Value::from(submission_channel),
@@ -350,7 +349,7 @@ async fn update_existing_content(
                 .as_ref()
                 .is_some_and(json_truthy)
         {
-            set_processing_field(&mut metadata, "platform_hint", Value::from(platform));
+            set_field(&mut metadata, "platform_hint", Value::from(platform));
         }
         content.content_metadata = Value::Object(metadata);
     } else if share_and_chat && content.status != "completed" {

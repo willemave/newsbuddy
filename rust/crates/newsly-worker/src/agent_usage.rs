@@ -30,32 +30,6 @@ pub(crate) struct AgentUsageRecorder {
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
-#[derive(Debug)]
-pub(crate) struct AgentUsageSink {
-    recorder: AgentUsageRecorder,
-}
-
-impl AgentUsageSink {
-    pub(crate) fn new(pool: PgPool, attribution: AgentUsageAttribution) -> Self {
-        Self {
-            recorder: AgentUsageRecorder::new(pool, attribution),
-        }
-    }
-
-    pub(crate) async fn finish(&self) {
-        self.recorder.finish().await;
-    }
-}
-
-impl AgentEventSink for AgentUsageSink {
-    fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        if let AgentEvent::Usage { observation } = event {
-            self.recorder.publish(*observation)?;
-        }
-        Ok(())
-    }
-}
-
 impl AgentUsageRecorder {
     pub(crate) fn new(pool: PgPool, attribution: AgentUsageAttribution) -> Self {
         let (sender, mut receiver) = mpsc::unbounded_channel::<AgentModelUsageObservation>();
@@ -95,7 +69,7 @@ impl AgentUsageRecorder {
         }
     }
 
-    pub(crate) fn publish(
+    pub(crate) fn record(
         &self,
         observation: AgentModelUsageObservation,
     ) -> Result<(), AgentRuntimeError> {
@@ -114,6 +88,15 @@ impl AgentUsageRecorder {
         {
             tracing::warn!(error = %error, "agent usage recorder task failed");
         }
+    }
+}
+
+impl AgentEventSink for AgentUsageRecorder {
+    fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
+        if let AgentEvent::Usage { observation } = event {
+            self.record(*observation)?;
+        }
+        Ok(())
     }
 }
 

@@ -5,7 +5,7 @@ use super::{
     ChatTaskPreparationOutcome, ChatTaskRejection, ChatTaskRepositoryError, ChatTaskSnapshot,
     ChatTurnKind, ChatTurnProcessingContext, ContentRow, DIG_DEEPER_FAILURE_MESSAGE, Map,
     MessageRow, ORDER_RETRY_DELAY_SECONDS, Postgres, PrepareChatTask, QueueTaskRow,
-    QueuedChatTaskKind, SessionRow, Transaction, Utc, Value,
+    QueuedChatTaskKind, Transaction, Utc, Value,
     advisory::initialize_stream_attempt,
     context::{
         build_dig_deeper_prompt, get_or_create_dig_deeper_session, lifecycle_is_valid,
@@ -71,7 +71,7 @@ pub(super) async fn prepare_dig_deeper_turn(
     if queue_task.content_id != Some(content_id) {
         return Err(ChatTaskRepositoryError::OwnershipMismatch);
     }
-    let Some(content) = load_content_for_update(transaction, content_id).await? else {
+    let Some(content) = load_content(transaction, content_id).await? else {
         return Ok(ChatTaskPreparationOutcome::Reject(ChatTaskRejection {
             message_id: None,
             session_id: None,
@@ -440,34 +440,7 @@ pub(super) async fn load_queue_task_for_update(
     .await
 }
 
-pub(super) async fn load_session_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-    session_id: i64,
-) -> Result<Option<SessionRow>, sqlx::Error> {
-    sqlx::query_as::<_, SessionRow>(
-        r#"
-        SELECT
-            id::bigint AS id,
-            user_id::bigint AS user_id,
-            content_id::bigint AS content_id,
-            news_item_id::bigint AS news_item_id,
-            title,
-            session_type,
-            topic,
-            context_snapshot,
-            is_hidden_from_history,
-            llm_model,
-            llm_provider,
-            is_archived
-        FROM chat_sessions
-        WHERE id::bigint = $1
-        FOR UPDATE
-        "#,
-    )
-    .bind(session_id)
-    .fetch_optional(&mut **transaction)
-    .await
-}
+pub(super) use crate::chat::{load_session_for_update, lock_active_user};
 
 pub(super) async fn load_message_for_update(
     transaction: &mut Transaction<'_, Postgres>,
@@ -491,13 +464,6 @@ pub(super) async fn load_message_for_update(
     .bind(message_id)
     .fetch_optional(&mut **transaction)
     .await
-}
-
-pub(super) async fn load_content_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-    content_id: i64,
-) -> Result<Option<ContentRow>, sqlx::Error> {
-    load_content(transaction, content_id).await
 }
 
 pub(super) async fn load_content(
@@ -524,19 +490,6 @@ pub(super) async fn load_content(
     .bind(content_id)
     .fetch_optional(&mut **transaction)
     .await
-}
-
-pub(super) async fn lock_active_user(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-) -> Result<bool, sqlx::Error> {
-    Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active = TRUE FOR SHARE",
-    )
-    .bind(user_id)
-    .fetch_optional(&mut **transaction)
-    .await?
-    .is_some())
 }
 
 pub(super) fn validate_prepare_request(

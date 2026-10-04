@@ -1,5 +1,5 @@
 use axum::extract::rejection::{JsonRejection, PathRejection};
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -22,11 +22,9 @@ use serde_json::{Map, Value, json};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
-const CREATE_SHARE_ACTION_OPERATION_ID: &str = "createShareAction";
-const APPROVE_ACTION_OPERATION_ID: &str = "approveLlmTaskAction";
 const MAX_HTTP_URL_CHARS: usize = 2_083;
 const SANDBOX_ROOT: &str = "/data/workspace";
 
@@ -57,21 +55,15 @@ pub(super) async fn create_share_action(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<ShareActionCreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ShareActionResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_SHARE_ACTION_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     let normalized = NormalizedShareAction::try_from_request(payload, &request_id)?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let created = insert_share_action_task(
         &mut transaction,
         &NewShareActionTask {
@@ -99,10 +91,7 @@ pub(super) async fn create_share_action(
         .enqueue_many_in_transaction(&mut transaction, vec![request])
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -185,10 +174,9 @@ pub(super) async fn approve_share_action_callback(
     headers: HeaderMap,
     path: Result<Path<(i64, i64)>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<LlmTaskActionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, APPROVE_ACTION_OPERATION_ID, &request_id)?;
     let Path((task_id, action_id)) =
         path.map_err(|rejection| validation_error(rejection.body_text(), &request_id))?;
     if task_id <= 0 || action_id <= 0 {
@@ -198,13 +186,8 @@ pub(super) async fn approve_share_action_callback(
         ));
     }
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let approved =
         persist_share_action_approval(&mut transaction, current_user.id, task_id, action_id)
             .await
@@ -212,10 +195,7 @@ pub(super) async fn approve_share_action_callback(
     let (task, action) = match approved {
         ApproveShareActionOutcome::Approved { task, action } => (task, action),
         ApproveShareActionOutcome::ApprovedGeneric { action } => {
-            transaction
-                .commit()
-                .await
-                .map_err(|error| internal_error(error, &request_id))?;
+            crate::write_support::commit(transaction, &request_id).await?;
             return Ok(Json(present_action(action, &request_id)?));
         }
         ApproveShareActionOutcome::InvalidStatus(status) => {
@@ -245,7 +225,6 @@ pub(super) async fn approve_share_action_callback(
                 action_id,
                 "ShareActionResultValidationError",
                 &error.to_string(),
-                None,
                 &request_id,
             )
             .await;
@@ -276,7 +255,6 @@ pub(super) async fn approve_share_action_callback(
                 action_id,
                 "ShareActionApplicationError",
                 &error.to_string(),
-                None,
                 &request_id,
             )
             .await;
@@ -302,10 +280,7 @@ pub(super) async fn approve_share_action_callback(
         )
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| internal_error(error, &request_id))?;
+        crate::write_support::commit(transaction, &request_id).await?;
         return Err(application_error(message, &request_id));
     }
     mark_share_action_applied(&mut transaction, action_id, &result)
@@ -317,10 +292,7 @@ pub(super) async fn approve_share_action_callback(
     let projection = load_share_action_action(&mut transaction, task_id, action_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(present_action(projection, &request_id)?))
 }
 
@@ -333,16 +305,10 @@ async fn persist_approval_failure(
     action_id: i64,
     error_type: &str,
     message: &str,
-    action_result: Option<&Map<String, Value>>,
     request_id: &str,
 ) -> Result<Json<LlmTaskActionResponse>, ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     fail_share_action_approval(
         &mut transaction,
         user_id,
@@ -350,14 +316,10 @@ async fn persist_approval_failure(
         action_id,
         error_type,
         message,
-        action_result,
     )
     .await
     .map_err(|error| internal_error(error, request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
+    crate::write_support::commit(transaction, request_id).await?;
     Err(application_error(message, request_id))
 }
 
@@ -549,18 +511,7 @@ fn repository_error(error: ShareActionRepositoryError, request_id: &str) -> ApiE
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn not_found(request_id: &str) -> ApiError {

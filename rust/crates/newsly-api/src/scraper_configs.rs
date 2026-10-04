@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use axum::extract::rejection::{JsonRejection, QueryRejection};
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -26,34 +26,14 @@ use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::scraper_config_normalization::{
     apply_validated_feed_url, feed_url, normalize_create_input, normalize_for_stored_type,
-    normalize_update_input, requires_feed_probe, response_limit, validate_display_name,
+    normalize_update_input, response_limit, validate_display_name,
 };
-use crate::write_support::{
-    bad_request, decode_json, internal_error, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 pub(super) mod history;
 
-const ALLOWED_SCRAPER_TYPES: [&str; 6] = [
-    "aggregator",
-    "atom",
-    "podcast_rss",
-    "reddit",
-    "substack",
-    "youtube",
-];
-
-const CREATE_OPERATION_ID: &str = "createScraperConfig";
-const UPDATE_OPERATION_ID: &str = "updateScraperConfig";
-const DELETE_OPERATION_ID: &str = "deleteScraperConfigEndpoint";
-const CREATE_CONTENT_OPERATION_ID: &str = "createContentScraperConfig";
-const UPDATE_CONTENT_OPERATION_ID: &str = "updateContentScraperConfig";
-const DELETE_CONTENT_OPERATION_ID: &str = "deleteContentScraperConfigEndpoint";
-const SUBSCRIBE_OPERATION_ID: &str = "subscribeScrapersToFeed";
-const SUBSCRIBE_CONTENT_OPERATION_ID: &str = "subscribeContentScrapersToFeed";
 const INITIAL_BACKFILL_COUNT: i64 = 2;
-const BACKFILL_SUPPORTED_TYPES: [&str; 3] = ["substack", "atom", "podcast_rss"];
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -73,22 +53,6 @@ pub(super) fn router() -> Router<AppState> {
         .route(
             "/api/scrapers/{config_id}/history",
             get(history::feed_history),
-        )
-        .route(
-            "/api/content/scrapers",
-            get(list_content_scraper_configs).post(create_content_scraper_config),
-        )
-        .route(
-            "/api/content/scrapers/",
-            get(list_content_scraper_configs).post(create_content_scraper_config),
-        )
-        .route(
-            "/api/content/scrapers/{config_id}",
-            put(update_content_scraper_config).delete(delete_content_scraper_config_endpoint),
-        )
-        .route(
-            "/api/content/scrapers/subscribe",
-            post(subscribe_content_to_feed),
         )
 }
 
@@ -133,34 +97,6 @@ pub(super) async fn list_scraper_configs(
     list_configs(state, headers, current_user, query).await
 }
 
-#[utoipa::path(
-    get,
-    path = "/api/content/scrapers/",
-    operation_id = "listContentScraperConfigs",
-    tag = "scrapers",
-    params(
-        ("type" = Option<String>, Query, description = "Single scraper type"),
-        ("types" = Option<String>, Query, description = "Comma-separated scraper types"),
-        ("include_stats" = Option<bool>, Query, description = "Include derived source stats")
-    ),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Scraper configurations", body = [ScraperConfigResponse]),
-        (status = 400, description = "Unsupported scraper type", body = newsly_contracts::ErrorEnvelope),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn list_content_scraper_configs(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    query: Result<Query<ScraperConfigListQuery>, QueryRejection>,
-) -> Result<Json<Vec<ScraperConfigResponse>>, ApiError> {
-    list_configs(state, headers, current_user, query).await
-}
-
 async fn list_configs(
     state: AppState,
     headers: HeaderMap,
@@ -178,9 +114,21 @@ async fn list_configs(
     .await
     .map_err(|error| internal_error(error, &request_id))?;
     let stats_by_config = if query.include_stats {
-        get_scraper_config_stats(state.database.pool(), current_user.id, &configs)
-            .await
-            .map_err(|error| internal_error(error, &request_id))?
+        let attribution_configs = if requested_types.is_some() {
+            load_scraper_configs(state.database.pool(), current_user.id, None)
+                .await
+                .map_err(|error| internal_error(error, &request_id))?
+        } else {
+            configs.clone()
+        };
+        get_scraper_config_stats(
+            state.database.pool(),
+            current_user.id,
+            &configs,
+            &attribution_configs,
+        )
+        .await
+        .map_err(|error| internal_error(error, &request_id))?
     } else {
         HashMap::new()
     };
@@ -218,52 +166,10 @@ pub(super) async fn create_scraper_config(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<CreateUserScraperConfig>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
-    create_config(
-        state,
-        headers,
-        current_user,
-        stamp,
-        payload,
-        CREATE_OPERATION_ID,
-    )
-    .await
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/content/scrapers/",
-    operation_id = "createContentScraperConfig",
-    tag = "scrapers",
-    request_body = CreateUserScraperConfig,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 201, description = "Scraper config created", body = ScraperConfigResponse),
-        (status = 400, description = "Invalid or duplicate scraper config", body = newsly_contracts::ErrorEnvelope),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn create_content_scraper_config(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<CreateUserScraperConfig>, JsonRejection>,
-) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
-    create_config(
-        state,
-        headers,
-        current_user,
-        stamp,
-        payload,
-        CREATE_CONTENT_OPERATION_ID,
-    )
-    .await
+    create_config(state, headers, current_user, stamp, payload).await
 }
 
 async fn create_config(
@@ -272,10 +178,8 @@ async fn create_config(
     current_user: AuthenticatedUser,
     stamp: RouteOwnershipStamp,
     payload: Result<Json<CreateUserScraperConfig>, JsonRejection>,
-    operation_id: &str,
 ) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, operation_id, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_display_name(payload.display_name.as_deref())
         .map_err(|error| validation_error(error, &request_id))?;
@@ -297,7 +201,7 @@ async fn create_config(
             &request_id,
         ));
     }
-    if requires_feed_probe(scraper_type) {
+    if payload.scraper_type.requires_feed_probe() {
         let effective_url = state
             .feed_validator
             .validate_feed_url(&requested_feed_url)
@@ -318,13 +222,8 @@ async fn create_config(
             .and_then(Value::as_str)
             .unwrap_or_default(),
     );
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let record = persist_scraper_config(
         &mut transaction,
         &NewScraperConfig {
@@ -343,10 +242,7 @@ async fn create_config(
         }
         other => internal_error(other, &request_id),
     })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let record_stats = stats_for_record(&state, current_user.id, &record, &request_id).await?;
     Ok((
         StatusCode::CREATED,
@@ -375,53 +271,10 @@ pub(super) async fn subscribe_to_feed(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<SubscribeToFeedRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
-    subscribe(
-        state,
-        headers,
-        current_user,
-        stamp,
-        payload,
-        SUBSCRIBE_OPERATION_ID,
-    )
-    .await
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/content/scrapers/subscribe",
-    operation_id = "subscribeContentScrapersToFeed",
-    tag = "scrapers",
-    request_body = SubscribeToFeedRequest,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Existing subscription reactivated or already active", body = ScraperConfigResponse),
-        (status = 201, description = "Feed subscription created", body = ScraperConfigResponse),
-        (status = 400, description = "Invalid or unsupported feed", body = newsly_contracts::ErrorEnvelope),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn subscribe_content_to_feed(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<SubscribeToFeedRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
-    subscribe(
-        state,
-        headers,
-        current_user,
-        stamp,
-        payload,
-        SUBSCRIBE_CONTENT_OPERATION_ID,
-    )
-    .await
+    subscribe(state, headers, current_user, stamp, payload).await
 }
 
 #[expect(
@@ -434,10 +287,8 @@ async fn subscribe(
     current_user: AuthenticatedUser,
     stamp: RouteOwnershipStamp,
     payload: Result<Json<SubscribeToFeedRequest>, JsonRejection>,
-    operation_id: &str,
 ) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, operation_id, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     let scraper_type = subscription_scraper_type(&payload.feed_type, &request_id)?;
     validate_display_name(payload.display_name.as_deref())
@@ -465,7 +316,7 @@ async fn subscribe(
         .await;
     }
 
-    if requires_feed_probe(scraper_type.as_str()) {
+    if scraper_type.requires_feed_probe() {
         let effective_url = state
             .feed_validator
             .validate_feed_url(&requested_feed_url)
@@ -478,13 +329,8 @@ async fn subscribe(
     }
     let normalized_feed_url = canonicalize_feed_url(feed_url(&config));
     let config_value = Value::Object(config);
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let created = persist_scraper_config(
         &mut transaction,
         &NewScraperConfig {
@@ -535,10 +381,7 @@ async fn subscribe(
         &request_id,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     present_subscription(
         &state,
         current_user.id,
@@ -578,13 +421,8 @@ async fn finalize_existing_subscription(
     canonical_feed_url: &str,
     request_id: &str,
 ) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     let locked = persist_scraper_config_update(
         &mut transaction,
         user_id,
@@ -620,10 +458,7 @@ async fn finalize_existing_subscription(
             enqueue_initial_backfill(state, &mut transaction, user_id, &record, request_id).await?;
         (record, FeedSubscriptionOutcome::Reactivated, task_id)
     };
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
+    crate::write_support::commit(transaction, request_id).await?;
     present_subscription(
         state,
         user_id,
@@ -642,7 +477,11 @@ async fn enqueue_initial_backfill(
     config: &ScraperConfigProjection,
     request_id: &str,
 ) -> Result<Option<i64>, ApiError> {
-    if !BACKFILL_SUPPORTED_TYPES.contains(&config.scraper_type.as_str()) {
+    let kind = config
+        .scraper_type
+        .parse::<ScraperType>()
+        .map_err(|error| internal_error(error, request_id))?;
+    if !kind.supports_backfill() {
         return Ok(None);
     }
     let mut request = EnqueueRequest::new(TaskType::BackfillFeeds);
@@ -683,18 +522,9 @@ async fn present_subscription(
 }
 
 fn subscription_scraper_type(feed_type: &str, request_id: &str) -> Result<ScraperType, ApiError> {
-    match feed_type {
-        "substack" => Ok(ScraperType::Substack),
-        "atom" => Ok(ScraperType::Atom),
-        "podcast_rss" => Ok(ScraperType::PodcastRss),
-        "youtube" => Ok(ScraperType::Youtube),
-        "reddit" => Ok(ScraperType::Reddit),
-        "aggregator" => Ok(ScraperType::Aggregator),
-        other => Err(bad_request(
-            format!("Unsupported feed type: {other}"),
-            request_id,
-        )),
-    }
+    feed_type
+        .parse()
+        .map_err(|_| bad_request(format!("Unsupported feed type: {feed_type}"), request_id))
 }
 
 fn subscription_config(
@@ -711,6 +541,18 @@ fn subscription_config(
             )
         })?;
         config.insert("subreddit".to_owned(), Value::String(subreddit));
+    } else if scraper_type == ScraperType::Aggregator {
+        // Chat aggregator cards subscribe by their `aggregator://<key>` feed URL.
+        let key = feed_url_value
+            .trim()
+            .strip_prefix("aggregator://")
+            .ok_or_else(|| {
+                bad_request(
+                    "Aggregator subscriptions require an aggregator://<key> URL",
+                    request_id,
+                )
+            })?;
+        config.insert("key".to_owned(), Value::String(key.to_owned()));
     } else {
         config.insert(
             "feed_url".to_owned(),
@@ -751,56 +593,10 @@ pub(super) async fn update_scraper_config(
     Path(config_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<UpdateUserScraperConfig>, JsonRejection>,
 ) -> Result<Json<ScraperConfigResponse>, ApiError> {
-    update_config(
-        state,
-        config_id,
-        headers,
-        current_user,
-        stamp,
-        payload,
-        UPDATE_OPERATION_ID,
-    )
-    .await
-}
-
-#[utoipa::path(
-    put,
-    path = "/api/content/scrapers/{config_id}",
-    operation_id = "updateContentScraperConfig",
-    tag = "scrapers",
-    params(("config_id" = i64, Path, description = "Scraper config ID")),
-    request_body = UpdateUserScraperConfig,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Scraper config updated", body = ScraperConfigResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Scraper config not found or invalid", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn update_content_scraper_config(
-    State(state): State<AppState>,
-    Path(config_id): Path<i64>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<UpdateUserScraperConfig>, JsonRejection>,
-) -> Result<Json<ScraperConfigResponse>, ApiError> {
-    update_config(
-        state,
-        config_id,
-        headers,
-        current_user,
-        stamp,
-        payload,
-        UPDATE_CONTENT_OPERATION_ID,
-    )
-    .await
+    update_config(state, config_id, headers, current_user, stamp, payload).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -811,10 +607,8 @@ async fn update_config(
     current_user: AuthenticatedUser,
     stamp: RouteOwnershipStamp,
     payload: Result<Json<UpdateUserScraperConfig>, JsonRejection>,
-    operation_id: &str,
 ) -> Result<Json<ScraperConfigResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, operation_id, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_display_name(payload.display_name.as_deref())
         .map_err(|error| validation_error(error, &request_id))?;
@@ -832,7 +626,11 @@ async fn update_config(
         .transpose()
         .map_err(|error| not_found_error(error.to_string(), &request_id))?;
     if let Some(config) = config.as_mut()
-        && requires_feed_probe(&prepared.scraper_type)
+        && prepared
+            .scraper_type
+            .parse::<ScraperType>()
+            .map_err(|error| not_found_error(error, &request_id))?
+            .requires_feed_probe()
     {
         let requested_feed_url = feed_url(config).to_owned();
         let effective_url = state
@@ -854,13 +652,8 @@ async fn update_config(
         .and_then(|config| config.get("feed_url"))
         .and_then(Value::as_str)
         .map(canonicalize_feed_url);
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let record = persist_scraper_config_update(
         &mut transaction,
         current_user.id,
@@ -890,10 +683,7 @@ async fn update_config(
         .with_retryable(true),
         other => internal_error(other, &request_id),
     })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let record_stats = stats_for_record(&state, current_user.id, &record, &request_id).await?;
     Ok(Json(config_response(record, Some(&record_stats))))
 }
@@ -918,50 +708,9 @@ pub(super) async fn delete_scraper_config_endpoint(
     Path(config_id): Path<i64>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<StatusCode, ApiError> {
-    delete_config(
-        state,
-        config_id,
-        headers,
-        current_user,
-        stamp,
-        DELETE_OPERATION_ID,
-    )
-    .await
-}
-
-#[utoipa::path(
-    delete,
-    path = "/api/content/scrapers/{config_id}",
-    operation_id = "deleteContentScraperConfigEndpoint",
-    tag = "scrapers",
-    params(("config_id" = i64, Path, description = "Scraper config ID")),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 204, description = "Scraper config deleted"),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Scraper config not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn delete_content_scraper_config_endpoint(
-    State(state): State<AppState>,
-    Path(config_id): Path<i64>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-) -> Result<StatusCode, ApiError> {
-    delete_config(
-        state,
-        config_id,
-        headers,
-        current_user,
-        stamp,
-        DELETE_CONTENT_OPERATION_ID,
-    )
-    .await
+    delete_config(state, config_id, headers, current_user, stamp).await
 }
 
 async fn delete_config(
@@ -970,17 +719,10 @@ async fn delete_config(
     headers: HeaderMap,
     current_user: AuthenticatedUser,
     stamp: RouteOwnershipStamp,
-    operation_id: &str,
 ) -> Result<StatusCode, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, operation_id, &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     persist_scraper_config_deletion(&mut transaction, current_user.id, config_id)
         .await
         .map_err(|error| match error {
@@ -989,10 +731,7 @@ async fn delete_config(
             }
             other => internal_error(other, &request_id),
         })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1019,7 +758,7 @@ fn requested_types(
     }
     let invalid = requested
         .iter()
-        .filter(|value| !ALLOWED_SCRAPER_TYPES.contains(&value.as_str()))
+        .filter(|value| value.parse::<ScraperType>().is_err())
         .cloned()
         .collect::<Vec<_>>();
     if !invalid.is_empty() {
@@ -1037,11 +776,19 @@ async fn stats_for_record(
     record: &ScraperConfigProjection,
     request_id: &str,
 ) -> Result<ScraperConfigStatsProjection, ApiError> {
-    get_scraper_config_stats(state.database.pool(), user_id, std::slice::from_ref(record))
+    let attribution_configs = load_scraper_configs(state.database.pool(), user_id, None)
         .await
-        .map_err(|error| internal_error(error, request_id))?
-        .remove(&record.id)
-        .ok_or_else(|| internal_error("scraper stats omitted requested config", request_id))
+        .map_err(|error| internal_error(error, request_id))?;
+    get_scraper_config_stats(
+        state.database.pool(),
+        user_id,
+        std::slice::from_ref(record),
+        &attribution_configs,
+    )
+    .await
+    .map_err(|error| internal_error(error, request_id))?
+    .remove(&record.id)
+    .ok_or_else(|| internal_error("scraper stats omitted requested config", request_id))
 }
 
 fn config_response(
@@ -1096,18 +843,7 @@ fn decode_query<T>(
 }
 
 fn validation_error(error: impl std::fmt::Display, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        json!({"errors": [{"message": error.to_string()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(error.to_string(), request_id)
 }
 
 fn not_found_error(message: impl Into<String>, request_id: &str) -> ApiError {
@@ -1117,4 +853,22 @@ fn not_found_error(message: impl Into<String>, request_id: &str) -> ApiError {
         message,
         request_id.to_owned(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aggregator_subscription_config_is_keyed_by_the_card_feed_url() {
+        let config =
+            subscription_config(ScraperType::Aggregator, " aggregator://HFPapers ", "test")
+                .unwrap();
+        assert_eq!(config["key"], "hfpapers");
+        assert_eq!(config["feed_url"], "aggregator://hfpapers");
+        assert!(subscription_config(ScraperType::Aggregator, "https://arxiv.org", "test").is_err());
+        assert!(
+            subscription_config(ScraperType::Aggregator, "aggregator://unknown", "test").is_err()
+        );
+    }
 }

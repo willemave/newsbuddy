@@ -174,12 +174,12 @@ impl XSyncFinalizer {
                 applied.content_id
             };
 
+            let snapshot = build_snapshot(tweet, &bookmarks.included_tweets)?;
+            persist_x_bookmark_snapshot(transaction, shell_content_id, &snapshot).await?;
             let destination_content_id =
                 resolve_x_bookmark_destination(transaction, shell_content_id)
                     .await?
                     .ok_or(XSyncFinalizeError::MissingContent(shell_content_id))?;
-            let snapshot = build_snapshot(tweet, &bookmarks.included_tweets)?;
-            persist_x_bookmark_snapshot(transaction, shell_content_id, &snapshot).await?;
             upsert_x_bookmark_ledger(
                 transaction,
                 self.plan.prepared.connection_id,

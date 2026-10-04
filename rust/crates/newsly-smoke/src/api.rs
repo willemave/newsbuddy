@@ -112,15 +112,3 @@ impl SmokeApi {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::MAX_ERROR_BODY_CHARS;
-
-    #[test]
-    fn diagnostic_bodies_remain_bounded() {
-        let value = "x".repeat(MAX_ERROR_BODY_CHARS + 100);
-        let bounded = value.chars().take(MAX_ERROR_BODY_CHARS).collect::<String>();
-        assert_eq!(bounded.len(), MAX_ERROR_BODY_CHARS);
-    }
-}

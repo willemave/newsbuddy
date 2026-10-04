@@ -1,5 +1,5 @@
 use axum::extract::rejection::{JsonRejection, PathRejection};
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -15,10 +15,8 @@ use newsly_db::{
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
-
-const REJECT_ACTION_OPERATION_ID: &str = "rejectLlmTaskAction";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -92,22 +90,16 @@ pub(super) async fn reject_task_action(
     headers: HeaderMap,
     path: Result<Path<(i64, i64)>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<LlmTaskActionRejectRequest>, JsonRejection>,
 ) -> Result<Json<LlmTaskActionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REJECT_ACTION_OPERATION_ID, &request_id)?;
     let Path((task_id, action_id)) = valid_action_path(path, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     let reason = validate_reason(payload.reason, &request_id)?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = persist_rejection(
         &mut transaction,
         current_user.id,
@@ -135,10 +127,7 @@ pub(super) async fn reject_task_action(
             return Err(not_found("LLM task", &request_id));
         }
     };
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(present_action(projection, &request_id)?))
 }
 
@@ -214,18 +203,7 @@ fn validate_reason(reason: Option<String>, request_id: &str) -> Result<Option<St
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn not_found(resource: &str, request_id: &str) -> ApiError {

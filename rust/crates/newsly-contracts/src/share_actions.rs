@@ -67,6 +67,16 @@ string_enum!(LlmTaskMode {
 });
 
 impl LlmTaskMode {
+    pub const SHARE_ACTIONS: [Self; 7] = [
+        Self::AddContent,
+        Self::AddToBriefing,
+        Self::AddLinks,
+        Self::AddFeed,
+        Self::Chat,
+        Self::Presentation,
+        Self::BookmarkOnly,
+    ];
+
     pub const fn is_share_action(self) -> bool {
         matches!(
             self,
@@ -133,22 +143,6 @@ pub struct ShareActionCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ShareActionPresentationCandidate {
-    pub source_url: Option<String>,
-    pub title: Option<String>,
-    pub interests_prompt: Option<String>,
-    pub artifact_mode: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ShareActionChatCandidate {
-    pub content_url: Option<String>,
-    pub initial_message: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ShareActionBriefingTarget {
     Feed {
@@ -193,8 +187,6 @@ pub struct ShareActionAgentResult {
     pub feed_url: Option<String>,
     #[serde(default)]
     pub content_urls: Vec<ShareActionCandidate>,
-    pub presentation: Option<ShareActionPresentationCandidate>,
-    pub chat: Option<ShareActionChatCandidate>,
     pub briefing_target: Option<ShareActionBriefingTarget>,
     pub title: Option<String>,
     pub platform: Option<String>,
@@ -219,5 +211,20 @@ impl ShareActionAgentResult {
             return Err("share action confidence must be between 0 and 1".to_owned());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LlmTaskMode;
+
+    #[test]
+    fn share_action_modes_match_the_public_acceptance_rule() {
+        assert!(
+            LlmTaskMode::SHARE_ACTIONS
+                .iter()
+                .all(|mode| mode.is_share_action())
+        );
+        assert!(!LlmTaskMode::Generic.is_share_action());
     }
 }

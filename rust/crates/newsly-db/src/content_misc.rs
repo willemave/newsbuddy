@@ -4,9 +4,10 @@ use sqlx::{Acquire, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 use crate::content_read::{
-    ContentDetailProjection, ContentReadRepositoryError, find_visible_content_detail,
-    find_visible_news_item_detail,
+    ContentReadRepositoryError, find_visible_content_detail, find_visible_news_item_detail,
 };
+use crate::scraper_stats::ConfigIndex;
+use crate::{ScraperConfigRepositoryError, list_scraper_configs};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContentConversionPlan {
@@ -254,54 +255,6 @@ async fn reuse_news_body(
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ContentNarrationPlan {
-    pub content: ContentDetailProjection,
-}
-
-pub async fn prepare_content_narration(
-    pool: &PgPool,
-    user_id: i64,
-    content_id: i64,
-) -> Result<Option<ContentNarrationPlan>, ContentMiscRepositoryError> {
-    Ok(find_visible_content_detail(pool, user_id, content_id)
-        .await?
-        .map(|content| ContentNarrationPlan { content }))
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TweetContentPlan {
-    pub id: i64,
-    pub url: String,
-    pub title: String,
-    pub source: Option<String>,
-    pub content_type: String,
-    pub status: String,
-    pub metadata: Value,
-}
-
-pub async fn prepare_tweet_content(
-    pool: &PgPool,
-    user_id: i64,
-    content_id: i64,
-) -> Result<Option<TweetContentPlan>, ContentMiscRepositoryError> {
-    let Some(content) = find_visible_content_detail(pool, user_id, content_id).await? else {
-        return Ok(None);
-    };
-    Ok(Some(TweetContentPlan {
-        id: content.id,
-        url: content.url,
-        title: content
-            .title
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| format!("Content {}", content.id)),
-        source: content.source,
-        content_type: content.content_type,
-        status: content.status,
-        metadata: content.content_metadata,
-    }))
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct FeedBackfillPlan {
     pub content_id: i64,
     pub config_id: i64,
@@ -327,15 +280,6 @@ struct FeedContentRow {
     source: Option<String>,
     content_metadata: Value,
     is_accessible: bool,
-}
-
-#[derive(Debug, FromRow)]
-struct FeedConfigRow {
-    id: i64,
-    scraper_type: String,
-    display_name: Option<String>,
-    feed_url: Option<String>,
-    config: Value,
 }
 
 pub async fn prepare_feed_backfill(
@@ -408,72 +352,29 @@ async fn resolve_feed_config(
     pool: &PgPool,
     user_id: i64,
     content: &FeedContentRow,
-) -> Result<Option<FeedConfigRow>, sqlx::Error> {
-    if let Some(config_id) = json_i64(content.content_metadata.get("feed_config_id")) {
-        let row = sqlx::query_as::<_, FeedConfigRow>(
-            r#"
-            SELECT id::bigint, scraper_type, display_name, feed_url, config::jsonb AS config
-            FROM user_scraper_configs
-            WHERE id::bigint = $1 AND user_id::bigint = $2 AND is_active = TRUE
-            "#,
-        )
-        .bind(config_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
-        if row.is_some() {
-            return Ok(row);
-        }
-    }
-    if let Some(feed_url) = content
+) -> Result<Option<crate::ScraperConfigProjection>, ScraperConfigRepositoryError> {
+    let configs = list_scraper_configs(pool, user_id, None)
+        .await?
+        .into_iter()
+        .filter(|config| config.is_active)
+        .collect::<Vec<_>>();
+    let index = ConfigIndex::new(&configs);
+    let feed_url = content
         .content_metadata
         .get("feed_url")
-        .and_then(value_string)
-    {
-        let row = sqlx::query_as::<_, FeedConfigRow>(
-            r#"
-            SELECT id::bigint, scraper_type, display_name, feed_url, config::jsonb AS config
-            FROM user_scraper_configs
-            WHERE user_id::bigint = $1 AND is_active = TRUE
-              AND lower(trim(trailing '/' from coalesce(feed_url, config::jsonb ->> 'feed_url', '')))
-                    = lower(trim(trailing '/' from $2::text))
-            ORDER BY id
-            LIMIT 1
-            "#,
-        )
-        .bind(user_id)
-        .bind(feed_url)
-        .fetch_optional(pool)
-        .await?;
-        if row.is_some() {
-            return Ok(row);
-        }
-    }
-    let Some(source) = content
-        .source
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    sqlx::query_as::<_, FeedConfigRow>(
-        r#"
-        SELECT id::bigint, scraper_type, display_name, feed_url, config::jsonb AS config
-        FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND is_active = TRUE
-          AND (
-              lower(coalesce(display_name, '')) = lower($2)
-              OR lower(coalesce(config::jsonb ->> 'name', '')) = lower($2)
-          )
-        ORDER BY id
-        LIMIT 1
-        "#,
-    )
-    .bind(user_id)
-    .bind(source)
-    .fetch_optional(pool)
-    .await
+        .and_then(value_string);
+    let source = content.source.clone().or_else(|| {
+        content
+            .content_metadata
+            .get("source")
+            .and_then(value_string)
+    });
+    let config_id = index.match_values(
+        json_i64(content.content_metadata.get("feed_config_id")),
+        feed_url.as_deref(),
+        source.as_deref(),
+    );
+    Ok(config_id.and_then(|id| configs.into_iter().find(|config| config.id == id)))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -564,8 +465,10 @@ async fn persist_backfill_entry(
 ) -> Result<(i64, bool), sqlx::Error> {
     let mut metadata = entry.metadata.clone();
     if let Some(object) = metadata.as_object_mut() {
-        object.insert(
-            "submitted_via".to_owned(),
+        *object = crate::content_metadata::initialize_metadata(std::mem::take(object));
+        crate::content_metadata::set_field(
+            object,
+            "submitted_via",
             Value::String(origin.as_str().to_owned()),
         );
     }
@@ -975,6 +878,8 @@ pub enum ContentMiscRepositoryError {
     Sqlx(#[from] sqlx::Error),
     #[error("content visibility query failed")]
     ContentRead(#[from] ContentReadRepositoryError),
+    #[error("scraper configuration query failed")]
+    ScraperConfig(#[from] ScraperConfigRepositoryError),
     #[error("only news content can be converted to an article")]
     NotNewsContent,
     #[error("no article URL was found")]

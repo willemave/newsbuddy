@@ -7,22 +7,22 @@ use crate::output::OutputFormat;
 
 #[derive(Debug, Parser)]
 #[command(name = "newsbuddy", about = "Newsbuddy API client")]
-pub struct Cli {
+pub(crate) struct Cli {
     /// Override the CLI config path.
     #[arg(long, global = true)]
-    pub config: Option<PathBuf>,
+    pub(crate) config: Option<PathBuf>,
     /// Override the Newsly server URL.
     #[arg(long, global = true)]
-    pub server: Option<String>,
+    pub(crate) server: Option<String>,
     /// Override the API key for this command.
     #[arg(long, global = true, hide_env_values = true)]
-    pub api_key: Option<String>,
+    pub(crate) api_key: Option<String>,
     /// Output format: json or text.
     #[arg(long, global = true, value_enum, default_value_t)]
-    pub output: OutputFormat,
+    pub(crate) output: OutputFormat,
     /// Shortcut for --output json.
     #[arg(long, global = true)]
-    pub json: bool,
+    pub(crate) json: bool,
     /// HTTP timeout.
     #[arg(
         long,
@@ -30,13 +30,13 @@ pub struct Cli {
         value_parser = parse_duration,
         default_value = "30s"
     )]
-    pub timeout: Duration,
+    pub(crate) timeout: Duration,
     #[command(subcommand)]
-    pub command: Command,
+    pub(crate) command: Command,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Command {
+pub(crate) enum Command {
     /// Manage local CLI configuration.
     Config(ConfigArgs),
     /// Authenticate and link the CLI to a Newsbuddy account.
@@ -65,13 +65,13 @@ pub enum Command {
 }
 
 #[derive(Debug, Args)]
-pub struct ConfigArgs {
+pub(crate) struct ConfigArgs {
     #[command(subcommand)]
-    pub command: ConfigCommand,
+    pub(crate) command: ConfigCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ConfigCommand {
+pub(crate) enum ConfigCommand {
     /// Set one configuration value.
     Set(ConfigSetArgs),
     /// Show the effective CLI configuration.
@@ -79,13 +79,13 @@ pub enum ConfigCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct ConfigSetArgs {
+pub(crate) struct ConfigSetArgs {
     #[command(subcommand)]
-    pub command: ConfigSetCommand,
+    pub(crate) command: ConfigSetCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ConfigSetCommand {
+pub(crate) enum ConfigSetCommand {
     /// Persist the server URL.
     Server { url: String },
     /// Persist the API key.
@@ -95,13 +95,13 @@ pub enum ConfigSetCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct AuthArgs {
+pub(crate) struct AuthArgs {
     #[command(subcommand)]
-    pub command: AuthCommand,
+    pub(crate) command: AuthCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum AuthCommand {
+pub(crate) enum AuthCommand {
     /// Start QR login and persist the linked API key.
     Login {
         #[arg(long)]
@@ -114,31 +114,31 @@ pub enum AuthCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct JobsArgs {
+pub(crate) struct JobsArgs {
     #[command(subcommand)]
-    pub command: JobsCommand,
+    pub(crate) command: JobsCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum JobsCommand {
+pub(crate) enum JobsCommand {
     /// Fetch one async job.
     Get { job_id: i64 },
     /// Poll a job until it reaches a terminal state.
     Wait {
         job_id: i64,
         #[command(flatten)]
-        wait: WaitArgs,
+        wait: WaitTimingArgs,
     },
 }
 
 #[derive(Debug, Args)]
-pub struct ContentArgs {
+pub(crate) struct ContentArgs {
     #[command(subcommand)]
-    pub command: ContentCommand,
+    pub(crate) command: ContentCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ContentCommand {
+pub(crate) enum ContentCommand {
     /// List content cards.
     List {
         #[arg(long, default_value_t = 25)]
@@ -178,30 +178,28 @@ fn parse_favorites_limit(raw: &str) -> Result<usize, String> {
 }
 
 #[derive(Debug, Args)]
-pub struct SubmitArgs {
-    pub url: String,
+pub(crate) struct SubmitArgs {
+    pub(crate) url: String,
     #[arg(long)]
-    pub note: Option<String>,
+    pub(crate) note: Option<String>,
     #[arg(long)]
-    pub crawl_links: bool,
+    pub(crate) crawl_links: bool,
     #[arg(long)]
-    pub title: Option<String>,
+    pub(crate) title: Option<String>,
     #[arg(long)]
-    pub platform: Option<String>,
-    #[arg(long)]
-    pub content_type: Option<String>,
+    pub(crate) platform: Option<String>,
     #[command(flatten)]
-    pub wait: OptionalWaitArgs,
+    pub(crate) wait: OptionalWaitArgs,
 }
 
 #[derive(Debug, Args)]
-pub struct ContentSubmissionsArgs {
+pub(crate) struct ContentSubmissionsArgs {
     #[command(subcommand)]
-    pub command: ContentSubmissionsCommand,
+    pub(crate) command: ContentSubmissionsCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ContentSubmissionsCommand {
+pub(crate) enum ContentSubmissionsCommand {
     /// List active or failed user submissions.
     List {
         #[arg(long, default_value_t = 25)]
@@ -212,13 +210,13 @@ pub enum ContentSubmissionsCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct LibraryArgs {
+pub(crate) struct LibraryArgs {
     #[command(subcommand)]
-    pub command: LibraryCommand,
+    pub(crate) command: LibraryCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum LibraryCommand {
+pub(crate) enum LibraryCommand {
     /// Download the current markdown library diff to local disk.
     Sync {
         #[arg(long)]
@@ -237,10 +235,10 @@ pub enum LibraryCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct SearchArgs {
-    pub query: String,
+pub(crate) struct SearchArgs {
+    pub(crate) query: String,
     #[arg(long, default_value_t = 10)]
-    pub limit: usize,
+    pub(crate) limit: usize,
     #[arg(
         long,
         default_value_t = true,
@@ -248,17 +246,35 @@ pub struct SearchArgs {
         num_args = 0..=1,
         default_missing_value = "true"
     )]
-    pub include_podcasts: bool,
+    pub(crate) include_podcasts: bool,
 }
 
 #[derive(Debug, Args)]
-pub struct SourcesArgs {
+pub(crate) struct SourcesArgs {
     #[command(subcommand)]
-    pub command: SourcesCommand,
+    pub(crate) command: SourcesCommand,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
+pub(crate) enum SourceFeedType {
+    Atom,
+    Substack,
+    PodcastRss,
+}
+
+impl SourceFeedType {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Atom => "atom",
+            Self::Substack => "substack",
+            Self::PodcastRss => "podcast_rss",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
-pub enum SourcesCommand {
+pub(crate) enum SourcesCommand {
     /// List configured sources.
     List {
         #[arg(long = "type")]
@@ -267,21 +283,21 @@ pub enum SourcesCommand {
     /// Subscribe to a feed.
     Add {
         feed_url: String,
-        #[arg(long)]
-        feed_type: String,
+        #[arg(long, value_enum)]
+        feed_type: SourceFeedType,
         #[arg(long)]
         display_name: Option<String>,
     },
 }
 
 #[derive(Debug, Args)]
-pub struct OnboardingArgs {
+pub(crate) struct OnboardingArgs {
     #[command(subcommand)]
-    pub command: OnboardingCommand,
+    pub(crate) command: OnboardingCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum OnboardingCommand {
+pub(crate) enum OnboardingCommand {
     /// Start onboarding discovery.
     #[command(alias = "run")]
     Start {
@@ -309,13 +325,13 @@ pub enum OnboardingCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct NewsArgs {
+pub(crate) struct NewsArgs {
     #[command(subcommand)]
-    pub command: NewsCommand,
+    pub(crate) command: NewsCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum NewsCommand {
+pub(crate) enum NewsCommand {
     /// List visible news items.
     List {
         #[arg(long, default_value_t = 25)]
@@ -337,7 +353,7 @@ pub enum NewsCommand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum CompletionShell {
+pub(crate) enum CompletionShell {
     Bash,
     Zsh,
     Fish,
@@ -345,24 +361,19 @@ pub enum CompletionShell {
 }
 
 #[derive(Debug, Clone, Copy, Args)]
-pub struct WaitArgs {
-    /// Kept for compatibility; `jobs wait` always waits.
-    #[arg(long)]
-    pub wait: bool,
+pub(crate) struct WaitTimingArgs {
     #[arg(long, value_parser = parse_duration, default_value = "2s")]
-    pub wait_interval: Duration,
+    pub(crate) wait_interval: Duration,
     #[arg(long, value_parser = parse_duration, default_value = "2m")]
-    pub wait_timeout: Duration,
+    pub(crate) wait_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, Args)]
-pub struct OptionalWaitArgs {
+pub(crate) struct OptionalWaitArgs {
     #[arg(long)]
-    pub wait: bool,
-    #[arg(long, value_parser = parse_duration, default_value = "2s")]
-    pub wait_interval: Duration,
-    #[arg(long, value_parser = parse_duration, default_value = "2m")]
-    pub wait_timeout: Duration,
+    pub(crate) wait: bool,
+    #[command(flatten)]
+    pub(crate) timing: WaitTimingArgs,
 }
 
 /// Parse the duration syntax accepted by CLI timeout and polling flags.
@@ -371,7 +382,7 @@ pub struct OptionalWaitArgs {
 ///
 /// Returns an error when the magnitude is invalid, a unit is missing or unsupported, or the
 /// duration is outside `std::time::Duration`'s range.
-pub fn parse_duration(raw: &str) -> Result<Duration, String> {
+pub(crate) fn parse_duration(raw: &str) -> Result<Duration, String> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Err("duration must not be empty".to_owned());
@@ -486,6 +497,39 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn source_feed_type_is_validated_by_clap() {
+        let parsed = Cli::try_parse_from([
+            "newsbuddy",
+            "sources",
+            "add",
+            "https://example.com/feed.xml",
+            "--feed-type",
+            "podcast_rss",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::Sources(SourcesArgs {
+                command: SourcesCommand::Add {
+                    feed_type: SourceFeedType::PodcastRss,
+                    ..
+                }
+            })
+        ));
+
+        let error = Cli::try_parse_from([
+            "newsbuddy",
+            "sources",
+            "add",
+            "https://example.com/feed.xml",
+            "--feed-type",
+            "youtube",
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("possible values"));
     }
 
     #[test]

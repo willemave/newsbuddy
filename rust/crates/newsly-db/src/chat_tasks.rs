@@ -285,7 +285,7 @@ pub struct AssistantScreenContext {
 }
 
 impl AssistantScreenContext {
-    fn validate(&self) -> Result<(), ChatTaskRepositoryError> {
+    pub(crate) fn validate(&self) -> Result<(), ChatTaskRepositoryError> {
         validate_bounded_text(&self.screen_type, 0, 64, "screen_context.screen_type")?;
         if self.content_id.is_some() && self.news_item_id.is_some() {
             return Err(ChatTaskRepositoryError::InvalidProcessingContext(
@@ -379,21 +379,7 @@ struct QueueTaskRow {
     status: String,
 }
 
-#[derive(Debug, Clone, FromRow)]
-struct SessionRow {
-    id: i64,
-    user_id: i64,
-    content_id: Option<i64>,
-    news_item_id: Option<i64>,
-    title: Option<String>,
-    session_type: Option<String>,
-    topic: Option<String>,
-    context_snapshot: Option<String>,
-    is_hidden_from_history: bool,
-    llm_model: String,
-    llm_provider: String,
-    is_archived: bool,
-}
+use crate::chat::ChatSessionRow as SessionRow;
 
 #[derive(Debug, Clone, FromRow)]
 struct MessageRow {

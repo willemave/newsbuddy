@@ -6,9 +6,9 @@ use reqwest::Url;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::write_support::internal_error;
+use newsly_domain::hex_encode;
 
 use super::support::{clean_optional, deck_error, validation_error};
 

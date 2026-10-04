@@ -31,23 +31,23 @@ struct TableCatalogRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TableSummary {
-    pub name: String,
-    pub kind: String,
+pub(crate) struct TableSummary {
+    pub(crate) name: String,
+    pub(crate) kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TableList {
-    pub generated_at: DateTime<Utc>,
-    pub schema: String,
-    pub limit: i64,
-    pub count: usize,
-    pub truncated: bool,
-    pub tables: Vec<TableSummary>,
+pub(crate) struct TableList {
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) schema: String,
+    pub(crate) limit: i64,
+    pub(crate) count: usize,
+    pub(crate) truncated: bool,
+    pub(crate) tables: Vec<TableSummary>,
 }
 
 impl TableList {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         let mut text = format!(
             "PostgreSQL schema {}: {} table(s){}",
             self.schema,
@@ -74,35 +74,35 @@ struct SchemaColumnRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SchemaColumn {
-    pub ordinal_position: i32,
-    pub name: String,
-    pub data_type: String,
-    pub postgres_type: String,
-    pub nullable: bool,
-    pub default: Option<String>,
-    pub primary_key: bool,
+pub(crate) struct SchemaColumn {
+    pub(crate) ordinal_position: i32,
+    pub(crate) name: String,
+    pub(crate) data_type: String,
+    pub(crate) postgres_type: String,
+    pub(crate) nullable: bool,
+    pub(crate) default: Option<String>,
+    pub(crate) primary_key: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TableSchema {
-    pub table: String,
-    pub columns: Vec<SchemaColumn>,
+pub(crate) struct TableSchema {
+    pub(crate) table: String,
+    pub(crate) columns: Vec<SchemaColumn>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SchemaDescription {
-    pub generated_at: DateTime<Utc>,
-    pub schema: String,
-    pub requested_table: Option<String>,
-    pub limit: i64,
-    pub count: usize,
-    pub truncated: bool,
-    pub tables: Vec<TableSchema>,
+pub(crate) struct SchemaDescription {
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) schema: String,
+    pub(crate) requested_table: Option<String>,
+    pub(crate) limit: i64,
+    pub(crate) count: usize,
+    pub(crate) truncated: bool,
+    pub(crate) tables: Vec<TableSchema>,
 }
 
 impl SchemaDescription {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         let mut text = format!(
             "PostgreSQL schema {}: {} described table(s){}",
             self.schema,
@@ -130,28 +130,28 @@ impl SchemaDescription {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct QueryColumn {
-    pub name: String,
-    pub postgres_type: String,
-    pub redacted: bool,
+pub(crate) struct QueryColumn {
+    pub(crate) name: String,
+    pub(crate) postgres_type: String,
+    pub(crate) redacted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct QueryResult {
-    pub sql: String,
-    pub limit: i64,
-    pub byte_limit: usize,
-    pub columns: Vec<String>,
-    pub column_metadata: Vec<QueryColumn>,
-    pub row_count: usize,
-    pub rows: Vec<BTreeMap<String, Value>>,
-    pub redacted: bool,
-    pub truncated: bool,
-    pub truncation_reason: Option<String>,
+pub(crate) struct QueryResult {
+    pub(crate) sql: String,
+    pub(crate) limit: i64,
+    pub(crate) byte_limit: usize,
+    pub(crate) columns: Vec<String>,
+    pub(crate) column_metadata: Vec<QueryColumn>,
+    pub(crate) row_count: usize,
+    pub(crate) rows: Vec<BTreeMap<String, Value>>,
+    pub(crate) redacted: bool,
+    pub(crate) truncated: bool,
+    pub(crate) truncation_reason: Option<String>,
 }
 
 impl QueryResult {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         let mut text = format!(
             "{} row(s){}; columns: {}",
             self.row_count,
@@ -171,15 +171,15 @@ impl QueryResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ExplainResult {
-    pub sql: String,
-    pub format: &'static str,
-    pub analyzed: bool,
-    pub plan: Value,
+pub(crate) struct ExplainResult {
+    pub(crate) sql: String,
+    pub(crate) format: &'static str,
+    pub(crate) analyzed: bool,
+    pub(crate) plan: Value,
 }
 
 impl ExplainResult {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         serde_json::to_string_pretty(&self.plan).unwrap_or_else(|_| "<invalid plan>".to_owned())
     }
 }
@@ -190,7 +190,7 @@ impl ExplainResult {
 ///
 /// Returns a validation error for an invalid schema or limit and a database error when the
 /// catalog query fails.
-pub async fn list_tables(
+pub(crate) async fn list_tables(
     pool: &PgPool,
     schema: &str,
     limit: i64,
@@ -241,7 +241,7 @@ pub async fn list_tables(
 ///
 /// Returns a validation error for invalid names or limits, [`DatabaseOperatorError::TableNotFound`]
 /// for a requested missing table, and a database error when catalog inspection fails.
-pub async fn describe_schema(
+pub(crate) async fn describe_schema(
     pool: &PgPool,
     schema: &str,
     table: Option<&str>,
@@ -354,7 +354,7 @@ pub async fn describe_schema(
 ///
 /// Returns a validation error for non-query SQL or invalid bounds and a database error when
 /// `PostgreSQL` rejects or cannot decode the query.
-pub async fn run_query(
+pub(crate) async fn run_query(
     pool: &PgPool,
     sql: &str,
     limit: i64,
@@ -430,7 +430,7 @@ pub async fn run_query(
 ///
 /// Returns a validation error for non-query SQL and a database error when `PostgreSQL` cannot plan
 /// the query.
-pub async fn explain_query(
+pub(crate) async fn explain_query(
     pool: &PgPool,
     sql: &str,
 ) -> Result<ExplainResult, DatabaseOperatorError> {
@@ -916,7 +916,7 @@ fn bound_text(value: String) -> String {
 }
 
 #[derive(Debug, Error)]
-pub enum DatabaseOperatorError {
+pub(crate) enum DatabaseOperatorError {
     #[error("{kind} name must contain between 1 and 63 bytes and no NUL byte")]
     InvalidCatalogName { kind: &'static str },
     #[error("limit must be between 1 and {maximum}")]

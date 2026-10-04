@@ -15,8 +15,8 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
-use crate::task_tools::{ExaSearchUsage, record_exa_tool_usage};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
+use crate::task_tools::record_exa_tool_usage;
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
     TaskFinalizerResult, TaskHandler,
@@ -66,7 +66,15 @@ impl TaskHandler for OnboardingDiscoverHandler {
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
         let services = Arc::clone(&self.services);
-        Box::pin(async move { execute_discovery(&services, &plan, &lease).await })
+        Box::pin(async move {
+            let request = match parse_request(&plan) {
+                Ok(request) => request,
+                Err(error) => {
+                    return HandlerExecution::from_result(TaskResult::fail(Some(error), false));
+                }
+            };
+            execute_audio_discovery(&services, &plan, &lease, request.user_id, request.run_id).await
+        })
     }
 }
 
@@ -74,20 +82,6 @@ impl TaskHandler for OnboardingDiscoverHandler {
 struct OnboardingRequest {
     user_id: i64,
     run_id: i64,
-}
-
-async fn execute_discovery(
-    services: &OnboardingDiscoveryWorkerServices,
-    task: &OwnedWorkPlan,
-    lease: &LeaseHealth,
-) -> HandlerExecution {
-    let request = match parse_request(task) {
-        Ok(request) => request,
-        Err(error) => {
-            return HandlerExecution::from_result(TaskResult::fail(Some(error), false));
-        }
-    };
-    execute_audio_discovery(services, task, lease, request.user_id, request.run_id).await
 }
 
 async fn execute_audio_discovery(
@@ -135,7 +129,7 @@ async fn execute_audio_discovery(
             return audio_failure(services, task, snapshot, error, false);
         }
     };
-    let usage = Arc::new(AgentUsageSink::new(
+    let usage = Arc::new(AgentUsageRecorder::new(
         services.pool.clone(),
         AgentUsageAttribution {
             operation: "onboarding.audio_discover".to_owned(),
@@ -150,8 +144,12 @@ async fn execute_audio_discovery(
     let events: Arc<dyn newsly_agent_runtime::AgentEventSink> = usage.clone();
     let result = services
         .provider
-        .with_events(events)
-        .discover_from_lanes(&snapshot.topic_summary, &snapshot.inferred_topics, &lanes)
+        .discover_from_lanes(
+            &snapshot.topic_summary,
+            &snapshot.inferred_topics,
+            &lanes,
+            events,
+        )
         .await;
     usage.finish().await;
     let outcome = match result {
@@ -165,17 +163,7 @@ async fn execute_audio_discovery(
         user_id,
         &format!("task-{}-attempt-{}", task.task_id, task.retry_count),
         "onboarding.audio_discover.search",
-        ExaSearchUsage {
-            request_count: outcome.exa_usage.request_count,
-            result_count: outcome.exa_usage.result_count,
-            summary_count: outcome.exa_usage.summary_count,
-            text_count: outcome.exa_usage.text_count,
-            summary_requested: false,
-            text_requested: true,
-            livecrawl_fallback: false,
-            estimated_cost_usd: outcome.exa_usage.estimated_cost_usd,
-            known_estimated_cost_usd: outcome.exa_usage.known_estimated_cost_usd,
-        },
+        outcome.exa_usage.into(),
     )
     .await;
     if lease.ownership_lost() {

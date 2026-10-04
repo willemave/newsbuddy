@@ -1,9 +1,14 @@
 use std::collections::BTreeMap;
 
 use chrono::{Duration, NaiveDateTime, Utc};
+use newsly_providers::{
+    infer_discussion_platform, normalize_discussion_external_id, normalize_discussion_http_url,
+    normalize_reddit_discussion_url,
+};
 use serde_json::{Value, json};
 use sqlx::{FromRow, Postgres, Transaction};
 use thiserror::Error;
+#[cfg(test)]
 use url::Url;
 use uuid::Uuid;
 
@@ -703,20 +708,21 @@ fn resolve_identity(news_item: &NewsItemSource) -> Option<DiscussionIdentity> {
     let mut discussion_url = news_item
         .discussion_url
         .as_deref()
-        .and_then(normalize_http_url)
+        .and_then(normalize_discussion_http_url)
         .or_else(|| {
             news_item
                 .canonical_item_url
                 .as_deref()
-                .and_then(normalize_http_url)
+                .and_then(normalize_discussion_http_url)
         });
     if platform == "reddit" {
-        discussion_url = discussion_url.and_then(|value| normalize_reddit_url(&value));
+        discussion_url = discussion_url.and_then(|value| normalize_reddit_discussion_url(&value));
     }
     if !matches!(platform.as_str(), "hackernews" | "reddit") {
-        platform = infer_platform(discussion_url.as_deref())?;
+        platform = infer_discussion_platform(None, discussion_url.as_deref())?;
         if platform == "reddit" {
-            discussion_url = discussion_url.and_then(|value| normalize_reddit_url(&value));
+            discussion_url =
+                discussion_url.and_then(|value| normalize_reddit_discussion_url(&value));
         }
     }
     let discussion_url = discussion_url?;
@@ -726,11 +732,10 @@ fn resolve_identity(news_item: &NewsItemSource) -> Option<DiscussionIdentity> {
     let external_id = clean_string(news_item.source_external_id.as_deref())
         .or_else(|| aggregator.and_then(|value| clean_value(value.get("external_id"))))
         .or_else(|| metadata.and_then(|value| clean_value(value.get("source_external_id"))))
-        .or_else(|| match platform.as_str() {
-            "hackernews" => hacker_news_id(&discussion_url),
-            "reddit" => reddit_submission_id(&discussion_url),
-            _ => None,
-        })?;
+        .and_then(|value| {
+            normalize_discussion_external_id(&platform, Some(&value), &discussion_url)
+        })
+        .or_else(|| normalize_discussion_external_id(&platform, None, &discussion_url))?;
     let title = metadata
         .and_then(|value| nested_clean(value, &["summary", "title"]))
         .or_else(|| metadata.and_then(|value| nested_clean(value, &["article", "title"])))
@@ -760,79 +765,6 @@ fn resolve_identity(news_item: &NewsItemSource) -> Option<DiscussionIdentity> {
         score,
         comment_count,
     })
-}
-
-fn normalize_http_url(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value.starts_with(['/', '?', '#']) {
-        return None;
-    }
-    let candidate = if value.starts_with("//") {
-        format!("https:{value}")
-    } else if value.contains("://") {
-        value.to_owned()
-    } else {
-        format!("https://{value}")
-    };
-    let mut url = Url::parse(&candidate).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return None;
-    }
-    url.set_scheme("https").ok()?;
-    Some(url.to_string())
-}
-
-fn normalize_reddit_url(value: &str) -> Option<String> {
-    let mut url = Url::parse(value).ok()?;
-    let host = url.host_str()?.to_ascii_lowercase();
-    if matches!(
-        host.as_str(),
-        "reddit.com" | "old.reddit.com" | "www.reddit.com"
-    ) {
-        url.set_host(Some("www.reddit.com")).ok()?;
-    }
-    Some(url.to_string())
-}
-
-fn infer_platform(url: Option<&str>) -> Option<String> {
-    let host = Url::parse(url?).ok()?.host_str()?.to_ascii_lowercase();
-    if domain_matches(&host, "news.ycombinator.com") {
-        Some("hackernews".to_owned())
-    } else if domain_matches(&host, "reddit.com") || domain_matches(&host, "redd.it") {
-        Some("reddit".to_owned())
-    } else {
-        None
-    }
-}
-
-fn hacker_news_id(value: &str) -> Option<String> {
-    let url = Url::parse(value).ok()?;
-    url.query_pairs()
-        .find(|(name, _)| name == "id")
-        .map(|(_, value)| value.into_owned())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            let parts = url.path_segments()?.collect::<Vec<_>>();
-            let value = parts.last()?.strip_suffix(".json")?;
-            value
-                .chars()
-                .all(|character| character.is_ascii_digit())
-                .then(|| value.to_owned())
-        })
-}
-
-fn reddit_submission_id(value: &str) -> Option<String> {
-    let url = Url::parse(value).ok()?;
-    let parts = url.path_segments()?.collect::<Vec<_>>();
-    parts
-        .windows(2)
-        .find(|window| window[0].eq_ignore_ascii_case("comments"))
-        .map(|window| window[1].to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-}
-
-fn domain_matches(host: &str, domain: &str) -> bool {
-    host == domain || host.ends_with(&format!(".{domain}"))
 }
 
 fn normalize_fingerprints(value: Option<&Value>) -> Option<BTreeMap<String, String>> {

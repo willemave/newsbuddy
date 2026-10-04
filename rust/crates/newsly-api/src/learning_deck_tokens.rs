@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::encoding::hex_encode;
+use newsly_domain::hex_encode;
 
 const PYJWT_HS256_HEADER: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
 const DEFAULT_SIGNED_URL_TTL_SECONDS: u64 = 900;
@@ -41,14 +41,7 @@ impl LearningDeckTokenSigner {
     /// # Errors
     ///
     /// Returns an error for missing/unsupported signing configuration.
-    pub(super) fn from_environment() -> Result<Self, LearningDeckTokenError> {
-        let algorithm = env::var("JWT_ALGORITHM").unwrap_or_else(|_| "HS256".to_owned());
-        if algorithm != "HS256" {
-            return Err(LearningDeckTokenError::UnsupportedAlgorithm(algorithm));
-        }
-        let secret = env::var("JWT_SECRET_KEY")
-            .map(SecretString::from)
-            .map_err(|_| LearningDeckTokenError::MissingSecret)?;
+    pub(super) fn from_secret(secret: SecretString) -> Result<Self, LearningDeckTokenError> {
         if secret.expose_secret().is_empty() {
             return Err(LearningDeckTokenError::MissingSecret);
         }
@@ -238,8 +231,6 @@ pub(super) fn hash_learning_deck_token(token: &str) -> String {
 pub(super) enum LearningDeckTokenError {
     #[error("JWT_SECRET_KEY is required for Learning Deck URLs")]
     MissingSecret,
-    #[error("unsupported JWT algorithm {0:?}; the Learning Deck token format requires HS256")]
-    UnsupportedAlgorithm(String),
     #[error("invalid Learning Deck signed URL lifetime {0:?}")]
     InvalidLifetime(String),
     #[error("Learning Deck signed URL lifetime overflowed")]

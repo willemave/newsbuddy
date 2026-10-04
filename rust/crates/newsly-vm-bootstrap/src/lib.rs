@@ -5,6 +5,5 @@
 
 pub mod capabilities;
 pub mod error;
-pub mod feed;
 
 pub use error::{BootstrapError, Result};

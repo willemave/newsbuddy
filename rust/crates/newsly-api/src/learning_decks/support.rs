@@ -10,10 +10,9 @@ use newsly_db::{
 };
 use newsly_queue::{EnqueueRequest, QueueError, TaskType};
 use reqwest::Url;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::error::ApiError;
-use crate::learning_deck_tokens::LearningDeckTokenSigner;
 use crate::write_support::internal_error;
 
 pub(super) fn content_task_request(task_type: TaskType, content_id: i64) -> EnqueueRequest {
@@ -109,10 +108,6 @@ pub(super) fn external_url(
     Ok(base.to_string())
 }
 
-pub(super) fn token_signer(request_id: &str) -> Result<LearningDeckTokenSigner, ApiError> {
-    LearningDeckTokenSigner::from_environment().map_err(|error| internal_error(error, request_id))
-}
-
 pub(super) fn valid_deck_id(
     path: Result<Path<i64>, PathRejection>,
     request_id: &str,
@@ -135,18 +130,7 @@ pub(super) fn clean_optional(value: Option<String>) -> Option<String> {
 }
 
 pub(super) fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 pub(super) fn deck_error(status: StatusCode, message: &str, request_id: &str) -> ApiError {

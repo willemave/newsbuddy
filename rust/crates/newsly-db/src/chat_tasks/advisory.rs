@@ -2,8 +2,11 @@
 
 use super::{
     ChatAdvisoryWriteOutcome, ChatTaskRepositoryError, ChatToolProgress, MessageRow, Postgres,
-    Transaction, Utc, context::truncate_chars, json, preparation::validate_bounded_text,
+    Transaction, preparation::validate_bounded_text,
 };
+use chrono::Utc;
+use newsly_domain::truncate_chars;
+use serde_json::json;
 
 /// Persist one cumulative final-response snapshot for the exact processing generation.
 pub async fn write_chat_partial(
@@ -95,8 +98,7 @@ pub async fn write_chat_tool_progress(
         r#"
         UPDATE chat_messages
         SET tool_progress = $3,
-            tool_progress_revision = COALESCE(tool_progress_revision, 0) + 1,
-            tool_progress_updated_at = timezone('UTC', clock_timestamp())
+            tool_progress_revision = COALESCE(tool_progress_revision, 0) + 1
         WHERE id::bigint = $1 AND stream_generation = $2 AND status = 'processing'
         "#,
     )
@@ -176,8 +178,7 @@ pub(super) async fn initialize_stream_attempt(
             stream_revision = 0,
             stream_updated_at = NULL,
             tool_progress = NULL,
-            tool_progress_revision = 0,
-            tool_progress_updated_at = NULL
+            tool_progress_revision = 0
         WHERE id::bigint = $1 AND status = 'processing'
         "#,
     )

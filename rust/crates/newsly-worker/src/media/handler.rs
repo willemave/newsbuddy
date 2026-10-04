@@ -701,21 +701,10 @@ fn content_id(plan: &OwnedWorkPlan) -> Option<i64> {
 }
 
 fn runtime_metadata(value: &Value) -> Map<String, Value> {
-    let stored = value.as_object().cloned().unwrap_or_default();
-    let mut runtime = stored
-        .get("domain")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    if let Some(processing) = stored.get("processing").and_then(Value::as_object) {
-        runtime.extend(processing.clone());
-    }
-    for (key, value) in stored {
-        if !matches!(key.as_str(), "domain" | "processing") {
-            runtime.entry(key).or_insert(value);
-        }
-    }
-    runtime
+    value
+        .as_object()
+        .map(newsly_db::content_metadata::runtime_metadata)
+        .unwrap_or_default()
 }
 
 fn metadata_string(metadata: &Map<String, Value>, key: &str) -> Option<String> {
@@ -861,13 +850,9 @@ mod tests {
             content_type: "podcast".to_owned(),
             url: "https://example.test/show".to_owned(),
             source_url: Some("https://cdn.example.test/episode.mp3".to_owned()),
-            title: None,
-            source: None,
             platform: None,
             status: "processing".to_owned(),
             content_metadata: json!({}),
-            error_message: None,
-            retry_count: 0,
         };
         assert_eq!(
             direct_audio_url(&snapshot).as_deref(),

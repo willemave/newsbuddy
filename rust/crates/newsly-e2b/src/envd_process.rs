@@ -24,13 +24,11 @@ use crate::error::E2bError;
 use crate::generated::process;
 use crate::types::{
     CommandEvent, CommandOutput, CommandRequest, CommandResult, ExecutionTag, ExitStatus,
-    OutputLimits, ProcessInfo, ProcessSelector, SandboxHandle,
+    OutputLimits, ProcessSelector, SandboxHandle,
 };
 
 const MIN_SUPPORTED_ENVD: &str = "0.1.0";
 const ENVD_STDIN_SELECTION: &str = "0.3.0";
-const ENVD_CLOSE_STDIN: &str = "0.5.2";
-const MAX_STDIN_BYTES: usize = 1024 * 1024;
 const KEEPALIVE_INTERVAL_SECONDS: &str = "50";
 
 type RawEventStream = Pin<Box<dyn Stream<Item = Result<RawProcessEvent, E2bError>> + Send>>;
@@ -40,11 +38,8 @@ type EventStream = Pin<Box<dyn Stream<Item = Result<CommandEvent, E2bError>> + S
 pub enum EnvdCapability {
     ProcessStreaming,
     ExecutionTags,
-    ProcessReconnect,
     ProcessSignals,
-    ProcessInput,
     StdinSelection,
-    CloseStdin,
 }
 
 impl EnvdCapability {
@@ -52,11 +47,8 @@ impl EnvdCapability {
         match self {
             Self::ProcessStreaming => "process_streaming",
             Self::ExecutionTags => "execution_tags",
-            Self::ProcessReconnect => "process_reconnect",
             Self::ProcessSignals => "process_signals",
-            Self::ProcessInput => "process_input",
             Self::StdinSelection => "stdin_selection",
-            Self::CloseStdin => "close_stdin",
         }
     }
 }
@@ -67,11 +59,8 @@ pub struct CapabilityReport {
     pub envd_version: Version,
     pub process_streaming: bool,
     pub execution_tags: bool,
-    pub process_reconnect: bool,
     pub process_signals: bool,
-    pub process_input: bool,
     pub stdin_selection: bool,
-    pub close_stdin: bool,
 }
 
 impl CapabilityReport {
@@ -79,11 +68,8 @@ impl CapabilityReport {
         let available = match capability {
             EnvdCapability::ProcessStreaming => self.process_streaming,
             EnvdCapability::ExecutionTags => self.execution_tags,
-            EnvdCapability::ProcessReconnect => self.process_reconnect,
             EnvdCapability::ProcessSignals => self.process_signals,
-            EnvdCapability::ProcessInput => self.process_input,
             EnvdCapability::StdinSelection => self.stdin_selection,
-            EnvdCapability::CloseStdin => self.close_stdin,
         };
         if available {
             Ok(())
@@ -131,17 +117,12 @@ impl EnvdProcessClient {
         let stdin_selection = version
             >= Version::parse(ENVD_STDIN_SELECTION)
                 .expect("the built-in stdin-selection version is valid");
-        let close_stdin = version
-            >= Version::parse(ENVD_CLOSE_STDIN).expect("the built-in close-stdin version is valid");
         Ok(CapabilityReport {
             envd_version: version,
             process_streaming: supported,
             execution_tags: supported,
-            process_reconnect: supported,
             process_signals: supported,
-            process_input: supported,
             stdin_selection,
-            close_stdin,
         })
     }
 
@@ -199,146 +180,6 @@ impl EnvdProcessClient {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn connect(
-        &self,
-        sandbox: &SandboxHandle,
-        selector: ProcessSelector,
-        execution_tag: ExecutionTag,
-        absolute_deadline: tokio::time::Instant,
-        idle_timeout: Duration,
-        output_limits: OutputLimits,
-        cancellation: CancellationToken,
-    ) -> Result<CommandEventStream, E2bError> {
-        output_limits.validate()?;
-        if cancellation.is_cancelled() {
-            return Err(E2bError::Cancelled);
-        }
-        if idle_timeout.is_zero() {
-            return Err(E2bError::InvalidInput(
-                "command idle timeout must be greater than zero".to_owned(),
-            ));
-        }
-        self.check_capabilities(sandbox)?
-            .require(EnvdCapability::ProcessReconnect)?;
-        let remaining = absolute_deadline
-            .checked_duration_since(tokio::time::Instant::now())
-            .ok_or(E2bError::Deadline)?;
-        let pid_hint = match &selector {
-            ProcessSelector::Pid(0) => {
-                return Err(E2bError::InvalidInput(
-                    "process PID must be greater than zero".to_owned(),
-                ));
-            }
-            ProcessSelector::Pid(pid) => Some(*pid),
-            ProcessSelector::Tag(tag) => {
-                if tag != &execution_tag {
-                    return Err(E2bError::InvalidInput(
-                        "process selector tag must match the execution tag".to_owned(),
-                    ));
-                }
-                None
-            }
-        };
-        let client = self.client(sandbox, output_limits.event_bytes)?;
-        let stream = client
-            .connect_with_options(
-                process::ConnectRequest {
-                    process: MessageField::some(selector_to_wire(selector)),
-                    ..Default::default()
-                },
-                CallOptions::default().with_timeout(remaining),
-            )
-            .await
-            .map_err(|error| connect_error(&error))?;
-        let raw = raw_connect_stream(stream);
-        Ok(self.normalized_stream(
-            sandbox.clone(),
-            execution_tag,
-            pid_hint,
-            raw,
-            absolute_deadline,
-            idle_timeout,
-            output_limits,
-            cancellation,
-            false,
-        ))
-    }
-
-    /// Reattach to an already-created process by unique execution tag. Absence is ambiguous and
-    /// never causes a replacement `Start` request.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn recover_by_tag(
-        &self,
-        sandbox: &SandboxHandle,
-        execution_tag: ExecutionTag,
-        absolute_deadline: tokio::time::Instant,
-        idle_timeout: Duration,
-        output_limits: OutputLimits,
-        cancellation: CancellationToken,
-    ) -> Result<CommandEventStream, E2bError> {
-        let matches = self
-            .list(sandbox)
-            .await?
-            .into_iter()
-            .filter(|process| process.tag.as_ref() == Some(&execution_tag))
-            .collect::<Vec<_>>();
-        let process = match matches.as_slice() {
-            [process] => process,
-            [] => {
-                return Err(E2bError::RecoveryUnavailable {
-                    execution_tag: execution_tag.to_string(),
-                });
-            }
-            _ => {
-                return Err(E2bError::Protocol(format!(
-                    "multiple envd processes have execution tag {execution_tag}"
-                )));
-            }
-        };
-        self.connect(
-            sandbox,
-            ProcessSelector::Pid(process.pid),
-            execution_tag,
-            absolute_deadline,
-            idle_timeout,
-            output_limits,
-            cancellation,
-        )
-        .await
-    }
-
-    pub async fn list(&self, sandbox: &SandboxHandle) -> Result<Vec<ProcessInfo>, E2bError> {
-        self.check_capabilities(sandbox)?
-            .require(EnvdCapability::ProcessReconnect)?;
-        let client = self.client(sandbox, 1024 * 1024)?;
-        let response = client
-            .list(process::ListRequest::default())
-            .await
-            .map_err(|error| connect_error(&error))?
-            .into_owned();
-        response
-            .processes
-            .into_iter()
-            .map(|mut item| {
-                if item.pid == 0 {
-                    return Err(E2bError::Protocol(
-                        "envd listed a process with PID zero".to_owned(),
-                    ));
-                }
-                let config = item.config.take().unwrap_or_default();
-                let tag = item.tag.map(ExecutionTag::parse).transpose()?;
-                Ok(ProcessInfo {
-                    pid: item.pid,
-                    tag,
-                    command: config.cmd,
-                    args: config.args,
-                    cwd: config.cwd,
-                })
-            })
-            .collect()
-    }
-
     pub async fn signal(
         &self,
         sandbox: &SandboxHandle,
@@ -356,58 +197,6 @@ impl EnvdProcessClient {
             .send_signal(process::SendSignalRequest {
                 process: MessageField::some(selector_to_wire(selector)),
                 signal: EnumValue::Known(signal),
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| connect_error(&error))?;
-        Ok(())
-    }
-
-    pub async fn send_stdin(
-        &self,
-        sandbox: &SandboxHandle,
-        selector: ProcessSelector,
-        input: Bytes,
-    ) -> Result<(), E2bError> {
-        validate_selector(&selector)?;
-        let execution_tag = match &selector {
-            ProcessSelector::Pid(_) => None,
-            ProcessSelector::Tag(tag) => Some(tag.to_string()),
-        };
-        self.check_capabilities(sandbox)?
-            .require(EnvdCapability::ProcessInput)?;
-        if input.len() > MAX_STDIN_BYTES {
-            return Err(E2bError::InvalidInput(format!(
-                "stdin message exceeds {MAX_STDIN_BYTES} bytes"
-            )));
-        }
-        self.client(sandbox, 64 * 1024)?
-            .send_input(process::SendInputRequest {
-                process: MessageField::some(selector_to_wire(selector)),
-                input: MessageField::some(process::ProcessInput {
-                    input: Some(process::process_input::Input::Stdin(input.to_vec())),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| {
-                ambiguous_mutation_error(&error, "send_process_stdin", execution_tag.as_deref())
-            })?;
-        Ok(())
-    }
-
-    pub async fn close_stdin(
-        &self,
-        sandbox: &SandboxHandle,
-        selector: ProcessSelector,
-    ) -> Result<(), E2bError> {
-        validate_selector(&selector)?;
-        self.check_capabilities(sandbox)?
-            .require(EnvdCapability::CloseStdin)?;
-        self.client(sandbox, 64 * 1024)?
-            .close_stdin(process::CloseStdinRequest {
-                process: MessageField::some(selector_to_wire(selector)),
                 ..Default::default()
             })
             .await
@@ -632,26 +421,6 @@ impl CommandEventStream {
         self.cancellation.cancel();
     }
 
-    #[must_use]
-    pub fn cancellation_token(&self) -> CancellationToken {
-        self.cancellation.clone()
-    }
-
-    /// Cancel the remote process and drain the bounded delivery channel until its pump exits.
-    pub async fn cancel_and_drain(mut self, drain_timeout: Duration) -> Result<(), E2bError> {
-        if drain_timeout.is_zero() {
-            return Err(E2bError::InvalidInput(
-                "stream drain timeout must be greater than zero".to_owned(),
-            ));
-        }
-        self.cancellation.cancel();
-        tokio::time::timeout(drain_timeout, async {
-            while self.next().await.is_some() {}
-        })
-        .await
-        .map_err(|_| E2bError::Deadline)
-    }
-
     pub async fn collect_result(mut self) -> Result<CommandResult, E2bError> {
         let mut output = CommandOutput::default();
         let mut execution_tag = None;
@@ -753,23 +522,6 @@ where
                 message: error.to_string(),
             }
         })? {
-            yield raw_event_from_wire(message.to_owned_message().event.take())?;
-        }
-    })
-}
-
-fn raw_connect_stream<B>(
-    mut stream: connectrpc::client::ServerStream<
-        B,
-        process::__buffa::view::ConnectResponseView<'static>,
-    >,
-) -> RawEventStream
-where
-    B: connectrpc::http_body::Body<Data = Bytes> + Send + Unpin + 'static,
-    B::Error: std::fmt::Display + Send + Sync + 'static,
-{
-    Box::pin(async_stream::try_stream! {
-        while let Some(message) = stream.message().await.map_err(|error| connect_stream_error(&error))? {
             yield raw_event_from_wire(message.to_owned_message().event.take())?;
         }
     })
@@ -1165,25 +917,6 @@ fn ambiguous_start_error(error: &connectrpc::ConnectError, tag: &ExecutionTag) -
     }
 }
 
-fn ambiguous_mutation_error(
-    error: &connectrpc::ConnectError,
-    operation: &str,
-    execution_tag: Option<&str>,
-) -> E2bError {
-    match error.code {
-        ErrorCode::DeadlineExceeded
-        | ErrorCode::Unavailable
-        | ErrorCode::Unknown
-        | ErrorCode::Internal
-        | ErrorCode::DataLoss => E2bError::AmbiguousDelivery {
-            operation: operation.to_owned(),
-            execution_tag: execution_tag.map(str::to_owned),
-            message: error.to_string(),
-        },
-        _ => connect_error(error),
-    }
-}
-
 fn connect_error(error: &connectrpc::ConnectError) -> E2bError {
     let message = error
         .message
@@ -1213,18 +946,6 @@ fn connect_error(error: &connectrpc::ConnectError) -> E2bError {
             E2bError::Protocol(message)
         }
         _ => E2bError::Protocol(message),
-    }
-}
-
-fn connect_stream_error(error: &connectrpc::ConnectError) -> E2bError {
-    match error.code {
-        ErrorCode::Unavailable | ErrorCode::Unknown | ErrorCode::Internal | ErrorCode::DataLoss => {
-            E2bError::StreamInterrupted {
-                operation: "connect_process".to_owned(),
-                message: error.to_string(),
-            }
-        }
-        _ => connect_error(error),
     }
 }
 

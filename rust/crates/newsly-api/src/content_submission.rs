@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -17,13 +17,12 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::auth::AuthenticatedUser;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
+use newsly_domain::hex_encode;
 
-const SUBMIT_CONTENT_OPERATION_ID: &str = "submitContent";
 const MAX_HTTP_URL_CHARS: usize = 2_083;
 
 pub(super) fn router() -> Router<AppState> {
@@ -55,21 +54,15 @@ pub(super) async fn submit_content(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<SubmitContentRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ContentSubmissionResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, SUBMIT_CONTENT_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     let normalized = NormalizedSubmission::try_from_request(payload, &request_id)?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let applied = apply_content_submission(
         &mut transaction,
         &ContentSubmissionInput {
@@ -84,7 +77,7 @@ pub(super) async fn submit_content(
             save_to_knowledge_and_mark_read: normalized.save_to_knowledge_and_mark_read,
             deck_source_only: false,
             user_id: current_user.id,
-            submitted_via: "share_sheet",
+            submitted_via: submission_channel(&headers),
         },
     )
     .await
@@ -138,10 +131,7 @@ pub(super) async fn submit_content(
             }
         }
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     let content_type = ContentType::from_str(&applied.content_type)
         .map_err(|error| invalid_durable_content(error, &request_id))?;
@@ -222,6 +212,19 @@ impl NormalizedSubmission {
             chat_initial_message,
             save_to_knowledge_and_mark_read: payload.save_to_knowledge_and_mark_read,
         })
+    }
+}
+
+fn submission_channel(headers: &HeaderMap) -> &'static str {
+    match headers
+        .get("x-newsly-client")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+    {
+        Some("ios") => "ios_app",
+        Some("ios_share_extension") => "share_sheet",
+        Some("rust_cli") => "cli",
+        _ => "api",
     }
 }
 
@@ -307,12 +310,7 @@ fn dig_deeper_request(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        message,
-        request_id.to_owned(),
-    )
+    ApiError::validation_message(message, request_id)
 }
 
 fn repository_error(error: ContentSubmissionRepositoryError, request_id: &str) -> ApiError {
@@ -354,14 +352,28 @@ mod tests {
     use axum::{http::StatusCode, response::IntoResponse};
     use newsly_contracts::SubmitContentRequest;
 
-    use super::{NormalizedSubmission, normalize_http_url};
+    use super::{NormalizedSubmission, normalize_http_url, submission_channel};
+
+    #[test]
+    fn submission_channel_tracks_the_caller_without_accepting_arbitrary_labels() {
+        let mut headers = axum::http::HeaderMap::new();
+        assert_eq!(submission_channel(&headers), "api");
+        for (client, channel) in [
+            ("ios", "ios_app"),
+            ("ios_share_extension", "share_sheet"),
+            ("rust_cli", "cli"),
+            ("unknown", "api"),
+        ] {
+            headers.insert("x-newsly-client", client.parse().unwrap());
+            assert_eq!(submission_channel(&headers), channel);
+        }
+    }
 
     #[test]
     fn request_normalization_preserves_submission_defaults() {
         let normalized = NormalizedSubmission::try_from_request(
             SubmitContentRequest {
                 url: " https://EXAMPLE.com ".to_owned(),
-                content_type: None,
                 title: Some("  supplied title  ".to_owned()),
                 platform: Some("  YouTube  ".to_owned()),
                 instruction: Some("  inspect links  ".to_owned()),
@@ -395,7 +407,6 @@ mod tests {
         let error = NormalizedSubmission::try_from_request(
             SubmitContentRequest {
                 url: "https://example.com/feed.xml".to_owned(),
-                content_type: None,
                 title: None,
                 platform: None,
                 instruction: None,

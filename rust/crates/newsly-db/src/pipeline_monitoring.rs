@@ -39,7 +39,7 @@ pub async fn observe_health(
     Ok(pipeline)
 }
 
-pub async fn observe(connection: &mut PgConnection) -> Result<(), sqlx::Error> {
+async fn observe(connection: &mut PgConnection) -> Result<(), sqlx::Error> {
     let historical: bool = sqlx::query_scalar("WITH ranked AS (SELECT *, row_number() OVER(PARTITION BY source_key ORDER BY id DESC) AS rank FROM source_ingestion_observations WHERE observed_at > now() - interval '45 minutes' AND source_key LIKE 'config:%') SELECT EXISTS(SELECT source_key FROM ranked WHERE rank <= 2 GROUP BY source_key HAVING count(*) = 2 AND bool_and(NOT bootstrap AND new_count >= 10 AND historical_count * 5 >= new_count * 4))")
         .fetch_one(&mut *connection).await?;
     set_signal(connection, "historical_intake", historical, "A scheduled source admitted at least 80% historical content in two successive polls; inspect provenance, do not delete by age").await?;
@@ -77,6 +77,30 @@ pub async fn observe(connection: &mut PgConnection) -> Result<(), sqlx::Error> {
     .execute(&mut *connection)
     .await?;
     Ok(())
+}
+
+/// Prune diagnostic attempts and expired cooldowns in bounded batches, outside watchdog repair.
+pub async fn prune_briefing_composition_history(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let attempts = sqlx::query(
+        "DELETE FROM briefing_composition_attempts WHERE attempt_id IN (
+             SELECT attempt_id FROM briefing_composition_attempts
+             WHERE observed_at < now() - interval '1 day'
+             ORDER BY observed_at LIMIT 1000 FOR UPDATE SKIP LOCKED)",
+    )
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    let cooldowns = sqlx::query(
+        "DELETE FROM briefing_composition_cooldowns WHERE (user_id, fingerprint) IN (
+             SELECT user_id, fingerprint FROM briefing_composition_cooldowns
+             WHERE retry_after < now() ORDER BY retry_after LIMIT 1000 FOR UPDATE SKIP LOCKED)",
+    )
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    transaction.commit().await?;
+    Ok(attempts + cooldowns)
 }
 
 pub async fn set_signal(
@@ -117,6 +141,29 @@ pub async fn settle_alert(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[sqlx::test]
+    async fn composition_retention_preserves_recent_attempts_and_live_cooldowns(pool: PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO briefing_composition_attempts(attempt_id,task_id,user_id,fingerprint,outcome,observed_at) VALUES('00000000-0000-0000-0000-000000000001',1,1,'old','accepted',now() - interval '2 days'),('00000000-0000-0000-0000-000000000002',1,1,'recent','accepted',now())")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO briefing_composition_cooldowns(user_id,fingerprint,retry_after) VALUES(1,'expired',now() - interval '1 hour'),(1,'live',now() + interval '1 hour')")
+            .execute(&pool).await.unwrap();
+        assert_eq!(prune_briefing_composition_history(&pool).await.unwrap(), 2);
+        assert_eq!(prune_briefing_composition_history(&pool).await.unwrap(), 0);
+        let attempts: Vec<String> =
+            sqlx::query_scalar("SELECT fingerprint FROM briefing_composition_attempts")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let cooldowns: Vec<String> =
+            sqlx::query_scalar("SELECT fingerprint FROM briefing_composition_cooldowns")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(attempts, ["recent"]);
+        assert_eq!(cooldowns, ["live"]);
+    }
 
     #[sqlx::test]
     async fn missing_first_source_check_is_not_a_healthy_empty_check(pool: PgPool) {

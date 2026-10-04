@@ -22,7 +22,7 @@ pub(super) async fn refresh_discussion(
     discussion_url: Option<&str>,
     external_id: Option<&str>,
 ) -> Result<DiscussionRefreshResult, ContentMiscGatewayError> {
-    let platform = infer_platform(platform, discussion_url)
+    let platform = infer_discussion_platform(platform, discussion_url)
         .ok_or(ContentMiscGatewayError::UnsupportedDiscussionPlatform)?;
     match platform.as_str() {
         "hackernews" => refresh_hacker_news(client, discussion_url, external_id).await,
@@ -38,7 +38,7 @@ async fn refresh_hacker_news(
 ) -> Result<DiscussionRefreshResult, ContentMiscGatewayError> {
     let item_id = external_id
         .and_then(positive_numeric_string)
-        .or_else(|| discussion_url.and_then(hacker_news_id))
+        .or_else(|| discussion_url.and_then(hacker_news_discussion_id))
         .ok_or(ContentMiscGatewayError::DiscussionIdentityMissing)?;
     let firebase_url = format!("{HN_FIREBASE_ITEM_URL}{item_id}.json");
     let firebase = match fetch_json(client.get(firebase_url)).await {
@@ -65,7 +65,7 @@ async fn refresh_hacker_news(
     };
     require_object_payload(&algolia, "Hacker News Algolia")?;
     let source_url = discussion_url
-        .and_then(normalize_http_url)
+        .and_then(normalize_discussion_http_url)
         .unwrap_or_else(|| format!("https://news.ycombinator.com/item?id={item_id}"));
     let mut comments = Vec::new();
     let mut total_seen = 0usize;
@@ -111,11 +111,11 @@ async fn refresh_reddit(
     external_id: Option<&str>,
 ) -> Result<DiscussionRefreshResult, ContentMiscGatewayError> {
     let source_url = discussion_url
-        .and_then(normalize_reddit_url)
+        .and_then(normalize_reddit_discussion_url)
         .ok_or(ContentMiscGatewayError::DiscussionIdentityMissing)?;
     let item_id = external_id
         .and_then(nonempty_owned)
-        .or_else(|| reddit_submission_id(&source_url))
+        .or_else(|| reddit_discussion_id(&source_url))
         .ok_or(ContentMiscGatewayError::DiscussionIdentityMissing)?;
     let mut endpoint =
         Url::parse(&source_url).map_err(|error| ContentMiscGatewayError::DiscussionFetch {
@@ -374,7 +374,7 @@ fn links_from_comments(comments: &[DiscussionCommentHit]) -> Vec<DiscussionLinkH
                 )
             });
             let candidate = candidate.trim_end_matches(['.', ':', '!', '?']);
-            let Some(url) = normalize_http_url(candidate) else {
+            let Some(url) = normalize_discussion_http_url(candidate) else {
                 continue;
             };
             if !candidate.starts_with("http://")
@@ -487,7 +487,10 @@ fn require_object_payload(value: &Value, provider: &str) -> Result<(), ContentMi
     })
 }
 
-fn infer_platform(platform: Option<&str>, discussion_url: Option<&str>) -> Option<String> {
+pub fn infer_discussion_platform(
+    platform: Option<&str>,
+    discussion_url: Option<&str>,
+) -> Option<String> {
     if let Some(value) = platform.and_then(nonempty_owned) {
         let normalized = value.to_ascii_lowercase().replace([' ', '-'], "_");
         return match normalized.as_str() {
@@ -508,7 +511,7 @@ fn infer_platform(platform: Option<&str>, discussion_url: Option<&str>) -> Optio
     }
 }
 
-fn normalize_http_url(value: &str) -> Option<String> {
+pub fn normalize_discussion_http_url(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() {
         return None;
@@ -528,7 +531,7 @@ fn normalize_http_url(value: &str) -> Option<String> {
     Some(url.to_string())
 }
 
-fn normalize_reddit_url(value: &str) -> Option<String> {
+pub fn normalize_reddit_discussion_url(value: &str) -> Option<String> {
     let mut url = Url::parse(value).ok()?;
     let host = url.host_str()?.to_ascii_lowercase();
     if !domain_matches(&host, "reddit.com") && !domain_matches(&host, "redd.it") {
@@ -544,7 +547,7 @@ fn normalize_reddit_url(value: &str) -> Option<String> {
     Some(url.to_string())
 }
 
-fn hacker_news_id(value: &str) -> Option<String> {
+pub fn hacker_news_discussion_id(value: &str) -> Option<String> {
     let url = Url::parse(value).ok()?;
     url.query_pairs()
         .find(|(name, _)| name == "id")
@@ -555,7 +558,7 @@ fn hacker_news_id(value: &str) -> Option<String> {
         })
 }
 
-fn reddit_submission_id(value: &str) -> Option<String> {
+pub fn reddit_discussion_id(value: &str) -> Option<String> {
     let url = Url::parse(value).ok()?;
     let parts = url.path_segments()?.collect::<Vec<_>>();
     parts
@@ -563,6 +566,24 @@ fn reddit_submission_id(value: &str) -> Option<String> {
         .find(|parts| parts[0].eq_ignore_ascii_case("comments"))
         .and_then(|parts| nonempty_owned(parts[1]))
         .map(|value| value.to_ascii_lowercase())
+}
+
+/// Normalizes an explicit discussion ID or derives it from the canonical URL.
+pub fn normalize_discussion_external_id(
+    platform: &str,
+    external_id: Option<&str>,
+    discussion_url: &str,
+) -> Option<String> {
+    match platform {
+        "hackernews" => external_id
+            .and_then(positive_numeric_string)
+            .or_else(|| hacker_news_discussion_id(discussion_url)),
+        "reddit" => external_id
+            .and_then(nonempty_owned)
+            .map(|value| value.to_ascii_lowercase())
+            .or_else(|| reddit_discussion_id(discussion_url)),
+        _ => None,
+    }
 }
 
 fn positive_numeric_string(value: &str) -> Option<String> {
@@ -774,16 +795,30 @@ mod tests {
     #[test]
     fn canonicalizes_platform_and_ids() {
         assert_eq!(
-            infer_platform(Some("hacker-news"), None).as_deref(),
+            infer_discussion_platform(Some("hacker-news"), None).as_deref(),
             Some("hackernews")
         );
         assert_eq!(
-            hacker_news_id("https://news.ycombinator.com/item?id=123").as_deref(),
+            hacker_news_discussion_id("https://news.ycombinator.com/item?id=123").as_deref(),
             Some("123")
         );
         assert_eq!(
-            reddit_submission_id("https://reddit.com/r/rust/comments/AbC123/title").as_deref(),
+            reddit_discussion_id("https://reddit.com/r/rust/comments/AbC123/title").as_deref(),
             Some("abc123")
+        );
+        assert!(
+            normalize_discussion_external_id(
+                "hackernews",
+                Some("not-a-number"),
+                "https://example.com/thread"
+            )
+            .is_none()
+        );
+        assert!(normalize_reddit_discussion_url("https://example.com/comments/abc").is_none());
+        assert_eq!(
+            normalize_reddit_discussion_url("http://old.reddit.com/r/rust/comments/AbC123/title")
+                .as_deref(),
+            Some("https://www.reddit.com/r/rust/comments/AbC123/title")
         );
     }
 

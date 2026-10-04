@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use newsly_e2b::{
     CommandRequest, ControlPlaneConfig, DirectE2bProvider, ExecutionTag, FileLimits, NetworkPolicy,
-    OutputLimits, SandboxProvider, SandboxRequest, SandboxUser,
+    OutputLimits, SandboxRequest, SandboxUser,
 };
 use secrecy::SecretString;
 use tokio::time::Instant;

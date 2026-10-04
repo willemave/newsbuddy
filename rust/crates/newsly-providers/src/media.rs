@@ -5,7 +5,6 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use newsly_extraction::PublicUrl;
 use reqwest::Url;
-use reqwest::header::{ACCEPT, LOCATION, USER_AGENT};
 use serde::Deserialize;
 use thiserror::Error;
 use tokio::fs::{self, File};
@@ -14,6 +13,7 @@ use tokio::process::Command;
 use uuid::Uuid;
 
 use crate::feed_validation::entry_audio_url;
+use crate::public_http::{PublicHttpError, send_public};
 
 const DEFAULT_MAX_MEDIA_BYTES: u64 = 500_000_000;
 const APPLE_LOOKUP_MAX_BYTES: u64 = 2_000_000;
@@ -79,7 +79,6 @@ pub struct ApplePodcastResolution {
 
 #[derive(Debug, Clone)]
 pub struct MediaGateway {
-    client: reqwest::Client,
     config: MediaGatewayConfig,
 }
 
@@ -118,13 +117,7 @@ impl MediaGateway {
                 "youtube_player_client must contain between 1 and 32 characters".to_owned(),
             ));
         }
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(config.request_timeout)
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .build()?;
-        Ok(Self { client, config })
+        Ok(Self { config })
     }
 
     pub const fn max_media_bytes(&self) -> u64 {
@@ -491,37 +484,31 @@ impl MediaGateway {
         raw_url: &str,
         accept: Option<&str>,
     ) -> Result<reqwest::Response, MediaGatewayError> {
-        let mut current = PublicUrl::parse(raw_url)?;
-        for redirect_count in 0..=self.config.max_redirects {
-            current.validate_dns().await?;
-            let mut request = self.client.get(current.as_url().clone()).header(
-                USER_AGENT,
-                "Mozilla/5.0 (compatible; Newsly/1.0; Media Worker)",
-            );
-            if let Some(accept) = accept {
-                request = request.header(ACCEPT, accept);
-            }
-            let response = request.send().await?;
-            if !response.status().is_redirection() {
-                return response
-                    .error_for_status()
-                    .map_err(MediaGatewayError::Transport);
-            }
-            if redirect_count == self.config.max_redirects {
-                return Err(MediaGatewayError::TooManyRedirects);
-            }
-            let location = response
-                .headers()
-                .get(LOCATION)
-                .and_then(|value| value.to_str().ok())
-                .ok_or(MediaGatewayError::RedirectLocationMissing)?;
-            let next = current
-                .as_url()
-                .join(location)
-                .map_err(|error| MediaGatewayError::InvalidRedirect(error.to_string()))?;
-            current = PublicUrl::parse(next.as_str())?;
-        }
-        Err(MediaGatewayError::TooManyRedirects)
+        send_public(
+            raw_url,
+            self.config.request_timeout,
+            Duration::from_secs(15),
+            "Mozilla/5.0 (compatible; Newsly/1.0; Media Worker)",
+            accept,
+            self.config.max_redirects,
+            false,
+        )
+        .await
+        .map(|result| result.response)
+        .map_err(map_public_http_error)?
+        .error_for_status()
+        .map_err(MediaGatewayError::Transport)
+    }
+}
+
+fn map_public_http_error(error: PublicHttpError) -> MediaGatewayError {
+    match error {
+        PublicHttpError::Url(error) => MediaGatewayError::PublicUrl(error),
+        PublicHttpError::Http(error) => MediaGatewayError::Transport(error),
+        PublicHttpError::Status { status, .. } => MediaGatewayError::HttpStatus(status),
+        PublicHttpError::Deadline => MediaGatewayError::RequestTimeout,
+        PublicHttpError::TooLarge => MediaGatewayError::ResponseTooLarge { limit: 0 },
+        PublicHttpError::Redirect => MediaGatewayError::TooManyRedirects,
     }
 }
 
@@ -910,6 +897,10 @@ pub enum MediaGatewayError {
     PublicUrl(#[from] newsly_extraction::ExtractionClientError),
     #[error("media HTTP request failed")]
     Transport(#[from] reqwest::Error),
+    #[error("media HTTP request returned {0}")]
+    HttpStatus(reqwest::StatusCode),
+    #[error("media HTTP request exceeded its deadline")]
+    RequestTimeout,
     #[error("media file I/O failed")]
     Io(#[from] std::io::Error),
     #[error("media response exceeded the {limit}-byte limit")]

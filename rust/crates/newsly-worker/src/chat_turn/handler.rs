@@ -6,16 +6,17 @@ use newsly_db::{
     PrepareChatTask, QueuedChatTaskKind, cancel_chat_llm_task_attempt, prepare_chat_task,
     write_chat_partial,
 };
-use newsly_providers::OpenAiBackgroundResponses;
+use newsly_providers::OpenAiBackgroundGateway;
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
-use super::agent::{ChatAgentError, ChatAgentRuntime};
+use super::agent::{ChatAgentError, ChatAgentRunKind, ChatAgentRuntime};
 use super::deep_research::{DeepResearchError, run_deep_research};
 use super::finalizer::{ChatFailureFinalizer, ChatSuccessFinalizer};
+use super::usage_source;
 
 const CHAT_FAILURE_MESSAGE: &str = "This chat turn could not be completed. Please retry.";
 const DEEP_RESEARCH_FAILURE_MESSAGE: &str =
@@ -26,7 +27,7 @@ const DIG_DEEPER_FAILURE_MESSAGE: &str = "Dig-deeper chat turn failed";
 pub struct ChatTaskServices {
     pool: PgPool,
     agent: Arc<ChatAgentRuntime>,
-    deep_research: Arc<dyn OpenAiBackgroundResponses>,
+    deep_research: Arc<OpenAiBackgroundGateway>,
     max_retries: i32,
 }
 
@@ -34,7 +35,7 @@ impl ChatTaskServices {
     pub fn new(
         pool: PgPool,
         agent: Arc<ChatAgentRuntime>,
-        deep_research: Arc<dyn OpenAiBackgroundResponses>,
+        deep_research: Arc<OpenAiBackgroundGateway>,
         max_retries: i32,
     ) -> Self {
         Self {
@@ -222,18 +223,7 @@ impl ChatPartitionHandler {
         let usage_source = usage_source(&snapshot);
         HandlerExecution::with_finalizer(
             TaskResult::ok(),
-            ChatSuccessFinalizer::new(
-                snapshot,
-                completed.transcript,
-                completed.render_metadata,
-                completed.output_text,
-                completed.tool_names,
-                completed.model_provider,
-                completed.model_name,
-                completed.provider_response_id,
-                completed.usage,
-                usage_source,
-            ),
+            ChatSuccessFinalizer::new(snapshot, completed, usage_source),
         )
     }
 
@@ -242,17 +232,17 @@ impl ChatPartitionHandler {
         snapshot: &ChatTaskSnapshot,
         cancellation: CancellationToken,
     ) -> Result<CompletedChatWork, ChatExecutionError> {
-        if snapshot.context.kind == newsly_db::ChatTurnKind::DeepResearch {
-            return match run_deep_research(
-                &self.services.agent,
-                Arc::clone(&self.services.deep_research),
-                &self.services.pool,
-                snapshot,
-                cancellation,
-            )
-            .await
-            {
-                Ok(run) => Ok(CompletedChatWork {
+        let kind = match snapshot.context.kind {
+            newsly_db::ChatTurnKind::DeepResearch => {
+                return run_deep_research(
+                    &self.services.agent,
+                    Arc::clone(&self.services.deep_research),
+                    &self.services.pool,
+                    snapshot,
+                    cancellation,
+                )
+                .await
+                .map(|run| CompletedChatWork {
                     output_text: run.output_text,
                     transcript: run.turn_transcript,
                     render_metadata: None,
@@ -261,17 +251,13 @@ impl ChatPartitionHandler {
                     model_name: run.model_name,
                     provider_response_id: Some(run.provider_response_id),
                     usage: run.usage,
-                }),
-                Err(DeepResearchError::Cancelled | DeepResearchError::OwnershipLost) => {
-                    Err(ChatExecutionError::OwnershipLost)
-                }
-                Err(DeepResearchError::PollingBudgetExhausted) => Err(ChatExecutionError::Retry(
-                    "Deep research is still running".to_owned(),
-                )),
-                Err(error) => Err(ChatExecutionError::Terminal(error.to_string())),
-            };
-        }
-        match self.services.agent.run(snapshot, cancellation).await {
+                })
+                .map_err(classify_deep_research_error);
+            }
+            newsly_db::ChatTurnKind::Assistant => ChatAgentRunKind::Assistant,
+            newsly_db::ChatTurnKind::Article => ChatAgentRunKind::Article,
+        };
+        match self.services.agent.run(snapshot, kind, cancellation).await {
             Ok(run) => Ok(CompletedChatWork {
                 output_text: run.outcome.output_text.clone(),
                 transcript: run.turn_transcript,
@@ -323,15 +309,15 @@ impl TaskHandler for ChatPartitionHandler {
 }
 
 #[derive(Debug)]
-struct CompletedChatWork {
-    output_text: String,
-    transcript: NewslyTranscript,
-    render_metadata: Option<serde_json::Value>,
-    tool_names: Vec<String>,
-    model_provider: String,
-    model_name: String,
-    provider_response_id: Option<String>,
-    usage: ProviderUsage,
+pub(super) struct CompletedChatWork {
+    pub(super) output_text: String,
+    pub(super) transcript: NewslyTranscript,
+    pub(super) render_metadata: Option<serde_json::Value>,
+    pub(super) tool_names: Vec<String>,
+    pub(super) model_provider: String,
+    pub(super) model_name: String,
+    pub(super) provider_response_id: Option<String>,
+    pub(super) usage: ProviderUsage,
 }
 
 #[derive(Debug)]
@@ -339,6 +325,21 @@ enum ChatExecutionError {
     OwnershipLost,
     Retry(String),
     Terminal(String),
+}
+
+fn classify_deep_research_error(error: DeepResearchError) -> ChatExecutionError {
+    match error {
+        DeepResearchError::Cancelled | DeepResearchError::OwnershipLost => {
+            ChatExecutionError::OwnershipLost
+        }
+        DeepResearchError::PollingBudgetExhausted => {
+            ChatExecutionError::Retry("Deep research is still running".to_owned())
+        }
+        DeepResearchError::PollProvider(error) if error.retryable() => {
+            ChatExecutionError::Retry(error.to_string())
+        }
+        error => ChatExecutionError::Terminal(error.to_string()),
+    }
 }
 
 fn rejection_for_snapshot(
@@ -369,10 +370,33 @@ fn failure(message: impl Into<String>, retryable: bool) -> HandlerExecution {
     HandlerExecution::from_result(TaskResult::fail(Some(message.into()), retryable))
 }
 
-fn usage_source(snapshot: &ChatTaskSnapshot) -> String {
-    match snapshot.context.kind {
-        newsly_db::ChatTurnKind::Article => "async".to_owned(),
-        newsly_db::ChatTurnKind::Assistant => snapshot.context.source.clone(),
-        newsly_db::ChatTurnKind::DeepResearch => "deep_research".to_owned(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use newsly_providers::OpenAiGatewayError;
+
+    fn api_error(retryable: bool) -> OpenAiGatewayError {
+        OpenAiGatewayError::Api {
+            status: if retryable { 429 } else { 400 },
+            code: None,
+            message: "provider failure".to_owned(),
+            retryable,
+        }
+    }
+
+    #[test]
+    fn retries_only_retryable_poll_failures() {
+        assert!(matches!(
+            classify_deep_research_error(DeepResearchError::PollProvider(api_error(true))),
+            ChatExecutionError::Retry(_)
+        ));
+        assert!(matches!(
+            classify_deep_research_error(DeepResearchError::PollProvider(api_error(false))),
+            ChatExecutionError::Terminal(_)
+        ));
+        assert!(matches!(
+            classify_deep_research_error(DeepResearchError::StartProvider(api_error(true))),
+            ChatExecutionError::Terminal(_)
+        ));
     }
 }

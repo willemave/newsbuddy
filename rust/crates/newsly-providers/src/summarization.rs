@@ -6,17 +6,18 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
-    ToolPolicy,
+    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
+    ResponseContract, ToolPolicy,
 };
 use schemars::JsonSchema;
-use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::{ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
+use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_SUMMARIZATION_MODEL: &str = "openai:gpt-6-luna";
 const MAX_SUMMARIZATION_PAYLOAD_CHARS: usize = 220_000;
@@ -375,11 +376,12 @@ impl SummarizationGateway {
         let model_spec = env::var("SUMMARIZATION_MODEL")
             .unwrap_or_else(|_| DEFAULT_SUMMARIZATION_MODEL.to_owned());
         let deadline = Duration::from_secs(
-            env::var("SUMMARIZATION_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(180)
-                .clamp(15, 900),
+            u64_from_env(
+                "SUMMARIZATION_TIMEOUT_SECONDS",
+                180,
+                "an unsigned integer number of seconds",
+            )?
+            .clamp(15, 900),
         );
         Self::from_env_for_model(model_spec, deadline)
     }
@@ -397,13 +399,8 @@ impl SummarizationGateway {
         model_spec: impl Into<String>,
         deadline: Duration,
     ) -> Result<Self, SummarizationGatewayError> {
-        let credentials = ProviderCredentials {
-            openai: secret_env("OPENAI_API_KEY"),
-            anthropic: secret_env("ANTHROPIC_API_KEY"),
-            google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-            openrouter: secret_env("OPENROUTER_API_KEY"),
-        };
-        let engine = RigAgentEngine::new(credentials, OpenRouterPrivacyPolicy::default())?;
+        let credentials = ProviderCredentials::from_env();
+        let engine = RigAgentEngine::new(credentials);
         let model_spec = crate::ModelSpec::parse(&model_spec.into())?.canonical();
         Ok(Self {
             engine,
@@ -422,18 +419,11 @@ impl SummarizationGateway {
     ///
     /// Returns an error for empty input or when model execution, decoding, or artifact validation
     /// fails.
-    pub async fn summarize(
-        &self,
-        source: &SummarizationSource,
-    ) -> Result<GeneratedLongformSummary, SummarizationGatewayError> {
-        self.summarize_with_events(source, Arc::new(NoEvents)).await
-    }
-
     /// Generates a long-form artifact while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same input, provider, and validation errors as [`Self::summarize`].
+    /// Returns input, provider, and validation errors from summary generation.
     pub async fn summarize_with_events(
         &self,
         source: &SummarizationSource,
@@ -761,37 +751,10 @@ fn clip_payload(payload: &str, max_chars: usize) -> String {
     )
 }
 
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(SecretString::from)
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, _call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async {
-            Err(AgentRuntimeError::Tool(
-                "summarization does not expose tools".to_owned(),
-            ))
-        })
-    }
-}
-
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum SummarizationGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("summarization input is empty")]
     EmptyInput,
     #[error("summarization returned no structured output")]
@@ -800,8 +763,6 @@ pub enum SummarizationGatewayError {
     InvalidArtifact(String),
     #[error(transparent)]
     Agent(#[from] AgentRuntimeError),
-    #[error(transparent)]
-    Engine(#[from] crate::RigAgentEngineError),
     #[error(transparent)]
     ModelSpec(#[from] crate::ModelSpecError),
     #[error(transparent)]

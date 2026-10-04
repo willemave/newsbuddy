@@ -4,17 +4,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use newsly_db::Database;
-use newsly_domain::{ResourceKey, RuntimeOwner};
 use newsly_providers::OpenAiBackgroundGateway;
-use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
-};
+use newsly_queue::{QueueKernel, TaskType};
+use newsly_worker::HandlerRegistry;
 use newsly_worker::chat_turn::{ChatAgentRuntime, ChatPartitionHandler, ChatTaskServices};
 use newsly_worker::process::{
-    initialize_observability, notification_database_url, spawn_shutdown_signal,
+    QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
 use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
-use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 use secrecy::SecretString;
 
 #[tokio::main]
@@ -57,37 +54,21 @@ pub(crate) async fn main() -> Result<()> {
     let mut handlers = HandlerRegistry::new();
     handlers.register(ChatPartitionHandler::chat_turn(Arc::clone(&services)))?;
     handlers.register(ChatPartitionHandler::dig_deeper(services))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [
-            ResourceKey::new(TaskType::ChatTurn.as_str())?,
-            ResourceKey::new(TaskType::DigDeeper.as_str())?,
-        ],
-    )?;
-    let mut claim = ClaimRequest::for_queue(process.worker_id.clone(), TaskQueue::Chat, scope);
-    claim.lease_duration = process.lease_duration;
-    let mut worker_config = WorkerConfig::new(claim);
-    worker_config.max_retries = process.max_retries;
-
-    let notification_hub =
-        QueueNotificationHub::spawn(notification_database_url(process.database_url()));
-    let notifications = notification_hub.subscribe();
-    let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
-
-    tracing::info!(
-        worker_id = %process.worker_id,
-        queue = %TaskQueue::Chat,
-        task_types = "chat_turn,dig_deeper",
-        "Newsly Rust chat worker started; only rows stamped for the Rust runtime are claimable"
-    );
-    let run_result = worker.run(shutdown_rx).await;
-    shutdown_task.abort();
-    notification_hub.close().await;
-    database.close().await;
-    let summary = run_result.context("Newsly Rust chat worker stopped unexpectedly")?;
-    tracing::info!(?summary, "Newsly Rust chat worker stopped");
-    Ok(())
+    run_queue_worker(
+        database,
+        queue,
+        handlers,
+        notification_database_url(process.database_url()),
+        QueueWorkerRunConfig {
+            process_name: "Newsly Rust chat worker",
+            worker_id: &process.worker_id,
+            lease_duration: process.lease_duration,
+            max_retries: process.max_retries,
+            task_types: &[TaskType::ChatTurn, TaskType::DigDeeper],
+            task_type_filter: None,
+        },
+    )
+    .await
 }
 
 fn required_secret(name: &'static str) -> Result<SecretString> {

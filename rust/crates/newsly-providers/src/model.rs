@@ -13,6 +13,18 @@ pub enum ModelProvider {
     OpenRouter,
 }
 
+impl ModelProvider {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Google => "google",
+            Self::OpenRouter => "openrouter",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelSpec {
     pub provider: ModelProvider,
@@ -56,13 +68,7 @@ impl ModelSpec {
     }
 
     pub fn canonical(&self) -> String {
-        let prefix = match self.provider {
-            ModelProvider::OpenAi => "openai",
-            ModelProvider::Anthropic => "anthropic",
-            ModelProvider::Google => "google",
-            ModelProvider::OpenRouter => "openrouter",
-        };
-        format!("{prefix}:{}", self.model)
+        format!("{}:{}", self.provider.as_str(), self.model)
     }
 }
 
@@ -75,6 +81,25 @@ pub struct ProviderCredentials {
 }
 
 impl ProviderCredentials {
+    pub fn from_env() -> Self {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
+        let secret = |name| {
+            lookup(name)
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .map(SecretString::from)
+        };
+        Self {
+            openai: secret("OPENAI_API_KEY"),
+            anthropic: secret("ANTHROPIC_API_KEY"),
+            google: secret("GOOGLE_API_KEY").or_else(|| secret("GEMINI_API_KEY")),
+            openrouter: secret("OPENROUTER_API_KEY"),
+        }
+    }
+
     pub fn key_for(&self, provider: ModelProvider) -> Option<&SecretString> {
         match provider {
             ModelProvider::OpenAi => self.openai.as_ref(),
@@ -82,6 +107,51 @@ impl ProviderCredentials {
             ModelProvider::Google => self.google.as_ref(),
             ModelProvider::OpenRouter => self.openrouter.as_ref(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use secrecy::ExposeSecret;
+
+    use super::*;
+
+    #[test]
+    fn credentials_trim_values_and_fall_back_from_blank_google_key() {
+        let values = HashMap::from([
+            ("OPENAI_API_KEY", " openai "),
+            ("GOOGLE_API_KEY", "  "),
+            ("GEMINI_API_KEY", " gemini "),
+        ]);
+        let credentials = ProviderCredentials::from_lookup(|name| {
+            values.get(name).map(|value| (*value).to_owned())
+        });
+
+        assert_eq!(
+            credentials.openai.as_ref().map(ExposeSecret::expose_secret),
+            Some("openai")
+        );
+        assert_eq!(
+            credentials.google.as_ref().map(ExposeSecret::expose_secret),
+            Some("gemini")
+        );
+        assert!(credentials.anthropic.is_none());
+        assert!(credentials.openrouter.is_none());
+    }
+
+    #[test]
+    fn credentials_prefer_google_key() {
+        let values = HashMap::from([("GOOGLE_API_KEY", "google"), ("GEMINI_API_KEY", "gemini")]);
+        let credentials = ProviderCredentials::from_lookup(|name| {
+            values.get(name).map(|value| (*value).to_owned())
+        });
+
+        assert_eq!(
+            credentials.google.as_ref().map(ExposeSecret::expose_secret),
+            Some("google")
+        );
     }
 }
 

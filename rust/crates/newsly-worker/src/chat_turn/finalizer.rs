@@ -8,6 +8,8 @@ use serde_json::Value;
 
 use crate::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 
+use super::handler::CompletedChatWork;
+
 #[derive(Debug)]
 pub(super) struct ChatSuccessFinalizer {
     snapshot: ChatTaskSnapshot,
@@ -23,29 +25,21 @@ pub(super) struct ChatSuccessFinalizer {
 }
 
 impl ChatSuccessFinalizer {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         snapshot: ChatTaskSnapshot,
-        transcript: NewslyTranscript,
-        render_metadata: Option<Value>,
-        output_text: String,
-        tool_names: Vec<String>,
-        model_provider: String,
-        model_name: String,
-        provider_response_id: Option<String>,
-        usage: ProviderUsage,
+        completed: CompletedChatWork,
         usage_source: String,
     ) -> Self {
         Self {
             snapshot,
-            transcript,
-            render_metadata,
-            output_text,
-            tool_names,
-            model_provider,
-            model_name,
-            provider_response_id,
-            usage,
+            transcript: completed.transcript,
+            render_metadata: completed.render_metadata,
+            output_text: completed.output_text,
+            tool_names: completed.tool_names,
+            model_provider: completed.model_provider,
+            model_name: completed.model_name,
+            provider_response_id: completed.provider_response_id,
+            usage: completed.usage,
             usage_source,
         }
     }

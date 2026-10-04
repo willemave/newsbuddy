@@ -9,8 +9,8 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::learning_deck::{LearningDeckDispatchOutcome, LearningDeckTaskExecutor};
-use crate::share_actions::{ShareActionDispatchOutcome, ShareActionTaskExecutor};
+use crate::learning_deck::LearningDeckTaskExecutor;
+use crate::share_actions::ShareActionTaskExecutor;
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, HandlerInterruptionPolicy,
     LeaseHealth, TaskFinalizer, TaskFinalizerResult, TaskHandler,
@@ -82,20 +82,12 @@ impl RunLlmTaskHandler {
         match kind {
             LlmTaskDispatchKind::Terminal => HandlerExecution::from_result(TaskResult::ok()),
             LlmTaskDispatchKind::ShareAction => {
-                match self.share_actions.execute(&plan, lease).await {
-                    ShareActionDispatchOutcome::Handled(execution) => execution,
-                    ShareActionDispatchOutcome::NotShareAction => {
-                        unsupported_execution(task_id, user_id, "share_action")
-                    }
-                }
+                self.share_actions
+                    .execute(&plan, lease, task_id, user_id)
+                    .await
             }
             LlmTaskDispatchKind::LearningDeck => {
-                match self.learning_decks.execute(&plan, lease).await {
-                    LearningDeckDispatchOutcome::Handled(execution) => execution,
-                    LearningDeckDispatchOutcome::NotLearningDeck => {
-                        unsupported_execution(task_id, user_id, "learning_deck")
-                    }
-                }
+                Box::pin(self.learning_decks.execute(&plan, lease, task_id, user_id)).await
             }
             LlmTaskDispatchKind::Unsupported { task_kind } => {
                 unsupported_execution(task_id, user_id, &task_kind)
@@ -125,11 +117,15 @@ impl TaskHandler for RunLlmTaskHandler {
     }
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
-        Box::pin(async move { self.execute_inner(plan, lease).await })
+        Box::pin(self.execute_inner(plan, lease))
     }
 }
 
-fn unsupported_execution(task_id: i64, user_id: i64, task_kind: &str) -> HandlerExecution {
+pub(crate) fn unsupported_execution(
+    task_id: i64,
+    user_id: i64,
+    task_kind: &str,
+) -> HandlerExecution {
     let message = format!("Unsupported LLM task kind: {task_kind}");
     HandlerExecution::with_finalizer(
         TaskResult::fail(Some(message), false),

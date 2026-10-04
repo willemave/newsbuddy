@@ -16,3 +16,13 @@ mod tools;
 
 pub use agent::{ChatAgentBuildError, ChatAgentConfig, ChatAgentRuntime};
 pub use handler::{ChatPartitionHandler, ChatTaskServices};
+
+pub(super) const DEEP_RESEARCH_MODEL: &str = "o4-mini-deep-research-2025-06-26";
+
+pub(super) fn usage_source(snapshot: &newsly_db::ChatTaskSnapshot) -> String {
+    match snapshot.context.kind {
+        newsly_db::ChatTurnKind::Article => "async".to_owned(),
+        newsly_db::ChatTurnKind::Assistant => snapshot.context.source.clone(),
+        newsly_db::ChatTurnKind::DeepResearch => "deep_research".to_owned(),
+    }
+}

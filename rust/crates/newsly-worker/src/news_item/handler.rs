@@ -10,7 +10,7 @@ use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::content::{ContentExtractionRuntime, ExtractionAttempt};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
@@ -110,7 +110,7 @@ impl TaskHandler for ProcessNewsItemHandler {
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
         let services = Arc::clone(&self.services);
-        Box::pin(async move { execute_processing(&services, &plan, lease).await })
+        Box::pin(async move { Box::pin(execute_processing(&services, &plan, lease)).await })
     }
 }
 
@@ -385,7 +385,7 @@ async fn execute_processing(
         (resolved_summary(summary, &preparation.snapshot), true)
     } else {
         let prompt = build_summary_prompt(&preparation.snapshot, article_body.as_deref());
-        let usage_sink = Arc::new(AgentUsageSink::new(
+        let usage_sink = Arc::new(AgentUsageRecorder::new(
             services.pool.clone(),
             AgentUsageAttribution {
                 operation: "news_processing.summarize_short_form".to_owned(),
@@ -438,11 +438,10 @@ async fn execute_processing(
             &lease.claim,
             &preparation.snapshot,
             &summary,
-            &usage,
         )
         .await
         {
-            Ok(true) => usage.clear(),
+            Ok(true) => {}
             Ok(false) => return HandlerExecution::from_result(TaskResult::defer(1)),
             Err(error) => {
                 return processing_failure_with_usage(
@@ -451,7 +450,7 @@ async fn execute_processing(
                     preparation.snapshot,
                     &error.to_string(),
                     true,
-                    usage,
+                    Vec::new(),
                 );
             }
         }
@@ -624,7 +623,7 @@ async fn execute_processing(
             .and_then(|body| relevant_link_input(&preparation.snapshot, body))
         {
             Some(input) => {
-                let usage_sink = Arc::new(AgentUsageSink::new(
+                let usage_sink = Arc::new(AgentUsageRecorder::new(
                     services.pool.clone(),
                     AgentUsageAttribution {
                         operation: "news_processing.select_article_links".to_owned(),

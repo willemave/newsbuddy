@@ -8,36 +8,36 @@ use tokio::time::{Instant, sleep};
 use crate::client::{ApiError, Client};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WaitOptions {
-    pub interval: Duration,
-    pub timeout: Duration,
+pub(crate) struct WaitOptions {
+    pub(crate) interval: Duration,
+    pub(crate) timeout: Duration,
 }
 
 impl WaitOptions {
-    fn validate(self) -> Result<Self, ApiError> {
-        if self.interval.is_zero() {
+    pub(crate) fn new(interval: Duration, timeout: Duration) -> Result<Self, ApiError> {
+        if interval.is_zero() {
             return Err(ApiError::local("wait-interval must be greater than zero"));
         }
-        Ok(self)
+        Ok(Self { interval, timeout })
     }
 }
 
-pub fn normalize_status(status: &str) -> String {
+pub(crate) fn normalize_status(status: &str) -> String {
     status.trim().to_ascii_lowercase()
 }
 
-pub fn is_terminal_status(status: &str) -> bool {
+pub(crate) fn is_terminal_status(status: &str) -> bool {
     matches!(
         normalize_status(status).as_str(),
         "completed" | "failed" | "skipped"
     )
 }
 
-pub fn is_failed_or_skipped_status(status: &str) -> bool {
+pub(crate) fn is_failed_or_skipped_status(status: &str) -> bool {
     matches!(normalize_status(status).as_str(), "failed" | "skipped")
 }
 
-pub fn job_failed_or_skipped(job: &Value) -> bool {
+pub(crate) fn job_failed_or_skipped(job: &Value) -> bool {
     job.get("status")
         .and_then(Value::as_str)
         .is_some_and(is_failed_or_skipped_status)
@@ -49,8 +49,11 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when polling fails, the response is invalid, or the deadline expires.
-    pub async fn wait_for_job(&self, job_id: i64, options: WaitOptions) -> Result<Value, ApiError> {
-        let options = options.validate()?;
+    pub(crate) async fn wait_for_job(
+        &self,
+        job_id: i64,
+        options: WaitOptions,
+    ) -> Result<Value, ApiError> {
         let deadline = deadline(options.timeout)?;
         loop {
             let job = self.get_job(job_id).await?;
@@ -73,12 +76,11 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when polling fails, processing fails, or the deadline expires.
-    pub async fn wait_for_submitted_content(
+    pub(crate) async fn wait_for_submitted_content(
         &self,
         content_id: i64,
         options: WaitOptions,
     ) -> Result<Value, ApiError> {
-        let options = options.validate()?;
         let deadline = deadline(options.timeout)?;
         loop {
             match self.get_content(content_id).await {
@@ -128,12 +130,11 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when polling fails, the response is invalid, or the deadline expires.
-    pub async fn wait_for_onboarding(
+    pub(crate) async fn wait_for_onboarding(
         &self,
         run_id: i64,
         options: WaitOptions,
     ) -> Result<Value, ApiError> {
-        let options = options.validate()?;
         let deadline = deadline(options.timeout)?;
         loop {
             let run = self.get_onboarding(run_id).await?;
@@ -159,13 +160,12 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when polling fails, the link is unusable, or the deadline expires.
-    pub async fn wait_for_cli_link(
+    pub(crate) async fn wait_for_cli_link(
         &self,
         session_id: &str,
         poll_token: &str,
         options: WaitOptions,
     ) -> Result<Value, ApiError> {
-        let options = options.validate()?;
         let deadline = deadline(options.timeout)?;
         loop {
             let response = self.poll_cli_link(session_id, poll_token).await?;

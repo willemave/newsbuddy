@@ -20,7 +20,4 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-url = { version = "=2.5.8", features = ["serde"] }
-
-[dev-dependencies]
-axum.workspace = true
+url = { workspace = true, features = ["serde"] }

@@ -331,11 +331,6 @@ pub struct ComposedBriefingSegment {
     pub event_groups: Vec<Vec<String>>,
     pub model: String,
     pub prompt_version: String,
-    pub input_tokens: Option<i32>,
-    pub output_tokens: Option<i32>,
-    pub generation_ms: i32,
-    pub warnings: Vec<String>,
-    pub usage: BriefingSegmentUsage,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -399,17 +394,8 @@ struct PendingNewsRow {
     pending_id: i64,
     lens_key: String,
     enqueued_at: NaiveDateTime,
-    id: i64,
-    summary_text: Option<String>,
-    summary_key_points: Value,
-    raw_metadata: Value,
-    article_url: Option<String>,
-    canonical_story_url: Option<String>,
-    canonical_item_url: Option<String>,
-    published_at: Option<NaiveDateTime>,
-    processed_at: Option<NaiveDateTime>,
-    ingested_at: NaiveDateTime,
-    created_at: NaiveDateTime,
+    #[sqlx(flatten)]
+    source: SourceNewsRow,
 }
 
 #[derive(Debug, FromRow)]
@@ -426,18 +412,18 @@ struct SourceContentRow {
 }
 
 #[derive(Debug, FromRow)]
-struct SourceNewsRow {
-    id: i64,
-    summary_text: Option<String>,
-    summary_key_points: Value,
-    raw_metadata: Value,
-    article_url: Option<String>,
-    canonical_story_url: Option<String>,
-    canonical_item_url: Option<String>,
-    published_at: Option<NaiveDateTime>,
-    processed_at: Option<NaiveDateTime>,
-    ingested_at: NaiveDateTime,
-    created_at: NaiveDateTime,
+pub(crate) struct SourceNewsRow {
+    pub(crate) id: i64,
+    pub(crate) summary_text: Option<String>,
+    pub(crate) summary_key_points: Value,
+    pub(crate) raw_metadata: Value,
+    pub(crate) article_url: Option<String>,
+    pub(crate) canonical_story_url: Option<String>,
+    pub(crate) canonical_item_url: Option<String>,
+    pub(crate) published_at: Option<NaiveDateTime>,
+    pub(crate) processed_at: Option<NaiveDateTime>,
+    pub(crate) ingested_at: NaiveDateTime,
+    pub(crate) created_at: NaiveDateTime,
 }
 
 #[derive(Debug, FromRow)]
@@ -480,17 +466,8 @@ struct SegmentRow {
 struct UnassignedNewsRow {
     pending_id: i64,
     enqueued_at: NaiveDateTime,
-    id: i64,
-    summary_text: Option<String>,
-    summary_key_points: Value,
-    raw_metadata: Value,
-    article_url: Option<String>,
-    canonical_story_url: Option<String>,
-    canonical_item_url: Option<String>,
-    published_at: Option<NaiveDateTime>,
-    processed_at: Option<NaiveDateTime>,
-    ingested_at: NaiveDateTime,
-    created_at: NaiveDateTime,
+    #[sqlx(flatten)]
+    source: SourceNewsRow,
 }
 
 #[derive(Debug, FromRow)]

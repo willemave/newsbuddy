@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use newsly_contracts::LlmTaskMode;
 use newsly_db::{
     E2eDatabaseIdentity, IosE2eFixtureNamespace, IosE2eFixtureSeedReceipt, IosE2eLocalArtifactPlan,
     inspect_e2e_database_identity, ios_e2e_local_artifact_plan, seed_ios_e2e_fixture,
@@ -17,59 +18,49 @@ use sqlx::PgPool;
 const APP_BUNDLE_ID: &str = "org.willemaw.newsly";
 const DEBUG_SESSION_PATH: &str = "/auth/debug/new-user";
 const SHARE_ACTION_PATH: &str = "/api/share-actions";
-const SHARE_MODES: [&str; 7] = [
-    "add_content",
-    "add_to_briefing",
-    "add_links",
-    "add_feed",
-    "chat",
-    "presentation",
-    "bookmark_only",
-];
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct IosE2eUserManifest {
-    pub id: i64,
-    pub email: String,
-    pub debug_session_request: Value,
-    pub debug_login_url: String,
+pub(crate) struct IosE2eUserManifest {
+    pub(crate) id: i64,
+    pub(crate) email: String,
+    pub(crate) debug_session_request: Value,
+    pub(crate) debug_login_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct IosE2eApiManifest {
-    pub base_url: String,
-    pub debug_session_path: String,
-    pub endpoints: BTreeMap<String, String>,
+pub(crate) struct IosE2eApiManifest {
+    pub(crate) base_url: String,
+    pub(crate) debug_session_path: String,
+    pub(crate) endpoints: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct IosE2eShareManifest {
-    pub seeded_task_id: i64,
-    pub seeded_action_id: i64,
-    pub supported_modes: Vec<String>,
-    pub example_request: Value,
-    pub accepted_status: u16,
+pub(crate) struct IosE2eShareManifest {
+    pub(crate) seeded_task_id: i64,
+    pub(crate) seeded_action_id: i64,
+    pub(crate) supported_modes: Vec<String>,
+    pub(crate) example_request: Value,
+    pub(crate) accepted_status: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct IosE2eFixtureManifest {
-    pub schema_version: u8,
-    pub fixture_type: String,
-    pub namespace: String,
-    pub database: E2eDatabaseIdentity,
-    pub user: IosE2eUserManifest,
-    pub api: IosE2eApiManifest,
-    pub content: newsly_db::IosE2eContentFixtures,
-    pub briefing: newsly_db::IosE2eBriefingFixtures,
-    pub chat: newsly_db::IosE2eChatFixtures,
-    pub learning: newsly_db::IosE2eLearningFixtures,
-    pub tasks: newsly_db::IosE2eTaskFixtures,
-    pub share_api: IosE2eShareManifest,
-    pub maestro_env: BTreeMap<String, String>,
+pub(crate) struct IosE2eFixtureManifest {
+    pub(crate) schema_version: u8,
+    pub(crate) fixture_type: String,
+    pub(crate) namespace: String,
+    pub(crate) database: E2eDatabaseIdentity,
+    pub(crate) user: IosE2eUserManifest,
+    pub(crate) api: IosE2eApiManifest,
+    pub(crate) content: newsly_db::IosE2eContentFixtures,
+    pub(crate) briefing: newsly_db::IosE2eBriefingFixtures,
+    pub(crate) chat: newsly_db::IosE2eChatFixtures,
+    pub(crate) learning: newsly_db::IosE2eLearningFixtures,
+    pub(crate) tasks: newsly_db::IosE2eTaskFixtures,
+    pub(crate) share_api: IosE2eShareManifest,
+    pub(crate) maestro_env: BTreeMap<String, String>,
 }
 
 impl IosE2eFixtureManifest {
-    pub fn render_text(&self) -> String {
+    pub(crate) fn render_text(&self) -> String {
         format!(
             "seeded iOS E2E fixture namespace={} database={} user_id={} content_id={} chat_session_id={}; rerun with --output json for the complete manifest",
             self.namespace,
@@ -87,7 +78,7 @@ impl IosE2eFixtureManifest {
 ///
 /// Returns an error unless the caller explicitly confirms a local environment, the database is
 /// local, fixture paths are safe, every artifact is written, and the database seed commits.
-pub async fn seed(
+pub(crate) async fn seed(
     pool: &PgPool,
     namespace: &str,
     server_port: u16,
@@ -255,7 +246,10 @@ fn build_manifest(
         share_api: IosE2eShareManifest {
             seeded_task_id: receipt.tasks.share_task_id,
             seeded_action_id: receipt.tasks.share_action_id,
-            supported_modes: SHARE_MODES.iter().map(ToString::to_string).collect(),
+            supported_modes: LlmTaskMode::SHARE_ACTIONS
+                .iter()
+                .map(|mode| mode.as_str().to_owned())
+                .collect(),
             example_request: json!({
                 "url": format!(
                     "https://fixtures.newsly.invalid/{}/knowledge",
@@ -328,12 +322,28 @@ fn maestro_environment(
     BTreeMap::from([
         ("APP_ID".to_owned(), APP_BUNDLE_ID.to_owned()),
         (
+            "AUDIO_EPISODE_ID".to_owned(),
+            receipt.learning.audio_episode_id.to_string(),
+        ),
+        (
+            "ARTICLE_TITLE".to_owned(),
+            receipt.content.detail_title.clone(),
+        ),
+        (
             "ARTICLE_SEGMENT_ID".to_owned(),
             receipt.briefing.segment_id.to_string(),
         ),
         (
             "CHAT_SESSION_ID".to_owned(),
             receipt.chat.session_id.to_string(),
+        ),
+        (
+            "ASSISTANT_REPLY".to_owned(),
+            receipt.chat.expected_assistant_message.clone(),
+        ),
+        (
+            "BASELINE_DIR".to_owned(),
+            "client/newsly/Maestro/baselines".to_owned(),
         ),
         (
             "CONTENT_ID".to_owned(),
@@ -345,12 +355,63 @@ fn maestro_environment(
         ),
         ("DECK_ID".to_owned(), receipt.learning.deck_id.to_string()),
         (
+            "FOLLOW_UP".to_owned(),
+            "What should I verify next?".to_owned(),
+        ),
+        (
+            "FOLLOW_UP_REPLY".to_owned(),
+            "Verify the smallest observable behavior first.".to_owned(),
+        ),
+        (
+            "LATEST_ASSISTANT".to_owned(),
+            receipt.chat.expected_assistant_message.clone(),
+        ),
+        (
             "LONG_CONTENT_ID".to_owned(),
             receipt.content.knowledge_content_id.to_string(),
         ),
+        (
+            "NEWS_ITEM_ID".to_owned(),
+            receipt.content.detail_content_id.to_string(),
+        ),
+        (
+            "NEWS_SEGMENT_ID".to_owned(),
+            receipt.briefing.segment_id.to_string(),
+        ),
+        (
+            "OLDER_USER".to_owned(),
+            receipt.chat.expected_user_message.clone(),
+        ),
+        (
+            "PODCAST_SEGMENT_ID".to_owned(),
+            receipt.briefing.segment_id.to_string(),
+        ),
+        (
+            "PODCAST_TITLE".to_owned(),
+            receipt.learning.audio_title.clone(),
+        ),
+        ("QUERY".to_owned(), "reliable async systems".to_owned()),
+        ("RECORD_SCREENSHOTS".to_owned(), "false".to_owned()),
+        (
+            "SEGMENT_ID".to_owned(),
+            receipt.briefing.segment_id.to_string(),
+        ),
         ("SERVER_HOST".to_owned(), host.to_owned()),
         ("SERVER_PORT".to_owned(), server_port.to_string()),
+        (
+            "TOPIC_STANCE".to_owned(),
+            "Prefer bounded, observable retries.".to_owned(),
+        ),
+        (
+            "TOPIC_SUMMARY".to_owned(),
+            "Reliable asynchronous systems".to_owned(),
+        ),
+        (
+            "TRANSCRIPT".to_owned(),
+            "Summarize the reliability lessons.".to_owned(),
+        ),
         ("USER_ID".to_owned(), receipt.user_id.to_string()),
+        ("VISUAL_NOW".to_owned(), receipt.seeded_at.to_rfc3339()),
     ])
 }
 
@@ -388,6 +449,11 @@ fn require_local_database(identity: &E2eDatabaseIdentity) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::fs;
+
+    use chrono::{Duration, TimeZone, Utc};
+
     use super::*;
 
     #[test]
@@ -419,18 +485,71 @@ mod tests {
     }
 
     #[test]
-    fn share_manifest_lists_the_complete_public_mode_set() {
-        assert_eq!(
-            SHARE_MODES,
-            [
-                "add_content",
-                "add_to_briefing",
-                "add_links",
-                "add_feed",
-                "chat",
-                "presentation",
-                "bookmark_only",
-            ]
-        );
+    fn maestro_manifest_supplies_every_flow_variable() {
+        let seeded_at = Utc.with_ymd_and_hms(2026, 9, 23, 10, 30, 0).unwrap();
+        let receipt = IosE2eFixtureSeedReceipt {
+            namespace: "contract".to_owned(),
+            seeded_at,
+            user_id: 7,
+            user_email: "fixture@example.test".to_owned(),
+            content: newsly_db::IosE2eContentFixtures {
+                detail_content_id: 11,
+                detail_title: "Detail".to_owned(),
+                knowledge_content_id: 12,
+                knowledge_title: "Knowledge".to_owned(),
+                processing_content_id: 13,
+                processing_title: "Processing".to_owned(),
+            },
+            briefing: newsly_db::IosE2eBriefingFixtures {
+                lens_id: 21,
+                lens_key: "articles".to_owned(),
+                segment_id: 22,
+            },
+            chat: newsly_db::IosE2eChatFixtures {
+                session_id: 31,
+                title: "Chat".to_owned(),
+                expected_user_message: "Question".to_owned(),
+                expected_assistant_message: "Answer".to_owned(),
+            },
+            learning: newsly_db::IosE2eLearningFixtures {
+                deck_id: 41,
+                deck_title: "Deck".to_owned(),
+                viewer_available: true,
+                audio_episode_id: 42,
+                audio_title: "Audio".to_owned(),
+                audio_file_available: true,
+            },
+            tasks: newsly_db::IosE2eTaskFixtures {
+                deferred_processing_task_id: 51,
+                deferred_until: seeded_at + Duration::hours(1),
+                share_task_id: 52,
+                share_action_id: 53,
+            },
+        };
+        let environment = maestro_environment(&receipt, "127.0.0.1", 8000);
+        let flows =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../client/newsly/Maestro/flows");
+        let mut required = BTreeSet::new();
+        for entry in fs::read_dir(flows).expect("Maestro flow directory should exist") {
+            let path = entry.expect("flow entry should be readable").path();
+            if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
+                continue;
+            }
+            let contents = fs::read_to_string(path).expect("Maestro flow should be readable");
+            for suffix in contents.split("${").skip(1) {
+                let variable = suffix
+                    .chars()
+                    .take_while(|character| character.is_ascii_uppercase() || *character == '_')
+                    .collect::<String>();
+                if !variable.is_empty() {
+                    required.insert(variable);
+                }
+            }
+        }
+        let missing = required
+            .into_iter()
+            .filter(|variable| !environment.contains_key(variable))
+            .collect::<Vec<_>>();
+        assert!(missing.is_empty(), "missing Maestro variables: {missing:?}");
     }
 }

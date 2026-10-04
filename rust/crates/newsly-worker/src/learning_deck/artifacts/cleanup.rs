@@ -1,4 +1,5 @@
-use super::{Duration, LearningDeckArtifactError, LearningDeckArtifactStore};
+use super::{LearningDeckArtifactError, LearningDeckArtifactStore};
+use std::time::Duration;
 
 impl LearningDeckArtifactStore {
     pub(in crate::learning_deck) fn start_cleanup(&self) {

@@ -1,68 +1,39 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{StreamExt, stream};
-use newsly_agent_runtime::{
-    AgentEngine, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError};
 use reqwest::Url;
-use rig_core::schemars::{JsonSchema, schema_for};
+use rig_core::schemars::JsonSchema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::rig_engine::{RunStructuredError, StructuredRunRequest};
+use crate::{ProviderCredentials, RigAgentEngine};
 
-#[path = "onboarding_agent_support.rs"]
-mod agent_support;
-mod exa;
 #[path = "onboarding_lane_sources.rs"]
 mod lane_sources;
 #[path = "onboarding_model.rs"]
 mod model_config;
-use agent_support::{NoEvents, NoTools};
-pub use exa::OnboardingExaUsage;
-use exa::search_exa;
+use crate::exa::{ExaSearchOptions, ExaSearchUsage, search_exa};
+use crate::provider_env::{ProviderEnvError, u64_from_env};
+pub type OnboardingExaUsage = ExaSearchUsage;
 use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const EXA_MAX_CONCURRENCY: usize = 8;
-const PROFILE_TIMEOUT: Duration = Duration::from_secs(8);
-const VOICE_TIMEOUT: Duration = Duration::from_secs(6);
 const AUDIO_PLAN_TIMEOUT: Duration = Duration::from_secs(8);
 const FAST_DISCOVER_TIMEOUT: Duration = Duration::from_secs(12);
 const DISCOVERY_PROMPT_MAX_RESULTS: usize = 200;
 const DISCOVERY_SNIPPET_CHARS: usize = 280;
-const PROFILE_SYSTEM_PROMPT: &str = "You are building a short onboarding profile for a user. Use the provided interests and web snippets to infer a concise profile summary and 3-6 topical interests. Do not invent interests that contradict the user-provided topics. Return structured output only.";
-const VOICE_SYSTEM_PROMPT: &str = "You extract onboarding fields from a transcript. Return a first name if explicitly stated and a concise list of interest topics. Do not guess missing information. Return structured output only.";
 const FAST_DISCOVER_SYSTEM_PROMPT: &str = "You are selecting high-quality sources for a new user. Use only the profile summary, topics, and search snippets to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. Every suggestion must be grounded in web_results; do not use static defaults, curated backups, or general prior knowledge as source candidates. Podcast suggestions must come from web_results only. If web_results contain no suitable sources for a category, return zero suggestions for that category. Suggest up to 5 sources per category, spread across the profile topics so that every topic is represented in each category where web_results support it. Every suggestion must include a concise, specific rationale sentence. Prefer sources with clear RSS URLs when possible. Podcast directory entries and results marked RSS feed give the show's real feed; use that URL as feed_url. Reddit community results are real public communities; prefer active, substantive discussion communities over meme or joke subreddits, and use the name without the r/ prefix as subreddit. For feed-like sources, always provide a best-effort feed_url when available. If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). For reddit entries, include subreddit. Return structured output only.";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OnboardingProfile {
-    pub profile_summary: String,
-    pub inferred_topics: Vec<String>,
-    pub candidate_sources: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OnboardingProfileOutcome {
-    pub profile: OnboardingProfile,
-    pub exa_usage: OnboardingExaUsage,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OnboardingDiscoveryOutcome {
     pub seeds: OnboardingDiscoverySeeds,
     pub exa_usage: OnboardingExaUsage,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OnboardingVoiceFields {
-    pub first_name: Option<String>,
-    pub interest_topics: Vec<String>,
-    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -125,24 +96,6 @@ pub struct OnboardingDiscoverySeeds {
     pub subreddits: Vec<OnboardingSuggestionSeed>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-struct ProfileOutput {
-    profile_summary: String,
-    #[serde(default)]
-    inferred_topics: Vec<String>,
-    #[serde(default)]
-    candidate_sources: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-struct VoiceOutput {
-    first_name: Option<String>,
-    #[serde(default)]
-    interest_topics: Vec<String>,
-    #[schemars(range(min = 0.0, max = 1.0))]
-    confidence: Option<f64>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WebResult {
     title: String,
@@ -172,7 +125,6 @@ pub struct OnboardingGateway {
     exa_api_key: Option<SecretString>,
     exa_search_url: Url,
     engine: RigAgentEngine,
-    events: Arc<dyn AgentEventSink>,
     reddit: Option<lane_sources::RedditCredentials>,
 }
 
@@ -200,136 +152,22 @@ impl OnboardingGateway {
     pub fn from_env() -> Result<Self, OnboardingGatewayError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(
-                env_u64("HTTP_TIMEOUT_SECONDS", 60).max(1),
+                u64_from_env(
+                    "HTTP_TIMEOUT_SECONDS",
+                    60,
+                    "an unsigned integer number of seconds",
+                )?
+                .max(1),
             ))
             .build()?;
         let exa_search_url = exa_search_url()?;
-        let policy = OpenRouterPrivacyPolicy::default();
-        let engine = RigAgentEngine::new(
-            ProviderCredentials {
-                openai: secret_env("OPENAI_API_KEY"),
-                anthropic: secret_env("ANTHROPIC_API_KEY"),
-                google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-                openrouter: secret_env("OPENROUTER_API_KEY"),
-            },
-            policy,
-        )?;
+        let engine = RigAgentEngine::new(ProviderCredentials::from_env());
         Ok(Self {
             client,
             exa_api_key: secret_env("EXA_API_KEY"),
             exa_search_url,
             engine,
-            events: Arc::new(NoEvents),
             reddit: lane_sources::RedditCredentials::from_env(),
-        })
-    }
-
-    /// Returns a request-local clone that publishes model events to `events`.
-    #[must_use]
-    pub fn with_events(&self, events: Arc<dyn AgentEventSink>) -> Self {
-        let mut gateway = self.clone();
-        gateway.events = events;
-        gateway
-    }
-
-    /// Builds a grounded onboarding profile from the user's declared interests.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the provider request fails or its structured response is invalid.
-    pub async fn build_profile(
-        &self,
-        first_name: &str,
-        interest_topics: &[String],
-    ) -> Result<OnboardingProfileOutcome, OnboardingGatewayError> {
-        let queries = profile_queries(interest_topics, first_name);
-        let outcome = self.search_many(queries, 3, false, PROFILE_TIMEOUT).await;
-        let results = outcome.results;
-        if results.is_empty() {
-            return Ok(OnboardingProfileOutcome {
-                profile: OnboardingProfile {
-                    profile_summary: profile_fallback_summary(first_name, interest_topics),
-                    inferred_topics: merge_topics([interest_topics.iter().map(String::as_str)], 8),
-                    candidate_sources: Vec::new(),
-                },
-                exa_usage: outcome.usage,
-            });
-        }
-
-        let web_results = results
-            .iter()
-            .take(10)
-            .enumerate()
-            .map(|(index, item)| {
-                format!(
-                    "{}. {}\nurl: {}\nsummary: {}",
-                    index + 1,
-                    item.title,
-                    item.url,
-                    item.snippet.as_deref().unwrap_or_default()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let prompt = format!(
-            "first_name: {first_name}\ninterest_topics: {}\n\nweb_results:\n{web_results}",
-            interest_topics.join(", ")
-        );
-        let output: ProfileOutput = self
-            .structured(
-                "onboarding.profile",
-                PROFILE_SYSTEM_PROMPT,
-                prompt,
-                PROFILE_TIMEOUT,
-            )
-            .await?;
-        let inferred_topics = merge_topics(
-            [
-                output.inferred_topics.iter().map(String::as_str),
-                interest_topics.iter().map(String::as_str),
-            ],
-            8,
-        );
-        Ok(OnboardingProfileOutcome {
-            profile: OnboardingProfile {
-                profile_summary: output.profile_summary,
-                inferred_topics,
-                candidate_sources: output.candidate_sources,
-            },
-            exa_usage: outcome.usage,
-        })
-    }
-
-    /// Extracts onboarding fields from a voice transcript.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the provider request fails or its structured response is invalid.
-    pub async fn parse_voice(
-        &self,
-        transcript: &str,
-        locale: Option<&str>,
-    ) -> Result<OnboardingVoiceFields, OnboardingGatewayError> {
-        let prompt = format!(
-            "Extract the user's first name (if stated) and the topics of news they want to read. Return concise topic phrases (2-5 words) and avoid guessing. locale: {}\ntranscript: {transcript}",
-            locale
-                .filter(|value| !value.is_empty())
-                .unwrap_or("unknown")
-        );
-        let output: VoiceOutput = self
-            .structured(
-                "onboarding.voice_parse",
-                VOICE_SYSTEM_PROMPT,
-                prompt,
-                VOICE_TIMEOUT,
-            )
-            .await?;
-        Ok(OnboardingVoiceFields {
-            first_name: clean(output.first_name),
-            interest_topics: merge_topics([output.interest_topics.iter().map(String::as_str)], 8),
-            confidence: output
-                .confidence
-                .filter(|value| (0.0..=1.0).contains(value)),
         })
     }
 
@@ -339,8 +177,9 @@ impl OnboardingGateway {
         &self,
         transcript: &str,
         locale: Option<&str>,
+        events: Arc<dyn AgentEventSink>,
     ) -> OnboardingAudioPlan {
-        self.build_audio_plan_with_metadata(transcript, locale)
+        self.build_audio_plan_with_metadata(transcript, locale, events)
             .await
             .0
     }
@@ -351,6 +190,7 @@ impl OnboardingGateway {
         &self,
         transcript: &str,
         locale: Option<&str>,
+        events: Arc<dyn AgentEventSink>,
     ) -> (OnboardingAudioPlan, bool, Option<String>) {
         let prompt = format!(
             "locale: {}\ntranscript: {transcript}",
@@ -364,6 +204,7 @@ impl OnboardingGateway {
                 AUDIO_PLAN_SYSTEM_PROMPT,
                 prompt,
                 AUDIO_PLAN_TIMEOUT,
+                events,
             )
             .await
         {
@@ -388,6 +229,7 @@ impl OnboardingGateway {
         &self,
         profile_summary: &str,
         inferred_topics: &[String],
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<OnboardingDiscoveryOutcome, OnboardingGatewayError> {
         let queries = discovery_queries(profile_summary, inferred_topics, 6);
         let outcome = self
@@ -406,6 +248,7 @@ impl OnboardingGateway {
                 profile_summary,
                 inferred_topics,
                 &results,
+                events,
             )
             .await?;
         Ok(OnboardingDiscoveryOutcome {
@@ -426,6 +269,7 @@ impl OnboardingGateway {
         profile_summary: &str,
         inferred_topics: &[String],
         lanes: &[OnboardingAudioLane],
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<OnboardingDiscoveryOutcome, OnboardingGatewayError> {
         let gateway = self.clone();
         let topics = inferred_topics.to_vec();
@@ -453,6 +297,7 @@ impl OnboardingGateway {
                 profile_summary,
                 inferred_topics,
                 &results,
+                events,
             )
             .await?;
         Ok(OnboardingDiscoveryOutcome {
@@ -467,6 +312,7 @@ impl OnboardingGateway {
         profile_summary: &str,
         inferred_topics: &[String],
         results: &[WebResult],
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
         if results.is_empty() {
             return Ok(OnboardingDiscoverySeeds::default());
@@ -503,6 +349,7 @@ impl OnboardingGateway {
             FAST_DISCOVER_SYSTEM_PROMPT,
             prompt,
             FAST_DISCOVER_TIMEOUT,
+            events,
         )
         .await
     }
@@ -513,48 +360,38 @@ impl OnboardingGateway {
         system_prompt: &str,
         user_prompt: String,
         deadline: Duration,
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<T, OnboardingGatewayError>
     where
         T: DeserializeOwned + JsonSchema,
     {
-        let outcome = self
+        let (value, _) = self
             .engine
-            .run(
-                AgentRequest {
+            .run_structured(
+                StructuredRunRequest {
                     feature: feature.to_owned(),
                     model_spec: ONBOARDING_MODEL.to_owned(),
                     system_prompt: system_prompt.to_owned(),
                     user_prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: feature.replace('.', "_"),
-                        schema: schema_for!(T),
-                        strict: true,
-                        validation_retries: 2,
-                    },
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(3),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(3_000),
-                        deadline,
-                    },
+                    deadline,
+                    request_limit: 3,
+                    output_token_limit: 3_000,
+                    validation_retries: 2,
                     provider_parameters: onboarding_provider_parameters(),
                 },
-                Arc::new(NoTools),
-                Arc::clone(&self.events),
+                events,
             )
-            .await?;
-        let value = outcome
-            .structured_output
-            .ok_or(OnboardingGatewayError::MissingStructuredOutput)?;
-        serde_json::from_value(value)
-            .map_err(|error| OnboardingGatewayError::InvalidStructuredOutput(error.to_string()))
+            .await
+            .map_err(|error| match error {
+                RunStructuredError::Runtime(error) => OnboardingGatewayError::Agent(error),
+                RunStructuredError::MissingOutput => {
+                    OnboardingGatewayError::MissingStructuredOutput
+                }
+                RunStructuredError::Decode(error) => {
+                    OnboardingGatewayError::InvalidStructuredOutput(error.to_string())
+                }
+            })?;
+        Ok(value)
     }
 
     async fn search_many(
@@ -580,9 +417,14 @@ impl OnboardingGateway {
                     endpoint,
                     &api_key,
                     &query,
-                    num_results,
-                    include_social,
-                    timeout,
+                    ExaSearchOptions {
+                        num_results,
+                        include_social,
+                        text_max_characters: DISCOVERY_SNIPPET_CHARS,
+                        livecrawl: None,
+                        summary_query: None,
+                        timeout: Some(timeout),
+                    },
                 )
                 .await;
                 (index, query, result)
@@ -621,24 +463,6 @@ impl OnboardingGateway {
     }
 }
 
-fn profile_queries(topics: &[String], first_name: &str) -> Vec<String> {
-    let topics = merge_topics([topics.iter().map(String::as_str)], 8);
-    let mut queries = Vec::new();
-    for topic in topics {
-        queries.push(format!("{topic} newsletter"));
-        queries.push(format!("{topic} podcast"));
-        queries.push(format!("{topic} substack"));
-        if queries.len() >= 4 {
-            break;
-        }
-    }
-    if queries.is_empty() {
-        queries.push(format!("{first_name} newsletter"));
-    }
-    queries.truncate(4);
-    queries
-}
-
 fn discovery_queries(summary: &str, topics: &[String], max_queries: usize) -> Vec<String> {
     let topics = topics
         .iter()
@@ -660,15 +484,6 @@ fn discovery_queries(summary: &str, topics: &[String], max_queries: usize) -> Ve
     }
     queries.truncate(max_queries);
     queries
-}
-
-fn profile_fallback_summary(first_name: &str, topics: &[String]) -> String {
-    let topics = merge_topics([topics.iter().map(String::as_str)], 3);
-    if topics.is_empty() {
-        first_name.to_owned()
-    } else {
-        format!("{first_name} interested in {}", topics.join(", "))
-    }
 }
 
 fn normalize_audio_plan(plan: OnboardingAudioPlan, transcript: &str) -> OnboardingAudioPlan {
@@ -1065,23 +880,16 @@ fn secret_env(name: &str) -> Option<SecretString> {
         .map(SecretString::from)
 }
 
-fn env_u64(name: &str, default: u64) -> u64 {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
-}
-
 #[derive(Debug, Error)]
 pub enum OnboardingGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("onboarding HTTP client failed")]
     Http(#[from] reqwest::Error),
     #[error("onboarding provider URL is invalid: {0}")]
     Url(String),
     #[error("onboarding search provider was unavailable for an entire discovery lane")]
     SearchUnavailable,
-    #[error("onboarding agent configuration failed")]
-    AgentConfiguration(#[from] crate::RigAgentEngineError),
     #[error("onboarding agent request failed")]
     Agent(#[from] AgentRuntimeError),
     #[error("onboarding model omitted its structured output")]

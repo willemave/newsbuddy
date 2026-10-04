@@ -9,12 +9,12 @@ use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 use newsly_agent_runtime::{
-    AgentEngine, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, BoxToolFuture,
-    NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor, ToolPolicy,
+    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
+    ResponseContract, ToolPolicy,
 };
 use reqwest::{StatusCode, Url};
 use schemars::{JsonSchema, schema_for};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tempfile::TempDir;
@@ -22,7 +22,12 @@ use thiserror::Error;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine, RigAgentEngineError};
+use crate::{ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
+use crate::elevenlabs::{
+    ElevenLabsSynthesisError, ElevenLabsSynthesisRequest, is_standard_api_base, synthesize,
+};
 
 const SCRIPT_SYSTEM_PROMPT: &str = "You write concise, natural podcast scripts for Newsly. Create spoken dialogue, not an essay. The format should feel like a smart tech and business podcast roundtable: quick context, clear stakes, grounded analysis, and a brisk close. Do not mention or imitate any specific real podcast, host, or brand. Do not invent facts outside the supplied source material. Do not emit stage directions, music cues, sponsor reads, or markdown.";
 const ELEVENLABS_FLASH_MAX_INPUT_CHARS: usize = 40_000;
@@ -48,7 +53,6 @@ pub trait AudioEpisodeTtsUsageObserver: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct AudioEpisodeGatewayConfig {
     pub credentials: ProviderCredentials,
-    pub openrouter_policy: OpenRouterPrivacyPolicy,
     pub script_model: String,
     pub script_timeout: Duration,
     pub elevenlabs_api_base: Url,
@@ -110,8 +114,7 @@ impl AudioEpisodeGateway {
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(120))
             .build()?;
-        let script_engine =
-            RigAgentEngine::new(config.credentials.clone(), config.openrouter_policy.clone())?;
+        let script_engine = RigAgentEngine::new(config.credentials.clone());
         let max_parallel = config.max_parallel_tts_requests;
         Ok(Self {
             client,
@@ -130,12 +133,7 @@ impl AudioEpisodeGateway {
     }
 
     pub fn uses_standard_elevenlabs_pricing(&self) -> bool {
-        let base = &self.config.elevenlabs_api_base;
-        base.scheme() == "https"
-            && base.host_str() == Some("api.elevenlabs.io")
-            && matches!(base.path(), "" | "/")
-            && base.query().is_none()
-            && base.fragment().is_none()
+        is_standard_api_base(&self.config.elevenlabs_api_base)
     }
 
     /// Generates and validates a structured two-speaker script for the supplied source snapshot.
@@ -267,80 +265,21 @@ impl AudioEpisodeGateway {
         } else {
             &self.config.guest_voice_id
         };
-        let mut endpoint = self.config.elevenlabs_api_base.clone();
-        {
-            let mut segments = endpoint.path_segments_mut().map_err(|()| {
-                AudioEpisodeGatewayError::InvalidConfiguration(
-                    "ElevenLabs API base URL cannot be a base URL".to_owned(),
-                )
-            })?;
-            segments.pop_if_empty();
-            segments.extend(["v1", "text-to-speech", voice_id]);
-        }
-        endpoint
-            .query_pairs_mut()
-            .append_pair("output_format", &self.config.output_format);
-        let request_started = Instant::now();
-        let response = self
-            .client
-            .post(endpoint)
-            .header("xi-api-key", self.config.elevenlabs_api_key.expose_secret())
-            .header(reqwest::header::ACCEPT, "audio/mpeg")
-            .json(&ElevenLabsRequest {
-                text: &chunk.text,
+        let bytes = synthesize(
+            &self.client,
+            ElevenLabsSynthesisRequest {
+                api_base: &self.config.elevenlabs_api_base,
+                api_key: &self.config.elevenlabs_api_key,
+                voice_id,
                 model_id: &self.config.tts_model,
-                voice_settings: ElevenLabsVoiceSettings {
-                    speed: self.config.voice_speed,
-                },
-            })
-            .send()
-            .await;
-        tracing::info!(
-            stage = "tts_response_headers",
-            elapsed_ms = request_started.elapsed().as_millis(),
-            succeeded = response
-                .as_ref()
-                .is_ok_and(|response| response.status().is_success()),
-            status = response
-                .as_ref()
-                .ok()
-                .map(|response| response.status().as_u16()),
-            "Audio timing"
-        );
-        let response = response?;
-        let status = response.status();
-        if !status.is_success() {
-            let detail = response
-                .text()
-                .await
-                .unwrap_or_default()
-                .chars()
-                .take(1_000)
-                .collect();
-            return Err(AudioEpisodeGatewayError::ElevenLabsStatus { status, detail });
-        }
-        if response.content_length().is_some_and(|length| {
-            length > u64::try_from(self.config.max_tts_response_bytes).unwrap_or(u64::MAX)
-        }) {
-            return Err(AudioEpisodeGatewayError::AudioTooLarge);
-        }
-        // Headers are not first audio: this path still buffers the complete body.
-        let body_started = Instant::now();
-        let bytes = response.bytes().await;
-        tracing::info!(
-            stage = "tts_response_body",
-            elapsed_ms = body_started.elapsed().as_millis(),
-            request_elapsed_ms = request_started.elapsed().as_millis(),
-            succeeded = bytes.is_ok(),
-            "Audio timing"
-        );
-        let bytes = bytes?;
-        if bytes.is_empty() {
-            return Err(AudioEpisodeGatewayError::EmptyAudio);
-        }
-        if bytes.len() > self.config.max_tts_response_bytes {
-            return Err(AudioEpisodeGatewayError::AudioTooLarge);
-        }
+                output_format: &self.config.output_format,
+                speed: self.config.voice_speed,
+                text: &chunk.text,
+                max_response_bytes: self.config.max_tts_response_bytes,
+            },
+        )
+        .await
+        .map_err(audio_episode_synthesis_error)?;
         observe_tts_chunk_usage(
             usage_observer,
             chunk_index,
@@ -349,7 +288,7 @@ impl AudioEpisodeGateway {
             self.uses_standard_elevenlabs_pricing(),
         )
         .await?;
-        Ok(bytes.to_vec())
+        Ok(bytes)
     }
 
     async fn stitch_mp3(&self, chunks: &[Vec<u8>]) -> Result<Vec<u8>, AudioEpisodeGatewayError> {
@@ -502,32 +441,6 @@ pub struct SynthesizedDialogue {
 struct TtsChunk {
     speaker: AudioEpisodeSpeaker,
     text: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ElevenLabsRequest<'a> {
-    text: &'a str,
-    model_id: &'a str,
-    voice_settings: ElevenLabsVoiceSettings,
-}
-
-#[derive(Debug, Serialize)]
-struct ElevenLabsVoiceSettings {
-    speed: f32,
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async move {
-            Err(AgentRuntimeError::Tool(format!(
-                "audio script generation does not expose tool {}",
-                call.name
-            )))
-        })
-    }
 }
 
 fn script_user_prompt(kind: &str, snapshot: &Value) -> Result<String, AudioEpisodeGatewayError> {
@@ -715,6 +628,20 @@ fn validate_config(config: &AudioEpisodeGatewayConfig) -> Result<(), AudioEpisod
     Ok(())
 }
 
+fn audio_episode_synthesis_error(error: ElevenLabsSynthesisError) -> AudioEpisodeGatewayError {
+    match error {
+        ElevenLabsSynthesisError::InvalidApiBase => AudioEpisodeGatewayError::InvalidConfiguration(
+            "ElevenLabs API base URL cannot be a base URL".to_owned(),
+        ),
+        ElevenLabsSynthesisError::Http(error) => AudioEpisodeGatewayError::Http(error),
+        ElevenLabsSynthesisError::Status { status, detail } => {
+            AudioEpisodeGatewayError::ElevenLabsStatus { status, detail }
+        }
+        ElevenLabsSynthesisError::EmptyAudio => AudioEpisodeGatewayError::EmptyAudio,
+        ElevenLabsSynthesisError::AudioTooLarge => AudioEpisodeGatewayError::AudioTooLarge,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum AudioEpisodeGatewayError {
     #[error("audio episode provider configuration is invalid: {0}")]
@@ -723,8 +650,6 @@ pub enum AudioEpisodeGatewayError {
     UnsupportedKind(String),
     #[error("audio episode script is invalid: {0}")]
     InvalidScript(String),
-    #[error("audio episode script provider configuration failed")]
-    ScriptConfiguration(#[from] RigAgentEngineError),
     #[error("audio episode script generation failed")]
     Script(#[from] AgentRuntimeError),
     #[error("audio episode JSON processing failed")]
@@ -769,7 +694,6 @@ impl AudioEpisodeGatewayError {
             Self::InvalidConfiguration(_)
             | Self::UnsupportedKind(_)
             | Self::InvalidScript(_)
-            | Self::ScriptConfiguration(_)
             | Self::Json(_)
             | Self::AudioTooLarge
             | Self::ProviderClosed

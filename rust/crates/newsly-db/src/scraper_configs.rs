@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use newsly_domain::AggregatorKey;
 use serde_json::Value;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
@@ -91,15 +92,7 @@ pub async fn apply_validated_feed_subscription(
     if feed_url.is_empty() {
         return Err(ScraperConfigRepositoryError::InvalidFeedUrl);
     }
-    let active_user = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active IS TRUE FOR SHARE",
-    )
-    .bind(user_id)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    if active_user.is_none() {
-        return Err(ScraperConfigRepositoryError::UserMissingOrInactive);
-    }
+    lock_active_user(transaction, user_id).await?;
 
     let candidates = subscription_candidates(transaction, user_id, scraper_type).await?;
     if let Some(existing) = candidates.into_iter().find(|candidate| {
@@ -227,6 +220,129 @@ pub async fn apply_validated_feed_subscription(
         mutation: FeedSubscriptionMutation::AlreadySubscribed,
         config,
     })
+}
+
+/// Follows a catalog aggregator, or reactivates the user's existing subscription to it.
+///
+/// `topics` must already be catalog-spelled. When given it replaces the stored topic filter, and
+/// an empty slice means every topic. `None` keeps an existing filter. Aggregators read shared
+/// global items, so there is no per-user backfill to enqueue.
+pub async fn apply_aggregator_subscription(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
+    key: AggregatorKey,
+    topics: Option<&[&str]>,
+) -> Result<AppliedFeedSubscription, ScraperConfigRepositoryError> {
+    lock_active_user(transaction, user_id).await?;
+    let feed_url = format!("aggregator://{}", key.as_str());
+    let existing = subscription_candidates(transaction, user_id, "aggregator")
+        .await?
+        .into_iter()
+        .find(|candidate| candidate.feed_url.as_deref() == Some(feed_url.as_str()));
+    let config = aggregator_subscription_config(
+        existing.as_ref().map(|candidate| &candidate.config),
+        key,
+        topics,
+    );
+    if let Some(existing) = existing {
+        let mutation = if existing.is_active {
+            FeedSubscriptionMutation::AlreadySubscribed
+        } else {
+            FeedSubscriptionMutation::Reactivated
+        };
+        let config = sqlx::query_as::<_, ScraperConfigProjection>(
+            r"
+            UPDATE user_scraper_configs
+            SET is_active = TRUE, config = $2, updated_at = timezone('UTC', now())
+            WHERE id::bigint = $1
+            RETURNING
+                id::bigint AS id,
+                user_id::bigint AS user_id,
+                scraper_type,
+                display_name,
+                feed_url,
+                config,
+                is_active,
+                timezone('UTC', created_at) AS created_at
+            ",
+        )
+        .bind(existing.id)
+        .bind(config)
+        .fetch_one(&mut **transaction)
+        .await?;
+        return Ok(AppliedFeedSubscription { config, mutation });
+    }
+    let config = sqlx::query_as::<_, ScraperConfigProjection>(
+        r"
+        INSERT INTO user_scraper_configs (
+            user_id, scraper_type, display_name, feed_url, config, is_active,
+            created_at, updated_at
+        )
+        VALUES (
+            $1::bigint::integer, 'aggregator', $2, $3, $4, TRUE,
+            timezone('UTC', now()), timezone('UTC', now())
+        )
+        ON CONFLICT (user_id, scraper_type, feed_url) DO NOTHING
+        RETURNING
+            id::bigint AS id,
+            user_id::bigint AS user_id,
+            scraper_type,
+            display_name,
+            feed_url,
+            config,
+            is_active,
+            timezone('UTC', created_at) AS created_at
+        ",
+    )
+    .bind(user_id)
+    .bind(key.display_name())
+    .bind(&feed_url)
+    .bind(config)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(ScraperConfigRepositoryError::LostSubscriptionRace)?;
+    Ok(AppliedFeedSubscription {
+        config,
+        mutation: FeedSubscriptionMutation::Created,
+    })
+}
+
+/// Same stored shape as onboarding: `{key, limit, topics?}` plus any unrelated existing fields.
+fn aggregator_subscription_config(
+    existing: Option<&Value>,
+    key: AggregatorKey,
+    topics: Option<&[&str]>,
+) -> Value {
+    let mut config = existing
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    config.insert("key".to_owned(), Value::from(key.as_str()));
+    config.entry("limit").or_insert_with(|| Value::from(1));
+    match topics {
+        Some([]) => {
+            config.remove("topics");
+        }
+        Some(topics) => {
+            config.insert("topics".to_owned(), Value::from(topics.to_vec()));
+        }
+        None => {}
+    }
+    Value::Object(config)
+}
+
+async fn lock_active_user(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
+) -> Result<(), ScraperConfigRepositoryError> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active IS TRUE FOR SHARE",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .map(|_| ())
+    .ok_or(ScraperConfigRepositoryError::UserMissingOrInactive)
 }
 
 async fn subscription_candidates(
@@ -665,6 +781,14 @@ mod tests {
             "aggregator://hackernews"
         );
         assert_eq!(canonicalize_feed_url("relative/feed/"), "relative/feed");
+        assert_eq!(
+            canonicalize_feed_url("https://Example.com:443/Feed/?Token=AbC#fragment"),
+            "https://example.com:443/Feed?Token=AbC"
+        );
+        assert_ne!(
+            canonicalize_feed_url("https://example.com/Feed?Token=AbC"),
+            canonicalize_feed_url("https://example.com/feed?token=abc")
+        );
     }
 
     #[sqlx::test]

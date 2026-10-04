@@ -1,4 +1,5 @@
 use chrono::NaiveDateTime;
+use newsly_db::content_metadata::set_field;
 use newsly_providers::ImageGenerationUsage;
 use serde_json::{Map, Value};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
@@ -64,22 +65,22 @@ pub(super) async fn apply_generated_image(
     }
 
     let mut metadata = metadata_map(&content.content_metadata);
-    set_domain_field(
+    set_field(
         &mut metadata,
         "image_generated_at",
         Value::String(plan.generated_at.to_rfc3339()),
     );
-    set_domain_field(
+    set_field(
         &mut metadata,
         "image_url",
         Value::String(plan.staged.image_url()),
     );
-    set_domain_field(
+    set_field(
         &mut metadata,
         "thumbnail_url",
         Value::String(plan.staged.thumbnail_url()),
     );
-    set_domain_field(&mut metadata, "artwork_status", Value::from("ready"));
+    set_field(&mut metadata, "artwork_status", Value::from("ready"));
     content.content_metadata = Value::Object(metadata);
     "completed".clone_into(&mut content.status);
     content.error_message = None;
@@ -311,13 +312,6 @@ fn metadata_map(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
 }
 
-fn set_domain_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    if let Some(domain) = metadata.get_mut("domain").and_then(Value::as_object_mut) {
-        domain.insert(key.to_owned(), value.clone());
-    }
-    metadata.insert(key.to_owned(), value);
-}
-
 fn positive_i64(value: &Value) -> Option<i64> {
     value.as_i64().filter(|value| *value > 0)
 }
@@ -351,7 +345,7 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        set_domain_field(
+        set_field(
             &mut metadata,
             "image_url",
             Value::String("/image".to_owned()),

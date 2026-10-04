@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -10,55 +10,38 @@ use newsly_contracts::{
     AgentOnboardingCompleteRequest, AgentOnboardingStartRequest, AgentOnboardingStartResponse,
     OnboardingAudioDiscoverRequest, OnboardingAudioDiscoverResponse, OnboardingCompleteRequest,
     OnboardingCompleteResponse, OnboardingDiscoveryLaneStatus, OnboardingDiscoveryStatusResponse,
-    OnboardingFastDiscoverRequest, OnboardingFastDiscoverResponse, OnboardingProfileRequest,
-    OnboardingProfileResponse, OnboardingSelectedAggregator, OnboardingSuggestion,
-    OnboardingSuggestionType, OnboardingVoiceParseRequest, OnboardingVoiceParseResponse,
-    ScraperType,
+    OnboardingSelectedAggregator, ScraperType,
 };
 use newsly_db::{
     AgentOnboardingSuggestionProjection, ExistingOnboardingFeedConfig, OnboardingAudioLaneInput,
     OnboardingAudioRunInput, OnboardingCompletionAggregator, OnboardingCompletionInput,
-    OnboardingCompletionProjection, OnboardingCompletionSource,
-    OnboardingDiscoveryStatusProjection, OnboardingFlowRepositoryError,
-    OnboardingSuggestionProjection, canonicalize_feed_url, complete_onboarding_selection,
-    create_onboarding_audio_run, expedite_pending_briefing_refresh,
-    find_onboarding_discovery_status, list_existing_onboarding_feed_configs,
-    load_agent_onboarding_suggestions, load_onboarding_completion_suggestions,
+    OnboardingCompletionProjection, OnboardingCompletionSource, OnboardingFlowRepositoryError,
+    canonicalize_feed_url, complete_onboarding_selection, create_onboarding_audio_run,
+    expedite_pending_briefing_refresh, find_onboarding_discovery_status,
+    list_existing_onboarding_feed_configs, load_agent_onboarding_suggestions,
+    load_onboarding_completion_suggestions,
 };
 use newsly_domain::AggregatorKey;
-use newsly_providers::{OnboardingAudioPlan, OnboardingDiscoverySeeds, OnboardingSuggestionSeed};
+use newsly_providers::OnboardingAudioPlan;
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
-use crate::feed_validation::FeedValidationError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::model_usage::onboarding_gateway_with_usage;
+use crate::model_usage::onboarding_events_with_usage;
+use crate::onboarding::present_discovery_status;
 use crate::scraper_config_normalization::{
     apply_validated_feed_url, feed_url, normalize_create_input,
 };
-use crate::write_support::{
-    bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error, not_found, verify_stamp};
 use crate::{AppState, request_id_from_headers};
-mod exa_usage;
-use exa_usage::record_onboarding_exa_usage;
+use newsly_providers::FeedValidationError;
 
-const PROFILE_OPERATION_ID: &str = "buildOnboardingProfile";
-const VOICE_OPERATION_ID: &str = "parseOnboardingVoice";
-const FAST_DISCOVER_OPERATION_ID: &str = "runOnboardingFastDiscover";
-const AUDIO_DISCOVER_OPERATION_ID: &str = "startOnboardingDiscoverAudioDiscoveryFlow";
-const COMPLETE_FLOW_OPERATION_ID: &str = "completeOnboardingFlow";
-const AGENT_START_OPERATION_ID: &str = "startOnboarding";
-const AGENT_COMPLETE_OPERATION_ID: &str = "completeOnboarding";
 const INITIAL_BACKFILL_COUNT: i64 = 2;
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/onboarding/profile", post(build_profile))
-        .route("/api/onboarding/parse-voice", post(parse_voice))
-        .route("/api/onboarding/fast-discover", post(fast_discover))
         .route("/api/onboarding/audio-discover", post(audio_discover))
         .route("/api/onboarding/complete", post(complete_flow))
         .route("/api/agent/onboarding", post(start_agent_onboarding))
@@ -67,208 +50,6 @@ pub(super) fn router() -> Router<AppState> {
             "/api/agent/onboarding/{run_id}/complete",
             post(complete_agent_onboarding),
         )
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/onboarding/profile",
-    operation_id = "buildOnboardingProfile",
-    tag = "onboarding",
-    request_body = OnboardingProfileRequest,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = OnboardingProfileResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn build_profile(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<OnboardingProfileRequest>, JsonRejection>,
-) -> Result<Json<OnboardingProfileResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, PROFILE_OPERATION_ID, &request_id)?;
-    validate_length(&payload.first_name, 1, 120, "first_name", &request_id)?;
-    if payload.interest_topics.len() > 12 {
-        return Err(validation_error(
-            "interest_topics must contain at most 12 items",
-            &request_id,
-        ));
-    }
-    let interest_topics = clean_topics(&payload.interest_topics, usize::MAX);
-    if interest_topics.is_empty() {
-        return Err(validation_error("interest_topics is required", &request_id));
-    }
-    verify_before_external(&state, &stamp, &request_id).await?;
-    let (gateway, usage) =
-        onboarding_gateway_with_usage(&state, Some(current_user.id), "onboarding.build_profile");
-    let outcome = gateway
-        .build_profile(&payload.first_name, &interest_topics)
-        .await;
-    usage.finish().await;
-    let outcome = outcome.map_err(|error| internal_error(error, &request_id))?;
-    record_onboarding_exa_usage(
-        &state,
-        current_user.id,
-        &request_id,
-        "onboarding.build_profile",
-        outcome.exa_usage,
-    )
-    .await;
-    let profile = outcome.profile;
-    Ok(Json(OnboardingProfileResponse {
-        profile_summary: profile.profile_summary,
-        inferred_topics: profile.inferred_topics,
-        candidate_sources: profile.candidate_sources,
-    }))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/onboarding/parse-voice",
-    operation_id = "parseOnboardingVoice",
-    tag = "onboarding",
-    request_body = OnboardingVoiceParseRequest,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = OnboardingVoiceParseResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn parse_voice(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<OnboardingVoiceParseRequest>, JsonRejection>,
-) -> Result<Json<OnboardingVoiceParseResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, VOICE_OPERATION_ID, &request_id)?;
-    validate_length(&payload.transcript, 3, 6_000, "transcript", &request_id)?;
-    validate_optional_length(payload.locale.as_deref(), 20, "locale", &request_id)?;
-    verify_before_external(&state, &stamp, &request_id).await?;
-    let transcript = payload.transcript.trim();
-    let response = if transcript.is_empty() {
-        empty_voice_response()
-    } else {
-        let (gateway, usage) =
-            onboarding_gateway_with_usage(&state, Some(current_user.id), "onboarding.voice_parse");
-        let result = gateway
-            .parse_voice(transcript, payload.locale.as_deref())
-            .await;
-        usage.finish().await;
-        match result {
-            Ok(fields) => {
-                let topics = clean_topics(&fields.interest_topics, 8);
-                let mut missing_fields = Vec::new();
-                if fields.first_name.is_none() {
-                    missing_fields.push("first_name".to_owned());
-                }
-                if topics.is_empty() {
-                    missing_fields.push("interest_topics".to_owned());
-                }
-                OnboardingVoiceParseResponse {
-                    first_name: fields.first_name,
-                    interest_topics: topics,
-                    confidence: fields.confidence,
-                    missing_fields,
-                }
-            }
-            Err(error) => {
-                tracing::error!(
-                    error = %error,
-                    user_id = current_user.id,
-                    "onboarding voice parse failed; returning the canonical empty result"
-                );
-                empty_voice_response()
-            }
-        }
-    };
-    Ok(Json(response))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/onboarding/fast-discover",
-    operation_id = "runOnboardingFastDiscover",
-    tag = "onboarding",
-    request_body = OnboardingFastDiscoverRequest,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = OnboardingFastDiscoverResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 503, description = "Feed discovery unavailable", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn fast_discover(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<OnboardingFastDiscoverRequest>, JsonRejection>,
-) -> Result<Json<OnboardingFastDiscoverResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, FAST_DISCOVER_OPERATION_ID, &request_id)?;
-    validate_min_length(&payload.profile_summary, 3, "profile_summary", &request_id)?;
-    if payload.inferred_topics.len() > 12 {
-        return Err(validation_error(
-            "inferred_topics must contain at most 12 items",
-            &request_id,
-        ));
-    }
-    verify_before_external(&state, &stamp, &request_id).await?;
-    let (gateway, usage) =
-        onboarding_gateway_with_usage(&state, Some(current_user.id), "onboarding.fast_discover");
-    let result = gateway
-        .fast_discover(&payload.profile_summary, &payload.inferred_topics)
-        .await;
-    usage.finish().await;
-    let outcome = match result {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            tracing::error!(
-                error = %error,
-                user_id = current_user.id,
-                "fast onboarding discovery failed; returning no static defaults"
-            );
-            return Ok(Json(empty_discovery_response()));
-        }
-    };
-    record_onboarding_exa_usage(
-        &state,
-        current_user.id,
-        &request_id,
-        "onboarding.fast_discover",
-        outcome.exa_usage,
-    )
-    .await;
-    let response = normalize_discovery_seeds(
-        &state,
-        outcome.seeds,
-        &payload.profile_summary,
-        &payload.inferred_topics,
-    )
-    .await
-    .map_err(|error| {
-        feed_unavailable(
-            &error,
-            "Feed discovery is temporarily unavailable",
-            &request_id,
-        )
-    })?;
-    Ok(Json(response))
 }
 
 #[utoipa::path(
@@ -291,12 +72,11 @@ pub(super) async fn audio_discover(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<OnboardingAudioDiscoverRequest>, JsonRejection>,
 ) -> Result<Json<OnboardingAudioDiscoverResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
     let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, AUDIO_DISCOVER_OPERATION_ID, &request_id)?;
     validate_length(&payload.transcript, 3, 8_000, "transcript", &request_id)?;
     validate_optional_length(payload.locale.as_deref(), 20, "locale", &request_id)?;
     let transcript = payload.transcript.trim();
@@ -335,12 +115,11 @@ pub(super) async fn complete_flow(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<OnboardingCompleteRequest>, JsonRejection>,
 ) -> Result<Json<OnboardingCompleteResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
     let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, COMPLETE_FLOW_OPERATION_ID, &request_id)?;
     validate_completion_request(&payload, &request_id)?;
     let response =
         complete_onboarding(&state, current_user.id, payload, &stamp, &request_id).await?;
@@ -366,12 +145,11 @@ pub(super) async fn start_agent_onboarding(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<AgentOnboardingStartRequest>, JsonRejection>,
 ) -> Result<Json<AgentOnboardingStartResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
     let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, AGENT_START_OPERATION_ID, &request_id)?;
     validate_length(&payload.brief, 1, 4_000, "brief", &request_id)?;
     if payload.brief.chars().count() < 3 || payload.brief.trim().is_empty() {
         return Err(internal_error(
@@ -445,13 +223,12 @@ pub(super) async fn complete_agent_onboarding(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     Path(run_id): Path<i64>,
     payload: Result<Json<AgentOnboardingCompleteRequest>, JsonRejection>,
 ) -> Result<Json<OnboardingCompleteResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
     let Json(payload) = decode_json(payload, &request_id)?;
-    require_operation(&stamp, AGENT_COMPLETE_OPERATION_ID, &request_id)?;
     let selected_suggestion_ids = if payload.accept_all {
         load_agent_onboarding_suggestions(state.database.pool(), current_user.id, run_id)
             .await
@@ -482,18 +259,15 @@ async fn start_audio_run(
     stamp: &RouteOwnershipStamp,
     request_id: &str,
 ) -> Result<OnboardingAudioDiscoverResponse, ApiError> {
-    verify_before_external(state, stamp, request_id).await?;
-    let (gateway, usage) =
-        onboarding_gateway_with_usage(state, Some(user_id), "onboarding.audio_plan");
-    let plan = gateway.build_audio_plan(transcript, locale).await;
+    let (events, usage) =
+        onboarding_events_with_usage(state, Some(user_id), "onboarding.audio_plan");
+    let plan = state
+        .onboarding
+        .build_audio_plan(transcript, locale, events)
+        .await;
     usage.finish().await;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     let input = audio_run_input(user_id, plan);
     let run = create_onboarding_audio_run(&mut transaction, &input)
         .await
@@ -505,10 +279,7 @@ async fn start_audio_run(
         .enqueue_many_in_transaction(&mut transaction, vec![request])
         .await
         .map_err(|error| queue_internal_error(error, request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
+    crate::write_support::commit(transaction, request_id).await?;
     Ok(OnboardingAudioDiscoverResponse {
         run_id: run.run_id,
         run_status: run.run_status,
@@ -552,7 +323,6 @@ async fn complete_onboarding(
     stamp: &RouteOwnershipStamp,
     request_id: &str,
 ) -> Result<OnboardingCompleteResponse, ApiError> {
-    verify_before_external(state, stamp, request_id).await?;
     let input = prepare_completion(state, user_id, payload, request_id).await?;
     let mut transaction = state
         .database
@@ -643,10 +413,10 @@ async fn prepare_completion(
         }
     }
     let aggregators = normalize_aggregators(payload.selected_aggregators);
-    let (update_twitter_username, twitter_username) = match payload.twitter_username {
-        None => (false, None),
-        Some(value) => (true, normalize_twitter_username(&value, request_id)?),
-    };
+    let twitter_username = payload
+        .twitter_username
+        .map(|value| normalize_twitter_username(&value, request_id))
+        .transpose()?;
     Ok(PreparedCompletion {
         selection: OnboardingCompletionInput {
             user_id,
@@ -655,7 +425,6 @@ async fn prepare_completion(
             sources,
             subreddits,
             aggregators,
-            update_twitter_username,
             twitter_username,
         },
     })
@@ -741,12 +510,10 @@ async fn prepare_source(
 }
 
 fn selected_scraper_type(value: &str) -> Option<ScraperType> {
-    match value {
-        "substack" => Some(ScraperType::Substack),
-        "atom" => Some(ScraperType::Atom),
-        "podcast_rss" => Some(ScraperType::PodcastRss),
-        _ => None,
-    }
+    value
+        .parse::<ScraperType>()
+        .ok()
+        .filter(|kind| kind.supports_backfill())
 }
 
 fn completion_tasks(
@@ -810,244 +577,6 @@ fn completion_tasks(
     (requests, primary_index, briefing_index)
 }
 
-async fn verify_before_external(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))
-}
-
-async fn normalize_discovery_seeds(
-    state: &AppState,
-    seeds: OnboardingDiscoverySeeds,
-    profile_summary: &str,
-    inferred_topics: &[String],
-) -> Result<OnboardingFastDiscoverResponse, FeedValidationError> {
-    let substacks = normalize_feed_suggestions(
-        state,
-        seeds.substacks,
-        OnboardingSuggestionType::Substack,
-        profile_summary,
-        inferred_topics,
-    )
-    .await?;
-    let podcasts = normalize_feed_suggestions(
-        state,
-        seeds.podcasts,
-        OnboardingSuggestionType::PodcastRss,
-        profile_summary,
-        inferred_topics,
-    )
-    .await?;
-    let subreddits =
-        normalize_subreddit_suggestions(seeds.subreddits, profile_summary, inferred_topics);
-    Ok(OnboardingFastDiscoverResponse {
-        recommended_pods: podcasts,
-        recommended_substacks: substacks,
-        recommended_subreddits: subreddits,
-    })
-}
-
-async fn normalize_feed_suggestions(
-    state: &AppState,
-    seeds: Vec<OnboardingSuggestionSeed>,
-    suggestion_type: OnboardingSuggestionType,
-    profile_summary: &str,
-    inferred_topics: &[String],
-) -> Result<Vec<OnboardingSuggestion>, FeedValidationError> {
-    let mut suggestions = Vec::new();
-    let mut seen = HashSet::new();
-    for seed in seeds {
-        let site_url = clean_optional(seed.site_url);
-        let mut candidate =
-            clean_optional(seed.feed_url).or_else(|| clean_optional(seed.candidate_feed_url));
-        if candidate.is_none() && suggestion_type == OnboardingSuggestionType::Substack {
-            candidate = site_url
-                .as_deref()
-                .map(|site_url| format!("{}/feed", site_url.trim_end_matches('/')));
-        }
-        if candidate.is_none() && seed.is_likely_feed == Some(true) {
-            candidate = site_url.as_deref().and_then(infer_feed_url);
-        }
-        let Some(candidate) = candidate else {
-            continue;
-        };
-        let Some(feed_url) = state.feed_validator.validate_feed_url(&candidate).await? else {
-            continue;
-        };
-        let canonical = canonicalize_feed_url(&feed_url);
-        if !seen.insert(canonical.clone()) {
-            continue;
-        }
-        let title = clean_optional(seed.title);
-        let rationale = clean_optional(seed.rationale).or_else(|| {
-            Some(default_rationale(
-                suggestion_type,
-                title.as_deref().unwrap_or(&canonical),
-                profile_summary,
-                inferred_topics,
-            ))
-        });
-        suggestions.push(OnboardingSuggestion {
-            id: None,
-            suggestion_type,
-            title,
-            site_url,
-            feed_url: Some(canonical),
-            subreddit: None,
-            rationale,
-            score: seed.score,
-            is_default: false,
-        });
-        if suggestions.len() >= 5 {
-            break;
-        }
-    }
-    Ok(suggestions)
-}
-
-fn normalize_subreddit_suggestions(
-    seeds: Vec<OnboardingSuggestionSeed>,
-    profile_summary: &str,
-    inferred_topics: &[String],
-) -> Vec<OnboardingSuggestion> {
-    let mut suggestions = Vec::new();
-    let mut seen = HashSet::new();
-    for seed in seeds {
-        let site_url = clean_optional(seed.site_url);
-        let subreddit = clean_optional(seed.subreddit)
-            .and_then(|value| normalize_subreddit(&value))
-            .or_else(|| site_url.as_deref().and_then(extract_subreddit));
-        let Some(subreddit) = subreddit else {
-            continue;
-        };
-        let key = subreddit.to_lowercase();
-        if !seen.insert(key) {
-            continue;
-        }
-        let title = clean_optional(seed.title).or_else(|| Some(subreddit.clone()));
-        let rationale = clean_optional(seed.rationale).or_else(|| {
-            Some(default_rationale(
-                OnboardingSuggestionType::Reddit,
-                title.as_deref().unwrap_or(&subreddit),
-                profile_summary,
-                inferred_topics,
-            ))
-        });
-        suggestions.push(OnboardingSuggestion {
-            id: None,
-            suggestion_type: OnboardingSuggestionType::Reddit,
-            title,
-            site_url,
-            feed_url: None,
-            subreddit: Some(subreddit),
-            rationale,
-            score: seed.score,
-            is_default: false,
-        });
-        if suggestions.len() >= 5 {
-            break;
-        }
-    }
-    suggestions
-}
-
-fn default_rationale(
-    suggestion_type: OnboardingSuggestionType,
-    label: &str,
-    profile_summary: &str,
-    inferred_topics: &[String],
-) -> String {
-    let context = clean_topics(inferred_topics, 2);
-    let context = if context.is_empty() {
-        profile_summary.trim().to_owned()
-    } else {
-        context.join(", ")
-    };
-    let context = if context.is_empty() {
-        "your interests"
-    } else {
-        &context
-    };
-    match suggestion_type {
-        OnboardingSuggestionType::PodcastRss => {
-            format!("Podcast covering {label} with discussions relevant to {context}.")
-        }
-        OnboardingSuggestionType::Reddit => {
-            format!("Active subreddit for {label} with ongoing threads related to {context}.")
-        }
-        OnboardingSuggestionType::Substack | OnboardingSuggestionType::Atom => {
-            format!("Feed focused on {label} with updates tied to {context}.")
-        }
-    }
-}
-
-fn present_discovery_status(
-    status: OnboardingDiscoveryStatusProjection,
-) -> OnboardingDiscoveryStatusResponse {
-    OnboardingDiscoveryStatusResponse {
-        run_id: status.run_id,
-        run_status: status.run_status,
-        topic_summary: status.topic_summary,
-        inferred_topics: status.inferred_topics,
-        lanes: status
-            .lanes
-            .into_iter()
-            .map(|lane| OnboardingDiscoveryLaneStatus {
-                name: lane.name,
-                status: lane.status,
-                completed_queries: lane.completed_queries,
-                query_count: lane.query_count,
-            })
-            .collect(),
-        suggestions: status.suggestions.map(present_suggestions),
-        error_message: status.error_message,
-    }
-}
-
-fn present_suggestions(
-    suggestions: Vec<OnboardingSuggestionProjection>,
-) -> OnboardingFastDiscoverResponse {
-    let mut response = empty_discovery_response();
-    for suggestion in suggestions {
-        let Ok(suggestion_type) =
-            OnboardingSuggestionType::try_from(suggestion.suggestion_type.as_str())
-        else {
-            continue;
-        };
-        let item = OnboardingSuggestion {
-            id: Some(suggestion.id),
-            suggestion_type,
-            title: suggestion.title,
-            site_url: suggestion.site_url,
-            feed_url: suggestion.feed_url,
-            subreddit: suggestion.subreddit,
-            rationale: suggestion.rationale,
-            score: suggestion.score,
-            is_default: false,
-        };
-        match suggestion_type {
-            OnboardingSuggestionType::PodcastRss => response.recommended_pods.push(item),
-            OnboardingSuggestionType::Reddit => response.recommended_subreddits.push(item),
-            OnboardingSuggestionType::Substack | OnboardingSuggestionType::Atom => {
-                response.recommended_substacks.push(item);
-            }
-        }
-    }
-    response
-}
-
 fn normalize_aggregators(
     aggregators: Vec<OnboardingSelectedAggregator>,
 ) -> Vec<OnboardingCompletionAggregator> {
@@ -1106,68 +635,6 @@ fn normalize_subreddit(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
-fn extract_subreddit(site_url: &str) -> Option<String> {
-    let url = reqwest::Url::parse(site_url).ok()?;
-    let host = url.host_str()?.to_ascii_lowercase();
-    if host != "reddit.com" && !host.ends_with(".reddit.com") {
-        return None;
-    }
-    let parts = url
-        .path_segments()?
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    (parts.len() >= 2 && parts[0].eq_ignore_ascii_case("r"))
-        .then(|| parts[1].trim().to_lowercase())
-        .filter(|value| !value.is_empty())
-}
-
-fn infer_feed_url(site_url: &str) -> Option<String> {
-    let lowered = site_url.to_lowercase();
-    ["/feed", ".xml", "rss", "atom", "podcast"]
-        .iter()
-        .any(|marker| lowered.contains(marker))
-        .then(|| site_url.trim().to_owned())
-}
-
-fn empty_voice_response() -> OnboardingVoiceParseResponse {
-    OnboardingVoiceParseResponse {
-        first_name: None,
-        interest_topics: Vec::new(),
-        confidence: Some(0.0),
-        missing_fields: vec!["first_name".to_owned(), "interest_topics".to_owned()],
-    }
-}
-
-fn empty_discovery_response() -> OnboardingFastDiscoverResponse {
-    OnboardingFastDiscoverResponse {
-        recommended_pods: Vec::new(),
-        recommended_substacks: Vec::new(),
-        recommended_subreddits: Vec::new(),
-    }
-}
-
-fn clean_topics(values: &[String], limit: usize) -> Vec<String> {
-    let mut topics = Vec::new();
-    let mut seen = HashSet::new();
-    for value in values {
-        let value = value.trim().trim_matches(['.', ',', ';', ':']);
-        if value.is_empty() || !seen.insert(value.to_lowercase()) {
-            continue;
-        }
-        topics.push(value.to_owned());
-        if topics.len() >= limit {
-            break;
-        }
-    }
-    topics
-}
-
-fn clean_optional(value: Option<String>) -> Option<String> {
-    value
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
 fn object(value: Value) -> Option<Map<String, Value>> {
     match value {
         Value::Object(object) => Some(object),
@@ -1186,21 +653,6 @@ fn validate_length(
     if !(minimum..=maximum).contains(&length) {
         return Err(validation_error(
             format!("{field} must contain between {minimum} and {maximum} characters"),
-            request_id,
-        ));
-    }
-    Ok(())
-}
-
-fn validate_min_length(
-    value: &str,
-    minimum: usize,
-    field: &str,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    if value.chars().count() < minimum {
-        return Err(validation_error(
-            format!("{field} must contain at least {minimum} characters"),
             request_id,
         ));
     }
@@ -1269,18 +721,7 @@ fn validate_completion_request(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn feed_unavailable(error: &FeedValidationError, message: &str, request_id: &str) -> ApiError {

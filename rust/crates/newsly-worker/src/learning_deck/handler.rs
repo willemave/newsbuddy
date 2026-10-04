@@ -5,7 +5,7 @@ use newsly_db::{
     MarkLearningDeckRunningOutcome, begin_learning_deck_preparation, mark_learning_deck_running,
     settle_learning_deck_source_missing,
 };
-use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
+use newsly_queue::{OwnedWorkPlan, TaskResult};
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 use thiserror::Error;
@@ -16,20 +16,13 @@ use crate::{HandlerExecution, LeaseHealth};
 use super::agent::{LearningDeckAgentError, LearningDeckAgentRuntime};
 use super::artifacts::{LearningDeckArtifactError, LearningDeckArtifactStore};
 use super::finalizer::{LearningDeckFailureFinalizer, LearningDeckSuccessFinalizer};
-use super::source::{LearningDeckSourceLoad, LearningDeckSourceLoader};
-
-#[derive(Debug)]
-pub(crate) enum LearningDeckDispatchOutcome {
-    Handled(HandlerExecution),
-    NotLearningDeck,
-}
+use super::source::{LearningDeckSourceLoad, load_source};
 
 #[derive(Debug, Clone)]
 pub struct LearningDeckTaskExecutor {
     pool: PgPool,
     agent: Arc<LearningDeckAgentRuntime>,
     artifacts: LearningDeckArtifactStore,
-    source_loader: LearningDeckSourceLoader,
     max_retries: i32,
 }
 
@@ -43,7 +36,6 @@ impl LearningDeckTaskExecutor {
         Self {
             pool,
             agent,
-            source_loader: LearningDeckSourceLoader::new(artifacts.clone()),
             artifacts,
             max_retries: max_retries.max(0),
         }
@@ -66,35 +58,18 @@ impl LearningDeckTaskExecutor {
         &self,
         plan: &OwnedWorkPlan,
         mut lease: LeaseHealth,
-    ) -> LearningDeckDispatchOutcome {
-        if plan.task_type != TaskType::RunLlmTask {
-            return handled_failure(None, "invalid_task_type", "Expected run_llm_task");
-        }
-        let Some(task_id) = positive_payload_id(&plan.payload, "llm_task_id") else {
-            return handled_failure(
-                None,
-                "invalid_payload",
-                "Missing or invalid llm_task_id in run_llm_task payload",
-            );
-        };
-        let Some(user_id) = positive_payload_id(&plan.payload, "user_id") else {
-            return handled_failure(
-                None,
-                "invalid_payload",
-                "Missing or invalid user_id in run_llm_task payload",
-            );
-        };
-        if plan.owner_user_id != Some(user_id) {
-            return handled_failure(None, "ownership_mismatch", "LLM task ownership mismatch");
-        }
-
+        task_id: i64,
+        user_id: i64,
+    ) -> HandlerExecution {
         let snapshot = match self.prepare(task_id, user_id).await {
             Ok(PrepareResult::NotLearningDeck) => {
-                return LearningDeckDispatchOutcome::NotLearningDeck;
+                return crate::run_llm_task::unsupported_execution(
+                    task_id,
+                    user_id,
+                    "learning_deck",
+                );
             }
-            Ok(PrepareResult::Finished(execution)) => {
-                return LearningDeckDispatchOutcome::Handled(execution);
-            }
+            Ok(PrepareResult::Finished(execution)) => return execution,
             Ok(PrepareResult::Ready(snapshot)) => snapshot,
             Err(error) => return repository_failure(error, None),
         };
@@ -106,7 +81,7 @@ impl LearningDeckTaskExecutor {
             );
         }
 
-        let source = match self.source_loader.load(&snapshot).await {
+        let source = match load_source(&self.artifacts, &snapshot).await {
             Ok(source) => source,
             Err(error) => {
                 return handled_failure(
@@ -123,7 +98,7 @@ impl LearningDeckTaskExecutor {
                     .settle_missing_source(&snapshot, &waiting_message)
                     .await
                 {
-                    Ok(execution) => LearningDeckDispatchOutcome::Handled(execution),
+                    Ok(execution) => execution,
                     Err(error) => repository_failure(error, Some((task_id, user_id))),
                 };
             }
@@ -134,9 +109,7 @@ impl LearningDeckTaskExecutor {
                 MarkLearningDeckRunningOutcome::Terminal
                 | MarkLearningDeckRunningOutcome::Cancelled,
             ) => {
-                return LearningDeckDispatchOutcome::Handled(HandlerExecution::from_result(
-                    TaskResult::ok(),
-                ));
+                return HandlerExecution::from_result(TaskResult::ok());
             }
             Err(error) => return repository_failure(error, Some((task_id, user_id))),
         }
@@ -189,8 +162,9 @@ impl LearningDeckTaskExecutor {
                     }
                 };
                 if retryable_agent_error(&error) {
-                    return LearningDeckDispatchOutcome::Handled(HandlerExecution::from_result(
-                        TaskResult::fail(Some(error.to_string()), true),
+                    return HandlerExecution::from_result(TaskResult::fail(
+                        Some(error.to_string()),
+                        true,
                     ));
                 }
                 return handled_agent_failure(
@@ -243,8 +217,9 @@ impl LearningDeckTaskExecutor {
                         | LearningDeckArtifactError::ObjectStore(_)
                         | LearningDeckArtifactError::File { .. }
                 ) {
-                    return LearningDeckDispatchOutcome::Handled(HandlerExecution::from_result(
-                        TaskResult::fail(Some(error.to_string()), true),
+                    return HandlerExecution::from_result(TaskResult::fail(
+                        Some(error.to_string()),
+                        true,
                     ));
                 }
                 return handled_agent_failure(
@@ -280,9 +255,9 @@ impl LearningDeckTaskExecutor {
             "request_count": agent.outcome.request_count,
             "tool_call_count": agent.outcome.tool_call_count,
             "provider_response_id": agent.outcome.provider_response_id,
-            "events": agent.events,
+            "event_count": agent.events.len(),
         }));
-        LearningDeckDispatchOutcome::Handled(HandlerExecution::with_finalizer(
+        HandlerExecution::with_finalizer(
             TaskResult::ok(),
             LearningDeckSuccessFinalizer::new(
                 self.artifacts.clone(),
@@ -299,7 +274,7 @@ impl LearningDeckTaskExecutor {
                 agent_log_object_key,
                 usage_json,
             ),
-        ))
+        )
     }
 
     async fn prepare(
@@ -384,18 +359,17 @@ fn handled_failure(
     verified_task: Option<(i64, i64)>,
     error_type: impl Into<String>,
     message: impl Into<String>,
-) -> LearningDeckDispatchOutcome {
+) -> HandlerExecution {
     let error_type = error_type.into();
     let message = message.into();
-    let execution = if let Some((task_id, user_id)) = verified_task {
+    if let Some((task_id, user_id)) = verified_task {
         HandlerExecution::with_finalizer(
             TaskResult::fail(Some(message.clone()), false),
             LearningDeckFailureFinalizer::new(task_id, user_id, error_type, message, None, None),
         )
     } else {
         HandlerExecution::from_result(TaskResult::fail(Some(message), false))
-    };
-    LearningDeckDispatchOutcome::Handled(execution)
+    }
 }
 
 fn handled_agent_failure(
@@ -405,9 +379,9 @@ fn handled_agent_failure(
     message: impl Into<String>,
     sandbox: Option<(String, String)>,
     agent_log_object_key: Option<String>,
-) -> LearningDeckDispatchOutcome {
+) -> HandlerExecution {
     let message = message.into();
-    LearningDeckDispatchOutcome::Handled(HandlerExecution::with_finalizer(
+    HandlerExecution::with_finalizer(
         TaskResult::fail(Some(message.clone()), false),
         LearningDeckFailureFinalizer::new(
             task_id,
@@ -417,23 +391,21 @@ fn handled_agent_failure(
             sandbox,
             agent_log_object_key,
         ),
-    ))
+    )
 }
 
-fn handled_defer(retry_delay_seconds: i64) -> LearningDeckDispatchOutcome {
-    LearningDeckDispatchOutcome::Handled(HandlerExecution::from_result(TaskResult::defer(
-        retry_delay_seconds,
-    )))
+fn handled_defer(retry_delay_seconds: i64) -> HandlerExecution {
+    HandlerExecution::from_result(TaskResult::defer(retry_delay_seconds))
 }
 
 fn repository_failure(
     error: LearningDeckTaskRepositoryError,
     verified_task: Option<(i64, i64)>,
-) -> LearningDeckDispatchOutcome {
+) -> HandlerExecution {
     match error {
-        LearningDeckTaskRepositoryError::Sqlx(error) => LearningDeckDispatchOutcome::Handled(
-            HandlerExecution::from_result(TaskResult::fail(Some(error.to_string()), true)),
-        ),
+        LearningDeckTaskRepositoryError::Sqlx(error) => {
+            HandlerExecution::from_result(TaskResult::fail(Some(error.to_string()), true))
+        }
         error => handled_failure(
             verified_task,
             repository_error_type(&error),
@@ -455,13 +427,6 @@ fn sandbox_identity(error: &LearningDeckAgentError) -> Option<(String, String)> 
     error
         .sandbox_identity()
         .map(|(provider, id)| (provider.to_owned(), id.to_owned()))
-}
-
-fn positive_payload_id(payload: &Map<String, Value>, field: &str) -> Option<i64> {
-    payload
-        .get(field)
-        .and_then(Value::as_i64)
-        .filter(|value| *value > 0)
 }
 
 fn json_object(value: Value) -> Map<String, Value> {

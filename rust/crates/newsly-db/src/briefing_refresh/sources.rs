@@ -1,9 +1,11 @@
 //! Eligible source loading and conversion into provider-independent Briefing projections.
+use crate::news_visibility::{SUBSCRIBED_AGGREGATORS_CTE, visible_news_predicate};
 
 use super::{
-    AssertSqlSafe, BTreeSet, BriefingRefreshSource, HashMap, HashSet, Map, NaiveDateTime, Postgres,
+    AssertSqlSafe, BriefingRefreshSource, HashMap, HashSet, Map, NaiveDateTime, Postgres,
     SourceContentRow, SourceNewsRow, Transaction, Value,
 };
+use crate::briefing::parse_source_ids;
 
 const BRIEFING_CONTEXT_MAX_CHARS: usize = 2_400;
 const BRIEFING_SOURCE_EXCERPT_MAX_CHARS: usize = 900;
@@ -92,19 +94,7 @@ pub(crate) async fn load_eligible_sources_for_keys(
         .fetch_all(&mut **transaction)
         .await?;
         for row in rows {
-            let source = source_from_news(
-                row.id,
-                row.summary_text.as_deref(),
-                &row.summary_key_points,
-                &row.raw_metadata,
-                row.article_url.as_deref(),
-                row.canonical_story_url.as_deref(),
-                row.canonical_item_url.as_deref(),
-                row.published_at,
-                row.processed_at,
-                row.ingested_at,
-                row.created_at,
-            );
+            let source = source_from_news(&row);
             sources.insert(source.source_key.clone(), source);
         }
     }
@@ -156,29 +146,17 @@ pub(super) async fn load_read_source_keys(
     Ok(read)
 }
 
-pub(super) fn visible_news_sql() -> &'static str {
-    r#"
-    WITH subscribed_aggregators AS MATERIALIZED (
-        SELECT config::jsonb AS config
-        FROM user_scraper_configs
-        WHERE user_id = $1::bigint AND scraper_type = 'aggregator' AND is_active IS TRUE
-    )
+pub(super) fn visible_news_sql() -> String {
+    format!(
+        r#"
+    {SUBSCRIBED_AGGREGATORS_CTE}
     SELECT news.*
     FROM news_items AS news
     WHERE news.status = 'ready' AND news.representative_news_item_id IS NULL
-      AND (
-          (news.visibility_scope = 'user' AND news.owner_user_id::bigint = $1)
-          OR (
-              news.visibility_scope = 'global'
-              AND EXISTS (
-                  SELECT 1 FROM subscribed_aggregators AS subscription
-                  WHERE aggregator_config_admits(
-                      subscription.config, news.platform, news.raw_metadata
-                  )
-              )
-          )
-      )
-    "#
+      AND {visibility}
+    "#,
+        visibility = visible_news_predicate("news")
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -230,20 +208,18 @@ pub(super) fn source_from_content(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn source_from_news(
-    id: i64,
-    summary_text: Option<&str>,
-    summary_key_points: &Value,
-    raw_metadata: &Value,
-    article_url: Option<&str>,
-    canonical_story_url: Option<&str>,
-    canonical_item_url: Option<&str>,
-    published_at: Option<NaiveDateTime>,
-    processed_at: Option<NaiveDateTime>,
-    ingested_at: NaiveDateTime,
-    created_at: NaiveDateTime,
-) -> BriefingRefreshSource {
+pub(crate) fn source_from_news(row: &super::SourceNewsRow) -> BriefingRefreshSource {
+    let id = row.id;
+    let summary_text = row.summary_text.as_deref();
+    let article_url = row.article_url.as_deref();
+    let canonical_story_url = row.canonical_story_url.as_deref();
+    let canonical_item_url = row.canonical_item_url.as_deref();
+    let summary_key_points = &row.summary_key_points;
+    let raw_metadata = &row.raw_metadata;
+    let published_at = row.published_at;
+    let processed_at = row.processed_at;
+    let ingested_at = row.ingested_at;
+    let created_at = row.created_at;
     let map = raw_metadata.as_object().cloned().unwrap_or_default();
     let version = image_version(&map);
     let has_image = map.get("image_generated_at").is_some_and(value_truthy);
@@ -280,11 +256,7 @@ pub(super) fn news_title(
     summary_text: Option<&str>,
     id: i64,
 ) -> String {
-    for path in [
-        ["summary", "title"],
-        ["cluster", "canonical_title"],
-        ["article", "title"],
-    ] {
+    for path in [["summary", "title"], ["article", "title"]] {
         if let Some(value) = metadata
             .get(path[0])
             .and_then(Value::as_object)
@@ -751,29 +723,6 @@ pub(super) fn title_case_slug(value: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-pub(super) fn parse_source_ids(keys: &[String]) -> (Vec<i64>, Vec<i64>) {
-    let mut content = BTreeSet::new();
-    let mut news = BTreeSet::new();
-    for key in keys {
-        let Some((kind, raw_id)) = key.split_once(':') else {
-            continue;
-        };
-        let Some(id) = raw_id.parse::<i64>().ok().filter(|id| *id > 0) else {
-            continue;
-        };
-        match kind {
-            "content" => {
-                content.insert(id);
-            }
-            "news" => {
-                news.insert(id);
-            }
-            _ => {}
-        }
-    }
-    (content.into_iter().collect(), news.into_iter().collect())
 }
 
 pub(super) fn u64_to_i32(value: u64) -> i32 {

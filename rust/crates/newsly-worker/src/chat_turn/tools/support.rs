@@ -1,6 +1,6 @@
 use newsly_agent_runtime::AgentRuntimeError;
 use newsly_contracts::{AssistantFeedOption, FeedFormat, FeedType};
-use newsly_e2b::OutputLimits;
+use newsly_domain::AggregatorKey;
 use sha1::{Digest, Sha1};
 
 pub(super) fn assistant_feed_option(
@@ -31,8 +31,7 @@ pub(super) fn assistant_feed_option(
         .rationale
         .as_deref()
         .and_then(|value| bounded_text(value, 600));
-    let digest = Sha1::digest(feed_url.as_bytes());
-    let id = format!("{digest:x}").chars().take(16).collect();
+    let id = option_id(&feed_url);
     let feed_format =
         if feed_type == FeedType::Atom || feed_url.to_ascii_lowercase().contains("atom") {
             FeedFormat::Atom
@@ -51,6 +50,35 @@ pub(super) fn assistant_feed_option(
         evidence_url: Some(site_url),
         is_subscribed: false,
     })
+}
+
+/// A reviewable subscription card for a built-in Newsly aggregator.
+pub(super) fn aggregator_feed_option(key: AggregatorKey) -> AssistantFeedOption {
+    let feed_url = format!("aggregator://{}", key.as_str());
+    let rationale = match key.topics() {
+        [] => None,
+        topics => Some(format!(
+            "Built-in Newsly aggregator. Follows all of {}; ask to narrow it.",
+            topics.join(", ")
+        )),
+    };
+    AssistantFeedOption {
+        id: option_id(&feed_url),
+        title: key.display_name().to_owned(),
+        site_url: key.site_url().to_owned(),
+        feed_url,
+        feed_type: FeedType::Aggregator,
+        feed_format: FeedFormat::Rss,
+        description: Some(key.description().to_owned()),
+        rationale,
+        evidence_url: Some(key.site_url().to_owned()),
+        is_subscribed: false,
+    }
+}
+
+fn option_id(feed_url: &str) -> String {
+    let digest = Sha1::digest(feed_url.as_bytes());
+    format!("{digest:x}").chars().take(16).collect()
 }
 
 fn bounded_text(value: &str, maximum: usize) -> Option<String> {
@@ -100,26 +128,6 @@ pub(super) fn bounded_query(value: &str) -> Result<&str, AgentRuntimeError> {
         ))
     } else {
         Ok(value)
-    }
-}
-
-pub(super) fn chat_output_limits(maximum_chars: usize) -> OutputLimits {
-    let channel = maximum_chars.saturating_mul(4).clamp(4_000, 800_000);
-    OutputLimits {
-        stdout_bytes: channel,
-        stderr_bytes: channel,
-        combined_bytes: channel.saturating_mul(2),
-        event_bytes: channel,
-        channel_capacity: 32,
-    }
-}
-
-pub(super) fn tail_chars(value: &str, maximum: usize) -> String {
-    let count = value.chars().count();
-    if count <= maximum {
-        value.to_owned()
-    } else {
-        value.chars().skip(count - maximum).collect()
     }
 }
 

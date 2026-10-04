@@ -82,15 +82,11 @@ newsbuddy config show
 approval URL to stderr, waits for app approval, and stores the returned API key.
 The following overrides remain supported:
 
-- config path: `--config`, `NEWSBUDDY_CONFIG`, `NEWSBUDDY_CONFIG_PATH`,
-  `NEWSLY_AGENT_CONFIG`, or `NEWSLY_AGENT_CONFIG_PATH`;
-- server: `--server`, `NEWSBUDDY_SERVER`, or `NEWSLY_AGENT_SERVER`;
-- API key: `--api-key`, `NEWSBUDDY_API_KEY`, or `NEWSLY_AGENT_API_KEY`;
+- config path: `--config` or `NEWSBUDDY_CONFIG`;
+- server: `--server` or `NEWSBUDDY_SERVER`;
+- API key: `--api-key` or `NEWSBUDDY_API_KEY`;
 - output: `--output json|text`, with `--json` as the JSON shortcut;
 - HTTP deadline: `--timeout`, which defaults to `30s`.
-
-The legacy `NEWSLY_AGENT_*` names are compatibility aliases, not separate
-configuration authorities.
 
 ## Local API keys over HTTP
 
@@ -207,8 +203,7 @@ files tracked by the previous local manifest. It verifies SHA-256 before
 publication, repairs missing or corrupt files, writes files atomically, rejects
 paths outside the root and writes through symlinks, and refuses to prune every
 tracked file from an empty remote manifest unless `--allow-prune-all` is set.
-The canonical local manifest remains `.newsbuddy-manifest.json`; the retired
-`.newsly-agent-manifest.json` name is read only for migration.
+The canonical local manifest is `.newsbuddy-manifest.json`.
 
 ## Development
 

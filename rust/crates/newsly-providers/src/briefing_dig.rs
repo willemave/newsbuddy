@@ -4,30 +4,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
-    ToolPolicy,
+    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
+    ResponseContract, ToolPolicy,
 };
 use reqwest::Url;
-use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use secrecy::SecretString;
+use serde_json::Map;
 use thiserror::Error;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::exa::{ExaSearchOptions, ExaSearchUsage, search_exa};
+use crate::provider_env::{ProviderEnvError, u64_from_env};
+use crate::{ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
 
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
-const EXCLUDED_DOMAINS: [&str; 8] = [
-    "facebook.com",
-    "linkedin.com",
-    "twitter.com",
-    "x.com",
-    "instagram.com",
-    "tiktok.com",
-    "pinterest.com",
-    "reddit.com",
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingWebSearchResult {
@@ -35,15 +27,6 @@ pub struct BriefingWebSearchResult {
     pub url: String,
     pub snippet: Option<String>,
     pub published_date: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExaSearchUsage {
-    pub request_count: u64,
-    pub result_count: u64,
-    pub summary_count: u64,
-    pub text_count: u64,
-    pub estimated_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,11 +60,12 @@ impl BriefingDigGateway {
     ///
     /// Returns an error when configured URLs or HTTP/model clients cannot be constructed.
     pub fn from_env() -> Result<Self, BriefingDigGatewayError> {
-        let timeout_seconds = env::var("HTTP_TIMEOUT_SECONDS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(60)
-            .max(1);
+        let timeout_seconds = u64_from_env(
+            "HTTP_TIMEOUT_SECONDS",
+            60,
+            "an unsigned integer number of seconds",
+        )?
+        .max(1);
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_seconds))
             .build()?;
@@ -95,13 +79,8 @@ impl BriefingDigGateway {
         let exa_search_url = exa_base
             .join("search")
             .map_err(|error| BriefingDigGatewayError::Url(error.to_string()))?;
-        let credentials = ProviderCredentials {
-            openai: secret_env("OPENAI_API_KEY"),
-            anthropic: secret_env("ANTHROPIC_API_KEY"),
-            google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-            openrouter: secret_env("OPENROUTER_API_KEY"),
-        };
-        let engine = RigAgentEngine::new(credentials, OpenRouterPrivacyPolicy::default())?;
+        let credentials = ProviderCredentials::from_env();
+        let engine = RigAgentEngine::new(credentials);
         Ok(Self {
             client,
             exa_api_key: secret_env("EXA_API_KEY"),
@@ -143,28 +122,21 @@ impl BriefingDigGateway {
             .exa_api_key
             .as_ref()
             .ok_or(BriefingDigGatewayError::ExaUnavailable)?;
-        let response = self
-            .client
-            .post(self.exa_search_url.clone())
-            .header("x-api-key", key.expose_secret())
-            .json(&ExaSearchRequest {
-                query,
-                num_results: u8::try_from(limit.clamp(1, 25)).unwrap_or(25),
-                exclude_domains: EXCLUDED_DOMAINS.to_vec(),
-                contents: ExaContentsRequest {
-                    livecrawl: "fallback",
-                    summary: ExaSummaryRequest {
-                        query: "Key points and main takeaways",
-                    },
-                    text: ExaTextRequest {
-                        max_characters: 1_500,
-                    },
-                },
-            })
-            .send()
-            .await?
-            .error_for_status()?;
-        let payload = response.json::<ExaSearchResponse>().await?;
+        let payload = search_exa(
+            &self.client,
+            self.exa_search_url.clone(),
+            key,
+            query,
+            ExaSearchOptions {
+                num_results: limit.clamp(1, 25),
+                include_social: false,
+                text_max_characters: 1_500,
+                livecrawl: Some("fallback"),
+                summary_query: Some("Key points and main takeaways"),
+                timeout: None,
+            },
+        )
+        .await?;
         let summary_count = payload
             .results
             .iter()
@@ -192,7 +164,9 @@ impl BriefingDigGateway {
                 result_count: u64::try_from(results.len()).unwrap_or(u64::MAX),
                 summary_count: u64::try_from(summary_count).unwrap_or(u64::MAX),
                 text_count: u64::try_from(text_count).unwrap_or(u64::MAX),
-                estimated_cost_usd: exa_estimated_cost_usd(payload.cost_dollars.as_ref()),
+                estimated_cost_usd: payload.estimated_cost_usd,
+                known_estimated_cost_usd: payload.estimated_cost_usd.unwrap_or_default(),
+                missing_cost_estimate_count: u64::from(payload.estimated_cost_usd.is_none()),
             },
             results,
         })
@@ -203,20 +177,11 @@ impl BriefingDigGateway {
     /// # Errors
     ///
     /// Returns an error when model execution fails.
-    pub async fn summarize(
-        &self,
-        system_prompt: String,
-        user_prompt: String,
-    ) -> Result<BriefingDigSummary, BriefingDigGatewayError> {
-        self.summarize_with_events(system_prompt, user_prompt, Arc::new(NoEvents))
-            .await
-    }
-
     /// Produces a bounded summary while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same provider and validation errors as [`Self::summarize`].
+    /// Returns provider and validation errors from summary generation.
     pub async fn summarize_with_events(
         &self,
         system_prompt: String,
@@ -263,83 +228,6 @@ impl BriefingDigGateway {
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRequest<'a> {
-    query: &'a str,
-    num_results: u8,
-    exclude_domains: Vec<&'static str>,
-    contents: ExaContentsRequest<'a>,
-}
-
-#[derive(Debug, Serialize)]
-struct ExaContentsRequest<'a> {
-    livecrawl: &'a str,
-    summary: ExaSummaryRequest<'a>,
-    text: ExaTextRequest,
-}
-
-#[derive(Debug, Serialize)]
-struct ExaSummaryRequest<'a> {
-    query: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaTextRequest {
-    max_characters: usize,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExaSearchResponse {
-    #[serde(default)]
-    results: Vec<ExaSearchRow>,
-    #[serde(rename = "costDollars")]
-    cost_dollars: Option<Value>,
-}
-
-fn exa_estimated_cost_usd(cost_dollars: Option<&Value>) -> Option<f64> {
-    cost_dollars
-        .and_then(|value| value.get("total"))
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRow {
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    url: String,
-    summary: Option<String>,
-    text: Option<String>,
-    published_date: Option<String>,
-}
-
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async move {
-            Err(AgentRuntimeError::Tool(format!(
-                "Briefing Dig does not expose tool {}",
-                call.name
-            )))
-        })
-    }
-}
-
 fn secret_env(name: &str) -> Option<SecretString> {
     env::var(name)
         .ok()
@@ -367,6 +255,8 @@ fn clean_snippet(value: Option<String>) -> Option<String> {
 
 #[derive(Debug, Error)]
 pub enum BriefingDigGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("Exa is not configured")]
     ExaUnavailable,
     #[error("Briefing model returned an empty summary")]
@@ -375,37 +265,6 @@ pub enum BriefingDigGatewayError {
     Http(#[from] reqwest::Error),
     #[error("Briefing Dig URL is invalid")]
     Url(String),
-    #[error("Briefing Dig agent configuration failed")]
-    AgentConfiguration(#[from] crate::RigAgentEngineError),
     #[error("Briefing Dig agent request failed")]
     Agent(#[from] AgentRuntimeError),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ExaSearchResponse, exa_estimated_cost_usd};
-
-    #[test]
-    fn exa_cost_estimate_accepts_only_finite_nonnegative_total() {
-        let valid: ExaSearchResponse = serde_json::from_value(serde_json::json!({
-            "results": [],
-            "costDollars": {"total": 0.0123}
-        }))
-        .expect("valid Exa response");
-        assert_eq!(
-            exa_estimated_cost_usd(valid.cost_dollars.as_ref()),
-            Some(0.0123)
-        );
-
-        for value in [
-            serde_json::json!({}),
-            serde_json::json!({"costDollars": null}),
-            serde_json::json!({"costDollars": {"total": "unknown"}}),
-            serde_json::json!({"costDollars": {"total": -0.01}}),
-        ] {
-            let response: ExaSearchResponse =
-                serde_json::from_value(value).expect("malformed estimate must not reject response");
-            assert_eq!(exa_estimated_cost_usd(response.cost_dollars.as_ref()), None);
-        }
-    }
 }

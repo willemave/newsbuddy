@@ -14,7 +14,6 @@ async-stream = "=0.3.6"
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
-feed-rs.workspace = true
 fernet.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
@@ -26,7 +25,7 @@ newsly-domain = { path = "../newsly-domain" }
 newsly-providers = { path = "../newsly-providers" }
 newsly-queue = { path = "../newsly-queue" }
 newsly-worker = { path = "../newsly-worker" }
-object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }
+object_store.workspace = true
 percent-encoding = "=2.3.2"
 reqwest.workspace = true
 secrecy.workspace = true
@@ -38,7 +37,7 @@ subtle.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util = { version = "=0.7.19", features = ["io"] }
+tokio-util = { workspace = true, features = ["io"] }
 toml.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
@@ -48,3 +47,6 @@ uuid.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+matchit = "=0.8.4"

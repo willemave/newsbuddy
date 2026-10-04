@@ -2,6 +2,7 @@
 //!
 //! Each function owns one short pool checkout or caller transaction. Tool executors never retain
 //! an ORM-shaped row or SQLx connection while Rig performs another model request.
+use crate::news_visibility::{SUBSCRIBED_AGGREGATORS_CTE, visible_news_predicate};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -167,13 +168,9 @@ pub async fn list_unread_chat_news(
         return Err(ChatToolRepositoryError::InvalidInput);
     }
     let mut transaction = pool.begin().await?;
-    let total_count = sqlx::query_scalar::<_, i64>(
+    let total_count = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
         r#"
-        WITH subscribed_aggregators AS MATERIALIZED (
-            SELECT config::jsonb AS config
-            FROM user_scraper_configs
-            WHERE user_id = $1::bigint AND scraper_type = 'aggregator' AND is_active IS TRUE
-        )
+        {SUBSCRIBED_AGGREGATORS_CTE}
         SELECT COUNT(item.id)::bigint
         FROM news_items AS item
         JOIN users AS account ON account.id::bigint = $1 AND account.is_active = TRUE
@@ -182,17 +179,10 @@ pub async fn list_unread_chat_news(
         WHERE item.status = 'ready'
           AND item.representative_news_item_id IS NULL
           AND read.id IS NULL
-          AND (
-              (item.visibility_scope = 'global' AND EXISTS (
-                  SELECT 1 FROM subscribed_aggregators AS subscription
-                  WHERE aggregator_config_admits(
-                      subscription.config, item.platform, item.raw_metadata
-                  )
-              ))
-              OR (item.visibility_scope = 'user' AND item.owner_user_id::bigint = $1)
-          )
+          AND {visibility}
         "#,
-    )
+        visibility = visible_news_predicate("item")
+    )))
     .bind(user_id)
     .fetch_one(&mut *transaction)
     .await?;
@@ -210,13 +200,10 @@ pub async fn list_unread_chat_news(
     })
 }
 
-fn news_search_statement() -> &'static str {
-    r#"
-        WITH subscribed_aggregators AS MATERIALIZED (
-            SELECT config::jsonb AS config
-            FROM user_scraper_configs
-            WHERE user_id = $1::bigint AND scraper_type = 'aggregator' AND is_active IS TRUE
-        )
+fn news_search_statement() -> sqlx::AssertSqlSafe<String> {
+    sqlx::AssertSqlSafe(format!(
+        r#"
+        {SUBSCRIBED_AGGREGATORS_CTE}
         SELECT
             item.id::bigint AS news_item_id,
             COALESCE(
@@ -239,15 +226,7 @@ fn news_search_statement() -> &'static str {
           ON read.news_item_id = item.id AND read.user_id::bigint = $1
         WHERE item.status = 'ready'
           AND item.representative_news_item_id IS NULL
-          AND (
-              (item.visibility_scope = 'global' AND EXISTS (
-                  SELECT 1 FROM subscribed_aggregators AS subscription
-                  WHERE aggregator_config_admits(
-                      subscription.config, item.platform, item.raw_metadata
-                  )
-              ))
-              OR (item.visibility_scope = 'user' AND item.owner_user_id::bigint = $1)
-          )
+          AND {visibility}
           AND ($4::boolean IS FALSE OR read.id IS NULL)
           AND (
               BTRIM($2) = ''
@@ -287,7 +266,9 @@ fn news_search_statement() -> &'static str {
           COALESCE(item.published_at, item.processed_at, item.ingested_at, item.created_at) DESC,
           item.id DESC
         LIMIT $3
-        "#
+        "#,
+        visibility = visible_news_predicate("item")
+    ))
 }
 
 pub async fn prepare_chat_article_conversion(
@@ -335,12 +316,12 @@ pub async fn create_deep_research_handoff(
         r#"
         INSERT INTO chat_sessions (
             user_id, content_id, title, session_type, topic, llm_provider, llm_model,
-            created_at, updated_at, council_mode, is_hidden_from_history, is_archived
+            created_at, updated_at, is_archived
         )
         SELECT
             account.id, $2::bigint::integer, 'Deep Research', 'deep_research', $3,
             'deep_research', $4, timezone('UTC', clock_timestamp()),
-            timezone('UTC', clock_timestamp()), FALSE, FALSE, FALSE
+            timezone('UTC', clock_timestamp()), FALSE
         FROM users AS account
         WHERE account.id::bigint = $1 AND account.is_active = TRUE
         RETURNING id::bigint

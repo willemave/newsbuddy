@@ -4,7 +4,7 @@ use newsly_db::{
     PreparedShareSource, ShareActionPreparation, ShareActionRepositoryError,
     begin_share_action_preparation, finish_share_action_preparation,
 };
-use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
+use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult};
 use serde_json::Value;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
@@ -18,16 +18,6 @@ use super::workflows::{
     ContentActionInput, build_deterministic_chat_action, build_deterministic_presentation_action,
     build_host_action,
 };
-
-/// Outcome used by the shared `run_llm_task` dispatcher.
-///
-/// `run_llm_task` also owns Learning Deck attempts, so a Share Action executor must decline an
-/// unrelated durable row rather than claiming the whole namespace as its own product handler.
-#[derive(Debug)]
-pub enum ShareActionDispatchOutcome {
-    Handled(HandlerExecution),
-    NotShareAction,
-}
 
 #[derive(Debug, Clone)]
 pub struct ShareActionTaskExecutor {
@@ -64,34 +54,9 @@ impl ShareActionTaskExecutor {
         &self,
         plan: &OwnedWorkPlan,
         mut lease: LeaseHealth,
-    ) -> ShareActionDispatchOutcome {
-        if plan.task_type != TaskType::RunLlmTask {
-            return handled_failure(None, "invalid_task_type", "Expected run_llm_task", false);
-        }
-        let Some(task_id) = positive_payload_id(&plan.payload, "llm_task_id") else {
-            return handled_failure(
-                None,
-                "invalid_payload",
-                "Missing or invalid llm_task_id in run_llm_task payload",
-                false,
-            );
-        };
-        let Some(user_id) = positive_payload_id(&plan.payload, "user_id") else {
-            return handled_failure(
-                None,
-                "invalid_payload",
-                "Missing or invalid user_id in run_llm_task payload",
-                false,
-            );
-        };
-        if plan.owner_user_id != Some(user_id) {
-            return handled_failure(
-                None,
-                "ownership_mismatch",
-                "LLM task ownership mismatch",
-                false,
-            );
-        }
+        task_id: i64,
+        user_id: i64,
+    ) -> HandlerExecution {
         let snapshot = {
             let mut transaction = match self.pool.begin().await {
                 Ok(transaction) => transaction,
@@ -103,7 +68,11 @@ impl ShareActionTaskExecutor {
                 match begin_share_action_preparation(&mut transaction, task_id, user_id).await {
                     Ok(preparation) => preparation,
                     Err(ShareActionRepositoryError::WrongTaskKind) => {
-                        return ShareActionDispatchOutcome::NotShareAction;
+                        return crate::run_llm_task::unsupported_execution(
+                            task_id,
+                            user_id,
+                            "share_action",
+                        );
                     }
                     Err(
                         error @ (ShareActionRepositoryError::TaskNotFound
@@ -113,7 +82,6 @@ impl ShareActionTaskExecutor {
                             None,
                             repository_error_type(&error),
                             error.to_string(),
-                            false,
                         );
                     }
                     Err(ShareActionRepositoryError::Sqlx(error)) => {
@@ -124,7 +92,6 @@ impl ShareActionTaskExecutor {
                             Some((task_id, user_id)),
                             repository_error_type(&error),
                             error.to_string(),
-                            false,
                         );
                     }
                 };
@@ -133,9 +100,7 @@ impl ShareActionTaskExecutor {
                     if let Err(error) = transaction.commit().await {
                         return handled_retry(error.to_string());
                     }
-                    return ShareActionDispatchOutcome::Handled(HandlerExecution::from_result(
-                        TaskResult::ok(),
-                    ));
+                    return HandlerExecution::from_result(TaskResult::ok());
                 }
                 ShareActionPreparation::Ready(draft) => draft,
             };
@@ -144,7 +109,6 @@ impl ShareActionTaskExecutor {
                     Some((task_id, user_id)),
                     "lease_reclaim_budget_exhausted",
                     "LLM task stopped after repeated worker interruptions",
-                    false,
                 );
             }
             let source = if draft.prepare_shared_source {
@@ -153,7 +117,6 @@ impl ShareActionTaskExecutor {
                         Some((task_id, user_id)),
                         "invalid_task_input",
                         "Share Action URL is missing",
-                        false,
                     );
                 };
                 let action_input = ContentActionInput {
@@ -186,7 +149,6 @@ impl ShareActionTaskExecutor {
                             Some((task_id, user_id)),
                             "ShareActionPreparationError",
                             error.to_string(),
-                            false,
                         );
                     }
                 };
@@ -205,7 +167,6 @@ impl ShareActionTaskExecutor {
                             Some((task_id, user_id)),
                             repository_error_type(&error),
                             error.to_string(),
-                            false,
                         );
                     }
                 };
@@ -222,22 +183,19 @@ impl ShareActionTaskExecutor {
                 build_deterministic_presentation_action(&snapshot)
             };
             return match action {
-                Ok(action) => {
-                    ShareActionDispatchOutcome::Handled(HandlerExecution::with_finalizer(
-                        TaskResult::ok(),
-                        ShareActionSuccessFinalizer::deterministic(
-                            self.queue.clone(),
-                            self.sandbox_root.clone(),
-                            snapshot,
-                            action,
-                        ),
-                    ))
-                }
+                Ok(action) => HandlerExecution::with_finalizer(
+                    TaskResult::ok(),
+                    ShareActionSuccessFinalizer::deterministic(
+                        self.queue.clone(),
+                        self.sandbox_root.clone(),
+                        snapshot,
+                        action,
+                    ),
+                ),
                 Err(error) => handled_failure(
                     Some((task_id, user_id)),
                     "ShareActionWorkflowError",
                     error.to_string(),
-                    false,
                 ),
             };
         }
@@ -258,15 +216,13 @@ impl ShareActionTaskExecutor {
                     if let Some(action) =
                         super::workflows::build_verified_source_action(&snapshot, &target)
                     {
-                        return ShareActionDispatchOutcome::Handled(
-                            HandlerExecution::with_finalizer(
-                                TaskResult::ok(),
-                                ShareActionSuccessFinalizer::deterministic(
-                                    self.queue.clone(),
-                                    self.sandbox_root.clone(),
-                                    snapshot,
-                                    action,
-                                ),
+                        return HandlerExecution::with_finalizer(
+                            TaskResult::ok(),
+                            ShareActionSuccessFinalizer::deterministic(
+                                self.queue.clone(),
+                                self.sandbox_root.clone(),
+                                snapshot,
+                                action,
                             ),
                         );
                     }
@@ -316,11 +272,10 @@ impl ShareActionTaskExecutor {
                         Some((task_id, user_id)),
                         "ShareActionResultValidationError",
                         error.to_string(),
-                        false,
                     );
                 }
             };
-        ShareActionDispatchOutcome::Handled(HandlerExecution::with_finalizer(
+        HandlerExecution::with_finalizer(
             TaskResult::ok(),
             ShareActionSuccessFinalizer::agent(
                 self.queue.clone(),
@@ -329,7 +284,7 @@ impl ShareActionTaskExecutor {
                 agent,
                 host_action,
             ),
-        ))
+        )
     }
 }
 
@@ -337,13 +292,12 @@ fn handled_failure(
     verified_task: Option<(i64, i64)>,
     error_type: impl Into<String>,
     message: impl Into<String>,
-    retryable: bool,
-) -> ShareActionDispatchOutcome {
+) -> HandlerExecution {
     let error_type = error_type.into();
     let message = message.into();
-    let execution = match verified_task {
+    match verified_task {
         Some((task_id, user_id)) => HandlerExecution::with_finalizer(
-            TaskResult::fail(Some(message.clone()), retryable),
+            TaskResult::fail(Some(message.clone()), false),
             ShareActionFailureFinalizer {
                 task_id,
                 user_id,
@@ -353,16 +307,12 @@ fn handled_failure(
                 sandbox_id: None,
             },
         ),
-        None => HandlerExecution::from_result(TaskResult::fail(Some(message), retryable)),
-    };
-    ShareActionDispatchOutcome::Handled(execution)
+        None => HandlerExecution::from_result(TaskResult::fail(Some(message), false)),
+    }
 }
 
-fn handled_retry(message: impl Into<String>) -> ShareActionDispatchOutcome {
-    ShareActionDispatchOutcome::Handled(HandlerExecution::from_result(TaskResult::fail(
-        Some(message.into()),
-        true,
-    )))
+fn handled_retry(message: impl Into<String>) -> HandlerExecution {
+    HandlerExecution::from_result(TaskResult::fail(Some(message.into()), true))
 }
 
 fn handled_agent_failure(
@@ -371,12 +321,12 @@ fn handled_agent_failure(
     error_type: impl Into<String>,
     message: impl Into<String>,
     sandbox: Option<(String, String)>,
-) -> ShareActionDispatchOutcome {
+) -> HandlerExecution {
     let (sandbox_provider, sandbox_id) = sandbox
         .map(|(provider, id)| (Some(provider), Some(id)))
         .unwrap_or_default();
     let message = message.into();
-    ShareActionDispatchOutcome::Handled(HandlerExecution::with_finalizer(
+    HandlerExecution::with_finalizer(
         TaskResult::fail(Some(message.clone()), false),
         ShareActionFailureFinalizer {
             task_id,
@@ -386,20 +336,11 @@ fn handled_agent_failure(
             sandbox_provider,
             sandbox_id,
         },
-    ))
+    )
 }
 
-fn handled_defer(retry_delay_seconds: i64) -> ShareActionDispatchOutcome {
-    ShareActionDispatchOutcome::Handled(HandlerExecution::from_result(TaskResult::defer(
-        retry_delay_seconds,
-    )))
-}
-
-fn positive_payload_id(payload: &serde_json::Map<String, Value>, field: &str) -> Option<i64> {
-    payload
-        .get(field)
-        .and_then(Value::as_i64)
-        .filter(|value| *value > 0)
+fn handled_defer(retry_delay_seconds: i64) -> HandlerExecution {
+    HandlerExecution::from_result(TaskResult::defer(retry_delay_seconds))
 }
 
 fn clean_input_text(input: &serde_json::Map<String, Value>, field: &str) -> Option<String> {

@@ -11,7 +11,6 @@ pub mod bootstrap;
 pub mod control_plane;
 pub mod envd_process;
 pub mod error;
-pub mod feed;
 pub mod files;
 pub mod network;
 pub mod session;
@@ -29,20 +28,18 @@ pub mod generated {
 }
 
 pub use bootstrap::{
-    VM_BOOTSTRAP_EXECUTABLE, VmBootstrapClient, VmBootstrapLimits, VmBootstrapProvider,
-    VmCapabilities,
+    VM_BOOTSTRAP_EXECUTABLE, VmBootstrapClient, VmBootstrapLimits, VmCapabilities,
 };
 pub use control_plane::{ControlPlaneClient, ControlPlaneConfig, SandboxHealth};
 pub use envd_process::{
     CapabilityReport, CommandEventStream, EnvdCapability, EnvdProcessClient, ProcessSignal,
 };
 pub use error::{DeliveryState, E2bError, ErrorDisposition};
-pub use feed::{FeedFetchRequest, FeedFetchResult, MAX_FEED_RESPONSE_BYTES, VmFeedProvider};
 pub use files::{BoxByteStream, EnvdFileClient, FileLimits};
-pub use network::{NetworkPolicy, NetworkRule, NetworkTransform};
-pub use session::{DirectE2bProvider, RecoveredCommand, ResultManifestLocation, SandboxProvider};
+pub use network::NetworkPolicy;
+pub use session::DirectE2bProvider;
 pub use types::{
     CommandEvent, CommandOutput, CommandRequest, CommandResult, ExecutionTag, ExitStatus,
-    OutputLimits, ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxInfo, SandboxPath,
+    OutputLimits, ProcessSelector, SandboxHandle, SandboxId, SandboxInfo, SandboxPath,
     SandboxRequest, SandboxUser, WorkspacePath,
 };

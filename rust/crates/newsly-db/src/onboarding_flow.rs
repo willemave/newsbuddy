@@ -1,10 +1,13 @@
+use crate::content_metadata::{json_truthy, runtime_metadata, summary_is_readable};
 use std::collections::HashSet;
 
 use serde_json::Value;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
-use crate::canonicalize_feed_url;
+use crate::{
+    OnboardingDiscoveryLaneProjection, OnboardingDiscoveryStatusProjection, canonicalize_feed_url,
+};
 
 const NEWS_SEED_LIMIT: i64 = 100;
 const FEED_CONTENT_SEED_LIMIT: i64 = 30;
@@ -23,23 +26,6 @@ pub struct OnboardingAudioRunInput {
     pub topic_summary: String,
     pub inferred_topics: Vec<String>,
     pub lanes: Vec<OnboardingAudioLaneInput>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OnboardingAudioRunProjection {
-    pub run_id: i64,
-    pub run_status: String,
-    pub topic_summary: Option<String>,
-    pub inferred_topics: Vec<String>,
-    pub lanes: Vec<OnboardingAudioLaneProjection>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OnboardingAudioLaneProjection {
-    pub name: String,
-    pub status: String,
-    pub completed_queries: i32,
-    pub query_count: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
@@ -83,8 +69,7 @@ pub struct OnboardingCompletionInput {
     pub sources: Vec<OnboardingCompletionSource>,
     pub subreddits: Vec<String>,
     pub aggregators: Vec<OnboardingCompletionAggregator>,
-    pub update_twitter_username: bool,
-    pub twitter_username: Option<String>,
+    pub twitter_username: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,7 +89,7 @@ pub struct OnboardingCompletionProjection {
 pub async fn create_onboarding_audio_run(
     transaction: &mut Transaction<'_, Postgres>,
     input: &OnboardingAudioRunInput,
-) -> Result<OnboardingAudioRunProjection, OnboardingFlowRepositoryError> {
+) -> Result<OnboardingDiscoveryStatusProjection, OnboardingFlowRepositoryError> {
     let user_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1::bigint AND is_active = TRUE)",
     )
@@ -179,7 +164,7 @@ pub async fn create_onboarding_audio_run(
         .bind(serde_json::to_value(&lane.queries)?)
         .execute(&mut **transaction)
         .await?;
-        lanes.push(OnboardingAudioLaneProjection {
+        lanes.push(OnboardingDiscoveryLaneProjection {
             name: lane.name.clone(),
             status: "queued".to_owned(),
             completed_queries: 0,
@@ -187,12 +172,14 @@ pub async fn create_onboarding_audio_run(
         });
     }
 
-    Ok(OnboardingAudioRunProjection {
+    Ok(OnboardingDiscoveryStatusProjection {
         run_id,
         run_status: "pending".to_owned(),
         topic_summary: Some(input.topic_summary.clone()),
         inferred_topics: input.inferred_topics.clone(),
         lanes,
+        suggestions: None,
+        error_message: None,
     })
 }
 
@@ -406,35 +393,7 @@ pub async fn complete_onboarding_selection(
     let seeded_feed_content_ids =
         seed_selected_feed_content(transaction, input.user_id, &raw_feed_urls).await?;
 
-    if input.update_twitter_username {
-        sqlx::query(
-            r#"
-            UPDATE users
-            SET twitter_username = $2,
-                has_completed_onboarding = TRUE,
-                reading_experience = 'briefing',
-                updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1::bigint
-            "#,
-        )
-        .bind(input.user_id)
-        .bind(&input.twitter_username)
-        .execute(&mut **transaction)
-        .await?;
-    } else {
-        sqlx::query(
-            r#"
-            UPDATE users
-            SET has_completed_onboarding = TRUE,
-                reading_experience = 'briefing',
-                updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1::bigint
-            "#,
-        )
-        .bind(input.user_id)
-        .execute(&mut **transaction)
-        .await?;
-    }
+    complete_user_onboarding(transaction, input.user_id, input.twitter_username.as_ref()).await?;
 
     crate::briefing_refresh::preparation::ensure_fixed_lenses(transaction, input.user_id).await?;
     let first_edition_run_id = start_first_edition(transaction, input.user_id).await?;
@@ -460,6 +419,29 @@ pub async fn complete_onboarding_selection(
         tutorial_complete,
         has_feed_discovery_task,
     })
+}
+
+async fn complete_user_onboarding(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
+    twitter_username: Option<&Option<String>>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE users
+        SET twitter_username = CASE WHEN $2 THEN $3 ELSE twitter_username END,
+            has_completed_onboarding = TRUE,
+            reading_experience = 'briefing',
+            updated_at = timezone('UTC', now())
+        WHERE id::bigint = $1::bigint
+        "#,
+    )
+    .bind(user_id)
+    .bind(twitter_username.is_some())
+    .bind(twitter_username.and_then(Option::as_ref))
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn validate_completion_selection(
@@ -967,67 +949,18 @@ async fn eligible_image_content_ids(
     Ok(candidates
         .into_iter()
         .filter(|candidate| {
-            let metadata = runtime_metadata(&candidate.content_metadata);
+            let metadata = runtime_metadata(
+                &candidate
+                    .content_metadata
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default(),
+            );
             !metadata.get("image_generated_at").is_some_and(json_truthy)
                 && summary_is_readable(&metadata, &candidate.content_type)
         })
         .map(|candidate| candidate.id)
         .collect())
-}
-
-fn runtime_metadata(value: &Value) -> serde_json::Map<String, Value> {
-    let mut runtime = value.as_object().cloned().unwrap_or_default();
-    for namespace in ["domain", "processing"] {
-        if let Some(fields) = runtime.get(namespace).and_then(Value::as_object).cloned() {
-            runtime.extend(fields);
-        }
-    }
-    runtime
-}
-
-fn json_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(value) => *value,
-        Value::Number(value) => value.as_f64().is_some_and(|value| value != 0.0),
-        Value::String(value) => !value.is_empty(),
-        Value::Array(value) => !value.is_empty(),
-        Value::Object(value) => !value.is_empty(),
-    }
-}
-
-fn summary_is_readable(metadata: &serde_json::Map<String, Value>, content_type: &str) -> bool {
-    let Some(summary) = metadata.get("summary") else {
-        return false;
-    };
-    if content_type == "podcast" {
-        return json_truthy(summary);
-    }
-    let Some(summary) = summary.as_object() else {
-        return json_truthy(summary);
-    };
-    if metadata.get("summary_kind").and_then(Value::as_str) == Some("longform_artifact")
-        && summary.get("artifact").is_some_and(Value::is_object)
-    {
-        return summary.get("feed_preview").is_some_and(Value::is_object)
-            || metadata.get("feed_preview").is_some_and(Value::is_object)
-            || summary.get("one_line").is_some_and(json_truthy);
-    }
-    [
-        "one_line",
-        "overview",
-        "summary",
-        "hook",
-        "takeaway",
-        "editorial_narrative",
-        "bullet_points",
-        "key_points",
-        "points",
-        "insights",
-        "artifact",
-    ]
-    .iter()
-    .any(|key| summary.get(*key).is_some_and(json_truthy))
 }
 
 fn push_unique(values: &mut Vec<String>, seen: &mut HashSet<String>, value: &str) {

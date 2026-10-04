@@ -20,6 +20,9 @@ const API_METADATA_REDACT_KEYS: &[&str] = &[
     "storage_key",
     "storage_bucket",
     "article_body_ref",
+    "submitted_by_user_id",
+    "share_and_chat_user_ids",
+    "share_and_chat_requests",
 ];
 const API_METADATA_INTERNAL_KEYS: &[&str] = &["domain", "processing"];
 const API_METADATA_LARGE_VALUE_ALLOWLIST: &[&str] = &[
@@ -49,22 +52,6 @@ const API_METADATA_LARGE_VALUE_ALLOWLIST: &[&str] = &[
     "source_metadata",
 ];
 const API_METADATA_MAX_VALUE_CHARS: usize = 12_000;
-const PROCESSING_FIELD_NAMES: &[&str] = &[
-    "subscribe_to_feed",
-    "feed_subscription",
-    "detected_feed",
-    "all_detected_feeds",
-    "share_and_chat_user_ids",
-    "share_and_chat_requests",
-    "submitted_by_user_id",
-    "submitted_via",
-    "platform_hint",
-    "content_to_summarize",
-    "processing_errors",
-    "canonical_content_id",
-    "tweet_enrichment",
-    "tweet_only",
-];
 const DISPLAY_SUMMARY_KINDS: &[SummaryKind] = &[
     SummaryKind::LongStructured,
     SummaryKind::LongInterleaved,
@@ -324,13 +311,7 @@ fn insert_news_context_metadata(
                 .as_deref()
                 .map_or(Value::Null, |value| Value::String(value.to_owned()))
         });
-    metadata.entry("cluster".to_owned()).or_insert_with(|| {
-        Value::Object(
-            object_field(&value_object(&item.raw_metadata), "cluster")
-                .cloned()
-                .unwrap_or_default(),
-        )
-    });
+    metadata.remove("cluster");
     let relevant_links = news_relevant_links(
         metadata,
         article_url,
@@ -347,24 +328,10 @@ fn insert_news_context_metadata(
 }
 
 fn runtime_metadata(raw_metadata: &Value) -> Map<String, Value> {
-    let stored = value_object(raw_metadata);
-    let mut domain = object_field(&stored, "domain").cloned().unwrap_or_default();
-    let mut processing = object_field(&stored, "processing")
-        .cloned()
-        .unwrap_or_default();
-    for (key, value) in &stored {
-        if matches!(key.as_str(), "domain" | "processing") {
-            continue;
-        }
-        let target = if PROCESSING_FIELD_NAMES.contains(&key.as_str()) {
-            &mut processing
-        } else {
-            &mut domain
-        };
-        target.entry(key.clone()).or_insert_with(|| value.clone());
-    }
-    domain.extend(processing);
-    domain
+    raw_metadata
+        .as_object()
+        .map(newsly_db::content_metadata::runtime_metadata)
+        .unwrap_or_default()
 }
 
 fn backfill_legacy_news_article(
@@ -1221,27 +1188,10 @@ pub(super) fn subscription_candidate(content: &ContentDetailResponse) -> Option<
         return None;
     }
     let feed = content.detected_feed.as_ref()?;
-    matches!(
-        feed.feed_type.as_str(),
-        "substack" | "atom" | "podcast_rss" | "youtube" | "reddit" | "aggregator"
-    )
-    .then_some((feed.feed_type.as_str(), feed.url.as_str()))
-}
-
-pub(super) fn canonicalize_feed_url(value: &str) -> String {
-    let trimmed = value.trim();
-    let Ok(mut parsed) = reqwest::Url::parse(trimmed) else {
-        return trimmed.trim_end_matches('/').to_owned();
-    };
-    parsed.set_fragment(None);
-    let mut result = parsed.to_string();
-    let query_suffix = parsed
-        .query()
-        .map(|query| format!("?{query}"))
-        .unwrap_or_default();
-    let without_query = result.strip_suffix(&query_suffix).unwrap_or(&result);
-    result = format!("{}{}", without_query.trim_end_matches('/'), query_suffix);
-    result
+    feed.feed_type
+        .parse::<newsly_contracts::ScraperType>()
+        .ok()
+        .map(|_| (feed.feed_type.as_str(), feed.url.as_str()))
 }
 
 fn valid_http_url(value: &str) -> Option<String> {
@@ -1364,6 +1314,22 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn public_content_metadata_redacts_shared_submitters_and_initial_prompts() {
+        let metadata = sanitize_metadata_for_api(runtime_metadata(&json!({
+            "submitted_by_user_id":1,"share_and_chat_user_ids":[1,2],
+            "processing":{"share_and_chat_requests":[{"user_id":2,"initial_message":"private"}],"detected_feed":{"url":"feed"}}
+        })));
+        for key in [
+            "submitted_by_user_id",
+            "share_and_chat_user_ids",
+            "share_and_chat_requests",
+        ] {
+            assert!(!metadata.contains_key(key));
+        }
+        assert_eq!(metadata["detected_feed"]["url"], "feed");
+    }
+
     fn news_item() -> NewsItemProjection {
         let ingested_at = Utc
             .with_ymd_and_hms(2026, 8, 31, 12, 0, 0)
@@ -1448,6 +1414,7 @@ mod tests {
             "https://example.com/context"
         );
         assert!(detail.metadata.get("full_text").is_none());
+        assert!(detail.metadata.get("cluster").is_none());
     }
 
     #[test]

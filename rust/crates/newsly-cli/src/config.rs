@@ -7,38 +7,26 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const ENV_CONFIG_PATH: &str = "NEWSBUDDY_CONFIG";
-pub const ENV_CONFIG_PATH_ALIAS: &str = "NEWSBUDDY_CONFIG_PATH";
-pub const LEGACY_ENV_CONFIG_PATH: &str = "NEWSLY_AGENT_CONFIG";
-pub const LEGACY_ENV_CONFIG_PATH_ALT: &str = "NEWSLY_AGENT_CONFIG_PATH";
-pub const ENV_SERVER_URL: &str = "NEWSBUDDY_SERVER";
-pub const LEGACY_ENV_SERVER_URL: &str = "NEWSLY_AGENT_SERVER";
-pub const ENV_API_KEY: &str = "NEWSBUDDY_API_KEY";
-pub const LEGACY_ENV_API_KEY: &str = "NEWSLY_AGENT_API_KEY";
-
-const CONFIG_PATH_ENV_NAMES: [&str; 4] = [
-    ENV_CONFIG_PATH,
-    ENV_CONFIG_PATH_ALIAS,
-    LEGACY_ENV_CONFIG_PATH,
-    LEGACY_ENV_CONFIG_PATH_ALT,
-];
+pub(crate) const ENV_CONFIG_PATH: &str = "NEWSBUDDY_CONFIG";
+pub(crate) const ENV_SERVER_URL: &str = "NEWSBUDDY_SERVER";
+pub(crate) const ENV_API_KEY: &str = "NEWSBUDDY_API_KEY";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileConfig {
+pub(crate) struct FileConfig {
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub server_url: String,
+    pub(crate) server_url: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub api_key: String,
+    pub(crate) api_key: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub library_root: String,
+    pub(crate) library_root: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeConfig {
-    pub path: PathBuf,
-    pub server_url: String,
-    pub api_key: String,
-    pub library_root: PathBuf,
+pub(crate) struct RuntimeConfig {
+    pub(crate) path: PathBuf,
+    pub(crate) server_url: String,
+    pub(crate) api_key: String,
+    pub(crate) library_root: PathBuf,
 }
 
 impl RuntimeConfig {
@@ -47,7 +35,7 @@ impl RuntimeConfig {
     /// # Errors
     ///
     /// Returns [`ConfigError::MissingServerUrl`] when no server URL is configured.
-    pub fn validate_server_only(&self) -> Result<(), ConfigError> {
+    pub(crate) fn validate_server_only(&self) -> Result<(), ConfigError> {
         if self.server_url.trim().is_empty() {
             return Err(ConfigError::MissingServerUrl);
         }
@@ -59,7 +47,7 @@ impl RuntimeConfig {
     /// # Errors
     ///
     /// Returns the applicable missing-server or missing-API-key error.
-    pub fn validate_remote(&self) -> Result<(), ConfigError> {
+    pub(crate) fn validate_remote(&self) -> Result<(), ConfigError> {
         self.validate_server_only()?;
         if self.api_key.trim().is_empty() {
             return Err(ConfigError::MissingApiKey);
@@ -69,7 +57,7 @@ impl RuntimeConfig {
 }
 
 #[derive(Debug, Error)]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     #[error("missing server_url; run `newsbuddy config set server ...` first")]
     MissingServerUrl,
     #[error("missing api_key; run `newsbuddy config set api-key ...` first")]
@@ -80,18 +68,8 @@ pub enum ConfigError {
     Json(#[from] serde_json::Error),
 }
 
-/// Return the canonical default configuration path.
-pub fn default_path() -> PathBuf {
-    default_path_with_home(home_directory().as_deref())
-}
-
-/// Return the canonical default Markdown library root.
-pub fn default_library_root() -> PathBuf {
-    default_library_root_with_home(home_directory().as_deref())
-}
-
-/// Resolve a config path using explicit, canonical, then legacy overrides.
-pub fn resolve_path(explicit: &str) -> PathBuf {
+/// Resolve a config path using an explicit or canonical environment override.
+pub(crate) fn resolve_path(explicit: &str) -> PathBuf {
     resolve_path_with(
         explicit,
         &environment_value,
@@ -105,7 +83,7 @@ pub fn resolve_path(explicit: &str) -> PathBuf {
 /// # Errors
 ///
 /// Returns an error when the file cannot be read or contains invalid JSON.
-pub fn load(path: impl AsRef<Path>) -> Result<FileConfig, ConfigError> {
+pub(crate) fn load(path: impl AsRef<Path>) -> Result<FileConfig, ConfigError> {
     let path = path.as_ref();
     let payload = match fs::read_to_string(path) {
         Ok(payload) => payload,
@@ -128,7 +106,7 @@ pub fn load(path: impl AsRef<Path>) -> Result<FileConfig, ConfigError> {
 /// # Errors
 ///
 /// Returns an error when the config cannot be encoded or written.
-pub fn save(path: impl AsRef<Path>, config: &FileConfig) -> Result<(), ConfigError> {
+pub(crate) fn save(path: impl AsRef<Path>, config: &FileConfig) -> Result<(), ConfigError> {
     let path = path.as_ref();
     if let Some(parent) = path
         .parent()
@@ -148,7 +126,7 @@ pub fn save(path: impl AsRef<Path>, config: &FileConfig) -> Result<(), ConfigErr
 /// # Errors
 ///
 /// Returns an error when the existing config cannot be loaded or the update cannot be saved.
-pub fn update(
+pub(crate) fn update(
     path: impl AsRef<Path>,
     update: impl FnOnce(FileConfig) -> FileConfig,
 ) -> Result<FileConfig, ConfigError> {
@@ -166,7 +144,7 @@ pub fn update(
 /// # Errors
 ///
 /// Returns an error when the selected config file cannot be loaded.
-pub fn resolve_runtime(
+pub(crate) fn resolve_runtime(
     path_override: &str,
     server_override: &str,
     api_key_override: &str,
@@ -182,7 +160,7 @@ pub fn resolve_runtime(
 }
 
 /// Mask a configured API key while retaining enough context to identify it.
-pub fn masked_api_key(raw: &str) -> String {
+pub(crate) fn masked_api_key(raw: &str) -> String {
     let raw = raw.trim();
     if raw.is_empty() {
         return String::new();
@@ -201,7 +179,7 @@ pub fn masked_api_key(raw: &str) -> String {
 }
 
 /// Expand a leading `~/` and make a path absolute without requiring it to exist.
-pub fn clean_path(path: &str) -> PathBuf {
+pub(crate) fn clean_path(path: &str) -> PathBuf {
     clean_path_with(path, home_directory().as_deref(), &current_directory())
 }
 
@@ -226,9 +204,11 @@ fn resolve_runtime_with(
 ) -> Result<RuntimeConfig, ConfigError> {
     let path = resolve_path_with(path_override, env_value, home, current_dir);
     let file_config = load(&path)?;
-    let server_url = first_env_value(&env_value, &[ENV_SERVER_URL, LEGACY_ENV_SERVER_URL])
+    let server_url = env_value(ENV_SERVER_URL)
+        .and_then(|value| nonempty_trimmed(&value))
         .unwrap_or(file_config.server_url);
-    let api_key = first_env_value(&env_value, &[ENV_API_KEY, LEGACY_ENV_API_KEY])
+    let api_key = env_value(ENV_API_KEY)
+        .and_then(|value| nonempty_trimmed(&value))
         .unwrap_or(file_config.api_key);
 
     let server_url = nonempty_trimmed(server_override).unwrap_or(server_url);
@@ -256,16 +236,11 @@ fn resolve_path_with(
     if let Some(explicit) = nonempty_trimmed(explicit) {
         return clean_path_with(&explicit, home, current_dir);
     }
-    if let Some(config_path) = first_env_value(&env_value, &CONFIG_PATH_ENV_NAMES) {
+    if let Some(config_path) = env_value(ENV_CONFIG_PATH).and_then(|value| nonempty_trimmed(&value))
+    {
         return clean_path_with(&config_path, home, current_dir);
     }
     default_path_with_home(home)
-}
-
-fn first_env_value(env_value: &impl Fn(&str) -> Option<String>, names: &[&str]) -> Option<String> {
-    names
-        .iter()
-        .find_map(|name| env_value(name).and_then(|value| nonempty_trimmed(&value)))
 }
 
 fn nonempty_trimmed(value: &str) -> Option<String> {
@@ -418,18 +393,16 @@ mod tests {
     }
 
     #[test]
-    fn path_resolution_supports_canonical_and_legacy_aliases() {
+    fn path_resolution_supports_the_canonical_environment_name() {
         let directory = tempdir().expect("temporary directory");
-        for env_name in CONFIG_PATH_ENV_NAMES {
-            let target = directory.path().join(format!("{env_name}.json"));
-            let target_text = target.to_string_lossy().into_owned();
-            let bindings = [(env_name, target_text.as_str())];
-            let env = env_from(&bindings);
-            assert_eq!(
-                resolve_path_with("", &env, Some(directory.path()), directory.path()),
-                target
-            );
-        }
+        let target = directory.path().join("config.json");
+        let target_text = target.to_string_lossy().into_owned();
+        let bindings = [(ENV_CONFIG_PATH, target_text.as_str())];
+        let env = env_from(&bindings);
+        assert_eq!(
+            resolve_path_with("", &env, Some(directory.path()), directory.path()),
+            target
+        );
     }
 
     #[test]
@@ -443,28 +416,6 @@ mod tests {
             Path::new("/work"),
         );
         assert_eq!(resolved, directory.path().join("preferred/config.json"));
-    }
-
-    #[test]
-    fn legacy_runtime_environment_is_supported() {
-        let directory = tempdir().expect("temporary directory");
-        let path = directory.path().join("config.json");
-        let path_text = path.to_string_lossy().into_owned();
-        let env = env_from(&[
-            (LEGACY_ENV_SERVER_URL, "https://legacy.example.com"),
-            (LEGACY_ENV_API_KEY, "legacy-key"),
-        ]);
-        let runtime = resolve_runtime_with(
-            &path_text,
-            "",
-            "",
-            &env,
-            Some(directory.path()),
-            directory.path(),
-        )
-        .expect("resolve runtime");
-        assert_eq!(runtime.server_url, "https://legacy.example.com");
-        assert_eq!(runtime.api_key, "legacy-key");
     }
 
     #[test]

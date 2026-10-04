@@ -61,25 +61,10 @@ pub(super) fn summary_matches(metadata: &Value, fingerprint: &str) -> bool {
 }
 
 pub(super) fn runtime_metadata_view(metadata: &Value) -> Map<String, Value> {
-    let Some(root) = metadata.as_object() else {
-        return Map::new();
-    };
-    let mut domain = root
-        .get("domain")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    for (key, value) in root {
-        if !matches!(key.as_str(), "domain" | "processing") {
-            domain.entry(key.clone()).or_insert_with(|| value.clone());
-        }
-    }
-    if let Some(processing) = root.get("processing").and_then(Value::as_object) {
-        for (key, value) in processing {
-            domain.insert(key.clone(), value.clone());
-        }
-    }
-    domain
+    metadata
+        .as_object()
+        .map(newsly_db::content_metadata::runtime_metadata)
+        .unwrap_or_default()
 }
 
 fn first_text(source_text: Option<&str>, maps: [&Map<String, Value>; 2], keys: &[&str]) -> String {

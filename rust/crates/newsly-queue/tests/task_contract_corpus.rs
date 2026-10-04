@@ -22,7 +22,6 @@ struct TaskCatalog {
 struct CatalogTask {
     task_type: TaskType,
     queue: TaskQueue,
-    handler: String,
     payload_schema: String,
     payload_schema_sha256: String,
     dedupe_by_content: bool,
@@ -42,7 +41,6 @@ struct PolicyTask {
     task_type: TaskType,
     queue: TaskQueue,
     payload_schema: String,
-    handler: String,
     current_owner: String,
     database_writer: String,
     e2b_namespace: String,
@@ -111,10 +109,6 @@ fn task_contract_corpus_is_complete_and_rust_owned() {
             "queue mismatch for {task_type}"
         );
         assert_eq!(
-            catalog_task.handler, spec.handler,
-            "handler mismatch for {task_type}"
-        );
-        assert_eq!(
             catalog_task.dedupe_by_content, spec.dedupe_by_content,
             "dedupe mismatch for {task_type}"
         );
@@ -142,10 +136,6 @@ fn task_contract_corpus_is_complete_and_rust_owned() {
         assert_eq!(
             policy_task.queue, spec.queue,
             "policy queue mismatch for {task_type}"
-        );
-        assert_eq!(
-            policy_task.handler, spec.handler,
-            "policy handler mismatch for {task_type}"
         );
         assert_eq!(policy_task.payload_schema, catalog_task.payload_schema);
         assert_eq!(policy_task.current_owner, "rust");

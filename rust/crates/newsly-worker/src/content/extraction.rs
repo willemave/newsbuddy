@@ -160,7 +160,6 @@ impl ContentExtractionRuntime {
                     fallback,
                     ExtractIntent::ResolvePubmed,
                     original_url,
-                    content_type,
                     request_id_base,
                     deadline,
                     Vec::new(),
@@ -192,16 +191,8 @@ impl ContentExtractionRuntime {
             }
             ExtractResult::Failure(failure) => typed_failure(failure, usage),
             ExtractResult::FallbackRequired(fallback) => {
-                self.firecrawl_fallback(
-                    fallback,
-                    intent,
-                    original_url,
-                    content_type,
-                    request_id,
-                    deadline,
-                    usage,
-                )
-                .await
+                self.firecrawl_fallback(fallback, intent, original_url, request_id, deadline, usage)
+                    .await
             }
             ExtractResult::Delegation(delegation) => {
                 if let Some(write) =
@@ -225,7 +216,6 @@ impl ContentExtractionRuntime {
         fallback: ExtractionFallbackRequired,
         intent: ExtractIntent,
         original_url: &str,
-        _content_type: &str,
         request_id_base: &str,
         deadline: DateTime<Utc>,
         mut usage: Vec<UsageWrite>,
@@ -450,20 +440,10 @@ fn feed_candidate(url: &PublicUrl, content_type: &str, page_title: &str) -> Feed
         "atom"
     };
     FeedCandidate {
-        url: canonicalize_url(url.as_url()),
+        url: newsly_db::canonicalize_feed_url(url.as_url().as_str()),
         feed_type: feed_type.to_owned(),
         title: (!page_title.trim().is_empty()).then(|| page_title.trim().to_owned()),
     }
-}
-
-fn canonicalize_url(url: &url::Url) -> String {
-    let mut canonical = url.clone();
-    canonical.set_fragment(None);
-    if canonical.path() != "/" {
-        let path = canonical.path().trim_end_matches('/').to_owned();
-        canonical.set_path(&path);
-    }
-    canonical.to_string()
 }
 
 fn extraction_method(method: ExtractionMethod) -> &'static str {

@@ -61,19 +61,7 @@ pub async fn load_snapshot(
             .ingested_at
             .max(news.processed_at.unwrap_or(news.ingested_at))
             .and_utc();
-        let source = sources::source_from_news(
-            news.id,
-            news.summary_text.as_deref(),
-            &news.summary_key_points,
-            &news.raw_metadata,
-            news.article_url.as_deref(),
-            news.canonical_story_url.as_deref(),
-            news.canonical_item_url.as_deref(),
-            news.published_at,
-            news.processed_at,
-            news.ingested_at,
-            news.created_at,
-        );
+        let source = sources::source_from_news(&news);
         if input_hash(&source.embedding_text()) != row.input_hash {
             continue;
         }
@@ -134,7 +122,7 @@ pub async fn load_snapshot(
     }))
 }
 
-pub async fn lock_snapshot_inputs(
+pub(super) async fn lock_snapshot_inputs(
     tx: &mut Transaction<'_, Postgres>,
     snapshot: &NewsCategorySnapshot,
 ) -> Result<(), sqlx::Error> {

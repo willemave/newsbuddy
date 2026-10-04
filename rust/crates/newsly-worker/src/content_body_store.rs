@@ -1,14 +1,9 @@
-use std::env;
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectPath;
-use object_store::{ClientOptions, Error as ObjectStoreError, ObjectStore, ObjectStoreExt};
-use secrecy::{ExposeSecret, SecretString};
+use object_store::{Error as ObjectStoreError, ObjectStore, ObjectStoreExt};
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
 
 const MAX_CHAT_CONTEXT_BYTES: usize = 2_000_000;
 
@@ -56,63 +51,13 @@ impl std::fmt::Debug for ContentBodyBackend {
 
 impl ContentBodyStore {
     pub(crate) fn from_env() -> Result<Self, ContentBodyStoreError> {
-        let provider = env::var("CONTENT_BODY_STORAGE_PROVIDER")
-            .unwrap_or_else(|_| "local".to_owned())
-            .trim()
-            .to_owned();
-        let backend = match provider.as_str() {
-            "local" => {
-                let configured = env::var_os("CONTENT_BODY_LOCAL_ROOT")
-                    .map_or_else(|| PathBuf::from("data/content_bodies"), PathBuf::from);
-                let root = if configured.is_absolute() {
-                    configured
-                } else {
-                    env::current_dir()?.join(configured)
-                };
-                validate_root(&root)?;
+        let backend = match newsly_providers::ObjectStorageBackend::from_environment()? {
+            newsly_providers::ObjectStorageBackend::Local { root } => {
                 ContentBodyBackend::Local { root }
             }
-            "s3_compatible" => {
-                let bucket = required("CONTENT_BODY_STORAGE_BUCKET")?;
-                let endpoint = optional("CONTENT_BODY_STORAGE_ENDPOINT");
-                let region = optional("CONTENT_BODY_STORAGE_REGION");
-                let access_key =
-                    optional("CONTENT_BODY_STORAGE_ACCESS_KEY").map(SecretString::from);
-                let secret_key =
-                    optional("CONTENT_BODY_STORAGE_SECRET_KEY").map(SecretString::from);
-                if access_key.is_some() != secret_key.is_some() {
-                    return Err(ContentBodyStoreError::IncompleteCredentials);
-                }
-                let timeout = bounded_u64("CONTENT_BODY_STORAGE_TIMEOUT_SECONDS", 30, 1, 300)?;
-                let mut builder = AmazonS3Builder::from_env()
-                    .with_bucket_name(bucket)
-                    .with_disable_bulk_delete(true)
-                    .with_client_options(
-                        ClientOptions::new().with_timeout(Duration::from_secs(timeout)),
-                    );
-                if let Some(endpoint) = endpoint {
-                    let url = reqwest::Url::parse(&endpoint)
-                        .map_err(|_| ContentBodyStoreError::InvalidEndpoint)?;
-                    builder = builder
-                        .with_allow_http(url.scheme() == "http")
-                        .with_endpoint(url.to_string());
-                }
-                if let Some(region) = region {
-                    builder = builder.with_region(region);
-                }
-                if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
-                    builder = builder
-                        .with_access_key_id(access_key.expose_secret())
-                        .with_secret_access_key(secret_key.expose_secret());
-                }
-                let store = builder
-                    .build()
-                    .map_err(|error| ContentBodyStoreError::ObjectStore(error.to_string()))?;
-                ContentBodyBackend::S3 {
-                    store: Arc::new(store),
-                }
+            newsly_providers::ObjectStorageBackend::S3 { store } => {
+                ContentBodyBackend::S3 { store }
             }
-            _ => return Err(ContentBodyStoreError::UnsupportedProvider(provider)),
         };
         Ok(Self { backend })
     }
@@ -157,21 +102,22 @@ impl ContentBodyStore {
         }
         match &self.backend {
             ContentBodyBackend::Local { root } => {
-                let path = safe_local_path(root, storage_key)?;
-                let file = match tokio::fs::File::open(path).await {
-                    Ok(file) => file,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                    Err(error) => return Err(ContentBodyStoreError::Io(error)),
-                };
-                let length = usize::try_from(file.metadata().await?.len()).unwrap_or(usize::MAX);
-                let mut bytes = Vec::with_capacity(length.min(maximum));
-                file.take(u64::try_from(maximum).unwrap_or(u64::MAX))
-                    .read_to_end(&mut bytes)
-                    .await?;
-                Ok(Some(ContentBodySlice {
-                    bytes,
-                    truncated: length > maximum,
-                }))
+                newsly_providers::read_local_object(root, storage_key, maximum)
+                    .await
+                    .map(|slice| {
+                        slice.map(|slice| ContentBodySlice {
+                            bytes: slice.bytes,
+                            truncated: slice.truncated,
+                        })
+                    })
+                    .map_err(|error| match error {
+                        newsly_providers::LocalStorageError::UnsafePath(_) => {
+                            ContentBodyStoreError::UnsafeKey(storage_key.to_owned())
+                        }
+                        newsly_providers::LocalStorageError::File { source, .. } => {
+                            ContentBodyStoreError::Io(source)
+                        }
+                    })
             }
             ContentBodyBackend::S3 { store } => {
                 let path = ObjectPath::parse(storage_key)
@@ -203,45 +149,24 @@ impl ContentBodyStore {
     }
 }
 
-fn safe_local_path(root: &Path, key: &str) -> Result<PathBuf, ContentBodyStoreError> {
-    let relative = Path::new(key);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(ContentBodyStoreError::UnsafeKey(key.to_owned()));
-    }
-    Ok(root.join(relative))
-}
-
 fn validate_key(key: &str) -> Result<(), ContentBodyStoreError> {
-    if key.trim().is_empty() || key.len() > 1_024 || key.contains('\0') {
+    if !newsly_providers::is_safe_object_key(key) {
         return Err(ContentBodyStoreError::UnsafeKey(key.to_owned()));
-    }
-    let _ = safe_local_path(Path::new("/body-root"), key)?;
-    Ok(())
-}
-
-fn validate_root(root: &Path) -> Result<(), ContentBodyStoreError> {
-    if !root.is_absolute() || root == Path::new("/") {
-        return Err(ContentBodyStoreError::UnsafeRoot);
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
 
-    use super::{ContentBodyBackend, ContentBodyStore, safe_local_path, validate_key};
+    use super::{ContentBodyBackend, ContentBodyStore, validate_key};
 
     #[test]
     fn canonical_body_keys_cannot_escape_storage() {
         assert!(validate_key("content/42/source.txt").is_ok());
         assert!(validate_key("../secret").is_err());
         assert!(validate_key("/absolute").is_err());
-        assert!(safe_local_path(Path::new("/body-root"), "a/../b").is_err());
+        assert!(validate_key("a/../b").is_err());
     }
 
     #[tokio::test]
@@ -274,48 +199,27 @@ mod tests {
                 .is_none()
         );
     }
-}
-
-fn required(name: &'static str) -> Result<String, ContentBodyStoreError> {
-    optional(name).ok_or(ContentBodyStoreError::Missing(name))
-}
-
-fn optional(name: &'static str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn bounded_u64(
-    name: &'static str,
-    default: u64,
-    minimum: u64,
-    maximum: u64,
-) -> Result<u64, ContentBodyStoreError> {
-    let value = optional(name)
-        .map_or(Ok(default), |value| value.parse::<u64>())
-        .map_err(|_| ContentBodyStoreError::Invalid(name))?;
-    if !(minimum..=maximum).contains(&value) {
-        return Err(ContentBodyStoreError::Invalid(name));
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_reads_reject_symlink_escape_and_non_files() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("body-root");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let outside = temporary.path().join("secret.txt");
+        tokio::fs::write(&outside, b"secret").await.unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape.txt")).unwrap();
+        let store = ContentBodyStore {
+            backend: ContentBodyBackend::Local { root },
+        };
+        assert!(store.get_bytes("escape.txt").await.is_err());
+        assert!(store.get_bytes(".").await.is_err());
     }
-    Ok(value)
 }
 
 #[derive(Debug, Error)]
 pub enum ContentBodyStoreError {
-    #[error("unsupported chat body storage provider {0}")]
-    UnsupportedProvider(String),
-    #[error("chat body storage configuration {0} is required")]
-    Missing(&'static str),
-    #[error("chat body storage configuration {0} is invalid")]
-    Invalid(&'static str),
-    #[error("chat body storage credentials are incomplete")]
-    IncompleteCredentials,
-    #[error("chat body storage endpoint is invalid")]
-    InvalidEndpoint,
-    #[error("chat body storage root must be an absolute non-root path")]
-    UnsafeRoot,
+    #[error("invalid content-body storage configuration")]
+    Configuration(#[from] newsly_providers::ObjectStorageConfigError),
     #[error("chat body storage key is unsafe: {0}")]
     UnsafeKey(String),
     #[error("chat body contains {0} bytes, exceeding the worker limit")]

@@ -6,7 +6,7 @@ use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::PgPool;
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
 use super::finalizer::SummarizationFinalizer;
@@ -193,7 +193,7 @@ async fn execute_summarization(
         .and_then(Value::as_i64)
         .filter(|value| *value > 0)
         .or(plan.owner_user_id);
-    let usage_sink = Arc::new(AgentUsageSink::new(
+    let usage_sink = Arc::new(AgentUsageRecorder::new(
         services.pool.clone(),
         AgentUsageAttribution {
             operation: "summarization.llm_summarization".to_owned(),

@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection};
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use newsly_contracts::{DownloadMoreRequest, DownloadMoreResponse};
 use newsly_db::{
@@ -13,16 +13,10 @@ use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
-use super::{
-    not_found_message, positive_path_id, queue_error, validation_error, verify_operation_now,
-};
-
-const DOWNLOAD_MORE_OPERATION_ID: &str = "downloadContentMoreFromSeries";
+use super::{not_found_message, positive_path_id, queue_error, validation_error};
 
 #[utoipa::path(
     post,
@@ -53,11 +47,10 @@ pub(crate) async fn download_more_from_series(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<DownloadMoreRequest>, JsonRejection>,
 ) -> Result<Json<DownloadMoreResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DOWNLOAD_MORE_OPERATION_ID, &request_id)?;
     let content_id = positive_path_id(path, "content_id", &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if !(1..=50).contains(&payload.count) {
@@ -66,7 +59,6 @@ pub(crate) async fn download_more_from_series(
             &request_id,
         ));
     }
-    verify_operation_now(&state, &stamp, &request_id).await?;
     let plan = match prepare_feed_backfill(
         state.database.pool(),
         current_user.id,
@@ -156,13 +148,8 @@ pub(crate) async fn download_more_from_series(
             ScrapedItem::News(_) => None,
         })
         .collect::<Vec<_>>();
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let persisted = persist_feed_backfill(
         &mut transaction,
         current_user.id,
@@ -186,10 +173,7 @@ pub(crate) async fn download_more_from_series(
             .await
             .map_err(|error| queue_error(error, &request_id))?;
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(DownloadMoreResponse {
         status: "completed".to_owned(),
         requested_count: payload.count,

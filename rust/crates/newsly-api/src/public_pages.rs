@@ -26,7 +26,6 @@ pub(super) fn router() -> Router<AppState> {
         .route("/terms", get(terms))
         .route("/robots.txt", get(robots))
         .route("/static/images/{*asset_path}", get(serve_image))
-        .route("/admin/static/{*asset_path}", get(serve_admin_asset))
 }
 
 async fn home() -> Response {
@@ -65,12 +64,6 @@ async fn serve_image(headers: HeaderMap, Path(asset_path): Path<String>) -> Resp
         request_id_from_headers(&headers),
     )
     .await
-}
-
-async fn serve_admin_asset(headers: HeaderMap, Path(asset_path): Path<String>) -> Response {
-    let root = env::var_os("ADMIN_STATIC_DIR")
-        .map_or_else(|| PathBuf::from("rust/assets/admin-static"), PathBuf::from);
-    serve_bounded_file(root, &asset_path, false, request_id_from_headers(&headers)).await
 }
 
 async fn serve_bounded_file(

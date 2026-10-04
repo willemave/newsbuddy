@@ -7,14 +7,14 @@ use std::time::Duration;
 
 use base64::Engine;
 use futures_util::StreamExt;
-use newsly_extraction::PublicUrl;
-use reqwest::header::LOCATION;
 use reqwest::{Response, StatusCode, Url};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::public_http::{PublicHttpError, send_public};
 
 const DEFAULT_RUNWARE_API_URL: &str = "https://api.runware.ai/v1";
 const DEFAULT_GOOGLE_API_URL: &str = "https://generativelanguage.googleapis.com";
@@ -80,7 +80,7 @@ impl Debug for GoogleImageAuth {
 }
 
 #[derive(Clone)]
-pub struct ImageGenerationGatewayConfig {
+struct ImageGenerationGatewayConfig {
     pub infographic_provider: InfographicProvider,
     pub runware_api_url: Url,
     pub runware_api_key: Option<SecretString>,
@@ -119,7 +119,7 @@ impl ImageGenerationGatewayConfig {
     ///
     /// Returns an error when a URL, provider, model list, credential combination, timeout, or
     /// response-size bound is invalid.
-    pub fn from_env() -> Result<Self, ImageGenerationError> {
+    fn from_env() -> Result<Self, ImageGenerationError> {
         let infographic_provider = InfographicProvider::parse(
             &env::var("INFOGRAPHIC_GENERATION_PROVIDER").unwrap_or_else(|_| "runware".to_owned()),
         )?;
@@ -229,16 +229,7 @@ impl ImageGenerationGateway {
     ///
     /// Returns an error when the image-provider configuration or HTTP client is invalid.
     pub fn from_env() -> Result<Self, ImageGenerationError> {
-        Self::new(ImageGenerationGatewayConfig::from_env()?)
-    }
-
-    /// Builds a provider gateway from an explicit, validated configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the configuration or HTTP client is invalid.
-    pub fn new(config: ImageGenerationGatewayConfig) -> Result<Self, ImageGenerationError> {
-        config.validate()?;
+        let config = ImageGenerationGatewayConfig::from_env()?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(config.request_timeout)
@@ -326,8 +317,6 @@ impl ImageGenerationGateway {
                     .runware_attempt(
                         api_key,
                         &request,
-                        content_id,
-                        task_id,
                         inline_attempt,
                         Arc::clone(&usage_observer),
                     )
@@ -362,8 +351,6 @@ impl ImageGenerationGateway {
         &self,
         api_key: &SecretString,
         request: &RunwareRequest<'_>,
-        _content_id: i64,
-        _task_id: i64,
         inline_attempt: usize,
         usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
@@ -442,40 +429,23 @@ impl ImageGenerationGateway {
     }
 
     async fn download_runware_image(&self, raw_url: &str) -> Result<Vec<u8>, ImageGenerationError> {
-        let mut current = public_https_url(raw_url)?;
-        for redirect_count in 0..=RUNWARE_IMAGE_MAX_REDIRECTS {
-            current
-                .validate_dns()
-                .await
-                .map_err(|_| ImageGenerationError::UnsafeProviderImageUrl)?;
-            let response = self
-                .client
-                .get(current.as_url().clone())
-                .send()
-                .await
-                .map_err(ImageGenerationError::RunwareDownload)?;
-            let status = response.status();
-            if !status.is_redirection() {
-                if !status.is_success() {
-                    return Err(ImageGenerationError::RunwareImageStatus(status));
-                }
-                return read_bounded(response, self.config.max_image_bytes).await;
-            }
-            if redirect_count == RUNWARE_IMAGE_MAX_REDIRECTS {
-                return Err(ImageGenerationError::RunwareImageStatus(status));
-            }
-            let location = response
-                .headers()
-                .get(LOCATION)
-                .and_then(|value| value.to_str().ok())
-                .ok_or(ImageGenerationError::UnsafeProviderImageUrl)?;
-            let next = current
-                .as_url()
-                .join(location)
-                .map_err(|_| ImageGenerationError::UnsafeProviderImageUrl)?;
-            current = public_https_url(next.as_str())?;
+        let response = send_public(
+            raw_url,
+            self.config.request_timeout,
+            Duration::from_secs(15),
+            "Newsly/1.0 Image Generation",
+            Some("image/*,application/octet-stream"),
+            RUNWARE_IMAGE_MAX_REDIRECTS,
+            true,
+        )
+        .await
+        .map_err(map_runware_public_http_error)?
+        .response;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ImageGenerationError::RunwareImageStatus(status));
         }
-        Err(ImageGenerationError::UnsafeProviderImageUrl)
+        read_bounded(response, self.config.max_image_bytes).await
     }
 
     async fn generate_google(
@@ -497,7 +467,6 @@ impl ImageGenerationGateway {
                     auth,
                     model,
                     prompt,
-                    content_id,
                     fallback_from_runware,
                     Arc::clone(&usage_observer),
                 )
@@ -527,7 +496,6 @@ impl ImageGenerationGateway {
         auth: &GoogleImageAuth,
         model: &str,
         prompt: &str,
-        _content_id: i64,
         fallback_from_runware: bool,
         usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
@@ -832,13 +800,16 @@ fn google_endpoint(
     Ok(endpoint)
 }
 
-fn public_https_url(raw_url: &str) -> Result<PublicUrl, ImageGenerationError> {
-    let url =
-        PublicUrl::parse(raw_url).map_err(|_| ImageGenerationError::UnsafeProviderImageUrl)?;
-    if url.as_url().scheme() != "https" {
-        return Err(ImageGenerationError::UnsafeProviderImageUrl);
+fn map_runware_public_http_error(error: PublicHttpError) -> ImageGenerationError {
+    match error {
+        PublicHttpError::Http(error) => ImageGenerationError::RunwareDownload(error),
+        PublicHttpError::Status { status, .. } => ImageGenerationError::RunwareImageStatus(status),
+        PublicHttpError::Deadline => ImageGenerationError::RunwareDownloadTimeout,
+        PublicHttpError::TooLarge => ImageGenerationError::ResponseTooLarge { limit: 0 },
+        PublicHttpError::Url(_) | PublicHttpError::Redirect => {
+            ImageGenerationError::UnsafeProviderImageUrl
+        }
     }
-    Ok(url)
 }
 
 async fn read_bounded(response: Response, limit: usize) -> Result<Vec<u8>, ImageGenerationError> {
@@ -965,6 +936,8 @@ pub enum ImageGenerationError {
     RunwareRequest(#[source] reqwest::Error),
     #[error("Runware image download failed")]
     RunwareDownload(#[source] reqwest::Error),
+    #[error("Runware image download exceeded its deadline")]
+    RunwareDownloadTimeout,
     #[error("Runware returned HTTP {status}: {message}")]
     RunwareStatus {
         status: StatusCode,
@@ -1019,6 +992,7 @@ impl ImageGenerationError {
             Self::RunwareImageStatus(status) | Self::GoogleStatus { status, .. } => {
                 status.is_server_error() || *status == StatusCode::TOO_MANY_REQUESTS
             }
+            Self::RunwareDownloadTimeout | Self::UsageObservation(_) => true,
             Self::ResponseTooLarge { .. }
             | Self::InvalidConfiguration(_)
             | Self::InvalidPrompt
@@ -1029,7 +1003,6 @@ impl ImageGenerationError {
             | Self::Json(_)
             | Self::Base64(_)
             | Self::RunwarePayload(_) => false,
-            Self::UsageObservation(_) => true,
         }
     }
 
@@ -1037,6 +1010,7 @@ impl ImageGenerationError {
         match self {
             Self::RunwareRequest(_)
             | Self::RunwareDownload(_)
+            | Self::RunwareDownloadTimeout
             | Self::RunwareImageStatus(_)
             | Self::RunwarePayload(_)
             | Self::Http(_) => true,

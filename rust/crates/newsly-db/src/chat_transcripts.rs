@@ -1,3 +1,4 @@
+use newsly_domain::truncate_chars;
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -8,7 +9,7 @@ use newsly_agent_runtime::{
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-const SEARCH_TOOL_NAMES: [&str; 2] = ["exa_web_search", "search_personal_library"];
+const SEARCH_TOOL_NAMES: [&str; 2] = ["search_web", "exa_web_search"];
 const INTERNAL_PROMPT_SENTINELS: [&str; 4] = [
     "Use the provided session context below",
     "Provided reference context is available below",
@@ -82,21 +83,41 @@ pub(crate) fn processing_transcript(
     }
 }
 
+pub(crate) fn is_legacy_transcript_shape(value: &Value) -> bool {
+    value.is_array()
+        || value
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| {
+                messages.iter().any(|message| {
+                    matches!(
+                        message.get("kind").and_then(Value::as_str),
+                        Some("request" | "response")
+                    )
+                })
+            })
+}
+
 pub(crate) fn decode_transcript(raw: &str) -> Result<NewslyTranscript, ChatTranscriptError> {
     let value: Value = serde_json::from_str(raw)?;
-    if value.is_object()
-        && let Ok(transcript) = serde_json::from_value::<NewslyTranscript>(value.clone())
-    {
-        transcript.validate()?;
-        return Ok(transcript);
-    }
-
-    let legacy = if value.is_array() {
-        serde_json::json!({"version": 1, "messages": value})
-    } else {
-        value
+    let error = match serde_json::from_value::<NewslyTranscript>(value.clone()) {
+        Ok(transcript) => {
+            transcript.validate()?;
+            return Ok(transcript);
+        }
+        Err(error) => error,
     };
-    Ok(NewslyTranscript::from_legacy_pydantic_ai(&legacy)?)
+    if is_legacy_transcript_shape(&value) {
+        let legacy = if value.is_array() {
+            serde_json::json!({"version":1,"messages":value})
+        } else {
+            value
+        };
+        if let Ok(transcript) = NewslyTranscript::from_legacy_pydantic_ai(&legacy) {
+            return Ok(transcript);
+        }
+    }
+    Err(ChatTranscriptError::Json(error))
 }
 
 pub(crate) fn display_messages(
@@ -373,18 +394,12 @@ fn process_summary_detail(
         .then(|| "Prepared intermediate context before writing the final answer.".to_owned())
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
-}
-
 #[derive(Debug, Error)]
 pub enum ChatTranscriptError {
     #[error("chat transcript JSON is invalid")]
     Json(#[from] serde_json::Error),
     #[error("Newsly chat transcript is invalid")]
     Transcript(#[from] newsly_agent_runtime::TranscriptError),
-    #[error("legacy chat transcript is invalid")]
-    Legacy(#[from] newsly_agent_runtime::LegacyHistoryError),
     #[error("completed chat transcript has no assistant text")]
     MissingAssistantText,
 }
@@ -393,7 +408,10 @@ pub enum ChatTranscriptError {
 mod tests {
     use chrono::TimeZone as _;
 
-    use super::{decode_transcript, latest_assistant_text, processing_transcript};
+    use super::{
+        ChatTranscriptError, count_tools, decode_transcript, latest_assistant_text,
+        process_summary_label, processing_transcript,
+    };
 
     #[test]
     fn accepts_newsly_and_legacy_transcripts() {
@@ -416,5 +434,66 @@ mod tests {
             "timestamp": "2026-08-30T12:00:00Z"
         }]);
         assert_eq!(latest_assistant_text(&legacy.to_string()).unwrap(), "World");
+    }
+
+    #[test]
+    fn malformed_canonical_and_legacy_shapes_preserve_the_canonical_decode_error() {
+        let invalid_canonical = serde_json::json!({
+            "version": 1,
+            "stream_generation": 0,
+            "messages": {}
+        });
+        let Err(ChatTranscriptError::Json(error)) =
+            decode_transcript(&invalid_canonical.to_string())
+        else {
+            panic!("malformed canonical transcript should return its serde error");
+        };
+        let expected =
+            serde_json::from_value::<newsly_agent_runtime::NewslyTranscript>(invalid_canonical)
+                .unwrap_err();
+        assert_eq!(error.to_string(), expected.to_string());
+
+        let invalid_legacy = serde_json::json!([{
+            "kind": "response",
+            "parts": "not-an-array",
+            "timestamp": "2026-08-30T12:00:00Z"
+        }]);
+        let Err(ChatTranscriptError::Json(error)) = decode_transcript(&invalid_legacy.to_string())
+        else {
+            panic!("malformed legacy transcript should preserve the canonical serde error");
+        };
+        let expected =
+            serde_json::from_value::<newsly_agent_runtime::NewslyTranscript>(invalid_legacy)
+                .unwrap_err();
+        assert_eq!(error.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn canonical_validation_errors_do_not_enter_the_legacy_fallback() {
+        let now = chrono::Utc.with_ymd_and_hms(2026, 8, 30, 12, 0, 0).unwrap();
+        let mut canonical = serde_json::to_value(processing_transcript("Hello", now)).unwrap();
+        canonical["version"] = serde_json::json!(2);
+        assert!(matches!(
+            decode_transcript(&canonical.to_string()),
+            Err(ChatTranscriptError::Transcript(
+                newsly_agent_runtime::TranscriptError::UnsupportedVersion(2)
+            ))
+        ));
+    }
+
+    #[test]
+    fn current_and_legacy_web_search_tools_report_reviewed_sources() {
+        for tool_name in ["search_web", "exa_web_search"] {
+            let counts = count_tools(&[tool_name.to_owned()]);
+            assert_eq!(
+                process_summary_label(&counts, false).as_deref(),
+                Some("Thinking • Executed 1 tool and reviewed sources")
+            );
+        }
+        let counts = count_tools(&["search_personal_library".to_owned()]);
+        assert_eq!(
+            process_summary_label(&counts, false).as_deref(),
+            Some("Thinking • Executed 1 tool and reviewed results")
+        );
     }
 }

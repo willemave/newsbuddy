@@ -36,6 +36,36 @@ async fn spawn_server(router: Router) -> (String, tokio::task::JoinHandle<()>) {
     (format!("http://{address}"), handle)
 }
 
+#[tokio::test]
+async fn help_exits_successfully_on_stdout() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit = run(["newsbuddy", "--help"], &mut stdout, &mut stderr, "1.2.3").await;
+
+    assert_eq!(exit, 0);
+    assert!(String::from_utf8_lossy(&stdout).contains("Usage:"));
+    assert!(stderr.is_empty());
+}
+
+#[tokio::test]
+async fn invalid_arguments_exit_with_an_error_on_stderr() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit = run(
+        ["newsbuddy", "--not-a-real-option"],
+        &mut stdout,
+        &mut stderr,
+        "1.2.3",
+    )
+    .await;
+
+    assert_ne!(exit, 0);
+    assert!(stdout.is_empty());
+    assert!(String::from_utf8_lossy(&stderr).contains("unexpected argument"));
+}
+
 fn content(id: i64, content_type: &str, title: &str, saved_at: &str) -> Value {
     json!({
         "id": id,
@@ -122,7 +152,7 @@ fn url_validation_matches_the_cli_contract() {
     assert!(parse_http_url("https://example.com/article").is_ok());
     assert!(matches!(
         parse_http_url("ftp://example.com"),
-        Err(CommandError::Local(message)) if message == "url must use http or https"
+        Err(error) if error.message == "url must use http or https"
     ));
     assert!(parse_http_url("not-a-url").is_err());
 }
@@ -131,16 +161,20 @@ fn url_validation_matches_the_cli_contract() {
 fn wait_validation_is_only_applied_when_waiting() {
     let disabled = optional_wait_options(OptionalWaitArgs {
         wait: false,
-        wait_interval: Duration::ZERO,
-        wait_timeout: Duration::ZERO,
+        timing: WaitTimingArgs {
+            wait_interval: Duration::ZERO,
+            wait_timeout: Duration::ZERO,
+        },
     });
     assert!(matches!(disabled, Ok(None)));
     let enabled = optional_wait_options(OptionalWaitArgs {
         wait: true,
-        wait_interval: Duration::ZERO,
-        wait_timeout: Duration::ZERO,
+        timing: WaitTimingArgs {
+            wait_interval: Duration::ZERO,
+            wait_timeout: Duration::ZERO,
+        },
     });
-    assert!(matches!(enabled, Err(CommandError::Local(_))));
+    assert!(enabled.is_err());
 }
 
 #[tokio::test]

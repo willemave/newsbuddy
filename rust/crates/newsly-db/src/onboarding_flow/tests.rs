@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 
 use super::{
-    OnboardingCompletionInput, OnboardingFlowRepositoryError,
+    OnboardingCompletionInput, OnboardingFlowRepositoryError, complete_user_onboarding,
     load_onboarding_completion_suggestions, validate_completion_selection,
 };
 
@@ -81,6 +81,50 @@ async fn insert_suggestion(pool: &PgPool, user_id: i64, run_id: i64) -> i64 {
     .expect("test suggestion should be inserted")
 }
 
+#[sqlx::test(migrations = false)]
+async fn onboarding_completion_distinguishes_omitted_cleared_and_set_twitter_names(pool: PgPool) {
+    sqlx::query(
+        r#"
+        CREATE TABLE users (
+            id bigint PRIMARY KEY,
+            twitter_username text,
+            has_completed_onboarding boolean NOT NULL DEFAULT FALSE,
+            reading_experience text,
+            updated_at timestamp without time zone
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("test users table should be created");
+    sqlx::query("INSERT INTO users (id, twitter_username) VALUES (1, 'existing')")
+        .execute(&pool)
+        .await
+        .expect("test user should be inserted");
+
+    for (patch, expected) in [
+        (None, Some("existing")),
+        (Some(None), None),
+        (Some(Some("updated".to_owned())), Some("updated")),
+    ] {
+        let mut transaction = pool.begin().await.expect("test transaction should start");
+        complete_user_onboarding(&mut transaction, 1, patch.as_ref())
+            .await
+            .expect("onboarding completion should update the user");
+        transaction
+            .commit()
+            .await
+            .expect("test transaction should commit");
+        let actual = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT twitter_username FROM users WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("updated user should be queryable");
+        assert_eq!(actual.as_deref(), expected);
+    }
+}
+
 fn completion_input(
     user_id: i64,
     run_id: i64,
@@ -93,7 +137,6 @@ fn completion_input(
         sources: Vec::new(),
         subreddits: Vec::new(),
         aggregators: Vec::new(),
-        update_twitter_username: false,
         twitter_username: None,
     }
 }

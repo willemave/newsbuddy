@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection};
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use newsly_contracts::{
     LearningDeckCreateRequest, LearningDeckListResponse, LearningDeckResponse,
@@ -21,9 +21,8 @@ use newsly_queue::{QueueKernel, TaskType};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::learning_deck_artifacts::LearningDeckArtifactStore;
 use crate::learning_deck_tokens::{generate_share_nonce, hash_learning_deck_token};
-use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
+use crate::write_support::{decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 use super::presentation::{
@@ -35,17 +34,8 @@ use super::source::{
 };
 use super::support::{
     content_task_request, create_repository_error, deck_error, external_url, queue_error,
-    repository_error, run_llm_task_request, sandbox_root, submission_error, token_signer,
-    valid_deck_id,
+    repository_error, run_llm_task_request, sandbox_root, submission_error, valid_deck_id,
 };
-
-const CREATE_OPERATION_ID: &str = "createLearningDeck";
-const RETRY_OPERATION_ID: &str = "retryLearningDeck";
-const DELETE_OPERATION_ID: &str = "deleteLearningDeck";
-const ENABLE_SHARE_OPERATION_ID: &str = "enableLearningDecksShare";
-const DISABLE_SHARE_OPERATION_ID: &str = "disableLearningDecksShare";
-const VIEWER_URL_OPERATION_ID: &str = "createLearningDecksViewerUrl";
-const SOURCE_NOTES_URL_OPERATION_ID: &str = "createLearningDecksSourceNotesUrl";
 
 #[utoipa::path(
     get,
@@ -66,12 +56,12 @@ pub(crate) async fn list_decks(
     current_user: AuthenticatedUser,
 ) -> Result<Json<LearningDeckListResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    let signer = token_signer(&request_id)?;
+    let signer = state.learning_deck_token_signer.as_ref();
     let decks = load_learning_decks(state.database.pool(), current_user.id)
         .await
         .map_err(|error| repository_error(error, &request_id))?
         .into_iter()
-        .map(|deck| present_deck(deck, &signer, &request_id))
+        .map(|deck| present_deck(deck, signer, &request_id))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(LearningDeckListResponse { decks }))
 }
@@ -102,22 +92,16 @@ pub(crate) async fn create_deck(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<LearningDeckCreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<LearningDeckResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CREATE_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     let request = ValidatedCreateRequest::try_from(payload, &request_id)?;
     let sandbox_root = sandbox_root(&request_id)?;
     let queue = QueueKernel::new(state.database.pool().clone());
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
 
     let (source, mut queue_requests) = match request.source {
         CreateSource::Content(content_id) => {
@@ -264,10 +248,7 @@ pub(crate) async fn create_deck(
             .await
             .map_err(|error| queue_error(error, &request_id))?;
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let response = load_and_present_deck(&state, current_user.id, deck_id, &request_id).await?;
     Ok((StatusCode::ACCEPTED, Json(response)))
 }
@@ -322,20 +303,14 @@ pub(crate) async fn retry_deck(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<(StatusCode, Json<LearningDeckResponse>), ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, RETRY_OPERATION_ID, &request_id)?;
     let deck_id = valid_deck_id(path, &request_id)?;
     let sandbox_root = sandbox_root(&request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = persist_deck_retry(&mut transaction, current_user.id, deck_id, &sandbox_root)
         .await
         .map_err(|error| create_repository_error(error, &request_id))?;
@@ -372,10 +347,7 @@ pub(crate) async fn retry_deck(
             ));
         }
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let response = load_and_present_deck(&state, current_user.id, deck_id, &request_id).await?;
     Ok((StatusCode::ACCEPTED, Json(response)))
 }
@@ -401,19 +373,13 @@ pub(crate) async fn delete_deck(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DELETE_OPERATION_ID, &request_id)?;
     let deck_id = valid_deck_id(path, &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let deletion = persist_deck_deletion(&mut transaction, current_user.id, deck_id)
         .await
         .map_err(|error| repository_error(error, &request_id))?
@@ -424,20 +390,23 @@ pub(crate) async fn delete_deck(
                 &request_id,
             )
         })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
-    // External cleanup deliberately happens after the short finalization transaction. The stable
-    // deck is already private/deleted if object storage is temporarily unavailable, and a retry is
-    // safe because missing immutable objects are treated as success.
-    let artifacts = LearningDeckArtifactStore::from_environment()
-        .map_err(|error| internal_error(error, &request_id))?;
-    artifacts
+    // Deletion is durable. Failed external cleanup is retried by the artifact sweeper;
+    // repeating this HTTP command cannot recover cleanup after the deck is hidden.
+    let cleanup = state
+        .learning_deck_artifact_store
         .delete_many(&deletion.object_keys)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+        .await;
+    if let Err(error) = cleanup {
+        tracing::warn!(
+            %request_id,
+            deck_id,
+            error = %error,
+            error_code = "learning_deck_cleanup_deferred",
+            "Deleted deck artifact cleanup deferred to the sweeper"
+        );
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -462,7 +431,7 @@ pub(crate) async fn create_viewer_url(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<LearningDeckUrlResponse>, ApiError> {
     private_deck_url(
@@ -471,7 +440,6 @@ pub(crate) async fn create_viewer_url(
         current_user.id,
         &stamp,
         path,
-        VIEWER_URL_OPERATION_ID,
         PrivateDeckTarget::Viewer,
     )
     .await
@@ -498,7 +466,7 @@ pub(crate) async fn create_source_notes_url(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<LearningDeckUrlResponse>, ApiError> {
     private_deck_url(
@@ -507,7 +475,6 @@ pub(crate) async fn create_source_notes_url(
         current_user.id,
         &stamp,
         path,
-        SOURCE_NOTES_URL_OPERATION_ID,
         PrivateDeckTarget::SourceNotes,
     )
     .await
@@ -534,22 +501,16 @@ pub(crate) async fn enable_share(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<LearningDeckShareResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, ENABLE_SHARE_OPERATION_ID, &request_id)?;
     let deck_id = valid_deck_id(path, &request_id)?;
     let generated_nonce =
         generate_share_nonce().map_err(|error| internal_error(error, &request_id))?;
-    let signer = token_signer(&request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let signer = state.learning_deck_token_signer.as_ref();
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = prepare_enable_learning_deck_share(
         &mut transaction,
         current_user.id,
@@ -586,10 +547,7 @@ pub(crate) async fn enable_share(
     )
     .await
     .map_err(|error| repository_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(LearningDeckShareResponse {
         share_enabled: true,
         share_url: Some(external_url(
@@ -621,19 +579,13 @@ pub(crate) async fn disable_share(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<LearningDeckShareResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DISABLE_SHARE_OPERATION_ID, &request_id)?;
     let deck_id = valid_deck_id(path, &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     match disable_learning_deck_share(&mut transaction, current_user.id, deck_id)
         .await
         .map_err(|error| repository_error(error, &request_id))?
@@ -647,10 +599,7 @@ pub(crate) async fn disable_share(
             ));
         }
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(LearningDeckShareResponse {
         share_enabled: false,
         share_url: None,

@@ -23,6 +23,4 @@ pub use model::{
 };
 pub use notifications::{QueueNotificationHub, QueueNotificationWaiter, QueueWakeOutcome};
 
-pub use ownership::{
-    ClaimRuntimeScope, ExecutorFenceError, TaskExecutorStamp, verify_executor_fence,
-};
+pub use ownership::{ClaimRuntimeScope, ExecutorFenceError, TaskExecutorStamp};

@@ -1,22 +1,14 @@
-use std::collections::BTreeMap;
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentOutcome, AgentRequest, AgentRuntimeError,
-    NewslyTranscript, ResponseContract, ToolPolicy,
+    AgentEvent, AgentEventSink, AgentOutcome, AgentRequest, AgentRuntimeError, NewslyTranscript,
+    ResponseContract, ToolPolicy,
 };
 use newsly_db::LearningDeckTaskSnapshot;
-use newsly_e2b::{
-    CommandRequest, ControlPlaneConfig, DirectE2bProvider, E2bError, ExecutionTag, FileLimits,
-    NetworkPolicy, OutputLimits, SandboxHandle, SandboxProvider, SandboxUser,
-};
-use newsly_providers::{
-    OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine, RigAgentEngineError,
-};
-use reqwest::Url;
-use secrecy::SecretString;
+use newsly_e2b::{DirectE2bProvider, E2bError, OutputLimits, SandboxHandle};
+use newsly_providers::{ProviderCredentials, RigAgentEngine};
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 use thiserror::Error;
@@ -27,7 +19,9 @@ use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::share_actions::ShareActionAgentConfig;
 use crate::task_sandbox::{
-    AcquiredTaskSandbox, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
+    AcquiredTaskSandbox, SandboxCommand, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
+    agent_network_policy, allowed_tools, direct_provider, exa_endpoint,
+    run_command as run_sandbox_command, secret_env, secret_env_alias,
 };
 use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
 
@@ -40,25 +34,13 @@ use super::browser::{BrowserValidationError, hosted_viewer_html, validate_in_bro
 
 #[path = "agent/policy.rs"]
 mod policy;
-use policy::{allowed_tools, ip_selector, learning_deck_agent_limits, source_provider_parameters};
+use policy::learning_deck_agent_limits;
 
 const DEFAULT_MODEL_SPEC: &str = "openai:gpt-6-luna";
-const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai/search";
 const INPUT_SOURCE_TEXT: &str = "input/source.txt";
 const INPUT_SOURCE_SNAPSHOT: &str = "input/source-snapshot.json";
 const INPUT_INTERESTS: &str = "input/interests.txt";
 const INPUT_DESIGN_BRIEF: &str = "input/deck-design-brief.md";
-const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
-    "10.0.0.0/8",
-    "100.64.0.0/10",
-    "169.254.0.0/16",
-    "172.16.0.0/12",
-    "192.0.0.0/24",
-    "192.168.0.0/16",
-    "198.18.0.0/15",
-    "fc00::/7",
-    "fe80::/10",
-];
 
 const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
 - Commands start in a task-specific directory below /data/workspace. Keep scratch files there.
@@ -132,30 +114,9 @@ impl LearningDeckAgentRuntime {
                 .max(20 * 1024 * 1024),
         )
         .unwrap_or(20 * 1024 * 1024);
-        let provider = Arc::new(DirectE2bProvider::new(
-            ControlPlaneConfig::production(e2b_key)?,
-            FileLimits {
-                upload_bytes: transfer_limit,
-                download_bytes: transfer_limit,
-            },
-        )?);
-        let engine = RigAgentEngine::new(
-            ProviderCredentials {
-                openai: secret_env("OPENAI_API_KEY"),
-                anthropic: secret_env("ANTHROPIC_API_KEY"),
-                google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-                openrouter: secret_env("OPENROUTER_API_KEY"),
-            },
-            OpenRouterPrivacyPolicy::default(),
-        )?;
-        let endpoint = env::var("EXA_API_BASE_URL")
-            .ok()
-            .map(|value| value.trim_end_matches('/').to_owned())
-            .map_or_else(
-                || Url::parse(DEFAULT_EXA_API_BASE),
-                |value| Url::parse(&format!("{value}/search")),
-            )
-            .map_err(|_| LearningDeckAgentBuildError::InvalidExaUrl)?;
+        let provider = direct_provider(e2b_key, transfer_limit)?;
+        let engine = RigAgentEngine::new(ProviderCredentials::from_env());
+        let endpoint = exa_endpoint().map_err(|_| LearningDeckAgentBuildError::InvalidExaUrl)?;
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
         let body_store = ContentBodyStore::from_env()?;
@@ -266,12 +227,16 @@ impl LearningDeckAgentRuntime {
         let definitions = TaskToolExecutor::definitions();
         let request = self.agent_request(
             task,
-            source_snapshot,
             NewslyTranscript::default(),
             build_user_prompt(source_snapshot, task.interests_prompt.as_deref()),
             definitions.clone(),
         )?;
-        let policy = self.agent_network_policy().await;
+        let policy = agent_network_policy(
+            self.config.base.public_base_url.as_ref(),
+            true,
+            "learning_deck",
+        )
+        .await;
         self.provider
             .update_network(&sandbox.sandbox_id, &policy)
             .await?;
@@ -313,13 +278,8 @@ impl LearningDeckAgentRuntime {
                 self.provider
                     .update_network(&sandbox.sandbox_id, &policy)
                     .await?;
-                let repair_request = self.agent_request(
-                    task,
-                    source_snapshot,
-                    first.transcript.clone(),
-                    repair_prompt,
-                    definitions,
-                )?;
+                let repair_request =
+                    self.agent_request(task, first.transcript.clone(), repair_prompt, definitions)?;
                 let repair = tokio::select! {
                     () = cancellation.cancelled() => Err(LearningDeckAgentError::Cancelled),
                     result = self.engine.run(repair_request, tools.clone(), events.clone()) => {
@@ -383,7 +343,6 @@ impl LearningDeckAgentRuntime {
     fn agent_request(
         &self,
         task: &LearningDeckTaskSnapshot,
-        source_snapshot: &Map<String, Value>,
         transcript: NewslyTranscript,
         user_prompt: String,
         definitions: Vec<newsly_agent_runtime::ToolDefinition>,
@@ -397,7 +356,7 @@ impl LearningDeckAgentRuntime {
             response_contract: ResponseContract::Text,
             tools: definitions.clone(),
             tool_policy: ToolPolicy {
-                allowed: allowed_tools(task, &definitions),
+                allowed: allowed_tools(&task.tool_policy, &definitions),
                 require_tool: false,
                 allow_parallel_calls: false,
             },
@@ -405,7 +364,7 @@ impl LearningDeckAgentRuntime {
                 self.config.base.tool_call_limit,
                 self.config.base.sandbox_timeout,
             ),
-            provider_parameters: source_provider_parameters(source_snapshot),
+            provider_parameters: Map::new(),
         })
     }
 
@@ -487,7 +446,12 @@ impl LearningDeckAgentRuntime {
         let index_html = hosted_viewer_html(&index_html);
         validate_learning_deck_artifact(&index_html, &source_notes, &self.config.limits)
             .map_err(LearningDeckAgentError::from_artifact)?;
-        let policy = self.agent_network_policy().await;
+        let policy = agent_network_policy(
+            self.config.base.public_base_url.as_ref(),
+            true,
+            "learning_deck",
+        )
+        .await;
         self.provider
             .update_network(&sandbox.sandbox_id, &policy)
             .await?;
@@ -633,32 +597,26 @@ impl LearningDeckAgentRuntime {
         cancellation: CancellationToken,
         allow_missing: bool,
     ) -> Result<String, LearningDeckAgentError> {
-        let stream = self
-            .provider
-            .start_process(
-                sandbox,
-                CommandRequest {
-                    command: command.to_owned(),
-                    args,
-                    env: BTreeMap::new(),
-                    cwd,
-                    username: Some(SandboxUser::parse("user")?),
-                    tag: ExecutionTag::new(),
-                    stdin_enabled: false,
-                    absolute_deadline: deadline,
-                    idle_timeout: Duration::from_secs(60),
-                    output_limits: OutputLimits {
-                        stdout_bytes: 200_000,
-                        stderr_bytes: 100_000,
-                        combined_bytes: 250_000,
-                        event_bytes: 220_000,
-                        channel_capacity: 32,
-                    },
+        let result = run_sandbox_command(
+            &self.provider,
+            sandbox,
+            SandboxCommand {
+                command: command.to_owned(),
+                args,
+                cwd,
+                deadline,
+                idle_timeout: Duration::from_secs(60),
+                output_limits: OutputLimits {
+                    stdout_bytes: 200_000,
+                    stderr_bytes: 100_000,
+                    combined_bytes: 250_000,
+                    event_bytes: 220_000,
+                    channel_capacity: 32,
                 },
-                cancellation,
-            )
-            .await?;
-        let result = stream.collect_result().await?;
+            },
+            cancellation,
+        )
+        .await?;
         if result.exit_code != 0 {
             if allow_missing && result.exit_code == 1 {
                 return Ok(String::new());
@@ -695,42 +653,6 @@ impl LearningDeckAgentRuntime {
         )
         .await?;
         Ok(())
-    }
-
-    async fn agent_network_policy(&self) -> NetworkPolicy {
-        let mut deny_out = PRIVATE_NETWORK_DENIALS
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if let Some(base_url) = &self.config.base.public_base_url
-            && let Some(host) = base_url.host_str()
-        {
-            let port = base_url.port_or_known_default().unwrap_or(443);
-            match tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::net::lookup_host((host, port)),
-            )
-            .await
-            {
-                Ok(Ok(addresses)) => {
-                    deny_out.extend(addresses.map(|address| ip_selector(address.ip())));
-                }
-                Ok(Err(error)) => {
-                    tracing::warn!(host, error = %error, "unable to resolve Newsly origin for Learning Deck VM egress denial");
-                }
-                Err(_) => tracing::warn!(
-                    host,
-                    "timed out resolving Newsly origin for Learning Deck VM egress denial"
-                ),
-            }
-        }
-        deny_out.sort();
-        deny_out.dedup();
-        NetworkPolicy {
-            deny_out,
-            allow_internet_access: Some(true),
-            ..NetworkPolicy::default()
-        }
     }
 }
 
@@ -800,7 +722,7 @@ impl LearningDeckEvents {
 impl AgentEventSink for LearningDeckEvents {
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
         if let AgentEvent::Usage { observation } = &event {
-            self.usage.publish(observation.as_ref().clone())?;
+            self.usage.record(observation.as_ref().clone())?;
         }
         self.push(
             "agent_event",
@@ -936,18 +858,6 @@ fn substitute_prompt_values(value: &str) -> String {
         .replace("$landscape_canvas", "1280 x 720")
 }
 
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .map(SecretString::from)
-}
-
-fn secret_env_alias(names: &[&str]) -> Option<SecretString> {
-    names.iter().find_map(|name| secret_env(name))
-}
-
 #[derive(Debug, Error)]
 pub(super) enum LearningDeckAgentConfigError {
     #[error(transparent)]
@@ -968,8 +878,6 @@ pub(super) enum LearningDeckAgentBuildError {
     InvalidExaUrl,
     #[error(transparent)]
     E2b(#[from] E2bError),
-    #[error(transparent)]
-    Rig(#[from] RigAgentEngineError),
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]

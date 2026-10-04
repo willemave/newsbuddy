@@ -1,3 +1,4 @@
+use crate::content_metadata::{json_truthy, runtime_metadata, summary_is_readable};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{Map, Value, json};
 use sqlx::types::Json;
@@ -544,20 +545,19 @@ pub async fn persist_x_bookmark_snapshot(
     content_id: i64,
     snapshot_updates: &Value,
 ) -> Result<(), XSyncRepositoryError> {
+    let stored = sqlx::query_scalar::<_, Value>(
+        "SELECT COALESCE(content_metadata, '{}'::json) FROM contents WHERE id::bigint = $1 FOR UPDATE"
+    ).bind(content_id).fetch_optional(&mut **transaction).await?;
+    let Some(stored) = stored else {
+        return Ok(());
+    };
+    let mut metadata = stored.as_object().cloned().unwrap_or_default();
+    if let Some(updates) = snapshot_updates.as_object() {
+        crate::content_metadata::set_fields(&mut metadata, updates);
+    }
     sqlx::query(
-        r#"
-        UPDATE contents
-        SET content_metadata = (
-                COALESCE(content_metadata::jsonb, '{}'::jsonb) || $2::jsonb
-            )::json,
-            updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1::bigint
-        "#,
-    )
-    .bind(content_id)
-    .bind(snapshot_updates)
-    .execute(&mut **transaction)
-    .await?;
+        "UPDATE contents SET content_metadata = $2, updated_at = timezone('UTC', now()) WHERE id::bigint = $1"
+    ).bind(content_id).bind(Value::Object(metadata)).execute(&mut **transaction).await?;
     Ok(())
 }
 
@@ -601,7 +601,6 @@ pub async fn upsert_x_bookmark_ledger(
         ON CONFLICT (connection_id, channel, external_item_id) DO UPDATE
         SET content_id = EXCLUDED.content_id,
             item_url = EXCLUDED.item_url,
-            last_seen_at = EXCLUDED.last_seen_at,
             updated_at = timezone('UTC', now())
         "#,
     )
@@ -712,7 +711,13 @@ pub async fn x_bookmark_destination_needs_image(
     {
         return Ok(false);
     }
-    let runtime = runtime_metadata(&candidate.content_metadata);
+    let runtime = runtime_metadata(
+        &candidate
+            .content_metadata
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+    );
     Ok(!runtime.get("image_generated_at").is_some_and(json_truthy)
         && summary_is_readable(&runtime, &candidate.content_type))
 }
@@ -902,63 +907,6 @@ fn json_positive_i64(value: &Value) -> Option<i64> {
         .as_i64()
         .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
         .filter(|value| *value > 0)
-}
-
-fn runtime_metadata(value: &Value) -> serde_json::Map<String, Value> {
-    let mut runtime = value.as_object().cloned().unwrap_or_default();
-    for namespace in ["domain", "processing"] {
-        if let Some(fields) = runtime.get(namespace).and_then(Value::as_object).cloned() {
-            for (key, value) in fields {
-                runtime.insert(key, value);
-            }
-        }
-    }
-    runtime
-}
-
-fn json_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(value) => *value,
-        Value::Number(value) => value.as_f64().is_some_and(|value| value != 0.0),
-        Value::String(value) => !value.is_empty(),
-        Value::Array(value) => !value.is_empty(),
-        Value::Object(value) => !value.is_empty(),
-    }
-}
-
-fn summary_is_readable(runtime: &serde_json::Map<String, Value>, content_type: &str) -> bool {
-    let Some(summary) = runtime.get("summary") else {
-        return false;
-    };
-    if content_type == "podcast" {
-        return json_truthy(summary);
-    }
-    let Some(summary) = summary.as_object() else {
-        return json_truthy(summary);
-    };
-    if runtime.get("summary_kind").and_then(Value::as_str) == Some("longform_artifact")
-        && summary.get("artifact").is_some_and(Value::is_object)
-    {
-        return summary.get("feed_preview").is_some_and(Value::is_object)
-            || runtime.get("feed_preview").is_some_and(Value::is_object)
-            || summary.get("one_line").is_some_and(json_truthy);
-    }
-    [
-        "one_line",
-        "overview",
-        "summary",
-        "hook",
-        "takeaway",
-        "editorial_narrative",
-        "bullet_points",
-        "key_points",
-        "points",
-        "insights",
-        "artifact",
-    ]
-    .iter()
-    .any(|key| summary.get(*key).is_some_and(json_truthy))
 }
 
 fn truncate(value: &str, max_chars: usize) -> &str {

@@ -137,7 +137,7 @@ pub fn canonicalize_timezone(value: &str) -> Result<String, NewsCategorySchedule
 }
 
 /// Resolve the next 03:00 local maintenance window using calendar arithmetic and IANA rules.
-pub fn next_news_category_night(
+fn next_news_category_night(
     user_id: i64,
     timezone: &str,
     after: DateTime<Utc>,

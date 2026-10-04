@@ -12,8 +12,8 @@ use newsly_db::{
 };
 use newsly_e2b::{
     CommandRequest, DeliveryState, DirectE2bProvider, E2bError, ExecutionTag, ExitStatus,
-    NetworkPolicy, OutputLimits, SandboxHandle, SandboxId, SandboxInfo, SandboxProvider,
-    SandboxRequest, SandboxUser, VmBootstrapProvider, VmCapabilities,
+    NetworkPolicy, OutputLimits, SandboxHandle, SandboxId, SandboxInfo, SandboxRequest,
+    SandboxUser, VmCapabilities,
 };
 use sqlx::PgPool;
 use thiserror::Error;

@@ -100,7 +100,6 @@ string_enum!(TaskStatus {
 pub struct TaskSpec {
     pub task_type: TaskType,
     pub queue: TaskQueue,
-    pub handler: &'static str,
     pub dedupe_by_content: bool,
     pub requires_owner: bool,
 }
@@ -134,45 +133,8 @@ impl TaskType {
         TaskSpec {
             task_type: self,
             queue,
-            handler: self.handler_name(),
             dedupe_by_content,
             requires_owner,
-        }
-    }
-
-    /// Returns the concrete Rust handler type that owns this durable task contract.
-    pub const fn handler_name(self) -> &'static str {
-        match self {
-            Self::Scrape => "newsly_worker::scrape::ScrapeHandler",
-            Self::BackfillFeeds => "newsly_worker::feed_backfill::BackfillFeedsHandler",
-            Self::AnalyzeUrl => "newsly_worker::content::AnalyzeUrlHandler",
-            Self::ProcessContent => "newsly_worker::content::ProcessContentHandler",
-            Self::EnrichNewsItemArticle => "newsly_worker::news_item::EnrichNewsItemArticleHandler",
-            Self::ProcessNewsItem => "newsly_worker::news_item::ProcessNewsItemHandler",
-            Self::ProcessPodcastMedia => "newsly_worker::media::ProcessPodcastMediaHandler",
-            Self::DownloadTweetVideoAudio => "newsly_worker::media::DownloadTweetVideoAudioHandler",
-            Self::TranscribeTweetVideo => "newsly_worker::media::TranscribeTweetVideoHandler",
-            Self::Summarize => "newsly_worker::summarization::SummarizeHandler",
-            Self::FetchNewsItemDiscussion => {
-                "newsly_worker::discussion::FetchNewsItemDiscussionHandler"
-            }
-            Self::GenerateImage => "newsly_worker::image_generation::GenerateImageHandler",
-            Self::DiscoverFeeds => "newsly_worker::feed_discovery::DiscoverFeedsHandler",
-            Self::OnboardingDiscover => {
-                "newsly_worker::onboarding_discovery::OnboardingDiscoverHandler"
-            }
-            Self::DigDeeper | Self::ChatTurn => "newsly_worker::chat_turn::ChatPartitionHandler",
-            Self::SyncIntegration => "newsly_worker::x_sync::XSyncIntegrationHandler",
-            Self::GenerateAudioEpisode => {
-                "newsly_worker::audio_episode::GenerateAudioEpisodeHandler"
-            }
-            Self::RunLlmTask => "newsly_worker::run_llm_task::RunLlmTaskHandler",
-            Self::BriefingRefresh => "newsly_worker::briefing_refresh::BriefingRefreshHandler",
-            Self::PrepareNewsLens => "newsly_worker::briefing_refresh::PrepareNewsLensHandler",
-            Self::ReclusterNewsLenses => {
-                "newsly_worker::briefing_refresh::ReclusterNewsLensesHandler"
-            }
-            Self::DeleteUserAccount => "newsly_account_deletion_worker::AccountDeletionHandler",
         }
     }
 
@@ -375,7 +337,6 @@ pub struct EnqueueRequest {
     pub task_type: TaskType,
     pub content_id: Option<i64>,
     pub payload: Option<Map<String, Value>>,
-    pub queue_name: Option<TaskQueue>,
     pub dedupe: Option<bool>,
     pub dedupe_key: Option<String>,
     pub owner_user_id: Option<i64>,
@@ -390,7 +351,6 @@ impl EnqueueRequest {
             task_type,
             content_id: None,
             payload: None,
-            queue_name: None,
             dedupe: None,
             dedupe_key: None,
             owner_user_id: None,

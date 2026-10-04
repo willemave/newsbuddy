@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentModelUsageObservation, AgentOutcome,
-    AgentRequest, AgentRuntimeError, AssistantPart, BoxAgentFuture, MessagePart, MessageRole,
-    NewslyMessage, ProviderUsage, ReasoningContentKind, RequestPart, ResponseContract,
-    ToolCall as NewslyToolCall, ToolExecutor, TranscriptFinishReason,
+    AgentEvent, AgentEventSink, AgentModelUsageObservation, AgentOutcome, AgentRequest,
+    AgentRuntimeError, AssistantPart, MessagePart, MessageRole, NewslyMessage, ProviderUsage,
+    ReasoningContentKind, RequestPart, ResponseContract, ToolCall as NewslyToolCall, ToolExecutor,
+    TranscriptFinishReason,
 };
+use reqwest::Client;
 use rig_core::client::CompletionClient;
 use rig_core::completion::{
     AssistantContent, CompletionModel, CompletionRequest, CompletionResponse, FinishReason,
@@ -19,36 +20,33 @@ use rig_core::message::{
 use rig_core::providers::{anthropic, gemini, openai, openrouter};
 use secrecy::ExposeSecret;
 use serde_json::{Map, Value};
-use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    ModelProvider, ModelSpec, OpenRouterPrivacyPolicy, OpenRouterRoutingError, ProviderCredentials,
+    ModelProvider, ModelSpec, ProviderCredentials, openrouter::openrouter_request_parameters,
 };
 
 mod openai_response;
+mod structured;
+pub(crate) use structured::{RunStructuredError, StructuredRunRequest};
 
 #[derive(Debug, Clone)]
 pub struct RigAgentEngine {
     credentials: ProviderCredentials,
-    openrouter_policy: OpenRouterPrivacyPolicy,
+    http: Client,
 }
 
 impl RigAgentEngine {
-    /// Creates a Rig-backed agent engine with validated `OpenRouter` routing policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the routing policy is internally inconsistent.
-    pub fn new(
-        credentials: ProviderCredentials,
-        openrouter_policy: OpenRouterPrivacyPolicy,
-    ) -> Result<Self, RigAgentEngineError> {
-        openrouter_policy.validate()?;
-        Ok(Self {
-            credentials,
-            openrouter_policy,
-        })
+    /// Creates a Rig-backed agent engine with a shared HTTP connection pool.
+    #[must_use]
+    pub fn new(credentials: ProviderCredentials) -> Self {
+        Self::with_http_client(credentials, Client::new())
+    }
+
+    /// Creates a Rig-backed agent engine using the supplied shared HTTP connection pool.
+    #[must_use]
+    pub fn with_http_client(credentials: ProviderCredentials, http: Client) -> Self {
+        Self { credentials, http }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -140,11 +138,11 @@ impl RigAgentEngine {
                         ToolChoice::Auto
                     },
                 ),
-                additional_params: self.provider_parameters(
+                additional_params: Self::provider_parameters(
                     model_spec.provider,
                     &request.provider_parameters,
                     request.tool_policy.allow_parallel_calls,
-                )?,
+                ),
                 output_schema: output_schema.clone(),
                 record_telemetry_content: false,
             };
@@ -393,30 +391,41 @@ impl RigAgentEngine {
             .expose_secret()
             .to_owned();
         match spec.provider {
-            ModelProvider::OpenAi => openai::Client::new(key)
+            ModelProvider::OpenAi => openai::Client::builder()
+                .api_key(key)
+                .http_client(self.http.clone())
+                .build()
                 .map(|client| RigModel::OpenAi {
                     client,
                     model: spec.model.clone(),
                 })
                 .map_err(|error| AgentRuntimeError::Provider(error.to_string())),
-            ModelProvider::Anthropic => anthropic::Client::new(key)
+            ModelProvider::Anthropic => anthropic::Client::builder()
+                .api_key(key)
+                .http_client(self.http.clone())
+                .build()
                 .map(|client| RigModel::Anthropic(client.completion_model(spec.model.clone())))
                 .map_err(|error| AgentRuntimeError::Provider(error.to_string())),
-            ModelProvider::Google => gemini::Client::new(key)
+            ModelProvider::Google => gemini::Client::builder()
+                .api_key(key)
+                .http_client(self.http.clone())
+                .build()
                 .map(|client| RigModel::Google(client.completion_model(spec.model.clone())))
                 .map_err(|error| AgentRuntimeError::Provider(error.to_string())),
-            ModelProvider::OpenRouter => openrouter::Client::new(key)
+            ModelProvider::OpenRouter => openrouter::Client::builder()
+                .api_key(key)
+                .http_client(self.http.clone())
+                .build()
                 .map(|client| RigModel::OpenRouter(client.completion_model(spec.model.clone())))
                 .map_err(|error| AgentRuntimeError::Provider(error.to_string())),
         }
     }
 
     fn provider_parameters(
-        &self,
         provider: ModelProvider,
         requested: &Map<String, Value>,
         allow_parallel_calls: bool,
-    ) -> Result<Option<Value>, AgentRuntimeError> {
+    ) -> Option<Value> {
         let mut parameters = requested.clone();
         if matches!(provider, ModelProvider::OpenAi | ModelProvider::OpenRouter) {
             parameters.insert(
@@ -425,31 +434,31 @@ impl RigAgentEngine {
             );
         }
         if provider == ModelProvider::OpenRouter {
-            for (key, value) in self
-                .openrouter_policy
-                .request_parameters()
-                .map_err(|error| AgentRuntimeError::InvalidRequest(error.to_string()))?
-            {
+            for (key, value) in openrouter_request_parameters() {
                 parameters.insert(key, value);
             }
         }
-        Ok((!parameters.is_empty()).then_some(Value::Object(parameters)))
+        (!parameters.is_empty()).then_some(Value::Object(parameters))
     }
 }
 
-impl AgentEngine for RigAgentEngine {
-    fn run(
+impl RigAgentEngine {
+    /// Runs one bounded agent request through the configured provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns a normalized runtime error when validation, provider execution, tools, events, or
+    /// the request deadline fails.
+    pub async fn run(
         &self,
         request: AgentRequest,
         tools: Arc<dyn ToolExecutor>,
         events: Arc<dyn AgentEventSink>,
-    ) -> BoxAgentFuture<'_> {
-        Box::pin(async move {
-            let deadline = request.limits.deadline;
-            tokio::time::timeout(deadline, self.run_inner(request, tools, events))
-                .await
-                .map_err(|_| AgentRuntimeError::DeadlineExceeded)?
-        })
+    ) -> Result<AgentOutcome, AgentRuntimeError> {
+        let deadline = request.limits.deadline;
+        tokio::time::timeout(deadline, self.run_inner(request, tools, events))
+            .await
+            .map_err(|_| AgentRuntimeError::DeadlineExceeded)?
     }
 }
 
@@ -543,7 +552,7 @@ fn rig_history_from_transcript(
 fn rig_message(message: &NewslyMessage) -> Result<Message, AgentRuntimeError> {
     match message.role {
         MessageRole::System => {
-            let text = request_text(&message.parts, true)?;
+            let text = request_text(&message.parts)?;
             Ok(Message::system(text))
         }
         MessageRole::User | MessageRole::Tool => {
@@ -564,14 +573,11 @@ fn rig_message(message: &NewslyMessage) -> Result<Message, AgentRuntimeError> {
     }
 }
 
-fn request_text(parts: &[MessagePart], system: bool) -> Result<String, AgentRuntimeError> {
+fn request_text(parts: &[MessagePart]) -> Result<String, AgentRuntimeError> {
     parts
         .iter()
         .map(|part| match part {
             MessagePart::Request(RequestPart::Text { text }) => Ok(text.clone()),
-            MessagePart::Request(RequestPart::Retry { message, .. }) if !system => {
-                Ok(message.clone())
-            }
             _ => Err(invalid_history("message role and part type do not agree")),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -875,12 +881,6 @@ fn enforce_request_limit(
     } else {
         Ok(())
     }
-}
-
-#[derive(Debug, Error)]
-pub enum RigAgentEngineError {
-    #[error(transparent)]
-    OpenRouterRouting(#[from] OpenRouterRoutingError),
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use crate::news_visibility::{SUBSCRIBED_AGGREGATORS_CTE, visible_news_predicate};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, FromRow, PgPool};
@@ -273,38 +274,8 @@ pub struct NewsListPage {
 
 // Subscriptions are materialized once per query; `aggregator_config_admits` (migration-owned)
 // is the single visibility rule for global aggregator items.
-const VISIBLE_NEWS_CTE: &str = r#"
-WITH subscribed_aggregators AS MATERIALIZED (
-    SELECT config::jsonb AS config
-    FROM user_scraper_configs
-    WHERE user_id = $1::bigint
-      AND scraper_type = 'aggregator'
-      AND is_active IS TRUE
-)
-"#;
 
-const VISIBLE_NEWS_PREDICATE: &str = r#"
-news.status = 'ready'
-AND news.representative_news_item_id IS NULL
-AND (
-    (news.visibility_scope = 'user' AND news.owner_user_id::bigint = $1::bigint)
-    OR (
-        news.visibility_scope = 'global'
-        AND EXISTS (
-            SELECT 1
-            FROM subscribed_aggregators AS subscription
-            WHERE aggregator_config_admits(subscription.config, news.platform, news.raw_metadata)
-        )
-    )
-)
-"#;
-
-fn visible_news_count_query() -> String {
-    format!(
-        r#"{VISIBLE_NEWS_CTE}
-        SELECT count(*)::bigint
-        FROM news_items AS news
-        WHERE {VISIBLE_NEWS_PREDICATE}
+const NEWS_READ_FILTER_PREDICATE: &str = r#"
           AND (
               $2::text = 'all'
               OR ($2::text = 'read' AND EXISTS (
@@ -318,7 +289,17 @@ fn visible_news_count_query() -> String {
                     AND read_status.news_item_id = news.id
               ))
           )
+"#;
+
+fn visible_news_count_query() -> String {
+    format!(
+        r#"{SUBSCRIBED_AGGREGATORS_CTE}
+        SELECT count(*)::bigint
+        FROM news_items AS news
+        WHERE news.status = 'ready' AND news.representative_news_item_id IS NULL AND {visibility}
+          {NEWS_READ_FILTER_PREDICATE}
         "#,
+        visibility = visible_news_predicate("news")
     )
 }
 
@@ -329,7 +310,7 @@ fn visible_news_items_query(include_id_filter: bool) -> String {
         ""
     };
     format!(
-        r#"{VISIBLE_NEWS_CTE}
+        r#"{SUBSCRIBED_AGGREGATORS_CTE}
         SELECT
             news.id::bigint AS id,
             news.platform,
@@ -396,9 +377,10 @@ fn visible_news_items_query(include_id_filter: bool) -> String {
         FROM news_items AS news
         LEFT JOIN news_item_discussions AS discussion
           ON discussion.news_item_id = news.id
-        WHERE {VISIBLE_NEWS_PREDICATE}
+        WHERE news.status = 'ready' AND news.representative_news_item_id IS NULL AND {visibility}
           {id_filter}
         "#,
+        visibility = visible_news_predicate("news")
     )
 }
 
@@ -434,21 +416,10 @@ pub async fn list_visible_news_items(
         .await?;
 
     let mut query = visible_news_items_query(false);
+    query.push_str(NEWS_READ_FILTER_PREDICATE);
     query.push_str(
         r#"
-          AND (
-              $2::text = 'all'
-              OR ($2::text = 'read' AND EXISTS (
-                  SELECT 1 FROM news_item_read_status AS read_status
-                  WHERE read_status.user_id::bigint = $1::bigint
-                    AND read_status.news_item_id = news.id
-              ))
-              OR ($2::text = 'unread' AND NOT EXISTS (
-                  SELECT 1 FROM news_item_read_status AS read_status
-                  WHERE read_status.user_id::bigint = $1::bigint
-                    AND read_status.news_item_id = news.id
-              ))
-          )
+
           AND (
               $3::timestamp IS NULL
               OR coalesce(news.published_at, news.processed_at, news.ingested_at, news.created_at)
@@ -507,4 +478,24 @@ pub async fn list_active_feed_urls(
 pub enum ContentReadRepositoryError {
     #[error("PostgreSQL content read-model query failed")]
     Sqlx(#[from] sqlx::Error),
+}
+
+#[cfg(test)]
+mod visibility_query_plan_tests {
+    #[sqlx::test(migrations = false)]
+    async fn shared_visibility_list_query_remains_inlinable(pool: sqlx::PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        let statement = format!(
+            "EXPLAIN (VERBOSE) {}",
+            super::visible_news_items_query(false)
+        );
+        let plan = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(statement))
+            .bind(1_i64)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .join("\n");
+        assert!(plan.contains("CTE subscribed_aggregators"), "{plan}");
+        assert!(!plan.contains("aggregator_config_admits"), "{plan}");
+    }
 }

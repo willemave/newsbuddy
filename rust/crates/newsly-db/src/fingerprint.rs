@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, query_scalar};
 use thiserror::Error;
 
@@ -337,13 +336,7 @@ fn verify_hash(
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut output = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    output
+    newsly_domain::sha256_hex(bytes)
 }
 
 fn compare_snapshot(

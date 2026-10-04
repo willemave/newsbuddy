@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
-use std::time::Instant;
 
 use chrono::Utc;
 use futures_util::stream::{self, StreamExt};
@@ -28,6 +27,7 @@ use super::finalizer::BriefingRefreshFinalizer;
 use super::normalize::normalize_layout;
 use super::planning::{PlannedBriefingWindow, plan_windows};
 use super::semantic_lenses::plan_semantic_lenses;
+use super::{EMBEDDING_PROVIDER, nonempty, split_model_spec};
 
 #[derive(Debug, Clone)]
 pub struct BriefingRefreshWorkerServices {
@@ -297,7 +297,7 @@ async fn build_publication(
         .await;
         embedding_usage.extend(planned.embedding_batches.into_iter().map(|batch| {
             BriefingEmbeddingUsage {
-                provider: "openrouter".to_owned(),
+                provider: EMBEDDING_PROVIDER.to_owned(),
                 model: batch.model,
                 provider_response_id: batch.provider_response_id,
                 usage: batch.usage,
@@ -355,7 +355,7 @@ async fn build_publication(
         .await;
         embedding_usage.extend(planned.embedding_batches.into_iter().map(|batch| {
             BriefingEmbeddingUsage {
-                provider: "openrouter".to_owned(),
+                provider: EMBEDDING_PROVIDER.to_owned(),
                 model: batch.model,
                 provider_response_id: batch.provider_response_id,
                 usage: batch.usage,
@@ -378,7 +378,7 @@ async fn build_publication(
 
     let parallelism = services.config.compose_parallelism.min(units.len().max(1));
     let gateway = &services.gateway;
-    let max_attempts = services.config.max_compose_attempts;
+    let max_attempts = super::config::MAX_COMPOSE_ATTEMPTS;
     let max_figures_deep = services.config.max_figures_deep;
     let context = CompositionContext {
         pool: &services.pool,
@@ -504,7 +504,6 @@ async fn compose_unit(
     context: CompositionContext<'_>,
 ) -> Result<ComposedUnit, BriefingRefreshExecutionError> {
     use sha2::{Digest, Sha256};
-    let started = Instant::now();
     let request = BriefingCompositionRequest {
         lens_title: unit.lens.title.clone(),
         tier: unit.lens.tier.clone(),
@@ -571,7 +570,9 @@ async fn compose_unit(
             }
         };
         let (provider, fallback_model) = split_model_spec(gateway.model_spec());
-        let model = nonempty(&generated.model).unwrap_or_else(|| fallback_model.to_owned());
+        let model = nonempty(&generated.model)
+            .unwrap_or(fallback_model)
+            .to_owned();
         let usage = BriefingSegmentUsage {
             provider: provider.to_owned(),
             model,
@@ -619,6 +620,13 @@ async fn compose_unit(
         if matches!(&unit.kind, CompositionUnitKind::Compaction { .. }) {
             warnings.push("compaction_segment".to_owned());
         }
+        if !warnings.is_empty() {
+            tracing::warn!(
+                lens_key = unit.lens.key,
+                warnings = ?warnings,
+                "briefing composition completed with warnings"
+            );
+        }
         return Ok(ComposedUnit {
             ordinal: unit.ordinal,
             kind: unit.kind,
@@ -636,11 +644,6 @@ async fn compose_unit(
                 event_groups: unit.window.event_groups,
                 model: gateway.model_spec().to_owned(),
                 prompt_version: BRIEFING_COMPOSITION_PROMPT_VERSION.to_owned(),
-                input_tokens: Some(u64_to_i32(usage.usage.input_tokens)),
-                output_tokens: Some(u64_to_i32(usage.usage.output_tokens)),
-                generation_ms: i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX),
-                warnings,
-                usage,
             },
         });
     }
@@ -666,19 +669,6 @@ fn composition_source(source: &BriefingRefreshSource) -> BriefingCompositionSour
         published_at: source.published_at.map(|value| value.to_rfc3339()),
         briefing_context: source.briefing_context.clone(),
     }
-}
-
-fn split_model_spec(value: &str) -> (&str, &str) {
-    value.split_once(':').unwrap_or(("unknown", value))
-}
-
-fn nonempty(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_owned())
-}
-
-fn u64_to_i32(value: u64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 fn plain_failure(message: impl Into<String>, retryable: bool) -> HandlerExecution {

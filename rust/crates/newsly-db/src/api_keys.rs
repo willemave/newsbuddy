@@ -1,3 +1,4 @@
+use newsly_domain::hex_encode;
 use std::fmt::{self, Debug, Formatter};
 
 use base64::Engine as _;
@@ -20,7 +21,7 @@ const SYSTEM_ADMIN_EMAIL: &str = "admin@system.local";
 /// The plaintext value must only cross the create response boundary once. Its
 /// custom debug representation deliberately never exposes the bearer secret.
 #[derive(Clone)]
-pub struct GeneratedApiKey {
+pub(crate) struct GeneratedApiKey {
     pub raw_key: SecretString,
     pub key_prefix: String,
 }
@@ -76,7 +77,7 @@ pub struct ApiKeyTargetUser {
 ///
 /// Returns [`ApiKeyRepositoryError::Entropy`] when secure operating-system
 /// randomness is unavailable.
-pub fn generate_api_key() -> Result<GeneratedApiKey, ApiKeyRepositoryError> {
+pub(crate) fn generate_api_key() -> Result<GeneratedApiKey, ApiKeyRepositoryError> {
     let mut public_id = [0_u8; API_KEY_PUBLIC_ID_BYTES];
     let mut secret = [0_u8; API_KEY_SECRET_BYTES];
     getrandom::fill(&mut public_id)?;
@@ -100,7 +101,7 @@ pub fn hash_api_key(raw_key: &str) -> String {
 /// Compare a presented API key with a stored digest without secret-dependent
 /// early exits.
 #[must_use]
-pub fn verify_api_key_hash(raw_key: &str, stored_hash: &str) -> bool {
+pub(crate) fn verify_api_key_hash(raw_key: &str, stored_hash: &str) -> bool {
     let presented_hash = hash_api_key(raw_key);
     presented_hash.len() == stored_hash.len()
         && bool::from(presented_hash.as_bytes().ct_eq(stored_hash.as_bytes()))
@@ -112,7 +113,7 @@ pub fn verify_api_key_hash(raw_key: &str, stored_hash: &str) -> bool {
 ///
 /// Returns [`ApiKeyRepositoryError::InvalidFormat`] for a non-Newsly or
 /// incomplete token.
-pub fn extract_api_key_prefix(raw_key: &str) -> Result<&str, ApiKeyRepositoryError> {
+pub(crate) fn extract_api_key_prefix(raw_key: &str) -> Result<&str, ApiKeyRepositoryError> {
     let suffix = raw_key
         .strip_prefix(API_KEY_TOKEN_PREFIX)
         .ok_or(ApiKeyRepositoryError::InvalidFormat)?;
@@ -124,6 +125,11 @@ pub fn extract_api_key_prefix(raw_key: &str) -> Result<&str, ApiKeyRepositoryErr
     }
     let prefix_length = API_KEY_TOKEN_PREFIX.len() + public_id.len();
     Ok(&raw_key[..prefix_length])
+}
+
+#[must_use]
+pub fn is_api_key_token(token: &str) -> bool {
+    token.starts_with(API_KEY_TOKEN_PREFIX)
 }
 
 /// Generate and insert a key in the caller-owned transaction. Only its digest
@@ -312,16 +318,6 @@ pub async fn ensure_system_admin_user(
             .await
             .map_err(ApiKeyRepositoryError::from),
     }
-}
-
-fn hex_encode(value: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(value.len() * 2);
-    for byte in value {
-        encoded.push(char::from(HEX[usize::from(*byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(*byte & 0x0f)]));
-    }
-    encoded
 }
 
 #[derive(Debug, Error)]

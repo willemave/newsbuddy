@@ -8,7 +8,6 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, body::Body, http::Request};
 use chrono::{DateTime, Timelike as _, Utc};
-use newsly_contracts::{ApiKeyCreateResponse, ApiKeySummaryResponse};
 use newsly_db::{
     ApiKeySummaryProjection, ApiKeyTargetUser, create_api_key, ensure_system_admin_user,
     list_api_key_target_users, list_api_keys, revoke_api_key,
@@ -19,14 +18,10 @@ use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{internal_error, not_found, require_operation, verify_stamp};
+use crate::write_support::{internal_error, not_found};
 use crate::{AppState, request_id_from_headers};
 
 const ADMIN_SESSION_COOKIE: &str = "admin_session";
-const PAGE_OPERATION_ID: &str = "adminApiKeysPage";
-const CREATE_OPERATION_ID: &str = "adminApiKeysCreate";
-const REVOKE_OPERATION_ID: &str = "adminApiKeysRevoke";
-const PAGE_HEADER: &str = include_str!("templates/admin_api_keys_header.html");
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[schema(as = Body_adminApiKeysCreate)]
@@ -57,30 +52,12 @@ pub(super) async fn api_keys_page(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    axum::extract::Extension(stamp): axum::extract::Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, PAGE_OPERATION_ID, &request_id)?;
-
-    // The established admin boundary lazily creates its attribution identity.
-    // Keep that compatibility write short and fenced even though this is a GET.
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
-    ensure_system_admin_user(&mut transaction)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
 
     let (users, keys) = tokio::try_join!(
         list_api_key_target_users(state.database.pool()),
@@ -118,44 +95,29 @@ pub(super) async fn create_key(
         .extensions()
         .get::<RouteOwnershipStamp>()
         .cloned()
-        .ok_or_else(|| crate::write_support::stale_owner(&request_id))?;
-    require_operation(&stamp, CREATE_OPERATION_ID, &request_id)?;
+        .ok_or_else(|| RouteOwnershipStamp::missing(&headers))?;
     let Form(form) = Form::<CreateApiKeyForm>::from_request(request, &state)
         .await
         .map_err(|rejection| form_validation_error(rejection.body_text(), &request_id))?;
     let user_id = form.user_id;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let admin_user_id = ensure_system_admin_user(&mut transaction)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     let created = create_api_key(&mut transaction, user_id, Some(admin_user_id))
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
 
     let raw_key = created.raw_key.expose_secret().to_owned();
-    let created_response = ApiKeyCreateResponse {
-        api_key: raw_key.clone(),
-        key: raw_key,
-        key_prefix: created.record.key_prefix.clone(),
-        record: summary_response(created.record),
-    };
     let (users, keys) = tokio::try_join!(
         list_api_key_target_users(state.database.pool()),
         list_api_keys(state.database.pool(), None),
     )
     .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Html(render_api_keys_page(&users, &keys, Some(&created_response))).into_response())
+    Ok(Html(render_api_keys_page(&users, &keys, Some(&raw_key))).into_response())
 }
 
 #[utoipa::path(
@@ -176,32 +138,23 @@ pub(super) async fn revoke_key(
     State(state): State<AppState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    axum::extract::Extension(stamp): axum::extract::Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Response, ApiError> {
     if !has_valid_admin_session(&state, &headers) {
         return Ok(admin_login_redirect(uri.path()));
     }
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REVOKE_OPERATION_ID, &request_id)?;
     let Path(api_key_id) =
         path.map_err(|rejection| form_validation_error(rejection.body_text(), &request_id))?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let record = revoke_api_key(&mut transaction, api_key_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?
         .ok_or_else(|| not_found("API key", &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     tracing::info!(api_key_id = record.id, "admin API key revoked");
     Ok(redirect("/admin/api-keys"))
 }
@@ -240,18 +193,12 @@ pub(super) fn redirect(location: &str) -> Response {
 }
 
 fn percent_encode_path(path: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut encoded = String::with_capacity(path.len());
-    for byte in path.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(char::from(byte));
-        } else {
-            encoded.push('%');
-            encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-            encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        }
-    }
-    encoded
+    const PATH_SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(path, PATH_SEGMENT).to_string()
 }
 
 fn form_validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
@@ -269,29 +216,18 @@ fn form_validation_error(message: impl Into<String>, request_id: &str) -> ApiErr
     )
 }
 
-fn summary_response(record: ApiKeySummaryProjection) -> ApiKeySummaryResponse {
-    ApiKeySummaryResponse {
-        id: record.id,
-        user_id: record.user_id,
-        key_prefix: record.key_prefix,
-        created_at: record.created_at,
-        revoked_at: record.revoked_at,
-        last_used_at: record.last_used_at,
-        created_by_admin_user_id: record.created_by_admin_user_id,
-    }
-}
-
 fn render_api_keys_page(
     users: &[ApiKeyTargetUser],
     keys: &[ApiKeySummaryProjection],
-    created: Option<&ApiKeyCreateResponse>,
+    created: Option<&str>,
 ) -> String {
-    let mut html = String::from(PAGE_HEADER);
+    let mut html = crate::admin_shell::admin_shell("API Keys");
+    html.push_str("<main><nav><a href=\"/admin/\">Dashboard</a> · <a href=\"/admin/evals/summaries\">Evals</a> · <a href=\"/admin/onboarding/lane-preview\">Lane Preview</a> · <a href=\"/admin/feedback\">Feedback</a> · <a href=\"/admin/logs\">Logs</a><form method=\"post\" action=\"/auth/admin/logout\"><button type=\"submit\">Sign Out</button></form></nav><section><h1>API Keys</h1><p>Create and revoke CLI API keys for users.</p>");
     if let Some(created) = created {
         let _ = write!(
             html,
             "  <div class=\"rounded border border-green-500 p-4\">\n    <h2>New Key</h2>\n    <p>Copy this key now. It will not be shown again.</p>\n    <pre>{}</pre>\n  </div>\n",
-            escape_html(&created.api_key)
+            escape_html(created)
         );
     }
     html.push_str(
@@ -351,14 +287,13 @@ fn render_api_keys_page(
         html.push_str("</td>\n      </tr>\n");
     }
     html.push_str(
-        r#"    </tbody>
+        r"    </tbody>
   </table>
 </section>
   </main>
-  <footer class="border-t border-gray-200 mt-auto"><div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4"><p class="text-xs text-gray-400 text-center">Newsbuddy Admin</p></div></footer>
 </body>
 </html>
-"#,
+",
     );
     html
 }

@@ -6,13 +6,13 @@ pub(crate) mod workflows;
 
 pub use agent::{
     ShareActionAgentBuildError, ShareActionAgentConfig, ShareActionAgentConfigError,
-    ShareActionAgentError, ShareActionAgentRunResult, ShareActionAgentRuntime,
+    ShareActionAgentRuntime,
 };
 pub use finalizer::{
     ShareActionFailureFinalizer, ShareActionFinalizationError, ShareActionSuccessFinalizer,
     apply_share_action_host_action,
 };
-pub use handler::{ShareActionDispatchOutcome, ShareActionTaskExecutor};
+pub use handler::ShareActionTaskExecutor;
 pub use workflows::{
     PreparedHostAction, ShareActionHostInput, ShareActionWorkflowError,
     build_deterministic_chat_action, build_host_action, parse_stored_host_input,

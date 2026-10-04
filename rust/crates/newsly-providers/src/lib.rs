@@ -6,21 +6,27 @@
 
 #![forbid(unsafe_code)]
 
+mod agent_support;
 mod audio_episode;
 mod briefing_composition;
 mod briefing_dig;
 mod content_analysis;
 mod content_misc;
 mod discussion_fetch;
+mod elevenlabs;
+mod exa;
 mod feed_validation;
 mod image_generation;
 mod media;
 mod model;
 mod news_item;
+mod object_storage;
 mod onboarding_flow;
 mod openai_background;
 mod openai_transcription;
 mod openrouter;
+mod openrouter_embeddings;
+mod provider_env;
 mod public_http;
 mod rig_engine;
 mod scraping;
@@ -47,7 +53,7 @@ pub use briefing_composition::{
 };
 pub use briefing_dig::{
     BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchOutcome,
-    BriefingWebSearchResult, ExaSearchUsage,
+    BriefingWebSearchResult,
 };
 pub use content_analysis::{
     AnalyzedContentType, ContentAnalysisGateway, ContentAnalysisGatewayError,
@@ -60,14 +66,18 @@ pub use content_misc::{
     GeneratedDiscussionSummary, GeneratedTweetSuggestion, GeneratedTweetSuggestions,
     PodcastEpisodeHit, SynthesizedNarration,
 };
+pub use discussion_fetch::{
+    hacker_news_discussion_id, infer_discussion_platform, normalize_discussion_external_id,
+    normalize_discussion_http_url, normalize_reddit_discussion_url, reddit_discussion_id,
+};
+pub use exa::ExaSearchUsage;
 pub use feed_validation::{
     FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat, ValidatedSharedItem,
     ValidatedSharedTarget,
 };
 pub use image_generation::{
     GeneratedImage, GoogleImageAuth, ImageGenerationError, ImageGenerationGateway,
-    ImageGenerationGatewayConfig, ImageGenerationUsage, ImageGenerationUsageObserver,
-    InfographicProvider,
+    ImageGenerationUsage, ImageGenerationUsageObserver, InfographicProvider,
 };
 pub use media::{
     ApplePodcastResolution, DownloadedMedia, MediaGateway, MediaGatewayConfig, MediaGatewayError,
@@ -81,20 +91,17 @@ pub use news_item::{
 pub use onboarding_flow::{
     OnboardingAudioLane, OnboardingAudioPlan, OnboardingDiscoveryOutcome, OnboardingDiscoverySeeds,
     OnboardingExaUsage, OnboardingGateway, OnboardingGatewayError, OnboardingLaneTarget,
-    OnboardingProfile, OnboardingProfileOutcome, OnboardingSuggestionSeed, OnboardingVoiceFields,
+    OnboardingSuggestionSeed,
 };
 pub use openai_background::{
-    BackgroundBuiltInTools, BackgroundProviderError, BackgroundReasoningSummary,
-    BackgroundResponseStatus, BackgroundSource, BackgroundUsage, BoxBackgroundResponseFuture,
-    OpenAiBackgroundGateway, OpenAiBackgroundRequest, OpenAiBackgroundResponses,
-    OpenAiBackgroundResult, OpenAiGatewayError,
+    BackgroundBuiltInTools, BackgroundProviderError, BackgroundResponseStatus, BackgroundUsage,
+    OpenAiBackgroundGateway, OpenAiBackgroundRequest, OpenAiBackgroundResult, OpenAiGatewayError,
 };
 pub use openai_transcription::{
     AudioDurationSource, OpenAiTranscriptionError, OpenAiTranscriptionGateway,
     TranscriptionChunkUsage, TranscriptionResult, TranscriptionUsageObserver,
 };
-pub use openrouter::{OpenRouterPrivacyPolicy, OpenRouterRoutingError};
-pub use rig_engine::{RigAgentEngine, RigAgentEngineError};
+pub use rig_engine::RigAgentEngine;
 pub use scraping::{
     FeedEntrySelection, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
     ScrapeGatewayError, ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem, ScrapedNewsItem,
@@ -113,3 +120,11 @@ pub use x_sync::{
     XBookmarksPage, XLookupGateway, XSyncGateway, XSyncGatewayError, XSyncToken, XSyncUser, XTweet,
 };
 pub mod briefing_links;
+
+pub use object_storage::{
+    LocalStorageError, delete_local_object, is_safe_object_key, is_safe_storage_root,
+};
+
+pub use object_storage::{ObjectStorageBackend, ObjectStorageConfigError};
+
+pub use object_storage::{LocalObjectSlice, MAX_SOURCE_BODY_BYTES, read_local_object};

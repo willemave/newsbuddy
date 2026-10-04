@@ -10,20 +10,22 @@ fn usage_text_renders_tokens_vendor_units_and_cost() {
         until: generated_at,
         group_by: "vendor".to_owned(),
         totals: UsageTotals {
-            call_count: 2,
-            input_tokens: 60,
-            cache_read_tokens: 40,
-            cache_write_tokens: 10,
-            output_tokens: 40,
-            total_tokens: 100,
-            request_count: 2,
-            resource_count: 9,
-            cost_usd: Some(0.42),
-            known_cost_usd: 0.42,
-            public_list_estimate_usd: 0.0,
-            provider_estimate_usd: 0.28,
-            non_billable_record_count: 0,
-            unpriced_call_count: 0,
+            aggregate: UsageAggregate {
+                call_count: 2,
+                input_tokens: 60,
+                cache_read_tokens: 40,
+                cache_write_tokens: 10,
+                output_tokens: 40,
+                total_tokens: 100,
+                request_count: 2,
+                resource_count: 9,
+                cost_usd: Some(0.42),
+                known_cost_usd: 0.42,
+                public_list_estimate_usd: 0.0,
+                provider_estimate_usd: 0.28,
+                non_billable_record_count: 0,
+                unpriced_call_count: 0,
+            },
             unpriced_reasons: BTreeMap::new(),
             resource_units: BTreeMap::from([
                 ("search results".to_owned(), 8),
@@ -34,29 +36,31 @@ fn usage_text_renders_tokens_vendor_units_and_cost() {
         },
         groups: vec![UsageGroup {
             key: "exa".to_owned(),
-            call_count: 1,
-            input_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            output_tokens: 0,
-            total_tokens: 0,
-            request_count: 1,
-            resource_count: 8,
-            cost_usd: Some(0.28),
-            known_cost_usd: 0.28,
-            public_list_estimate_usd: 0.0,
-            provider_estimate_usd: 0.28,
-            non_billable_record_count: 0,
-            unpriced_call_count: 0,
+            aggregate: UsageAggregate {
+                call_count: 1,
+                input_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                request_count: 1,
+                resource_count: 8,
+                cost_usd: Some(0.28),
+                known_cost_usd: 0.28,
+                public_list_estimate_usd: 0.0,
+                provider_estimate_usd: 0.28,
+                non_billable_record_count: 0,
+                unpriced_call_count: 0,
+            },
         }],
     };
 
     let rendered = summary.render_text();
     assert!(rendered.contains(
         "Totals: 2 calls, 100 tokens, 40 cache-read tokens, 10 cache-write tokens, \
-         2 requests, 8 search results, 1 transcription seconds, $0.4200"
+        2 requests, 8 search results, 1 transcription seconds, $0.420000"
     ));
-    assert!(rendered.contains("- exa: 1 calls, 1 requests, $0.2800"));
+    assert!(rendered.contains("- exa: 1 calls, 1 requests, $0.280000"));
 }
 
 #[sqlx::test(migrations = false)]
@@ -122,7 +126,7 @@ async fn usage_cost_distinguishes_missing_partial_free_and_empty(pool: PgPool) {
     assert!(
         summary
             .render_text()
-            .contains("cost unknown ($0.3000 priced subtotal: $0.2500 public-list estimates, $0.0500 provider estimates; 1 non-billable, 2 unpriced records)")
+            .contains("Unknown ($0.300000 priced subtotal: $0.250000 public-list estimates, $0.050000 provider estimates; 1 non-billable, 2 unpriced records)")
     );
     assert!(
         summary

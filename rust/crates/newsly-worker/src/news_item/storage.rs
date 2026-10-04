@@ -87,13 +87,15 @@ impl NewsArticleBodyStore {
         }
         let relative = Path::new(&pointer.storage_key);
         validate_relative_path(relative)?;
-        let Some(bytes) = read_optional(&self.root, relative).await? else {
+        let Some(slice) = read_optional(&self.root, relative, MAX_NEWS_BODY_BYTES).await? else {
             return Ok(None);
         };
-        if bytes.len() > MAX_NEWS_BODY_BYTES {
-            return Err(NewsBodyStoreError::BodyTooLarge(bytes.len()));
+        if slice.truncated {
+            return Err(NewsBodyStoreError::BodyTooLarge(
+                MAX_NEWS_BODY_BYTES.saturating_add(1),
+            ));
         }
-        String::from_utf8(bytes)
+        String::from_utf8(slice.bytes)
             .map(Some)
             .map_err(NewsBodyStoreError::InvalidUtf8)
     }

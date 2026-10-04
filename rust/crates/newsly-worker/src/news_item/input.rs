@@ -9,6 +9,8 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use url::{Url, form_urlencoded};
 
+use crate::content::normalize_external_url as normalize_http_url;
+
 use super::model::{NewsSnapshot, RelationCandidate, RelevantLinkInput};
 
 const MAX_NEWS_ARTICLE_BODY_CHARS: usize = 48_000;
@@ -503,18 +505,6 @@ pub(super) fn normalize_key_points(value: &Value) -> Vec<String> {
 pub(super) fn clean_string(value: &str) -> Option<String> {
     let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
     (!value.is_empty()).then_some(value)
-}
-
-pub(super) fn normalize_http_url(value: &str) -> Option<String> {
-    let mut url = Url::parse(value.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return None;
-    }
-    url.set_scheme("https").ok()?;
-    url.set_fragment(None);
-    let host = url.host_str()?.to_ascii_lowercase();
-    url.set_host(Some(&host)).ok()?;
-    Some(url.to_string())
 }
 
 fn section_title(metadata: &Map<String, Value>, section: &str) -> Option<String> {

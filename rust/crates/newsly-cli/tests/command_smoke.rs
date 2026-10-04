@@ -182,16 +182,7 @@ async fn run_local_cli(temp: &TempDir, arguments: &[&str]) -> Output {
 }
 
 fn remove_cli_environment(command: &mut Command) {
-    for name in [
-        "NEWSBUDDY_CONFIG",
-        "NEWSBUDDY_CONFIG_PATH",
-        "NEWSBUDDY_SERVER",
-        "NEWSBUDDY_API_KEY",
-        "NEWSLY_AGENT_CONFIG",
-        "NEWSLY_AGENT_CONFIG_PATH",
-        "NEWSLY_AGENT_SERVER",
-        "NEWSLY_AGENT_API_KEY",
-    ] {
+    for name in ["NEWSBUDDY_CONFIG", "NEWSBUDDY_SERVER", "NEWSBUDDY_API_KEY"] {
         command.env_remove(name);
     }
 }
@@ -327,8 +318,6 @@ async fn command_families_preserve_the_http_contract() {
                 "Example",
                 "--platform",
                 "web",
-                "--content-type",
-                "article",
             ],
             command: "content.submit",
             method: Method::POST,
@@ -340,7 +329,6 @@ async fn command_families_preserve_the_http_contract() {
                 "crawl_links": true,
                 "title": "Example",
                 "platform": "web",
-                "content_type": "article",
                 "save_to_knowledge_and_mark_read": false
             }),
         },
@@ -651,13 +639,6 @@ async fn process_exit_and_error_envelopes_cover_remote_and_local_failures() {
     server.set_mode(NORMAL);
     for arguments in [
         &["content", "submit", "ftp://example.com"][..],
-        &[
-            "sources",
-            "add",
-            "https://example.com/feed",
-            "--feed-type",
-            "unsupported",
-        ][..],
         &["jobs", "wait", "7", "--wait-interval", "0s"][..],
     ] {
         let output = run_cli(&temp, &server.origin, arguments).await;
@@ -665,6 +646,21 @@ async fn process_exit_and_error_envelopes_cover_remote_and_local_failures() {
         let envelope: Value = serde_json::from_slice(&output.stdout).expect("local error envelope");
         assert_eq!(envelope["ok"], false);
     }
+    let output = run_cli(
+        &temp,
+        &server.origin,
+        &[
+            "sources",
+            "add",
+            "https://example.com/feed",
+            "--feed-type",
+            "unsupported",
+        ],
+    )
+    .await;
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("possible values"));
     assert!(
         server.take_requests().is_empty(),
         "local validation must precede HTTP"

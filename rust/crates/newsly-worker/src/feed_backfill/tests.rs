@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     FeedBackfillFinalizer, FeedBackfillRequest, FeedFetchOutcome, PreparedFeedConfigs,
-    feed_outcome_succeeded, prepare_configs,
+    backfill_task_result, feed_outcome_succeeded, prepare_configs,
 };
 
 async fn insert_user(pool: &PgPool) -> i64 {
@@ -109,27 +109,26 @@ fn podcast(config_id: i64, user_id: i64) -> ScrapedItem {
     }))
 }
 
-fn outcomes(prepared: &PreparedFeedConfigs, user_id: i64) -> Vec<FeedFetchOutcome> {
-    prepared
+fn outcome(prepared: &PreparedFeedConfigs, user_id: i64) -> FeedFetchOutcome {
+    let plan = prepared
         .plans
-        .iter()
-        .cloned()
-        .map(|plan| {
-            let item = if plan.scraper_type == "podcast_rss" {
-                podcast(plan.id, user_id)
-            } else {
-                article(plan.id, user_id)
-            };
-            FeedFetchOutcome {
-                plan,
-                result: Ok(ScrapeProviderOutcome {
-                    retryable_failure: false,
-                    items: vec![item],
-                    item_errors: Vec::new(),
-                }),
-            }
-        })
-        .collect()
+        .first()
+        .expect("single-config task should have a plan")
+        .clone();
+    assert_eq!(prepared.plans.len(), 1);
+    let item = if plan.scraper_type == "podcast_rss" {
+        podcast(plan.id, user_id)
+    } else {
+        article(plan.id, user_id)
+    };
+    FeedFetchOutcome {
+        plan,
+        result: Ok(ScrapeProviderOutcome {
+            retryable_failure: false,
+            items: vec![item],
+            item_errors: Vec::new(),
+        }),
+    }
 }
 
 async fn apply_and_commit(pool: &PgPool, finalizer: &FeedBackfillFinalizer) -> TaskFinalizerResult {
@@ -197,25 +196,88 @@ fn empty_feed_without_item_errors_is_still_valid() {
     }));
 }
 
+#[test]
+fn deactivated_configs_complete_without_a_provider_failure() {
+    let result = backfill_task_result(None);
+    assert!(result.success);
+}
+
 #[sqlx::test]
-async fn article_and_podcast_backfill_commit_with_membership_and_work(pool: PgPool) {
+async fn deactivated_configs_still_settle_first_edition_progress(pool: PgPool) {
     let user_id = insert_user(&pool).await;
     let config_ids = insert_feed_configs(&pool, user_id).await;
-    let request = request(user_id, config_ids);
-    let prepared = prepare_configs(&pool, &request)
+    let run_id: i64 = sqlx::query_scalar(
+        "INSERT INTO onboarding_first_edition_runs (user_id, status, revision, started_at) VALUES ($1::integer, 'active', 1, now()) RETURNING id::bigint",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("first-edition run should insert");
+    for (position, config_id) in config_ids.iter().enumerate() {
+        sqlx::query(
+            r#"INSERT INTO onboarding_first_edition_sources (run_id, source_key, display_name, source_kind, "position", status, processed_item_count) VALUES ($1::integer, $2, 'Feed', 'feed', $3, 'queued', 0)"#,
+        )
+        .bind(run_id)
+        .bind(format!("feed:{config_id}"))
+        .bind(i32::try_from(position).expect("fixture position should fit"))
+        .execute(&pool)
+        .await
+        .expect("first-edition source should insert");
+    }
+    sqlx::query("UPDATE user_scraper_configs SET is_active = FALSE WHERE id::bigint = ANY($1)")
+        .bind(&config_ids)
+        .execute(&pool)
+        .await
+        .expect("feed configs should deactivate");
+    let mut batch_request = request(user_id, config_ids.clone());
+    batch_request.first_edition_run_id = Some(run_id);
+    let prepared = prepare_configs(&pool, &batch_request)
         .await
         .expect("configs should prepare")
         .expect("active user should prepare");
+    assert!(prepared.plans.is_empty());
     let finalizer = FeedBackfillFinalizer {
         queue: QueueKernel::new(pool.clone()),
-        results: outcomes(&prepared, user_id),
-        request,
+        request: batch_request,
+        result: None,
     };
 
+    assert!(backfill_task_result(None).success);
     assert!(matches!(
         apply_and_commit(&pool, &finalizer).await,
         TaskFinalizerResult::Keep
     ));
+    let statuses = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint = $1 ORDER BY source_key",
+    )
+    .bind(run_id)
+    .fetch_all(&pool)
+    .await
+    .expect("first-edition progress should be queryable");
+    assert_eq!(statuses, vec!["unavailable", "unavailable"]);
+}
+
+#[sqlx::test]
+async fn article_and_podcast_backfill_commit_with_membership_and_work(pool: PgPool) {
+    let user_id = insert_user(&pool).await;
+    let config_ids = insert_feed_configs(&pool, user_id).await;
+    for config_id in config_ids {
+        let request = request(user_id, vec![config_id]);
+        let prepared = prepare_configs(&pool, &request)
+            .await
+            .expect("config should prepare")
+            .expect("active user should prepare");
+        let finalizer = FeedBackfillFinalizer {
+            queue: QueueKernel::new(pool.clone()),
+            result: Some(outcome(&prepared, user_id)),
+            request,
+        };
+
+        assert!(matches!(
+            apply_and_commit(&pool, &finalizer).await,
+            TaskFinalizerResult::Keep
+        ));
+    }
 
     let contents = sqlx::query_as::<_, (i64, String, String, Option<String>, Value)>(
         r"
@@ -282,7 +344,7 @@ async fn article_and_podcast_backfill_commit_with_membership_and_work(pool: PgPo
 #[sqlx::test]
 async fn queue_fence_commits_parent_completion_with_backfill_outputs(pool: PgPool) {
     let user_id = insert_user(&pool).await;
-    let config_ids = insert_feed_configs(&pool, user_id).await;
+    let config_ids = vec![insert_feed_configs(&pool, user_id).await[0]];
     let request = request(user_id, config_ids.clone());
     let prepared = prepare_configs(&pool, &request)
         .await
@@ -290,7 +352,7 @@ async fn queue_fence_commits_parent_completion_with_backfill_outputs(pool: PgPoo
         .expect("active user should prepare");
     let finalizer = FeedBackfillFinalizer {
         queue: QueueKernel::new(pool.clone()),
-        results: outcomes(&prepared, user_id),
+        result: Some(outcome(&prepared, user_id)),
         request,
     };
     let queue = QueueKernel::new(pool.clone());
@@ -347,29 +409,31 @@ async fn queue_fence_commits_parent_completion_with_backfill_outputs(pool: PgPoo
     .fetch_one(&pool)
     .await
     .expect("child tasks should be queryable");
-    assert_eq!(child_count, 2);
+    assert_eq!(child_count, 1);
     let content_count = sqlx::query_scalar::<_, i64>("SELECT count(*)::bigint FROM contents")
         .fetch_one(&pool)
         .await
         .expect("content should be queryable");
-    assert_eq!(content_count, 2);
+    assert_eq!(content_count, 1);
 }
 
 #[sqlx::test]
 async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: PgPool) {
     let user_id = insert_user(&pool).await;
     let config_ids = insert_feed_configs(&pool, user_id).await;
-    let first_request = request(user_id, config_ids.clone());
-    let first_prepared = prepare_configs(&pool, &first_request)
-        .await
-        .expect("configs should prepare")
-        .expect("active user should prepare");
-    let first = FeedBackfillFinalizer {
-        queue: QueueKernel::new(pool.clone()),
-        results: outcomes(&first_prepared, user_id),
-        request: first_request,
-    };
-    apply_and_commit(&pool, &first).await;
+    for config_id in &config_ids {
+        let first_request = request(user_id, vec![*config_id]);
+        let first_prepared = prepare_configs(&pool, &first_request)
+            .await
+            .expect("config should prepare")
+            .expect("active user should prepare");
+        let first = FeedBackfillFinalizer {
+            queue: QueueKernel::new(pool.clone()),
+            result: Some(outcome(&first_prepared, user_id)),
+            request: first_request,
+        };
+        apply_and_commit(&pool, &first).await;
+    }
 
     sqlx::query(
         r"
@@ -386,20 +450,22 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
     .await
     .expect("podcast membership should archive");
 
-    let repeat_request = request(user_id, config_ids);
-    let repeat_prepared = prepare_configs(&pool, &repeat_request)
-        .await
-        .expect("configs should prepare again")
-        .expect("active user should prepare again");
-    let repeat = FeedBackfillFinalizer {
-        queue: QueueKernel::new(pool.clone()),
-        results: outcomes(&repeat_prepared, user_id),
-        request: repeat_request,
-    };
-    assert!(matches!(
-        apply_and_commit(&pool, &repeat).await,
-        TaskFinalizerResult::Keep
-    ));
+    for config_id in config_ids {
+        let repeat_request = request(user_id, vec![config_id]);
+        let repeat_prepared = prepare_configs(&pool, &repeat_request)
+            .await
+            .expect("config should prepare again")
+            .expect("active user should prepare again");
+        let repeat = FeedBackfillFinalizer {
+            queue: QueueKernel::new(pool.clone()),
+            result: Some(outcome(&repeat_prepared, user_id)),
+            request: repeat_request,
+        };
+        assert!(matches!(
+            apply_and_commit(&pool, &repeat).await,
+            TaskFinalizerResult::Keep
+        ));
+    }
 
     let second_user_id = sqlx::query_scalar::<_, i64>(
         r"
@@ -412,20 +478,22 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
     .await
     .expect("second user should insert");
     let second_config_ids = insert_feed_configs(&pool, second_user_id).await;
-    let second_request = request(second_user_id, second_config_ids);
-    let second_prepared = prepare_configs(&pool, &second_request)
-        .await
-        .expect("second user's configs should prepare")
-        .expect("second active user should prepare");
-    let second = FeedBackfillFinalizer {
-        queue: QueueKernel::new(pool.clone()),
-        results: outcomes(&second_prepared, second_user_id),
-        request: second_request,
-    };
-    assert!(matches!(
-        apply_and_commit(&pool, &second).await,
-        TaskFinalizerResult::Keep
-    ));
+    for config_id in second_config_ids {
+        let second_request = request(second_user_id, vec![config_id]);
+        let second_prepared = prepare_configs(&pool, &second_request)
+            .await
+            .expect("second user's config should prepare")
+            .expect("second active user should prepare");
+        let second = FeedBackfillFinalizer {
+            queue: QueueKernel::new(pool.clone()),
+            result: Some(outcome(&second_prepared, second_user_id)),
+            request: second_request,
+        };
+        assert!(matches!(
+            apply_and_commit(&pool, &second).await,
+            TaskFinalizerResult::Keep
+        ));
+    }
 
     let content_count = sqlx::query_scalar::<_, i64>(
         "SELECT count(*)::bigint FROM contents WHERE content_type IN ('article', 'podcast')",
@@ -502,46 +570,44 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
         .await
         .expect("first-edition source should insert");
     }
-    let mut request = request(user_id, config_ids.clone());
-    request.first_edition_run_id = Some(run_id);
-    let prepared = prepare_configs(&pool, &request)
+    let mut batch_request = request(user_id, config_ids.clone());
+    batch_request.first_edition_run_id = Some(run_id);
+    let prepared = prepare_configs(&pool, &batch_request)
         .await
         .expect("configs should prepare")
         .expect("active user should prepare");
-    let results = prepared
-        .plans
-        .iter()
-        .cloned()
-        .map(|plan| {
-            let result = if plan.id == config_ids[0] {
-                ScrapeProviderOutcome {
-                    retryable_failure: false,
-                    items: vec![article(plan.id, user_id)],
-                    item_errors: vec!["one malformed article".to_owned()],
-                }
-            } else {
-                ScrapeProviderOutcome {
-                    retryable_failure: false,
-                    items: Vec::new(),
-                    item_errors: vec!["episode has no audio".to_owned()],
-                }
-            };
-            FeedFetchOutcome {
+    for plan in prepared.plans {
+        let expected_success = plan.id == config_ids[0];
+        let result = if plan.id == config_ids[0] {
+            ScrapeProviderOutcome {
+                retryable_failure: false,
+                items: vec![article(plan.id, user_id)],
+                item_errors: vec!["one malformed article".to_owned()],
+            }
+        } else {
+            ScrapeProviderOutcome {
+                retryable_failure: false,
+                items: Vec::new(),
+                item_errors: vec!["episode has no audio".to_owned()],
+            }
+        };
+        let mut single_request = request(user_id, vec![plan.id]);
+        single_request.first_edition_run_id = Some(run_id);
+        let finalizer = FeedBackfillFinalizer {
+            queue: QueueKernel::new(pool.clone()),
+            request: single_request,
+            result: Some(FeedFetchOutcome {
                 plan,
                 result: Ok(result),
-            }
-        })
-        .collect();
-    let finalizer = FeedBackfillFinalizer {
-        queue: QueueKernel::new(pool.clone()),
-        request,
-        results,
-    };
+            }),
+        };
 
-    assert!(matches!(
-        apply_and_commit(&pool, &finalizer).await,
-        TaskFinalizerResult::Keep
-    ));
+        let finalizer_result = apply_and_commit(&pool, &finalizer).await;
+        assert_eq!(
+            matches!(finalizer_result, TaskFinalizerResult::Keep),
+            expected_success
+        );
+    }
 
     let progress = sqlx::query_as::<_, (String, String, i32)>(
         r"
@@ -573,7 +639,7 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .expect("run revision should be queryable");
-    assert_eq!(revision, 2);
+    assert_eq!(revision, 3);
     let content_count = sqlx::query_scalar::<_, i64>("SELECT count(*)::bigint FROM contents")
         .fetch_one(&pool)
         .await
@@ -604,13 +670,13 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
     for (position, config_id) in config_ids.iter().enumerate() {
         sqlx::query(r#"INSERT INTO onboarding_first_edition_sources (run_id, source_key, display_name, source_kind, "position", status, processed_item_count) VALUES ($1::integer, $2, 'Feed', 'feed', $3, 'queued', 0)"#).bind(run_id).bind(format!("feed:{config_id}")).bind(i32::try_from(position).unwrap()).execute(&pool).await.unwrap();
     }
-    let mut request = request(user_id, config_ids.clone());
+    let mut request = request(user_id, vec![config_ids[0]]);
     request.first_edition_run_id = Some(run_id);
     let prepared = prepare_configs(&pool, &request)
         .await
         .expect("configs should prepare")
         .expect("active user should prepare");
-    let results = outcomes(&prepared, user_id);
+    let result = outcome(&prepared, user_id);
     sqlx::query("UPDATE user_scraper_configs SET display_name = 'Changed' WHERE id::bigint = $1")
         .bind(config_ids[0])
         .execute(&pool)
@@ -619,7 +685,7 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
     let finalizer = FeedBackfillFinalizer {
         queue: QueueKernel::new(pool.clone()),
         request,
-        results,
+        result: Some(result),
     };
 
     let result = apply_and_commit(&pool, &finalizer).await;
@@ -632,14 +698,14 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
         .fetch_one(&pool)
         .await
         .expect("content count should be queryable");
-    assert_eq!(content_count, 1);
+    assert_eq!(content_count, 0);
     let task_count = sqlx::query_scalar::<_, i64>("SELECT count(*)::bigint FROM processing_tasks")
         .fetch_one(&pool)
         .await
         .expect("task count should be queryable");
-    assert_eq!(task_count, 1);
+    assert_eq!(task_count, 0);
     let states: Vec<String> = sqlx::query_scalar("SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint = $1 ORDER BY source_key").bind(run_id).fetch_all(&pool).await.unwrap();
-    assert_eq!(states, ["queued", "processed"]);
+    assert_eq!(states, ["queued", "queued"]);
 }
 
 #[sqlx::test]

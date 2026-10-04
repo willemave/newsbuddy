@@ -1,14 +1,13 @@
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::str::FromStr as _;
 use std::time::Duration;
 
 use clap::{CommandFactory as _, Parser as _};
 use clap_complete::aot::{Shell, generate};
 use newsly_contracts::{
     AgentLibraryFileResponse, AgentLibraryManifestResponse, AgentOnboardingCompleteRequest,
-    AgentOnboardingStartRequest, AgentSearchRequest, BulkMarkReadRequest, ContentType,
+    AgentOnboardingStartRequest, AgentSearchRequest, BulkMarkReadRequest,
     OnboardingSelectedAggregator, SubmitContentRequest, SubscribeToFeedRequest,
 };
 use qrcode::QrCode;
@@ -19,13 +18,13 @@ use serde_json::{Value, json};
 use crate::args::{
     AuthCommand, Cli, Command, CompletionShell, ConfigCommand, ConfigSetCommand, ContentCommand,
     ContentSubmissionsCommand, JobsCommand, LibraryCommand, NewsCommand, OnboardingCommand,
-    OptionalWaitArgs, SourcesCommand, SubmitArgs, WaitArgs,
+    OptionalWaitArgs, SourcesCommand, SubmitArgs, WaitTimingArgs,
 };
 use crate::client::{ApiError, Client, QueryParameters};
 use crate::config::{self, FileConfig, RuntimeConfig};
 use crate::favorites::collect_favorite_articles;
 use crate::library::{LibrarySyncError, sync_library};
-use crate::output::{Envelope, EnvelopeError, OutputFormat, emit};
+use crate::output::{Envelope, OutputFormat, emit};
 use crate::wait::{WaitOptions, job_failed_or_skipped};
 
 #[derive(Debug)]
@@ -55,38 +54,6 @@ impl CommandResult {
     }
 }
 
-#[derive(Debug)]
-enum CommandError {
-    Api(ApiError),
-    Local(String),
-}
-
-impl CommandError {
-    fn local(error: impl std::fmt::Display) -> Self {
-        Self::Local(error.to_string())
-    }
-
-    fn envelope(self) -> EnvelopeError {
-        match self {
-            Self::Api(error) => EnvelopeError {
-                message: error.message,
-                status_code: error.status_code,
-                code: error.code,
-                details: error.details.map(|details| *details),
-                retryable: error.retryable,
-                request_id: error.request_id,
-            },
-            Self::Local(message) => EnvelopeError::message(message),
-        }
-    }
-}
-
-impl From<ApiError> for CommandError {
-    fn from(error: ApiError) -> Self {
-        Self::Api(error)
-    }
-}
-
 /// Parse and execute one `newsbuddy` invocation.
 pub async fn run<I, T>(
     arguments: I,
@@ -101,8 +68,13 @@ where
     let cli = match Cli::try_parse_from(arguments) {
         Ok(cli) => cli,
         Err(error) => {
-            let _ = write!(stderr, "{error}");
-            return 1;
+            let exit_code = u8::try_from(error.exit_code()).unwrap_or(1);
+            if error.use_stderr() {
+                let _ = write!(stderr, "{error}");
+            } else {
+                let _ = write!(stdout, "{error}");
+            }
+            return exit_code;
         }
     };
     let output_format = if cli.json {
@@ -131,7 +103,7 @@ where
         Err(error) => {
             let envelope = Envelope::failure(
                 command_name,
-                error.envelope(),
+                error,
                 Some(config_path.to_string_lossy().into_owned()),
             );
             if let Err(error) = emit(stdout, &envelope, output_format) {
@@ -146,7 +118,7 @@ async fn execute(
     cli: Cli,
     stderr: &mut impl Write,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     let root = RootOptions {
         config: cli.config,
         server: cli.server,
@@ -183,10 +155,7 @@ async fn execute(
     }
 }
 
-fn execute_config(
-    cli: &RootOptions,
-    command: ConfigCommand,
-) -> Result<CommandResult, CommandError> {
+fn execute_config(cli: &RootOptions, command: ConfigCommand) -> Result<CommandResult, ApiError> {
     let path = config::resolve_path(&path_override(cli.config.as_ref()));
     match command {
         ConfigCommand::Set(arguments) => match arguments.command {
@@ -251,7 +220,7 @@ async fn execute_auth(
     command: AuthCommand,
     stderr: &mut impl Write,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     match command {
         AuthCommand::Login {
             device_name,
@@ -259,14 +228,12 @@ async fn execute_auth(
             poll_timeout,
         } => {
             if poll_interval.is_zero() {
-                return Err(CommandError::Local(
+                return Err(ApiError::local(
                     "poll-interval must be greater than zero".to_owned(),
                 ));
             }
             let runtime = resolve_runtime(cli)?;
-            runtime
-                .validate_server_only()
-                .map_err(CommandError::local)?;
+            runtime.validate_server_only().map_err(ApiError::local)?;
             let client = Client::new(&runtime, cli.timeout, version)?;
             let device_name = device_name.unwrap_or_else(default_device_name);
             let started = client.start_cli_link(Some(&device_name)).await?;
@@ -275,19 +242,13 @@ async fn execute_auth(
             let approve_url = required_string(&started, "approve_url", "CLI link start")?;
             render_cli_link(stderr, approve_url);
 
+            let wait = WaitOptions::new(poll_interval, poll_timeout)?;
             let linked = client
-                .wait_for_cli_link(
-                    session_id,
-                    poll_token,
-                    WaitOptions {
-                        interval: poll_interval,
-                        timeout: poll_timeout,
-                    },
-                )
+                .wait_for_cli_link(session_id, poll_token, wait)
                 .await?;
             let api_key = required_string(&linked, "api_key", "CLI link poll")?.to_owned();
             if api_key.is_empty() {
-                return Err(CommandError::Local(
+                return Err(ApiError::local(
                     "CLI link completed without an API key".to_owned(),
                 ));
             }
@@ -318,15 +279,19 @@ async fn execute_jobs(
     cli: &RootOptions,
     command: JobsCommand,
     version: &str,
-) -> Result<CommandResult, CommandError> {
-    let client = authenticated_client(cli, version)?;
+) -> Result<CommandResult, ApiError> {
     match command {
-        JobsCommand::Get { job_id } => Ok(CommandResult::data(
-            "jobs.get",
-            client.get_job(job_id).await?,
-        )),
+        JobsCommand::Get { job_id } => {
+            let client = authenticated_client(cli, version)?;
+            Ok(CommandResult::data(
+                "jobs.get",
+                client.get_job(job_id).await?,
+            ))
+        }
         JobsCommand::Wait { job_id, wait } => {
-            let response = client.wait_for_job(job_id, wait_options(wait)).await?;
+            let wait = wait_options(wait)?;
+            let client = authenticated_client(cli, version)?;
+            let response = client.wait_for_job(job_id, wait).await?;
             Ok(CommandResult::data("jobs.wait", response))
         }
     }
@@ -336,7 +301,7 @@ async fn execute_content(
     cli: &RootOptions,
     command: ContentCommand,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     let client = authenticated_client(cli, version)?;
     match command {
         ContentCommand::List {
@@ -368,7 +333,7 @@ async fn execute_content(
         ContentCommand::Favorites { limit } => {
             let favorites = collect_favorite_articles(&client, limit, cli.timeout).await?;
             let text_data = favorites.render_text();
-            let data = serde_json::to_value(favorites).map_err(CommandError::local)?;
+            let data = serde_json::to_value(favorites).map_err(ApiError::local)?;
             let mut result = CommandResult::data("content.favorites", data);
             result.text_data = Some(text_data);
             Ok(result)
@@ -397,18 +362,11 @@ async fn execute_submit(
     arguments: SubmitArgs,
     summarize: bool,
     command: &'static str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     let url = parse_http_url(&arguments.url)?;
     let wait = optional_wait_options(arguments.wait)?;
-    let content_type = arguments
-        .content_type
-        .as_deref()
-        .map(ContentType::from_str)
-        .transpose()
-        .map_err(CommandError::local)?;
     let request = SubmitContentRequest {
         url: url.to_string(),
-        content_type,
         title: arguments.title,
         platform: arguments.platform,
         instruction: arguments.note,
@@ -424,10 +382,10 @@ async fn execute_submit(
         if let Some(task_id) = optional_i64(&response, "task_id", "content submission")? {
             let job = client.wait_for_job(task_id, wait).await?;
             if job_failed_or_skipped(&job) {
-                return Err(CommandError::Api(ApiError::local_with_details(
+                return Err(ApiError::local_with_details(
                     "submission job did not complete successfully",
                     job,
-                )));
+                ));
             }
             result.job = Some(job);
         }
@@ -441,7 +399,7 @@ async fn execute_library(
     cli: &RootOptions,
     command: LibraryCommand,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     match command {
         LibraryCommand::Sync {
             dir,
@@ -449,13 +407,13 @@ async fn execute_library(
             allow_prune_all,
         } => {
             let runtime = resolve_runtime(cli)?;
-            runtime.validate_remote().map_err(CommandError::local)?;
+            runtime.validate_remote().map_err(ApiError::local)?;
             let root = dir.unwrap_or_else(|| runtime.library_root.clone());
             let client = Client::new(&runtime, cli.timeout, version)?;
             let manifest_value = client.get_library_manifest(include_source).await?;
             let manifest: AgentLibraryManifestResponse = serde_json::from_value(manifest_value)
                 .map_err(|error| {
-                    CommandError::Local(format!("invalid library manifest response: {error}"))
+                    ApiError::local(format!("invalid library manifest response: {error}"))
                 })?;
             let receipt = sync_library(&root, &manifest, allow_prune_all, |relative_path| {
                 let client = &client;
@@ -470,7 +428,7 @@ async fn execute_library(
             .map_err(library_error)?;
             Ok(CommandResult::data(
                 "library.sync",
-                serde_json::to_value(receipt).map_err(CommandError::local)?,
+                serde_json::to_value(receipt).map_err(ApiError::local)?,
             ))
         }
     }
@@ -480,7 +438,7 @@ async fn execute_sources(
     cli: &RootOptions,
     command: SourcesCommand,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     let client = authenticated_client(cli, version)?;
     match command {
         SourcesCommand::List { source_type } => {
@@ -496,16 +454,9 @@ async fn execute_sources(
             feed_type,
             display_name,
         } => {
-            const SUPPORTED: [&str; 3] = ["atom", "substack", "podcast_rss"];
-            if !SUPPORTED.contains(&feed_type.as_str()) {
-                return Err(CommandError::Local(format!(
-                    "unsupported feed type {feed_type:?}; expected one of: {}",
-                    SUPPORTED.join(", ")
-                )));
-            }
             let request = SubscribeToFeedRequest {
                 feed_url: parse_http_url(&feed_url)?.to_string(),
-                feed_type,
+                feed_type: feed_type.as_str().to_owned(),
                 display_name,
             };
             Ok(CommandResult::data(
@@ -520,7 +471,7 @@ async fn execute_onboarding(
     cli: &RootOptions,
     command: OnboardingCommand,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     let client = authenticated_client(cli, version)?;
     match command {
         OnboardingCommand::Start {
@@ -584,7 +535,7 @@ async fn execute_news(
     cli: &RootOptions,
     command: NewsCommand,
     version: &str,
-) -> Result<CommandResult, CommandError> {
+) -> Result<CommandResult, ApiError> {
     let client = authenticated_client(cli, version)?;
     match command {
         NewsCommand::List {
@@ -624,23 +575,23 @@ async fn execute_news(
 fn update_config(
     path: &Path,
     update: impl FnOnce(FileConfig) -> FileConfig,
-) -> Result<FileConfig, CommandError> {
-    config::update(path, update).map_err(CommandError::local)
+) -> Result<FileConfig, ApiError> {
+    config::update(path, update).map_err(ApiError::local)
 }
 
-fn resolve_runtime(cli: &RootOptions) -> Result<RuntimeConfig, CommandError> {
+fn resolve_runtime(cli: &RootOptions) -> Result<RuntimeConfig, ApiError> {
     config::resolve_runtime(
         &path_override(cli.config.as_ref()),
         cli.server.as_deref().unwrap_or_default(),
         cli.api_key.as_deref().unwrap_or_default(),
     )
-    .map_err(CommandError::local)
+    .map_err(ApiError::local)
 }
 
-fn authenticated_client(cli: &RootOptions, version: &str) -> Result<Client, CommandError> {
+fn authenticated_client(cli: &RootOptions, version: &str) -> Result<Client, ApiError> {
     let runtime = resolve_runtime(cli)?;
-    runtime.validate_remote().map_err(CommandError::local)?;
-    Client::new(&runtime, cli.timeout, version).map_err(Into::into)
+    runtime.validate_remote().map_err(ApiError::local)?;
+    Client::new(&runtime, cli.timeout, version)
 }
 
 fn path_override(path: Option<&PathBuf>) -> String {
@@ -648,36 +599,24 @@ fn path_override(path: Option<&PathBuf>) -> String {
         .unwrap_or_default()
 }
 
-fn wait_options(arguments: WaitArgs) -> WaitOptions {
-    let _ = arguments.wait;
-    WaitOptions {
-        interval: arguments.wait_interval,
-        timeout: arguments.wait_timeout,
-    }
+fn wait_options(arguments: WaitTimingArgs) -> Result<WaitOptions, ApiError> {
+    WaitOptions::new(arguments.wait_interval, arguments.wait_timeout)
 }
 
-fn optional_wait_options(arguments: OptionalWaitArgs) -> Result<Option<WaitOptions>, CommandError> {
+fn optional_wait_options(arguments: OptionalWaitArgs) -> Result<Option<WaitOptions>, ApiError> {
     if !arguments.wait {
         return Ok(None);
     }
-    if arguments.wait_interval.is_zero() {
-        return Err(CommandError::Local(
-            "wait-interval must be greater than zero".to_owned(),
-        ));
-    }
-    Ok(Some(WaitOptions {
-        interval: arguments.wait_interval,
-        timeout: arguments.wait_timeout,
-    }))
+    wait_options(arguments.timing).map(Some)
 }
 
-fn parse_http_url(raw: &str) -> Result<Url, CommandError> {
-    let url = Url::parse(raw).map_err(CommandError::local)?;
+fn parse_http_url(raw: &str) -> Result<Url, ApiError> {
+    let url = Url::parse(raw).map_err(ApiError::local)?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(CommandError::Local("url must use http or https".to_owned()));
+        return Err(ApiError::local("url must use http or https".to_owned()));
     }
     if url.host_str().is_none() {
-        return Err(CommandError::Local("url must include a host".to_owned()));
+        return Err(ApiError::local("url must include a host".to_owned()));
     }
     Ok(url)
 }
@@ -692,31 +631,27 @@ fn required_string<'a>(
     value: &'a Value,
     field: &str,
     response_name: &str,
-) -> Result<&'a str, CommandError> {
+) -> Result<&'a str, ApiError> {
     value.get(field).and_then(Value::as_str).ok_or_else(|| {
-        CommandError::Local(format!(
+        ApiError::local(format!(
             "invalid {response_name} response: missing string field {field:?}"
         ))
     })
 }
 
-fn required_i64(value: &Value, field: &str, response_name: &str) -> Result<i64, CommandError> {
+fn required_i64(value: &Value, field: &str, response_name: &str) -> Result<i64, ApiError> {
     value.get(field).and_then(Value::as_i64).ok_or_else(|| {
-        CommandError::Local(format!(
+        ApiError::local(format!(
             "invalid {response_name} response: missing integer field {field:?}"
         ))
     })
 }
 
-fn optional_i64(
-    value: &Value,
-    field: &str,
-    response_name: &str,
-) -> Result<Option<i64>, CommandError> {
+fn optional_i64(value: &Value, field: &str, response_name: &str) -> Result<Option<i64>, ApiError> {
     match value.get(field) {
         None | Some(Value::Null) => Ok(None),
         Some(value) => value.as_i64().map(Some).ok_or_else(|| {
-            CommandError::Local(format!(
+            ApiError::local(format!(
                 "invalid {response_name} response: field {field:?} is not an integer"
             ))
         }),
@@ -744,10 +679,10 @@ fn render_cli_link(writer: &mut impl Write, approve_url: &str) {
     let _ = writeln!(writer, "\nApproval link:\n{approve_url}\n");
 }
 
-fn library_error(error: LibrarySyncError<ApiError>) -> CommandError {
+fn library_error(error: LibrarySyncError<ApiError>) -> ApiError {
     match error {
-        LibrarySyncError::Remote(error) => CommandError::Api(error),
-        error => CommandError::Local(error.to_string()),
+        LibrarySyncError::Remote(error) => error,
+        error => ApiError::local(error.to_string()),
     }
 }
 

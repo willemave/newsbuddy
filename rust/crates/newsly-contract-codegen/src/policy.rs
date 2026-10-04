@@ -79,6 +79,8 @@ pub struct Settings {
     pub untyped_fields: BTreeSet<String>,
     #[serde(default)]
     pub lenient_fields: BTreeSet<String>,
+    #[serde(default)]
+    pub equatable_models: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,6 +159,12 @@ impl Policy {
             .chain(&self.settings.lenient_fields)
         {
             ensure_field_path(path)?;
+        }
+        for model in &self.settings.equatable_models {
+            ensure!(
+                self.model_policy(model).is_some(),
+                "equatable Swift model {model} is not registered"
+            );
         }
         Ok(())
     }

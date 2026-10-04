@@ -1,26 +1,26 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{Map, Value};
-use sqlx::{FromRow, PgPool, Postgres, Transaction};
+use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
-struct LlmTaskActionRow {
-    id: i64,
-    llm_task_id: i64,
-    action_name: String,
-    action_status: String,
-    approval_policy: String,
-    approval_required: bool,
-    action_input: Value,
-    action_result: Value,
-    rationale: Option<String>,
-    idempotency_key: Option<String>,
-    approved_by_user_id: Option<i64>,
-    error_message: Option<String>,
-    created_at: NaiveDateTime,
-    approved_at: Option<NaiveDateTime>,
-    started_at: Option<NaiveDateTime>,
-    completed_at: Option<NaiveDateTime>,
+pub(crate) struct LlmTaskActionRow {
+    pub(crate) id: i64,
+    pub(crate) llm_task_id: i64,
+    pub(crate) action_name: String,
+    pub(crate) action_status: String,
+    pub(crate) approval_policy: String,
+    pub(crate) approval_required: bool,
+    pub(crate) action_input: Value,
+    pub(crate) action_result: Value,
+    pub(crate) rationale: Option<String>,
+    pub(crate) idempotency_key: Option<String>,
+    pub(crate) approved_by_user_id: Option<i64>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) created_at: NaiveDateTime,
+    pub(crate) approved_at: Option<NaiveDateTime>,
+    pub(crate) started_at: Option<NaiveDateTime>,
+    pub(crate) completed_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,7 +66,7 @@ pub async fn list_llm_task_actions_for_user(
         return Ok(None);
     }
 
-    let rows = sqlx::query_as::<_, LlmTaskActionRow>(ACTION_PROJECTION_SQL)
+    let rows = sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE llm_task_id = $1 ORDER BY created_at, id")))
         .bind(task_id)
         .fetch_all(pool)
         .await?;
@@ -165,9 +165,7 @@ where
     .await
 }
 
-const ACTION_PROJECTION_SQL: &str = r#"
-    SELECT
-        id::bigint AS id,
+pub(crate) const ACTION_COLUMNS_SQL: &str = r"id::bigint AS id,
         llm_task_id::bigint AS llm_task_id,
         action_name,
         action_status,
@@ -182,11 +180,7 @@ const ACTION_PROJECTION_SQL: &str = r#"
         created_at,
         approved_at,
         started_at,
-        completed_at
-    FROM llm_task_actions
-    WHERE llm_task_id = $1
-    ORDER BY created_at, id
-"#;
+        completed_at";
 
 impl From<LlmTaskActionRow> for LlmTaskActionProjection {
     fn from(row: LlmTaskActionRow) -> Self {
@@ -211,7 +205,7 @@ impl From<LlmTaskActionRow> for LlmTaskActionProjection {
     }
 }
 
-fn json_object_or_default(value: Value) -> Map<String, Value> {
+pub(crate) fn json_object_or_default(value: Value) -> Map<String, Value> {
     match value {
         Value::Object(object) => object,
         _ => Map::new(),

@@ -1,16 +1,13 @@
 pub(super) mod presentation;
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+use std::collections::BTreeSet;
 
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
-use chrono::{DateTime, NaiveDateTime};
+use chrono::NaiveDateTime;
 use newsly_contracts::{
     ContentDetailResponse, ContentType, NewsItemDetailResponse, NewsItemListResponse,
     PaginationMetadata,
@@ -20,12 +17,11 @@ use newsly_db::{
     list_active_feed_urls, list_visible_news_items,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
-use crate::write_support::internal_error;
+use crate::pagination_cursor::{self, InvalidCursor};
+use crate::write_support::{bad_request, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 pub(super) fn router() -> Router<AppState> {
@@ -70,10 +66,10 @@ pub(super) async fn get_content_detail(
         let active_urls = list_active_feed_urls(state.database.pool(), current_user.id, &feed_type)
             .await
             .map_err(|error| internal_error(error, &request_id))?;
-        let requested = presentation::canonicalize_feed_url(&feed_url);
+        let requested = newsly_db::canonicalize_feed_url(&feed_url);
         response.can_subscribe = !active_urls
             .iter()
-            .any(|url| presentation::canonicalize_feed_url(url) == requested);
+            .any(|url| newsly_db::canonicalize_feed_url(url) == requested);
     }
     Ok(Json(response))
 }
@@ -138,6 +134,7 @@ const fn default_limit() -> usize {
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = NewsItemListResponse),
+        (status = 400, description = "Invalid cursor", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Not found", body = newsly_contracts::ErrorEnvelope),
         (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
@@ -177,9 +174,9 @@ pub(super) async fn list_news_items(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor)
+        .map(|cursor| decode_cursor(cursor, &query.read_filter))
         .transpose()
-        .map_err(|message| validation_error(message, &request_id))?;
+        .map_err(|error| bad_request(error.to_string(), &request_id))?;
     let mut page = list_visible_news_items(
         state.database.pool(),
         current_user.id,
@@ -197,6 +194,8 @@ pub(super) async fn list_news_items(
         page.items
             .last()
             .map(|item| encode_cursor(item.id, item.sort_timestamp.naive_utc(), &query.read_filter))
+            .transpose()
+            .map_err(|error| internal_error(error, &request_id))?
     } else {
         None
     };
@@ -241,79 +240,58 @@ fn positive_path_id(
     Ok(id)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CursorPayload {
     last_id: i64,
     last_created_at: String,
-    #[serde(default, rename = "filters_hash")]
-    _filters_hash: Option<String>,
-    #[serde(default, rename = "last_rank")]
-    _last_rank: Option<f64>,
+    filters_hash: String,
 }
 
-fn decode_cursor(cursor: &str) -> Result<NewsListCursor, String> {
-    let decoded = URL_SAFE
-        .decode(cursor)
-        .or_else(|_| URL_SAFE_NO_PAD.decode(cursor))
-        .map_err(|_| "Invalid pagination cursor".to_owned())?;
-    let payload: CursorPayload =
-        serde_json::from_slice(&decoded).map_err(|_| "Invalid pagination cursor".to_owned())?;
-    if payload.last_id <= 0 {
-        return Err("Invalid pagination cursor".to_owned());
+fn decode_cursor(cursor: &str, read_filter: &str) -> Result<NewsListCursor, InvalidCursor> {
+    let payload: CursorPayload = pagination_cursor::decode(cursor)?;
+    if payload.last_id <= 0 || payload.filters_hash != filters_hash(read_filter) {
+        return Err(InvalidCursor);
     }
-    let last_sort_timestamp = parse_cursor_datetime(&payload.last_created_at)
-        .ok_or_else(|| "Invalid pagination cursor".to_owned())?;
+    let last_sort_timestamp = pagination_cursor::decode_timestamp(&payload.last_created_at)?;
     Ok(NewsListCursor {
         last_id: payload.last_id,
         last_sort_timestamp,
     })
 }
 
-fn parse_cursor_datetime(value: &str) -> Option<NaiveDateTime> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|value| value.naive_utc())
-        .ok()
-        .or_else(|| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f").ok())
-}
-
 #[derive(Debug, Serialize)]
 struct CursorFilter<'a> {
+    route: &'static str,
     read_filter: &'a str,
 }
 
-fn encode_cursor(last_id: i64, last_created_at: NaiveDateTime, read_filter: &str) -> String {
-    let filter_json = serde_json::to_string(&CursorFilter { read_filter })
-        .expect("cursor filter serialization is infallible");
-    let digest = Sha256::digest(filter_json.as_bytes());
-    let mut filters_hash = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut filters_hash, "{byte:02x}").expect("writing to a string is infallible");
+fn filters_hash(read_filter: &str) -> String {
+    let bytes = serde_json::to_vec(&CursorFilter {
+        route: "news_items",
+        read_filter,
+    })
+    .expect("cursor filter serialization is infallible");
+    newsly_domain::sha256_hex(&bytes)
+}
+
+fn encode_cursor(
+    last_id: i64,
+    last_created_at: NaiveDateTime,
+    read_filter: &str,
+) -> Result<String, InvalidCursor> {
+    if last_id <= 0 {
+        return Err(InvalidCursor);
     }
-    let mut payload = BTreeMap::new();
-    payload.insert("filters_hash", Value::String(filters_hash));
-    payload.insert(
-        "last_created_at",
-        Value::String(last_created_at.format("%Y-%m-%dT%H:%M:%S%.f").to_string()),
-    );
-    payload.insert("last_id", Value::from(last_id));
-    URL_SAFE
-        .encode(serde_json::to_vec(&payload).expect("cursor payload serialization is infallible"))
+    pagination_cursor::encode(&CursorPayload {
+        last_id,
+        last_created_at: pagination_cursor::encode_timestamp(last_created_at),
+        filters_hash: filters_hash(read_filter),
+    })
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn not_found(message: &str, request_id: &str) -> ApiError {
@@ -323,4 +301,21 @@ fn not_found(message: &str, request_id: &str) -> ApiError {
         message,
         request_id.to_owned(),
     )
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn news_cursor_round_trips_and_is_bound_to_read_filter() {
+        let timestamp =
+            NaiveDateTime::parse_from_str("2026-08-30T12:34:56.999999", "%Y-%m-%dT%H:%M:%S%.6f")
+                .expect("valid timestamp");
+        let cursor = encode_cursor(42, timestamp, "unread").expect("cursor encodes");
+        let decoded = decode_cursor(&cursor, "unread").expect("cursor decodes");
+        assert_eq!(decoded.last_id, 42);
+        assert_eq!(decoded.last_sort_timestamp, timestamp);
+        assert!(decode_cursor(&cursor, "read").is_err());
+    }
 }

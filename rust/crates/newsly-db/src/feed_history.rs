@@ -148,7 +148,7 @@ mod tests {
             }
             ids.push(id);
         }
-        let stats = get_scraper_config_stats(&pool, user, &configs)
+        let stats = get_scraper_config_stats(&pool, user, &configs, &configs)
             .await
             .unwrap();
         let stats = &stats[&config.id];
@@ -165,7 +165,7 @@ mod tests {
         );
         sqlx::query("INSERT INTO processing_tasks (content_id, task_type, status, executor_runtime, executor_version, executor_namespace) VALUES ($1, 'process_content', 'failed', 'rust', 1, 'process_content')")
             .bind(ids[1]).execute(&pool).await.unwrap();
-        let stats = get_scraper_config_stats(&pool, user, &configs)
+        let stats = get_scraper_config_stats(&pool, user, &configs, &configs)
             .await
             .unwrap();
         assert_eq!(stats[&config.id].failed_count, 2);
@@ -204,7 +204,7 @@ mod tests {
             .bind(ids[3]).execute(&pool).await.unwrap();
         sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', now()) - interval '1 minute' WHERE content_id::bigint = $1")
             .bind(ids[3]).execute(&pool).await.unwrap();
-        let stats = get_scraper_config_stats(&pool, user, &configs)
+        let stats = get_scraper_config_stats(&pool, user, &configs, &configs)
             .await
             .unwrap();
         assert_eq!(

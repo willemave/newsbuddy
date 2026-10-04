@@ -6,21 +6,27 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
-    ToolPolicy,
+    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
+    ResponseContract, ToolPolicy,
 };
-use reqwest::Url;
+use reqwest::{StatusCode, Url};
 use rig_core::schemars::{JsonSchema, schema_for};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::{ModelSpec, ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
+use crate::elevenlabs::{
+    ElevenLabsSynthesisError, ElevenLabsSynthesisRequest, is_standard_api_base, synthesize,
+};
+use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_ITUNES_SEARCH_URL: &str = "https://itunes.apple.com/search";
 const DEFAULT_ELEVENLABS_API_BASE: &str = "https://api.elevenlabs.io";
+const MAX_NARRATION_AUDIO_BYTES: usize = 30_000_000;
 const DEFAULT_TWEET_MODEL: &str = "openai:gpt-6-luna";
 const DEFAULT_ANTHROPIC_TWEET_MODEL: &str = "anthropic:claude-sonnet-4-5";
 const DEFAULT_DISCUSSION_MODEL: &str = "openai:gpt-6-luna";
@@ -236,9 +242,9 @@ pub struct ContentMiscGateway {
     client: reqwest::Client,
     itunes_search_url: Url,
     agent_engine: RigAgentEngine,
-    tweet_model: String,
-    anthropic_tweet_model: String,
-    discussion_model: String,
+    tweet_model: ModelSpec,
+    anthropic_tweet_model: ModelSpec,
+    discussion_model: ModelSpec,
     elevenlabs_api_base: Url,
     elevenlabs_api_key: Option<SecretString>,
     elevenlabs_voice_id: Option<String>,
@@ -254,7 +260,14 @@ impl ContentMiscGateway {
     ///
     /// Returns an error when provider URLs, credentials, or HTTP/model clients are invalid.
     pub fn from_env() -> Result<Self, ContentMiscGatewayError> {
-        let timeout = Duration::from_secs(env_u64("HTTP_TIMEOUT_SECONDS", 60).max(1));
+        let timeout = Duration::from_secs(
+            u64_from_env(
+                "HTTP_TIMEOUT_SECONDS",
+                60,
+                "an unsigned integer number of seconds",
+            )?
+            .max(1),
+        );
         let client = reqwest::Client::builder().timeout(timeout).build()?;
         let itunes_search_url = Url::parse(
             &env::var("APPLE_ITUNES_SEARCH_URL")
@@ -266,25 +279,23 @@ impl ContentMiscGateway {
                 .unwrap_or_else(|_| DEFAULT_ELEVENLABS_API_BASE.to_owned()),
         )
         .map_err(|error| ContentMiscGatewayError::Url(error.to_string()))?;
-        let agent_engine = RigAgentEngine::new(
-            ProviderCredentials {
-                openai: secret_env("OPENAI_API_KEY"),
-                anthropic: secret_env("ANTHROPIC_API_KEY"),
-                google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-                openrouter: secret_env("OPENROUTER_API_KEY"),
-            },
-            OpenRouterPrivacyPolicy::default(),
-        )?;
+        let agent_engine = RigAgentEngine::new(ProviderCredentials::from_env());
         Ok(Self {
             client,
             itunes_search_url,
             agent_engine,
-            tweet_model: env::var("TWEET_SUGGESTION_MODEL")
-                .unwrap_or_else(|_| DEFAULT_TWEET_MODEL.to_owned()),
-            anthropic_tweet_model: env::var("TWEET_SUGGESTION_ANTHROPIC_MODEL")
-                .unwrap_or_else(|_| DEFAULT_ANTHROPIC_TWEET_MODEL.to_owned()),
-            discussion_model: env::var("DISCUSSION_SUMMARY_MODEL")
-                .unwrap_or_else(|_| DEFAULT_DISCUSSION_MODEL.to_owned()),
+            tweet_model: ModelSpec::parse(
+                &env::var("TWEET_SUGGESTION_MODEL")
+                    .unwrap_or_else(|_| DEFAULT_TWEET_MODEL.to_owned()),
+            )?,
+            anthropic_tweet_model: ModelSpec::parse(
+                &env::var("TWEET_SUGGESTION_ANTHROPIC_MODEL")
+                    .unwrap_or_else(|_| DEFAULT_ANTHROPIC_TWEET_MODEL.to_owned()),
+            )?,
+            discussion_model: ModelSpec::parse(
+                &env::var("DISCUSSION_SUMMARY_MODEL")
+                    .unwrap_or_else(|_| DEFAULT_DISCUSSION_MODEL.to_owned()),
+            )?,
             elevenlabs_api_base,
             elevenlabs_api_key: secret_env("ELEVENLABS_API_KEY"),
             elevenlabs_voice_id: clean_env("ELEVENLABS_TTS_VOICE_ID"),
@@ -406,30 +417,11 @@ impl ContentMiscGateway {
     /// # Errors
     ///
     /// Returns an error when provider routing, model execution, decoding, or validation fails.
-    pub async fn generate_tweet_suggestions(
-        &self,
-        content_context: &str,
-        guidance: Option<&str>,
-        creativity: u8,
-        length: &str,
-        provider: Option<&str>,
-    ) -> Result<GeneratedTweetSuggestions, ContentMiscGatewayError> {
-        self.generate_tweet_suggestions_with_events(
-            content_context,
-            guidance,
-            creativity,
-            length,
-            provider,
-            Arc::new(NoEvents),
-        )
-        .await
-    }
-
     /// Generates structured tweet suggestions while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same provider and validation errors as [`Self::generate_tweet_suggestions`].
+    /// Returns provider and validation errors from tweet generation.
     pub async fn generate_tweet_suggestions_with_events(
         &self,
         content_context: &str,
@@ -440,9 +432,9 @@ impl ContentMiscGateway {
         events: Arc<dyn AgentEventSink>,
     ) -> Result<GeneratedTweetSuggestions, ContentMiscGatewayError> {
         let model_spec = if provider == Some("anthropic") {
-            self.anthropic_tweet_model.clone()
+            self.anthropic_tweet_model.canonical()
         } else {
-            self.tweet_model.clone()
+            self.tweet_model.canonical()
         };
         let schema = schema_for!(GeneratedTweetDocument);
         let prompt = format!(
@@ -521,26 +513,11 @@ impl ContentMiscGateway {
     /// # Errors
     ///
     /// Returns an error when model execution, response decoding, or validation fails.
-    pub async fn summarize_discussion(
-        &self,
-        prompt: &str,
-        merge: bool,
-        external_discussion_url: Option<&str>,
-    ) -> Result<GeneratedDiscussionSummary, ContentMiscGatewayError> {
-        self.summarize_discussion_with_events(
-            prompt,
-            merge,
-            external_discussion_url,
-            Arc::new(NoEvents),
-        )
-        .await
-    }
-
     /// Generates a discussion summary while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same provider and validation errors as [`Self::summarize_discussion`].
+    /// Returns provider and validation errors from discussion summarization.
     pub async fn summarize_discussion_with_events(
         &self,
         prompt: &str,
@@ -575,7 +552,7 @@ impl ContentMiscGateway {
             .run(
                 AgentRequest {
                     feature: "news_discussions".to_owned(),
-                    model_spec: self.discussion_model.clone(),
+                    model_spec: self.discussion_model.canonical(),
                     system_prompt: format!(
                         "{system_prompt} Write an overview of 20-900 characters and one to eight                          topics. Each topic title must contain 2-90 characters and its summary                          10-500 characters. Use concise plain text with single spaces. These are                          character limits, not word limits; rewrite to fit without losing meaning."
                     ),
@@ -619,7 +596,7 @@ impl ContentMiscGateway {
         Ok(GeneratedDiscussionSummary {
             summary,
             summary_json,
-            provider: model_provider_name(&self.discussion_model).to_owned(),
+            provider: self.discussion_model.provider.as_str().to_owned(),
             model: outcome.model_name,
             usage: outcome.usage,
             provider_response_id: outcome.provider_response_id,
@@ -643,54 +620,43 @@ impl ContentMiscGateway {
             .elevenlabs_voice_id
             .as_deref()
             .ok_or(ContentMiscGatewayError::NarrationUnavailable)?;
-        let mut endpoint = self.elevenlabs_api_base.clone();
-        {
-            let mut path = endpoint
-                .path_segments_mut()
-                .map_err(|()| ContentMiscGatewayError::NarrationUnavailable)?;
-            path.pop_if_empty();
-            path.extend(["v1", "text-to-speech", voice_id]);
-        }
-        endpoint
-            .query_pairs_mut()
-            .append_pair("output_format", &self.elevenlabs_output_format);
-        let audio = self
-            .client
-            .post(endpoint)
-            .header("xi-api-key", api_key.expose_secret())
-            .header(reqwest::header::ACCEPT, "audio/mpeg")
-            .json(&ElevenLabsRequest {
-                text: narration_text,
+        let audio = synthesize(
+            &self.client,
+            ElevenLabsSynthesisRequest {
+                api_base: &self.elevenlabs_api_base,
+                api_key,
+                voice_id,
                 model_id: &self.elevenlabs_model,
-                voice_settings: ElevenLabsVoiceSettings {
-                    speed: self.elevenlabs_speed,
-                },
-            })
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?
-            .to_vec();
-        if audio.is_empty() {
-            return Err(ContentMiscGatewayError::EmptyNarrationAudio);
-        }
+                output_format: &self.elevenlabs_output_format,
+                speed: self.elevenlabs_speed,
+                text: narration_text,
+                max_response_bytes: MAX_NARRATION_AUDIO_BYTES,
+            },
+        )
+        .await
+        .map_err(content_misc_synthesis_error)?;
         Ok(SynthesizedNarration {
             audio,
             model: self.elevenlabs_model.clone(),
             request_count: 1,
             text_chars: u64::try_from(narration_text.chars().count()).unwrap_or(u64::MAX),
-            standard_pricing: is_standard_elevenlabs_api_base(&self.elevenlabs_api_base),
+            standard_pricing: is_standard_api_base(&self.elevenlabs_api_base),
         })
     }
 }
 
-fn is_standard_elevenlabs_api_base(value: &Url) -> bool {
-    value.scheme() == "https"
-        && value.host_str() == Some("api.elevenlabs.io")
-        && matches!(value.path(), "" | "/")
-        && value.query().is_none()
-        && value.fragment().is_none()
+fn content_misc_synthesis_error(error: ElevenLabsSynthesisError) -> ContentMiscGatewayError {
+    match error {
+        ElevenLabsSynthesisError::InvalidApiBase => ContentMiscGatewayError::NarrationUnavailable,
+        ElevenLabsSynthesisError::Http(error) => ContentMiscGatewayError::Http(error),
+        ElevenLabsSynthesisError::Status { status, detail } => {
+            ContentMiscGatewayError::NarrationStatus { status, detail }
+        }
+        ElevenLabsSynthesisError::EmptyAudio => ContentMiscGatewayError::EmptyNarrationAudio,
+        ElevenLabsSynthesisError::AudioTooLarge => ContentMiscGatewayError::NarrationTooLarge {
+            limit: MAX_NARRATION_AUDIO_BYTES,
+        },
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -710,41 +676,6 @@ struct ItunesSearchResult {
     feed_url: Option<String>,
     description: Option<String>,
     release_date: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ElevenLabsRequest<'a> {
-    text: &'a str,
-    model_id: &'a str,
-    voice_settings: ElevenLabsVoiceSettings,
-}
-
-#[derive(Debug, Serialize)]
-struct ElevenLabsVoiceSettings {
-    speed: f32,
-}
-
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async move {
-            Err(AgentRuntimeError::Tool(format!(
-                "tweet suggestions do not expose tool {}",
-                call.name
-            )))
-        })
-    }
 }
 
 fn validate_tweets(
@@ -804,19 +735,6 @@ fn clean_optional_bounded(value: Option<String>, max_chars: usize) -> Option<Str
     })
 }
 
-fn model_provider_name(model_spec: &str) -> &'static str {
-    let value = model_spec.trim();
-    match value.split_once(':').map(|(provider, _)| provider) {
-        Some("openai") => "openai",
-        Some("anthropic") => "anthropic",
-        Some("google" | "google-gla") => "google",
-        Some("openrouter") => "openrouter",
-        _ if value.starts_with("claude-") => "anthropic",
-        _ if value.starts_with("gemini-") => "google",
-        _ => "openai",
-    }
-}
-
 fn clean_env(name: &str) -> Option<String> {
     env::var(name)
         .ok()
@@ -828,21 +746,16 @@ fn secret_env(name: &str) -> Option<SecretString> {
     clean_env(name).map(SecretString::from)
 }
 
-fn env_u64(name: &str, default: u64) -> u64 {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(default)
-}
-
 #[derive(Debug, Error)]
 pub enum ContentMiscGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("content provider HTTP request failed")]
     Http(#[from] reqwest::Error),
     #[error("content provider URL is invalid")]
     Url(String),
-    #[error("tweet provider configuration failed")]
-    TweetConfiguration(#[from] crate::RigAgentEngineError),
+    #[error("content model configuration failed")]
+    Model(#[from] crate::ModelSpecError),
     #[error("tweet generation failed")]
     TweetGeneration(#[from] AgentRuntimeError),
     #[error("tweet output serialization failed")]
@@ -865,6 +778,10 @@ pub enum ContentMiscGatewayError {
     NarrationUnavailable,
     #[error("narration provider returned empty audio")]
     EmptyNarrationAudio,
+    #[error("narration provider returned HTTP {status}: {detail}")]
+    NarrationStatus { status: StatusCode, detail: String },
+    #[error("narration provider response exceeded the {limit}-byte limit")]
+    NarrationTooLarge { limit: usize },
 }
 
 impl ContentMiscGatewayError {
@@ -887,16 +804,19 @@ impl ContentMiscGatewayError {
             Self::Http(error) => error.status().is_none_or(|status| {
                 status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
             }),
-            Self::InvalidDiscussionSummary(_)
+            Self::Config(_)
+            | Self::InvalidDiscussionSummary(_)
             | Self::Json(_)
             | Self::UnsupportedDiscussionPlatform
             | Self::DiscussionIdentityMissing
             | Self::DiscussionUnavailable { .. }
             | Self::Url(_)
-            | Self::TweetConfiguration(_)
+            | Self::Model(_)
             | Self::TweetGeneration(_)
             | Self::InvalidTweetOutput(_)
             | Self::NarrationUnavailable
+            | Self::NarrationStatus { .. }
+            | Self::NarrationTooLarge { .. }
             | Self::EmptyNarrationAudio => false,
         }
     }

@@ -1,4 +1,5 @@
 use chrono::NaiveDateTime;
+use newsly_db::content_metadata::{RAW_BODY_KEYS, remove_field, set_field};
 use serde_json::{Map, Value, json};
 use sqlx::{FromRow, Postgres, Transaction};
 use thiserror::Error;
@@ -8,15 +9,6 @@ use super::model::{
     AppliedSummarization, PendingChatRequest, SummarizationApplyOutcome,
     SummarizationFinalizationPlan, SummarizationMutation, SummarizationSnapshot,
 };
-
-const RAW_BODY_FIELDS: [&str; 6] = [
-    "content",
-    "transcript",
-    "content_to_summarize",
-    "file_path",
-    "transcript_path",
-    "full_text",
-];
 
 /// Loads the immutable summarization input in the worker's bounded prepare transaction.
 pub(super) async fn load_summarization_snapshot(
@@ -153,25 +145,25 @@ fn apply_completed_summary(
     summary: &Value,
 ) {
     let mut metadata = metadata_map(&content.content_metadata);
-    set_domain_field(&mut metadata, "summary", summary.clone());
-    set_domain_field(
+    set_field(&mut metadata, "summary", summary.clone());
+    set_field(
         &mut metadata,
         "summary_kind",
         Value::String("longform_artifact".to_owned()),
     );
-    set_domain_field(&mut metadata, "summary_version", Value::from(1));
+    set_field(&mut metadata, "summary_version", Value::from(1));
     if let Some(feed_preview) = summary.get("feed_preview") {
-        set_domain_field(&mut metadata, "feed_preview", feed_preview.clone());
+        set_field(&mut metadata, "feed_preview", feed_preview.clone());
     }
     if let Some(selection_trace) = summary.get("selection_trace") {
-        set_domain_field(&mut metadata, "selection_trace", selection_trace.clone());
+        set_field(&mut metadata, "selection_trace", selection_trace.clone());
     }
-    set_domain_field(
+    set_field(
         &mut metadata,
         "summarization_date",
         Value::String(plan.finalized_at.to_rfc3339()),
     );
-    set_domain_field(
+    set_field(
         &mut metadata,
         "summarization_input_fingerprint",
         Value::String(plan.attempt.input_fingerprint.clone()),
@@ -181,8 +173,8 @@ fn apply_completed_summary(
         &["share_and_chat_user_ids", "share_and_chat_requests"],
     );
     if plan.attempt.content.body_pointer().is_some() {
-        for field in RAW_BODY_FIELDS {
-            remove_domain_field(&mut metadata, field);
+        for field in RAW_BODY_KEYS {
+            remove_field(&mut metadata, field);
         }
     }
     if content
@@ -202,7 +194,7 @@ fn apply_completed_summary(
 
 fn apply_unchanged_summary(content: &mut LockedContent, plan: &SummarizationFinalizationPlan) {
     let mut metadata = metadata_map(&content.content_metadata);
-    set_domain_field(
+    set_field(
         &mut metadata,
         "summarization_input_fingerprint",
         Value::String(plan.attempt.input_fingerprint.clone()),
@@ -221,7 +213,7 @@ fn complete_readable_summary(
             .is_none_or(Value::is_null);
     if artwork_pending {
         "awaiting_image".clone_into(&mut content.status);
-        set_domain_field(&mut metadata, "artwork_status", Value::from("pending"));
+        set_field(&mut metadata, "artwork_status", Value::from("pending"));
     } else {
         "completed".clone_into(&mut content.status);
     }
@@ -239,7 +231,7 @@ fn apply_failure(
 ) {
     let mut metadata = metadata_map(&content.content_metadata);
     if !retry_scheduled {
-        remove_domain_field(&mut metadata, "summary");
+        remove_field(&mut metadata, "summary");
     }
     let mut errors = runtime_metadata_view(&Value::Object(metadata.clone()))
         .get("processing_errors")
@@ -252,7 +244,7 @@ fn apply_failure(
         "retryable": retry_scheduled,
         "timestamp": plan.finalized_at.to_rfc3339(),
     }));
-    set_processing_field(&mut metadata, "processing_errors", Value::Array(errors));
+    set_field(&mut metadata, "processing_errors", Value::Array(errors));
     let status = if retry_scheduled {
         "processing"
     } else if skipped {
@@ -361,46 +353,9 @@ fn metadata_map(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
 }
 
-fn set_domain_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    metadata.insert(key.to_owned(), value.clone());
-    let mut domain = metadata
-        .get("domain")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    domain.insert(key.to_owned(), value);
-    metadata.insert("domain".to_owned(), Value::Object(domain));
-}
-
-fn remove_domain_field(metadata: &mut Map<String, Value>, key: &str) {
-    metadata.remove(key);
-    if let Some(domain) = metadata.get_mut("domain").and_then(Value::as_object_mut) {
-        domain.remove(key);
-    }
-}
-
-fn set_processing_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    metadata.insert(key.to_owned(), value.clone());
-    let mut processing = metadata
-        .get("processing")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    processing.insert(key.to_owned(), value);
-    metadata.insert("processing".to_owned(), Value::Object(processing));
-}
-
 fn remove_processing_fields(metadata: &mut Map<String, Value>, keys: &[&str]) {
     for key in keys {
-        metadata.remove(*key);
-    }
-    if let Some(processing) = metadata
-        .get_mut("processing")
-        .and_then(Value::as_object_mut)
-    {
-        for key in keys {
-            processing.remove(*key);
-        }
+        remove_field(metadata, key);
     }
 }
 

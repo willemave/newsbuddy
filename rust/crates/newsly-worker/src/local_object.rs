@@ -1,6 +1,5 @@
 use std::path::{Component, Path, PathBuf};
 
-use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -15,21 +14,23 @@ pub(crate) enum LocalObjectError {
 }
 
 pub(crate) fn absolute_root(root: PathBuf) -> Result<PathBuf, LocalObjectError> {
-    if root.is_absolute() {
-        Ok(root)
+    let root = if root.is_absolute() {
+        root
     } else {
         std::env::current_dir()
-            .map(|current_directory| current_directory.join(root))
-            .map_err(LocalObjectError::CurrentDirectory)
+            .map_err(LocalObjectError::CurrentDirectory)?
+            .join(root)
+    };
+    if !newsly_providers::is_safe_storage_root(&root) {
+        return Err(LocalObjectError::UnsafePath);
     }
+    Ok(root)
 }
 
 pub(crate) fn validate_relative_path(path: &Path) -> Result<(), LocalObjectError> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
+    if !path
+        .to_str()
+        .is_some_and(newsly_providers::is_safe_object_key)
     {
         return Err(LocalObjectError::UnsafePath);
     }
@@ -51,13 +52,7 @@ pub(crate) fn storage_key(path: &Path) -> Result<String, LocalObjectError> {
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        write!(encoded, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    encoded
+    newsly_domain::sha256_hex(bytes)
 }
 
 /// Publishes immutable bytes without replacing an existing destination.
@@ -98,7 +93,8 @@ pub(crate) async fn publish(
 pub(crate) async fn read_optional(
     root: &Path,
     relative: &Path,
-) -> Result<Option<Vec<u8>>, LocalObjectError> {
+    maximum_bytes: usize,
+) -> Result<Option<newsly_providers::LocalObjectSlice>, LocalObjectError> {
     validate_relative_path(relative)?;
     let path = root.join(relative);
     let metadata = match fs::symlink_metadata(&path).await {
@@ -109,10 +105,17 @@ pub(crate) async fn read_optional(
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(LocalObjectError::UnsafeExistingObject);
     }
-    fs::read(path)
+    let key = relative.to_str().ok_or(LocalObjectError::UnsafePath)?;
+    newsly_providers::read_local_object(root, key, maximum_bytes)
         .await
-        .map(Some)
-        .map_err(LocalObjectError::Read)
+        .map_err(|error| match error {
+            newsly_providers::LocalStorageError::UnsafePath(_) => {
+                LocalObjectError::UnsafeExistingObject
+            }
+            newsly_providers::LocalStorageError::File { source, .. } => {
+                LocalObjectError::Read(source)
+            }
+        })
 }
 
 async fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), LocalObjectError> {

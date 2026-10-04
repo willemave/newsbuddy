@@ -1,3 +1,6 @@
+use newsly_db::content_metadata::{
+    RAW_BODY_KEYS, legacy_root_first_value as runtime_value, remove_field, set_field,
+};
 use std::collections::BTreeSet;
 use std::error::Error;
 
@@ -11,7 +14,6 @@ use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
-use url::Url;
 
 use crate::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 
@@ -20,23 +22,15 @@ use super::model::{
     ContentFinalizationPlan, ContentMutation, ContentSnapshot, FeedCandidate, InstructionLinkPlan,
     UsageWrite,
 };
+use super::normalize_external_url;
 use super::storage::StagedContentBody;
 
 mod feed_url;
 
-use feed_url::{canonicalize_feed_url, feed_display_name};
+use feed_url::feed_display_name;
+use newsly_db::canonicalize_feed_url;
 
-const PROCESSING_KEY: &str = "processing";
-const DOMAIN_KEY: &str = "domain";
 const CONTENT_USER_LOCK_ATTEMPTS: usize = 2;
-const RAW_BODY_KEYS: [&str; 6] = [
-    "content",
-    "transcript",
-    "content_to_summarize",
-    "file_path",
-    "transcript_path",
-    "full_text",
-];
 
 /// Loads the immutable content input used during the external-work phase. The query owns no
 /// explicit transaction and returns before any extractor request begins.
@@ -116,7 +110,7 @@ impl ContentFinalizer {
             } => {
                 let mut metadata = metadata_map(&content.content_metadata);
                 for (key, value) in metadata_updates {
-                    set_domain_field(&mut metadata, key, value.clone());
+                    set_field(&mut metadata, key, value.clone());
                 }
                 finalize_analysis(
                     transaction,
@@ -148,25 +142,25 @@ impl ContentFinalizer {
             } => {
                 let mut metadata = metadata_map(&content.content_metadata);
                 for (key, value) in metadata_updates {
-                    set_domain_field(&mut metadata, key, value.clone());
+                    set_field(&mut metadata, key, value.clone());
                 }
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "document_extractor_method",
                     Value::String(extraction_method.clone()),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "document_extractor_warnings",
                     strings_value(warnings),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "document_extractor_timings",
                     timings_value(timings),
                 );
                 if *body_char_count >= 500 {
-                    set_domain_field(
+                    set_field(
                         &mut metadata,
                         "analyze_url_source_body_ready",
                         Value::Bool(true),
@@ -209,7 +203,7 @@ impl ContentFinalizer {
             } => {
                 let mut metadata = metadata_map(&content.content_metadata);
                 for (key, value) in metadata_updates {
-                    set_domain_field(&mut metadata, key, value.clone());
+                    set_field(&mut metadata, key, value.clone());
                 }
                 if content.source_url.is_none() {
                     content.source_url = runtime_value(&metadata, "discussion_url")
@@ -225,7 +219,7 @@ impl ContentFinalizer {
                 if let Some(body) = body {
                     upsert_source_body(transaction, content.id, body).await?;
                     if *body_char_count >= 500 {
-                        set_domain_field(
+                        set_field(
                             &mut metadata,
                             "analyze_url_source_body_ready",
                             Value::Bool(true),
@@ -242,7 +236,7 @@ impl ContentFinalizer {
                         x_bookmark_fallback_user_id(&metadata, usage_user_id),
                     )
                     .await?;
-                    set_processing_field(
+                    set_field(
                         &mut metadata,
                         "canonical_content_id",
                         Value::from(duplicate_id),
@@ -263,7 +257,7 @@ impl ContentFinalizer {
                     target_url.clone_into(&mut content.url);
                     content_type.clone_into(&mut content.content_type);
                     content.platform = Some(truncate_chars(platform, 50));
-                    set_domain_field(&mut metadata, "platform", Value::String(platform.clone()));
+                    set_field(&mut metadata, "platform", Value::String(platform.clone()));
                     enqueue_content_task(
                         transaction,
                         &self.queue,
@@ -296,7 +290,7 @@ impl ContentFinalizer {
                     )
                     .await?;
                     if let Some(duplicate_id) = duplicate_id {
-                        set_processing_field(
+                        set_field(
                             &mut metadata,
                             "canonical_content_id",
                             Value::from(duplicate_id),
@@ -305,7 +299,7 @@ impl ContentFinalizer {
                         content.url.clone_from(&article.final_url);
                     }
                 }
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "author",
                     article
@@ -313,36 +307,36 @@ impl ContentFinalizer {
                         .as_ref()
                         .map_or(Value::Null, |author| Value::String(author.clone())),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "publication_date",
                     article.published_at.map_or(Value::Null, |published_at| {
                         Value::String(published_at.to_rfc3339())
                     }),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "content_type",
                     Value::String("html".to_owned()),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "document_extractor_method",
                     Value::String(article.extraction_method.clone()),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "document_extractor_warnings",
                     strings_value(&article.warnings),
                 );
-                set_domain_field(
+                set_field(
                     &mut metadata,
                     "document_extractor_timings",
                     timings_value(&article.timings),
                 );
                 if article.used_firecrawl {
-                    set_domain_field(&mut metadata, "used_firecrawl_fallback", Value::Bool(true));
-                    set_domain_field(
+                    set_field(&mut metadata, "used_firecrawl_fallback", Value::Bool(true));
+                    set_field(
                         &mut metadata,
                         "firecrawl_fallback_length",
                         Value::from(body.char_count),
@@ -350,7 +344,7 @@ impl ContentFinalizer {
                 }
                 let excerpt = compact_excerpt(&article.body);
                 if let Some(excerpt) = &excerpt {
-                    set_domain_field(&mut metadata, "excerpt", Value::String(excerpt.clone()));
+                    set_field(&mut metadata, "excerpt", Value::String(excerpt.clone()));
                 }
                 remove_raw_body_fields(&mut metadata);
                 attach_feed_candidates(&mut metadata, &article.feed_candidates);
@@ -426,13 +420,13 @@ impl ContentFinalizer {
                     "code": code,
                     "timestamp": Utc::now().to_rfc3339(),
                 }));
-                set_processing_field(&mut metadata, "processing_errors", Value::Array(errors));
-                set_processing_field(
+                set_field(&mut metadata, "processing_errors", Value::Array(errors));
+                set_field(
                     &mut metadata,
                     "extraction_error",
                     Value::String(reason.clone()),
                 );
-                set_processing_field(
+                set_field(
                     &mut metadata,
                     "extraction_error_code",
                     Value::String(code.clone()),
@@ -588,13 +582,13 @@ async fn finalize_analysis(
     attach_feed_candidates(metadata, feed_candidates);
     if let Some(platform) = platform.and_then(nonempty) {
         content.platform = Some(truncate_chars(platform, 50));
-        set_domain_field(metadata, "platform", Value::String(platform.to_owned()));
+        set_field(metadata, "platform", Value::String(platform.to_owned()));
     }
 
     let duplicate_id =
         find_duplicate_content(transaction, content.id, content_type, &content.url).await?;
     if let Some(duplicate_id) = duplicate_id {
-        set_processing_field(metadata, "canonical_content_id", Value::from(duplicate_id));
+        set_field(metadata, "canonical_content_id", Value::from(duplicate_id));
         "skipped".clone_into(&mut content.status);
         content.error_message = Some("Canonical URL conflicts with existing content".to_owned());
         content.processed_at = Some(Utc::now().naive_utc());
@@ -637,14 +631,14 @@ async fn apply_instruction_links(
     let Some(user_id) = active_user_id else {
         return Ok(());
     };
-    let Some(source_url) = normalize_content_url(&source.url) else {
+    let Some(source_url) = normalize_external_url(&source.url) else {
         return Ok(());
     };
     let mut seen = BTreeSet::from([source_url]);
     let mut image_content_ids = BTreeSet::new();
     let mut requests = Vec::new();
     for link in links {
-        let Some(url) = normalize_content_url(&link.url) else {
+        let Some(url) = normalize_external_url(&link.url) else {
             continue;
         };
         if !seen.insert(url.clone()) {
@@ -708,6 +702,9 @@ async fn resolve_instruction_child(
             "source": link.source,
         },
     });
+    let metadata = Value::Object(newsly_db::content_metadata::initialize_metadata(
+        metadata.as_object().cloned().unwrap_or_default(),
+    ));
     let inserted = sqlx::query_scalar::<_, i64>(
         r"
         INSERT INTO contents (
@@ -881,18 +878,6 @@ async fn reconcile_x_bookmark_destination_users(
             .await?;
     }
     Ok(())
-}
-
-fn normalize_content_url(value: &str) -> Option<String> {
-    let mut url = Url::parse(value.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host().is_none() {
-        return None;
-    }
-    if url.scheme() == "http" && url.set_scheme("https").is_err() {
-        return None;
-    }
-    url.set_fragment(None);
-    Some(url.to_string())
 }
 
 async fn find_duplicate_content(
@@ -1152,9 +1137,9 @@ async fn apply_feed_subscription(
     metadata: &mut Map<String, Value>,
     candidates: &[FeedCandidate],
 ) -> Result<(), ContentRepositoryError> {
-    set_processing_field(metadata, "subscribe_to_feed", Value::Bool(true));
+    set_field(metadata, "subscribe_to_feed", Value::Bool(true));
     let Some(candidate) = candidates.first() else {
-        set_processing_field(
+        set_field(
             metadata,
             "feed_subscription",
             json!({"status": "no_feed_found"}),
@@ -1162,7 +1147,7 @@ async fn apply_feed_subscription(
         return Ok(());
     };
     let Some(user_id) = runtime_positive_integer(metadata, "submitted_by_user_id") else {
-        set_processing_field(
+        set_field(
             metadata,
             "feed_subscription",
             json!({"status": "missing_user"}),
@@ -1176,7 +1161,7 @@ async fn apply_feed_subscription(
     .fetch_optional(&mut **transaction)
     .await?;
     if active.is_none() {
-        set_processing_field(
+        set_field(
             metadata,
             "feed_subscription",
             json!({"status": "inactive_user"}),
@@ -1297,7 +1282,7 @@ async fn apply_feed_subscription(
             "reason": projection.status,
         })
     };
-    set_processing_field(
+    set_field(
         metadata,
         "feed_subscription",
         json!({
@@ -1360,9 +1345,7 @@ async fn persist_usage(
         match write {
             UsageWrite::Extraction(batch) => {
                 for (index, event) in batch.events.iter().enumerate() {
-                    let quantity = i32::try_from(event.quantity).map_err(|_| {
-                        ContentRepositoryError::UsageQuantityOutOfRange(event.quantity)
-                    })?;
+                    let quantity = saturating_i32(event.quantity);
                     insert_usage(
                         transaction,
                         UsageInsert {
@@ -1425,9 +1408,7 @@ async fn persist_usage(
                 .await?;
             }
             UsageWrite::X(usage) => {
-                let resource_count = i32::try_from(usage.resource_count).map_err(|_| {
-                    ContentRepositoryError::XResourceCountOutOfRange(usage.resource_count)
-                })?;
+                let resource_count = i32::try_from(usage.resource_count).unwrap_or(i32::MAX);
                 insert_usage(
                     transaction,
                     UsageInsert {
@@ -1458,28 +1439,28 @@ async fn persist_usage(
     Ok(())
 }
 
-struct UsageInsert<'a> {
-    provider: &'a str,
-    model: &'a str,
-    feature: &'a str,
-    operation: &'a str,
-    request_id: Option<&'a str>,
-    task_id: i64,
-    content_id: Option<i64>,
-    user_id: Option<i64>,
-    request_count: Option<i32>,
-    resource_count: Option<i32>,
-    input_tokens: Option<i32>,
-    cache_read_tokens: Option<i32>,
-    cache_write_tokens: Option<i32>,
-    output_tokens: Option<i32>,
-    total_tokens: Option<i32>,
-    cost_usd: Option<f64>,
-    pricing_version: Option<&'a str>,
-    metadata: Value,
+pub(crate) struct UsageInsert<'a> {
+    pub(crate) provider: &'a str,
+    pub(crate) model: &'a str,
+    pub(crate) feature: &'a str,
+    pub(crate) operation: &'a str,
+    pub(crate) request_id: Option<&'a str>,
+    pub(crate) task_id: i64,
+    pub(crate) content_id: Option<i64>,
+    pub(crate) user_id: Option<i64>,
+    pub(crate) request_count: Option<i32>,
+    pub(crate) resource_count: Option<i32>,
+    pub(crate) input_tokens: Option<i32>,
+    pub(crate) cache_read_tokens: Option<i32>,
+    pub(crate) cache_write_tokens: Option<i32>,
+    pub(crate) output_tokens: Option<i32>,
+    pub(crate) total_tokens: Option<i32>,
+    pub(crate) cost_usd: Option<f64>,
+    pub(crate) pricing_version: Option<&'a str>,
+    pub(crate) metadata: Value,
 }
 
-async fn insert_usage(
+pub(crate) async fn insert_usage(
     transaction: &mut Transaction<'static, Postgres>,
     usage: UsageInsert<'_>,
 ) -> Result<(), sqlx::Error> {
@@ -1509,7 +1490,7 @@ async fn insert_usage(
             created_at
         )
         VALUES (
-            $1, $2, $3, $4, 'rust_worker', $5, $6, $7, $8,
+            $1, $2, $3, $4, 'queue', $5, $6, $7, $8,
             $9, $10, $11, $12, $13, $14, $15,
             $16, 'USD', $17, $18, timezone('UTC', now())
         )
@@ -1536,6 +1517,10 @@ async fn insert_usage(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+fn saturating_i32(value: u64) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 async fn scrub_task_instruction(
@@ -1576,51 +1561,6 @@ fn mutation_scrubs_instruction(mutation: &ContentMutation) -> bool {
 
 fn metadata_map(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
-}
-
-fn set_domain_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    metadata.insert(key.to_owned(), value.clone());
-    let domain = metadata
-        .entry(DOMAIN_KEY.to_owned())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !domain.is_object() {
-        *domain = Value::Object(Map::new());
-    }
-    domain
-        .as_object_mut()
-        .expect("domain was normalized to an object")
-        .insert(key.to_owned(), value);
-}
-
-fn set_processing_field(metadata: &mut Map<String, Value>, key: &str, value: Value) {
-    metadata.insert(key.to_owned(), value.clone());
-    let processing = metadata
-        .entry(PROCESSING_KEY.to_owned())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !processing.is_object() {
-        *processing = Value::Object(Map::new());
-    }
-    processing
-        .as_object_mut()
-        .expect("processing was normalized to an object")
-        .insert(key.to_owned(), value);
-}
-
-fn runtime_value<'a>(metadata: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
-    metadata
-        .get(key)
-        .or_else(|| {
-            metadata
-                .get(PROCESSING_KEY)
-                .and_then(Value::as_object)
-                .and_then(|processing| processing.get(key))
-        })
-        .or_else(|| {
-            metadata
-                .get(DOMAIN_KEY)
-                .and_then(Value::as_object)
-                .and_then(|domain| domain.get(key))
-        })
 }
 
 fn next_content_task(metadata: &Map<String, Value>, content_platform: Option<&str>) -> TaskType {
@@ -1664,9 +1604,9 @@ fn attach_feed_candidates(metadata: &mut Map<String, Value>, candidates: &[FeedC
     let Some(first) = candidates.first() else {
         return;
     };
-    set_processing_field(metadata, "detected_feed", first.to_json());
+    set_field(metadata, "detected_feed", first.to_json());
     if candidates.len() > 1 {
-        set_processing_field(
+        set_field(
             metadata,
             "all_detected_feeds",
             Value::Array(candidates.iter().map(FeedCandidate::to_json).collect()),
@@ -1676,12 +1616,7 @@ fn attach_feed_candidates(metadata: &mut Map<String, Value>, candidates: &[FeedC
 
 fn remove_raw_body_fields(metadata: &mut Map<String, Value>) {
     for key in RAW_BODY_KEYS {
-        metadata.remove(key);
-        for namespace in [DOMAIN_KEY, PROCESSING_KEY] {
-            if let Some(values) = metadata.get_mut(namespace).and_then(Value::as_object_mut) {
-                values.remove(key);
-            }
-        }
+        remove_field(metadata, key);
     }
 }
 
@@ -1746,10 +1681,6 @@ pub(super) enum ContentRepositoryError {
     XSync(#[from] XSyncRepositoryError),
     #[error("{0} enqueue returned no task id")]
     MissingEnqueueResult(TaskType),
-    #[error("extractor usage quantity {0} does not fit the persistence contract")]
-    UsageQuantityOutOfRange(u64),
-    #[error("X usage resource count {0} does not fit the persistence contract")]
-    XResourceCountOutOfRange(usize),
     #[error(
         "content {content_id} submitted-user attribution changed across {attempts} lock attempts"
     )]

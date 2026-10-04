@@ -1,10 +1,7 @@
-use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool};
-use subtle::ConstantTimeEq;
 use thiserror::Error;
 
-const API_KEY_PREFIX: &str = "newsly_ak_";
-const HEX: &[u8; 16] = b"0123456789abcdef";
+use crate::api_keys::{extract_api_key_prefix, verify_api_key_hash};
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct AuthenticatedUserRow {
@@ -60,8 +57,8 @@ pub async fn find_user_by_api_key(
     pool: &PgPool,
     raw_key: &str,
 ) -> Result<Option<AuthenticatedUserRow>, AuthenticationRepositoryError> {
-    let key_prefix = extract_key_prefix(raw_key)?;
-    let presented_hash = sha256_hex(raw_key.as_bytes());
+    let key_prefix = extract_api_key_prefix(raw_key)
+        .map_err(|_| AuthenticationRepositoryError::InvalidApiKeyFormat)?;
     let candidates = sqlx::query_as::<_, ApiKeyCandidateRow>(
         r#"
         SELECT
@@ -81,7 +78,7 @@ pub async fn find_user_by_api_key(
     .await?;
 
     for candidate in candidates {
-        if hashes_match(&presented_hash, &candidate.key_hash) {
+        if verify_api_key_hash(raw_key, &candidate.key_hash) {
             sqlx::query(
                 r#"
                 UPDATE user_api_keys
@@ -107,61 +104,10 @@ pub async fn find_user_by_api_key(
     Ok(None)
 }
 
-pub fn is_api_key_token(token: &str) -> bool {
-    token.starts_with(API_KEY_PREFIX)
-}
-
-fn extract_key_prefix(raw_key: &str) -> Result<&str, AuthenticationRepositoryError> {
-    let suffix = raw_key
-        .strip_prefix(API_KEY_PREFIX)
-        .ok_or(AuthenticationRepositoryError::InvalidApiKeyFormat)?;
-    let (public_id, secret) = suffix
-        .split_once('_')
-        .ok_or(AuthenticationRepositoryError::InvalidApiKeyFormat)?;
-    if public_id.is_empty() || secret.is_empty() {
-        return Err(AuthenticationRepositoryError::InvalidApiKeyFormat);
-    }
-    let prefix_length = API_KEY_PREFIX.len() + public_id.len();
-    Ok(&raw_key[..prefix_length])
-}
-
-fn sha256_hex(value: &[u8]) -> String {
-    let digest = Sha256::digest(value);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
-}
-
-fn hashes_match(presented: &str, stored: &str) -> bool {
-    presented.len() == stored.len() && bool::from(presented.as_bytes().ct_eq(stored.as_bytes()))
-}
-
 #[derive(Debug, Error)]
 pub enum AuthenticationRepositoryError {
     #[error("invalid Newsly API key format")]
     InvalidApiKeyFormat,
     #[error("PostgreSQL authentication lookup failed")]
     Sqlx(#[from] sqlx::Error),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{extract_key_prefix, hashes_match, is_api_key_token, sha256_hex};
-
-    #[test]
-    fn api_key_helpers_preserve_the_wire_contract() {
-        let raw = "newsly_ak_a1b2c3d4_secret-value";
-        assert!(is_api_key_token(raw));
-        assert_eq!(
-            extract_key_prefix(raw).expect("valid API key"),
-            "newsly_ak_a1b2c3d4"
-        );
-        let digest = sha256_hex(raw.as_bytes());
-        assert_eq!(digest.len(), 64);
-        assert!(hashes_match(&digest, &digest));
-        assert!(!hashes_match(&digest, &"0".repeat(64)));
-    }
 }

@@ -4,20 +4,6 @@ use utoipa::{IntoParams, ToSchema};
 
 pub const CUSTOM_NARRATION_MAX_SOURCES: usize = 12;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AudioEpisodeDelivery {
-    #[default]
-    Background,
-    Stream,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, IntoParams)]
-pub struct AudioEpisodeDeliveryQuery {
-    #[serde(default)]
-    pub delivery: AudioEpisodeDelivery,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
 pub struct CustomNarrationCreateRequest {
     #[serde(default)]

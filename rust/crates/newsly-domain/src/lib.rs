@@ -14,10 +14,7 @@ mod news_lens_reclustering;
 mod news_relations;
 mod ownership;
 
-pub use ids::{
-    BriefingVersion, ChatSessionId, ContentId, InvalidDatabaseId, InvalidGeneration, LeaseToken,
-    LlmTaskId, NewsItemId, StreamGeneration, UserId,
-};
+pub use ids::LeaseToken;
 pub use news_lens_reclustering::{
     NewsLensClusterIdentity, NewsLensLineage, NewsLensLineageKind, NewsLensReclusterCluster,
     NewsLensReclusterDiagnostics, NewsLensReclusterExistingCluster, NewsLensReclusterStory,
@@ -39,3 +36,6 @@ pub use ownership::{
 
 /// Provider-qualified model used to prepare shared news lens inputs.
 pub const DEFAULT_LENS_EMBEDDING_MODEL: &str = "openrouter:qwen/qwen3-embedding-8b";
+
+mod text;
+pub use text::{hex_encode, sha256_hex, truncate_chars};

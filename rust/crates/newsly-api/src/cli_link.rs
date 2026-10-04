@@ -1,5 +1,5 @@
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Extension, FromRequest, Path, Query, Request, State};
+use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,12 +19,9 @@ use serde::Deserialize;
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{internal_error, require_operation, verify_stamp};
+use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
 
-const START_OPERATION_ID: &str = "startCliLink";
-const POLL_OPERATION_ID: &str = "pollCliLink";
-const APPROVE_OPERATION_ID: &str = "approveCliLink";
 const SESSION_TTL: Duration = Duration::minutes(10);
 
 #[derive(Debug, Deserialize)]
@@ -58,11 +55,10 @@ pub(super) fn router() -> Router<AppState> {
 pub(super) async fn start_link(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     request: Request,
 ) -> Result<Json<CliLinkStartResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, START_OPERATION_ID, &request_id)?;
     let payload = Option::<Json<CliLinkStartRequest>>::from_request(request, &state)
         .await
         .map_err(|rejection| validation_error(rejection.body_text(), &request_id))?
@@ -74,13 +70,8 @@ pub(super) async fn start_link(
     let poll_token = random_urlsafe::<24>().map_err(|error| internal_error(error, &request_id))?;
     let expires_at = Utc::now() + SESSION_TTL;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let started = start_cli_link(
         &mut transaction,
         &session_id,
@@ -91,10 +82,7 @@ pub(super) async fn start_link(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(CliLinkStartResponse {
         approve_url: format!(
             "newsly://cli-link?session_id={}&approve_token={approve_token}",
@@ -130,12 +118,11 @@ pub(super) async fn approve_link(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     session_id: Result<Path<String>, PathRejection>,
     payload: Result<Json<CliLinkApproveRequest>, JsonRejection>,
 ) -> Result<Json<CliLinkApproveResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, APPROVE_OPERATION_ID, &request_id)?;
     let Path(session_id) =
         session_id.map_err(|rejection| validation_error(rejection.body_text(), &request_id))?;
     validate_length("session_id", &session_id, 8, 64, &request_id)?;
@@ -144,13 +131,8 @@ pub(super) async fn approve_link(
     validate_length("approve_token", &payload.approve_token, 8, 255, &request_id)?;
     let device_name = normalize_device_name(payload.device_name, &request_id)?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let approved = match approve_cli_link(
         &mut transaction,
         &session_id,
@@ -163,18 +145,12 @@ pub(super) async fn approve_link(
     {
         Ok(approved) => approved,
         Err(CliLinkRepositoryError::Expired) => {
-            transaction
-                .commit()
-                .await
-                .map_err(|error| internal_error(error, &request_id))?;
+            crate::write_support::commit(transaction, &request_id).await?;
             return Err(cli_link_error(CliLinkRepositoryError::Expired, &request_id));
         }
         Err(error) => return Err(cli_link_error(error, &request_id)),
     };
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(CliLinkApproveResponse {
         session_id: approved.session_id,
         status: CliLinkStatus::Approved,
@@ -203,12 +179,11 @@ pub(super) async fn approve_link(
 pub(super) async fn poll_link(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     session_id: Result<Path<String>, PathRejection>,
     query: Result<Query<PollQuery>, QueryRejection>,
 ) -> Result<Json<CliLinkPollResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, POLL_OPERATION_ID, &request_id)?;
     let Path(session_id) =
         session_id.map_err(|rejection| validation_error(rejection.body_text(), &request_id))?;
     validate_length("session_id", &session_id, 8, 64, &request_id)?;
@@ -218,20 +193,12 @@ pub(super) async fn poll_link(
 
     // Poll is a GET for client ergonomics but consumes the raw key exactly
     // once, so it still takes the same durable ownership fence as a mutation.
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let polled = poll_cli_link(&mut transaction, &session_id, &query.poll_token, Utc::now())
         .await
         .map_err(|error| cli_link_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(CliLinkPollResponse {
         session_id: polled.session_id,
         status: match polled.status {
@@ -286,18 +253,7 @@ fn validate_length(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn cli_link_error(error: CliLinkRepositoryError, request_id: &str) -> ApiError {

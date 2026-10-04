@@ -1,5 +1,5 @@
 use axum::extract::rejection::{JsonRejection, PathRejection};
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -27,17 +27,8 @@ use sha2::{Digest, Sha256};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
-};
+use crate::write_support::{bad_request, decode_json, internal_error, not_found, verify_stamp};
 use crate::{AppState, request_id_from_headers};
-
-const PUT_OPERATION_ID: &str = "putLlmIntegration";
-const DELETE_OPERATION_ID: &str = "deleteLlmIntegration";
-const TEST_OPERATION_ID: &str = "testLlmIntegration";
-const X_START_OPERATION_ID: &str = "startIntegrationsXOauthFlow";
-const X_EXCHANGE_OPERATION_ID: &str = "exchangeIntegrationsXOauthCode";
-const X_DISCONNECT_OPERATION_ID: &str = "disconnectIntegrationsConnectionX";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -106,11 +97,10 @@ pub(super) async fn start_x_oauth_flow(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<XOAuthStartRequest>, JsonRejection>,
 ) -> Result<Json<XOAuthStartResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, X_START_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if payload
         .twitter_username
@@ -124,18 +114,13 @@ pub(super) async fn start_x_oauth_flow(
     }
     let twitter_username = normalize_twitter_username(payload.twitter_username.as_deref())
         .map_err(|message| bad_request(message, &request_id))?;
-    let gateway = state.x_oauth.as_ref().ok_or_else(|| {
+    let services = state.x_oauth.as_ref().ok_or_else(|| {
         bad_request(
             "X OAuth is not configured. Set X_CLIENT_ID, X_OAUTH_REDIRECT_URI, and X_TOKEN_ENCRYPTION_KEY.",
             &request_id,
         )
     })?;
-    if state.integration_token_cipher.is_none() {
-        return Err(bad_request(
-            "X OAuth is not configured. Set X_CLIENT_ID, X_OAUTH_REDIRECT_URI, and X_TOKEN_ENCRYPTION_KEY.",
-            &request_id,
-        ));
-    }
+    let gateway = &services.gateway;
     let state_token = random_urlsafe::<32>().map_err(|error| internal_error(error, &request_id))?;
     let code_verifier =
         random_urlsafe::<64>().map_err(|error| internal_error(error, &request_id))?;
@@ -143,13 +128,8 @@ pub(super) async fn start_x_oauth_flow(
     let scopes = X_DEFAULT_SCOPES.map(str::to_owned).to_vec();
     let authorize_url = gateway.authorize_url(&state_token, &code_challenge, &scopes);
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let stored = store_x_oauth_pending(
         &mut transaction,
         current_user.id,
@@ -164,10 +144,7 @@ pub(super) async fn start_x_oauth_flow(
     if !stored {
         return Err(not_found("User", &request_id));
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(XOAuthStartResponse {
         authorize_url,
         state: state_token,
@@ -200,25 +177,20 @@ pub(super) async fn exchange_x_oauth_code(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<XOAuthExchangeRequest>, JsonRejection>,
 ) -> Result<Json<XConnectionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, X_EXCHANGE_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_oauth_exchange(&payload, &request_id)?;
-    let gateway = state
+    let services = state
         .x_oauth
         .as_ref()
         .ok_or_else(|| bad_request("X OAuth is not configured", &request_id))?;
+    let gateway = &services.gateway;
 
-    let mut prepare = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut prepare, &stamp, &request_id).await?;
+    let mut prepare =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let prepared =
         prepare_x_oauth_exchange(&mut prepare, current_user.id, &payload.state, Utc::now())
             .await
@@ -253,10 +225,7 @@ pub(super) async fn exchange_x_oauth_code(
             ));
         }
     };
-    prepare
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(prepare, &request_id).await?;
 
     let token = gateway
         .exchange_code(&payload.code, &prepared.code_verifier)
@@ -276,10 +245,7 @@ pub(super) async fn exchange_x_oauth_code(
     .await;
     let provider_username = normalize_twitter_username(provider_user.username.as_deref())
         .map_err(|message| bad_request(message, &request_id))?;
-    let token_cipher = state
-        .integration_token_cipher
-        .as_ref()
-        .ok_or_else(|| internal_error("integration token cipher is not configured", &request_id))?;
+    let token_cipher = &services.token_cipher;
     let encrypted_access = token_cipher
         .encrypt(&token.access_token)
         .map_err(|error| internal_error(error, &request_id))?;
@@ -299,13 +265,8 @@ pub(super) async fn exchange_x_oauth_code(
         token.scopes
     };
 
-    let mut finalize = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut finalize, &stamp, &request_id).await?;
+    let mut finalize =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let finalized = finalize_x_oauth_exchange(
         &mut finalize,
         current_user.id,
@@ -324,10 +285,7 @@ pub(super) async fn exchange_x_oauth_code(
     if !finalized {
         return Err(stale_flow(&request_id));
     }
-    finalize
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(finalize, &request_id).await?;
 
     let connection = find_x_connection(state.database.pool(), current_user.id)
         .await
@@ -354,54 +312,41 @@ pub(super) async fn disconnect_x_connection(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<IntegrationDisconnectResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, X_DISCONNECT_OPERATION_ID, &request_id)?;
-    let mut prepare = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut prepare, &stamp, &request_id).await?;
+    let mut prepare =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let plan = prepare_x_disconnect(&mut prepare, current_user.id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    prepare
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(prepare, &request_id).await?;
 
     let Some(plan) = plan else {
         return Ok(Json(disconnected_response()));
     };
     if let Some(encrypted_token) = plan.encrypted_token.as_deref() {
-        let raw_token = state
-            .integration_token_cipher
-            .as_ref()
-            .ok_or_else(|| {
-                internal_error("integration token cipher is not configured", &request_id)
-            })?
-            .decrypt(encrypted_token)
-            .map_err(|error| internal_error(error, &request_id))?;
-        let gateway = state
-            .x_oauth
-            .as_ref()
-            .ok_or_else(|| provider_error("X OAuth is not configured", &request_id))?;
-        gateway
-            .revoke(&raw_token, plan.token_type_hint)
-            .await
-            .map_err(|error| provider_error(error, &request_id))?;
+        if let Some(services) = &state.x_oauth {
+            if let Some(raw_token) =
+                decrypt_revocation_token(&services.token_cipher, encrypted_token, current_user.id)
+            {
+                services
+                    .gateway
+                    .revoke(&raw_token, plan.token_type_hint)
+                    .await
+                    .map_err(|error| provider_error(error, &request_id))?;
+            }
+        } else {
+            tracing::warn!(
+                error_code = "integration_revoke_unconfigured",
+                user_id = current_user.id,
+                "X revocation unavailable; disconnecting locally"
+            );
+        }
     }
 
-    let mut finalize = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut finalize, &stamp, &request_id).await?;
+    let mut finalize =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let finalized = finalize_x_disconnect(
         &mut finalize,
         current_user.id,
@@ -413,11 +358,22 @@ pub(super) async fn disconnect_x_connection(
     if !finalized {
         return Err(stale_flow(&request_id));
     }
-    finalize
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(finalize, &request_id).await?;
     Ok(Json(disconnected_response()))
+}
+
+fn decrypt_revocation_token(
+    cipher: &newsly_providers::IntegrationTokenCipher,
+    encrypted_token: &str,
+    user_id: i64,
+) -> Option<String> {
+    match cipher.decrypt(encrypted_token) {
+        Ok(token) => Some(token),
+        Err(error) => {
+            tracing::warn!(error_code = "integration_revoke_decryption_failed", user_id, error = %error, "X revocation token cannot be decrypted; disconnecting locally");
+            None
+        }
+    }
 }
 
 #[utoipa::path(
@@ -469,11 +425,10 @@ pub(super) async fn put_llm_integration(
     headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<UpsertUserLlmIntegrationRequest>, JsonRejection>,
 ) -> Result<Json<UserLlmIntegrationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, PUT_OPERATION_ID, &request_id)?;
     let provider = parse_provider(path, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_api_key(&payload.api_key, &request_id)?;
@@ -484,13 +439,8 @@ pub(super) async fn put_llm_integration(
         .encrypt(&payload.api_key)
         .map_err(|error| internal_error(error, &request_id))?;
 
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let integration = upsert_user_llm_integration(
         &mut transaction,
         current_user.id,
@@ -499,10 +449,7 @@ pub(super) async fn put_llm_integration(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(present_integration(&integration, &request_id)?))
 }
 
@@ -527,28 +474,19 @@ pub(super) async fn delete_llm_integration_endpoint(
     headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<DeleteUserLlmIntegrationResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DELETE_OPERATION_ID, &request_id)?;
     let provider = parse_provider(path, &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let deleted = delete_user_llm_integration(&mut transaction, current_user.id, provider.as_str())
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     if !deleted {
         return Err(not_found("Integration", &request_id));
     }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(DeleteUserLlmIntegrationResponse {
         status: DeleteStatus::Deleted,
         provider: provider.as_str().to_owned(),
@@ -576,10 +514,9 @@ pub(super) async fn test_llm_integration(
     headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
 ) -> Result<Json<UserLlmIntegrationTestResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, TEST_OPERATION_ID, &request_id)?;
     let provider = parse_provider(path, &request_id)?;
     let ok =
         user_llm_integration_configured(state.database.pool(), current_user.id, provider.as_str())
@@ -657,18 +594,7 @@ async fn persist_x_lookup_usage_best_effort(
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        serde_json::json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn validate_oauth_exchange(
@@ -770,4 +696,23 @@ fn stale_flow(request_id: &str) -> ApiError {
         "The X OAuth flow was superseded; start OAuth again",
         request_id.to_owned(),
     )
+}
+
+#[cfg(test)]
+mod revocation_tests {
+    use super::decrypt_revocation_token;
+    use newsly_providers::IntegrationTokenCipher;
+    use secrecy::SecretString;
+
+    #[test]
+    fn permanent_decryption_failure_does_not_block_local_disconnect() {
+        let cipher =
+            IntegrationTokenCipher::new(&SecretString::from("revocation-test-secret")).unwrap();
+        let encrypted = cipher.encrypt("token").unwrap();
+        assert_eq!(
+            decrypt_revocation_token(&cipher, &encrypted, 1).as_deref(),
+            Some("token")
+        );
+        assert_eq!(decrypt_revocation_token(&cipher, "corrupt", 1), None);
+    }
 }

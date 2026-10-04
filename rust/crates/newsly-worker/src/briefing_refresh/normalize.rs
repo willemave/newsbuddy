@@ -93,6 +93,8 @@ pub(super) fn normalize_layout(
                         alignment: *alignment,
                     });
                     figures_used += 1;
+                } else {
+                    warnings.push("unknown_figure_source_dropped".to_owned());
                 }
             }
             BriefingCompositionBlock::Pullquote { suggestion_id } => {
@@ -159,7 +161,7 @@ pub(super) fn normalize_layout(
             } => {
                 let source = source_by_key
                     .get(source_key.as_str())
-                    .ok_or_else(|| BriefingNormalizationError::UnknownSource(source_key.clone()))?;
+                    .expect("resolved figures reference a known source");
                 normalized_blocks.push(json!({
                     "type": "figure",
                     "weight": null,
@@ -372,11 +374,10 @@ fn runs_from_markdown(
     source_keys: &BTreeSet<String>,
     covered: &mut BTreeSet<String>,
 ) -> Vec<Value> {
-    let unwrapped = markdown;
     let mut runs = Vec::new();
     let mut cursor = 0_usize;
-    for link in briefing_links(unwrapped) {
-        append_text_runs(&mut runs, &unwrapped[cursor..link.range.start]);
+    for link in briefing_links(markdown) {
+        append_text_runs(&mut runs, &markdown[cursor..link.range.start]);
         let source_key = link.source_key;
         let text = link.label.as_str();
         if source_keys.contains(source_key.as_str()) {
@@ -393,7 +394,7 @@ fn runs_from_markdown(
         }
         cursor = link.range.end;
     }
-    append_text_runs(&mut runs, &unwrapped[cursor..]);
+    append_text_runs(&mut runs, &markdown[cursor..]);
     runs
 }
 
@@ -445,8 +446,7 @@ fn markdown_to_narration(markdown: &str) -> String {
         cursor = link.range.end;
     }
     without_links.push_str(&markdown[cursor..]);
-    let without_insights = INSIGHT_MARKER_RE.replace_all(&without_links, "");
-    without_insights
+    without_links
         .replace("**", "")
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -474,8 +474,6 @@ fn repair_text(value: &str) -> String {
 pub(super) enum BriefingNormalizationError {
     #[error("Briefing layout references unknown suggestion {0:?}")]
     UnknownSuggestion(String),
-    #[error("Briefing layout references unknown source {0:?}")]
-    UnknownSource(String),
     #[error("Briefing layout has no usable passage")]
     NoPassage,
     #[error("Briefing layout does not cover sources: {0:?}")]

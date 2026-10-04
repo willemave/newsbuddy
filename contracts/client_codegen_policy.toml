@@ -24,12 +24,6 @@ open = false
 swift_name = "APIContentClassification"
 
 [[enums]]
-schema = "TaskType"
-targets = ["app_swift"]
-open = true
-swift_name = "APITaskType"
-
-[[enums]]
 schema = "TaskStatus"
 targets = ["app_swift"]
 open = true
@@ -200,16 +194,6 @@ targets = ["app_swift"]
 open = false
 
 [[enums]]
-schema = "NewsItemVisibilityScope"
-targets = ["app_swift"]
-open = true
-
-[[enums]]
-schema = "NewsItemStatus"
-targets = ["app_swift"]
-open = true
-
-[[enums]]
 schema = "LearningDeckSourceKind"
 targets = ["app_swift"]
 open = true
@@ -299,13 +283,7 @@ targets = ["app_swift"]
 schema = "ContentBodyResponse"
 targets = ["app_swift"]
 [[models]]
-schema = "NarrationResponse"
-targets = ["app_swift"]
-[[models]]
 schema = "SubmissionStatusListResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "PodcastEpisodeSearchResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "MixedSearchResponse"
@@ -332,17 +310,10 @@ targets = ["app_swift"]
 schema = "KnowledgeMutationResponse"
 targets = ["app_swift"]
 [[models]]
-schema = "ChatGptUrlResponse"
-targets = ["app_swift"]
-swift_name = "APIChatGPTUrlResponse"
-[[models]]
 schema = "ConvertNewsResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "BadgeStatsResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "LongFormStatsResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "TweetSuggestionsRequest"
@@ -388,18 +359,6 @@ schema = "MessageStatusResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "CreateChatSessionResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "CouncilStartRequest"
-targets = ["app_swift"]
-[[models]]
-schema = "CouncilSelectRequest"
-targets = ["app_swift"]
-[[models]]
-schema = "CouncilRetryRequest"
-targets = ["app_swift"]
-[[models]]
-schema = "JobStatusResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "CustomNarrationCreateRequest"
@@ -459,9 +418,6 @@ targets = ["app_swift"]
 schema = "BriefingNarrationRequest"
 targets = ["app_swift"]
 [[models]]
-schema = "LegacyBriefingNarrationRequest"
-targets = ["app_swift"]
-[[models]]
 schema = "BriefingNarrationResponse"
 targets = ["app_swift"]
 [[models]]
@@ -498,37 +454,10 @@ targets = ["app_swift"]
 schema = "IntegrationDisconnectResponse"
 targets = ["app_swift"]
 [[models]]
-schema = "UserLlmIntegrationResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "UpsertUserLlmIntegrationRequest"
-targets = ["app_swift"]
-[[models]]
-schema = "UserLlmIntegrationTestResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "DeleteUserLlmIntegrationResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "OnboardingProfileRequest"
-targets = ["app_swift"]
-[[models]]
-schema = "OnboardingProfileResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "OnboardingVoiceParseRequest"
-targets = ["app_swift"]
-[[models]]
-schema = "OnboardingVoiceParseResponse"
-targets = ["app_swift"]
-[[models]]
 schema = "OnboardingAudioDiscoverRequest"
 targets = ["app_swift"]
 [[models]]
 schema = "OnboardingAudioDiscoverResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "OnboardingFastDiscoverRequest"
 targets = ["app_swift"]
 [[models]]
 schema = "OnboardingDiscoveryStatusResponse"
@@ -556,9 +485,6 @@ schema = "LearningDeckShareResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "AudioTranscriptionResponse"
-targets = ["app_swift"]
-[[models]]
-schema = "AudioTranscriptionHealthResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "AppleSignInRequest"
@@ -626,7 +552,6 @@ untyped_fields = [
   "NewsItemDetailResponse.metadata",
   "AgentOnboardingStartRequest.preferences",
   "ContentDiscussionResponse.stats",
-  "JobStatusResponse.payload",
   "LearningDeckResponse.source_metadata",
   "LlmTaskActionResponse.action_input",
   "LlmTaskActionResponse.action_result",
@@ -647,6 +572,16 @@ lenient_fields = [
   "AssistantFeedOption.is_subscribed",
   "ChatMessageDto.feed_options",
   "ChatMessageDto.council_candidates",
+  "ChatMessageDto.active_council_child_session_id",
+  "ChatSessionSummaryDto.active_child_session_id",
+  "ChatSessionSummaryDto.council_mode",
+  "UserResponse.council_personas",
+]
+
+# Generated value models used directly by SwiftUI equality checks. Opt in only
+# when every generated field is Equatable.
+equatable_models = [
+  "BriefingFirstRunTierProgress",
 ]
 
 # Defaults whose value cannot be recovered from OpenAPI's required/nullability
@@ -666,7 +601,6 @@ lenient_fields = [
 "ChatMessageDto.status" = '"completed"'
 "ContentDiscussionResponse.mode" = '"none"'
 "IntegrationDisconnectResponse.status" = '"disconnected"'
-"DeleteUserLlmIntegrationResponse.status" = '"deleted"'
 "SubmissionStatusResponse.submission_kind" = '"content"'
 "SubmissionStatusResponse.outcome" = '"processing"'
 "UserResponse.reading_experience" = '"briefing"'
@@ -674,7 +608,6 @@ lenient_fields = [
 "ContentDetailResponse.is_saved_to_knowledge" = "false"
 "ContentDetailResponse.body_available" = "false"
 "ContentDetailResponse.can_subscribe" = "false"
-"PodcastEpisodeSearchResponse.results" = "[]"
 "MixedSearchResponse.content" = "[]"
 "MixedSearchResponse.feeds" = "[]"
 "MixedSearchResponse.podcasts" = "[]"
@@ -686,8 +619,6 @@ lenient_fields = [
 "ContentDiscussionResponse.discussion_groups" = "[]"
 "ContentDiscussionResponse.links" = "[]"
 "ContentDiscussionResponse.stats" = "{}"
-"JobStatusResponse.payload" = "{}"
-"JobStatusResponse.retry_count" = "0"
 "AudioEpisodeResponse.source_item_ids" = "[]"
 "AudioEpisodeResponse.source_content_ids" = "[]"
 "AudioEpisodeResponse.source_count" = "0"
@@ -711,10 +642,6 @@ lenient_fields = [
 "XOAuthStartResponse.scopes" = "[]"
 "XConnectionResponse.scopes" = "[]"
 "IntegrationDisconnectResponse.provider" = '"x"'
-"OnboardingProfileResponse.inferred_topics" = "[]"
-"OnboardingProfileResponse.candidate_sources" = "[]"
-"OnboardingVoiceParseResponse.interest_topics" = "[]"
-"OnboardingVoiceParseResponse.missing_fields" = "[]"
 "OnboardingAudioDiscoverResponse.inferred_topics" = "[]"
 "OnboardingAudioDiscoverResponse.lanes" = "[]"
 "OnboardingDiscoveryStatusResponse.inferred_topics" = "[]"

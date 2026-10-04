@@ -10,10 +10,10 @@ use thiserror::Error;
 const SUPPORTED_MANIFEST_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OwnershipPolicyManifest {
-    pub version: u32,
-    pub scope: String,
-    pub runtime_registry: String,
+pub(crate) struct OwnershipPolicyManifest {
+    pub(crate) version: u32,
+    pub(crate) scope: String,
+    pub(crate) runtime_registry: String,
     #[serde(default)]
     routes: Vec<RoutePolicy>,
     #[serde(default)]
@@ -32,7 +32,7 @@ impl OwnershipPolicyManifest {
     /// # Errors
     ///
     /// Returns [`ManifestValidationError`] for malformed ownership policy or missing task schemas.
-    pub fn registry_seeds(&self) -> Result<Vec<OwnershipSeed>, ManifestValidationError> {
+    pub(crate) fn registry_seeds(&self) -> Result<Vec<OwnershipSeed>, ManifestValidationError> {
         self.validate_header()?;
         let mut seen = BTreeSet::new();
         let mut seeds = Vec::with_capacity(self.routes.len() + self.tasks.len());
@@ -57,10 +57,7 @@ impl OwnershipPolicyManifest {
         }
         for task in &self.tasks {
             validate_policy_fields(&task.task_type, &task.current_owner, &task.database_writer)?;
-            if task.queue.trim().is_empty()
-                || task.handler.trim().is_empty()
-                || task.payload_schema.trim().is_empty()
-            {
+            if task.queue.trim().is_empty() || task.payload_schema.trim().is_empty() {
                 return Err(ManifestValidationError::IncompleteResource(
                     task.task_type.clone(),
                 ));
@@ -99,7 +96,7 @@ impl OwnershipPolicyManifest {
 /// # Errors
 ///
 /// Returns [`ManifestValidationError`] for file, TOML, or policy errors.
-pub fn load_ownership_policy_manifest(
+pub(crate) fn load_ownership_policy_manifest(
     path: &Path,
 ) -> Result<OwnershipPolicyManifest, ManifestValidationError> {
     let contents = fs::read_to_string(path).map_err(|source| ManifestValidationError::Read {
@@ -177,13 +174,12 @@ struct TaskPolicy {
     task_type: String,
     queue: String,
     payload_schema: String,
-    handler: String,
     current_owner: String,
     database_writer: String,
 }
 
 #[derive(Debug, Error)]
-pub enum ManifestValidationError {
+pub(crate) enum ManifestValidationError {
     #[error("unable to read ownership manifest {path}")]
     Read {
         path: PathBuf,

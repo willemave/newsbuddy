@@ -14,7 +14,7 @@ use crate::{AuthConfig, AuthConfigError};
 
 const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0:8100";
 const DEFAULT_SERVICE_NAME: &str = "Newsly Rust API";
-const DEFAULT_ENVIRONMENT: &str = "development";
+const DEFAULT_ENVIRONMENT: &str = "production";
 const DEFAULT_LOG_FILTER: &str = "newsly_api=info,tower_http=info";
 const DEFAULT_APPLE_JWKS_URL: &str = "https://appleid.apple.com/auth/keys";
 const DEFAULT_APPLE_SIGNIN_AUDIENCE: &str = "org.willemaw.newsly";
@@ -29,6 +29,53 @@ const DEFAULT_X_API_BASE_URL: &str = "https://api.x.com/2";
 pub enum LogFormat {
     Json,
     Pretty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeploymentEnvironment {
+    Local,
+    Development,
+    Test,
+    Staging,
+    Production,
+}
+
+impl DeploymentEnvironment {
+    fn parse(value: &str) -> Result<Self, ConfigError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Ok(Self::Local),
+            "development" => Ok(Self::Development),
+            "test" => Ok(Self::Test),
+            "staging" => Ok(Self::Staging),
+            "production" => Ok(Self::Production),
+            _ => Err(ConfigError::InvalidValue {
+                name: "ENVIRONMENT",
+                value: value.to_owned(),
+                expected: "local, development, test, staging, or production",
+            }),
+        }
+    }
+
+    pub(crate) const fn is_production(self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    pub(crate) const fn requires_secure_cookies(self) -> bool {
+        matches!(self, Self::Staging | Self::Production)
+    }
+}
+
+impl fmt::Display for DeploymentEnvironment {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Local => "local",
+            Self::Development => "development",
+            Self::Test => "test",
+            Self::Staging => "staging",
+            Self::Production => "production",
+        };
+        formatter.write_str(value)
+    }
 }
 
 impl LogFormat {
@@ -49,7 +96,7 @@ impl LogFormat {
 pub struct ServerConfig {
     pub bind_address: SocketAddr,
     pub service_name: String,
-    pub environment: String,
+    pub environment: DeploymentEnvironment,
     pub debug: bool,
     pub log_filter: String,
     pub log_format: LogFormat,
@@ -131,8 +178,10 @@ impl ServerConfig {
                 source,
             })?;
         let service_name = value_or_default("NEWSLY_RUST_SERVICE_NAME", DEFAULT_SERVICE_NAME);
-        let environment = value_or_default("ENVIRONMENT", DEFAULT_ENVIRONMENT);
+        let environment =
+            DeploymentEnvironment::parse(&value_or_default("ENVIRONMENT", DEFAULT_ENVIRONMENT))?;
         let debug = parse_bool("DEBUG", false)?;
+        validate_debug_auth(environment, debug)?;
         let log_filter = env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_owned());
         let log_format = LogFormat::parse(
             &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
@@ -153,7 +202,6 @@ impl ServerConfig {
         let jwt_secret = env::var("JWT_SECRET_KEY")
             .map(SecretString::from)
             .map_err(|_| ConfigError::Missing("JWT_SECRET_KEY"))?;
-        let jwt_algorithm = value_or_default("JWT_ALGORITHM", "HS256");
         let admin_password = env::var("ADMIN_PASSWORD")
             .map(SecretString::from)
             .map_err(|_| ConfigError::Missing("ADMIN_PASSWORD"))?;
@@ -185,7 +233,6 @@ impl ServerConfig {
         let apple_private_key = optional_string("APPLE_PRIVATE_KEY").map(SecretString::from);
         let auth = AuthConfig::new(AuthConfigInput {
             jwt_secret,
-            jwt_algorithm,
             admin_password,
             admin_session_lifetime,
             access_token_lifetime,
@@ -345,6 +392,17 @@ fn parse_bool(name: &'static str, default: bool) -> Result<bool, ConfigError> {
     }
 }
 
+fn validate_debug_auth(environment: DeploymentEnvironment, debug: bool) -> Result<(), ConfigError> {
+    if debug && environment.is_production() {
+        return Err(ConfigError::InvalidValue {
+            name: "DEBUG",
+            value: "true".to_owned(),
+            expected: "false when ENVIRONMENT is production",
+        });
+    }
+    Ok(())
+}
+
 fn parse_u64(name: &'static str, default: u64) -> Result<u64, ConfigError> {
     parse_number(name, default)
 }
@@ -425,4 +483,38 @@ pub enum ConfigError {
     Auth(#[from] AuthConfigError),
     #[error(transparent)]
     OwnershipIdentity(#[from] newsly_domain::InvalidOwnershipValue),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DeploymentEnvironment, validate_debug_auth};
+
+    #[test]
+    fn deployment_environment_is_explicit_and_fail_closed() {
+        assert_eq!(
+            DeploymentEnvironment::parse("development").expect("development parses"),
+            DeploymentEnvironment::Development
+        );
+        assert_eq!(
+            DeploymentEnvironment::parse("production").expect("production parses"),
+            DeploymentEnvironment::Production
+        );
+        assert!(DeploymentEnvironment::parse("preview").is_err());
+    }
+
+    #[test]
+    fn only_remote_environments_require_secure_cookies() {
+        assert!(!DeploymentEnvironment::Local.requires_secure_cookies());
+        assert!(!DeploymentEnvironment::Development.requires_secure_cookies());
+        assert!(!DeploymentEnvironment::Test.requires_secure_cookies());
+        assert!(DeploymentEnvironment::Staging.requires_secure_cookies());
+        assert!(DeploymentEnvironment::Production.requires_secure_cookies());
+    }
+
+    #[test]
+    fn production_rejects_debug_auth() {
+        assert!(validate_debug_auth(DeploymentEnvironment::Production, true).is_err());
+        assert!(validate_debug_auth(DeploymentEnvironment::Production, false).is_ok());
+        assert!(validate_debug_auth(DeploymentEnvironment::Development, true).is_ok());
+    }
 }

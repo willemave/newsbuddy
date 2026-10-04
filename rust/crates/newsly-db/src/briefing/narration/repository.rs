@@ -83,7 +83,7 @@ pub async fn prepare_briefing_narration(
     let source_keys = dedupe_source_keys(
         ordered_segments
             .iter()
-            .flat_map(|segment| &segment.source_keys),
+            .flat_map(|segment| segment.source_keys.iter().cloned()),
     );
     let sources = load_eligible_sources_for_keys(transaction, user_id, &source_keys).await?;
     let program = NarrationProgram::resolve(selection, chaptered, &lenses[0])?;

@@ -12,8 +12,4 @@ pub(in crate::news_item) enum NewsRepositoryError {
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]
     Queue(#[from] newsly_queue::QueueError),
-    #[error(transparent)]
-    ContentSubmission(#[from] newsly_db::ContentSubmissionRepositoryError),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
 }

@@ -1,6 +1,57 @@
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewExaSearchUsage<'a> {
+    pub request_id: &'a str,
+    pub user_id: i64,
+    pub feature: &'a str,
+    pub operation: &'a str,
+    pub request_count: u64,
+    pub result_count: u64,
+    pub estimated_cost_usd: Option<f64>,
+    pub metadata: Value,
+}
+
+/// Records a completed search independently of client-supplied request IDs. Each observed
+/// provider invocation receives a fresh server identity, so repeated request headers cannot
+/// suppress billed usage. Attribution is skipped if the account is no longer active.
+///
+/// # Errors
+///
+/// Returns [`VendorUsageRepositoryError::Sqlx`] when PostgreSQL rejects the insert.
+pub async fn record_exa_search_usage(
+    pool: &PgPool,
+    usage: &NewExaSearchUsage<'_>,
+) -> Result<bool, VendorUsageRepositoryError> {
+    let inserted = sqlx::query_scalar::<_, i64>(
+        r"INSERT INTO vendor_usage_records (
+            provider, model, feature, operation, source, request_id, user_id,
+            request_count, resource_count, cost_usd, currency, pricing_version,
+            cost_basis, metadata, idempotency_key, created_at
+        ) SELECT
+            'exa', 'search', $1, $2, 'api', $3, users.id,
+            $5, $6, $7, 'USD', $8, $9, $10, $11,
+            timezone('UTC', clock_timestamp())
+          FROM users WHERE users.id::bigint = $4 AND users.is_active = TRUE
+        RETURNING id::bigint",
+    )
+    .bind(usage.feature)
+    .bind(usage.operation)
+    .bind(usage.request_id)
+    .bind(usage.user_id)
+    .bind(i32::try_from(usage.request_count).unwrap_or(i32::MAX))
+    .bind(i32::try_from(usage.result_count).unwrap_or(i32::MAX))
+    .bind(usage.estimated_cost_usd)
+    .bind(usage.estimated_cost_usd.map(|_| "exa-response-estimate"))
+    .bind(usage.estimated_cost_usd.map(|_| "provider_estimate"))
+    .bind(&usage.metadata)
+    .bind(format!("exa:{}", uuid::Uuid::new_v4()))
+    .fetch_optional(pool)
+    .await?;
+    Ok(inserted.is_some())
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewTranscriptionUsage<'a> {
@@ -251,4 +302,35 @@ pub async fn record_x_user_lookup_usage(
 pub enum VendorUsageRepositoryError {
     #[error("PostgreSQL vendor usage insert failed")]
     Sqlx(#[from] sqlx::Error),
+}
+
+#[cfg(test)]
+mod exa_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn client_request_id_does_not_deduplicate_distinct_searches(pool: PgPool) {
+        let user_id = sqlx::query_scalar::<_, i64>("INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('exa-observed','exa@example.com',FALSE,TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+        let usage = NewExaSearchUsage {
+            request_id: "repeated-client-header",
+            user_id,
+            feature: "agent_search",
+            operation: "agent.search_web",
+            request_count: 1,
+            result_count: 2,
+            estimated_cost_usd: Some(0.01),
+            metadata: json!({"cost_status":"provider_estimate"}),
+        };
+        assert!(record_exa_search_usage(&pool, &usage).await.unwrap());
+        assert!(record_exa_search_usage(&pool, &usage).await.unwrap());
+        let observed = sqlx::query_as::<_,(i64,i64)>("SELECT count(*)::bigint,count(DISTINCT idempotency_key)::bigint FROM vendor_usage_records WHERE request_id=$1").bind(usage.request_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(observed, (2, 2));
+        sqlx::query("UPDATE users SET is_active=FALSE WHERE id::bigint=$1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!record_exa_search_usage(&pool, &usage).await.unwrap());
+    }
 }

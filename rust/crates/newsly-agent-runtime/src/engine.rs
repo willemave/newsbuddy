@@ -12,8 +12,6 @@ use uuid::Uuid;
 
 use crate::{NewslyTranscript, ProviderUsage};
 
-pub type BoxAgentFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<AgentOutcome, AgentRuntimeError>> + Send + 'a>>;
 pub type BoxToolFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ToolOutput, AgentRuntimeError>> + Send + 'a>>;
 
@@ -184,15 +182,6 @@ pub trait AgentEventSink: std::fmt::Debug + Send + Sync {
     ///
     /// Returns an event-sink error when the durable progress boundary rejects the event.
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError>;
-}
-
-pub trait AgentEngine: std::fmt::Debug + Send + Sync {
-    fn run(
-        &self,
-        request: AgentRequest,
-        tools: Arc<dyn ToolExecutor>,
-        events: Arc<dyn AgentEventSink>,
-    ) -> BoxAgentFuture<'_>;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

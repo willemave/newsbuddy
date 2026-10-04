@@ -1,4 +1,4 @@
-use axum::extract::{Extension, FromRequest, Request, State};
+use axum::extract::{FromRequest, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -10,10 +10,8 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::users::user_response;
-use crate::write_support::{internal_error, require_operation, verify_stamp};
+use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
-
-const DEBUG_USER_OPERATION_ID: &str = "debugNewCreateUser";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new().route("/auth/debug/new-user", post(debug_create_user))
@@ -36,11 +34,10 @@ pub(super) fn router() -> Router<AppState> {
 pub(super) async fn debug_create_user(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     request: Request,
 ) -> Result<Json<TokenResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DEBUG_USER_OPERATION_ID, &request_id)?;
     if !state.debug_auth_enabled {
         return Err(not_found(&request_id));
     }
@@ -80,13 +77,8 @@ pub(super) async fn debug_create_user(
             .reading_experience
             .map(|value| value.as_str().to_owned()),
     };
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let upsert =
         create_or_update_debug_user(&mut transaction, payload.user_id, &apple_id, &email, &patch)
             .await
@@ -94,10 +86,7 @@ pub(super) async fn debug_create_user(
                 UserProfileRepositoryError::UserNotFound(_) => not_found(&request_id),
                 other => internal_error(other, &request_id),
             })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     let tokens = state
         .auth
         .issue_token_pair(upsert.profile.id, Utc::now())

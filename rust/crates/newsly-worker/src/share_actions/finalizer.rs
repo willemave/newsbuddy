@@ -7,10 +7,10 @@ use newsly_db::{
     lock_share_action_for_finalization, mark_share_action_applied, mark_share_action_applying,
     mark_share_action_failed, persist_share_action_agent_output, request_share_action,
 };
+use newsly_domain::sha256_hex;
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskResult, TaskType};
 use reqwest::Url;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
 
@@ -18,7 +18,8 @@ use crate::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 
 use super::agent::ShareActionAgentRunResult;
 use super::submission::{
-    ShareSubmissionPolicy, apply_validated_feed_action, submit_content_action,
+    AppliedShareFeedSubscription, ShareSubmissionPolicy, apply_validated_feed_action,
+    submit_content_action,
 };
 use super::workflows::{
     BriefingActionInput, ContentActionInput, LearningDeckActionInput, PreparedHostAction,
@@ -87,7 +88,7 @@ impl ShareActionSuccessFinalizer {
                 "request_count": agent.outcome.request_count,
                 "tool_call_count": agent.outcome.tool_call_count,
                 "provider_response_id": agent.outcome.provider_response_id,
-                "events": agent.events,
+                "event_count": agent.events.len(),
             });
             persist_share_action_agent_output(
                 transaction,
@@ -115,7 +116,7 @@ impl ShareActionSuccessFinalizer {
             &action.idempotency_key,
         )
         .await?;
-        if requested.status != newsly_db::RequestedActionStatus::Approved {
+        if !requested.approved {
             finish_share_action_task(transaction, task.id).await?;
             return Ok(TaskFinalizerResult::Keep);
         }
@@ -239,54 +240,20 @@ impl ShareActionApplicator<'_> {
                 let subscription =
                     apply_validated_feed_action(transaction, self.queue, task.user_id, input)
                         .await?;
-                Ok(Map::from_iter([
-                    ("outcome".to_owned(), Value::from("completed")),
-                    ("subscribed".to_owned(), Value::Bool(true)),
-                    (
-                        "subscription_outcome".to_owned(),
-                        Value::from(subscription.outcome),
-                    ),
-                    ("config_id".to_owned(), Value::from(subscription.config_id)),
-                    ("feed_url".to_owned(), Value::from(subscription.feed_url)),
-                    ("feed_type".to_owned(), Value::from(subscription.feed_type)),
-                    (
-                        "feed_format".to_owned(),
-                        Value::from(subscription.feed_format),
-                    ),
-                    (
-                        "backfill_task_id".to_owned(),
-                        option_i64(subscription.backfill_task_id),
-                    ),
-                ]))
+                let mut result = feed_subscription_fields(subscription);
+                result.insert("outcome".to_owned(), Value::from("completed"));
+                Ok(result)
             }
             ("add_to_briefing", ShareActionHostInput::Briefing(target)) => match target {
                 BriefingActionInput::Feed(input) => {
                     let subscription =
                         apply_validated_feed_action(transaction, self.queue, task.user_id, input)
                             .await?;
-                    Ok(Map::from_iter([
-                        ("resolved_kind".to_owned(), Value::from("feed")),
-                        (
-                            "resolved_url".to_owned(),
-                            Value::from(subscription.feed_url.clone()),
-                        ),
-                        ("subscribed".to_owned(), Value::Bool(true)),
-                        (
-                            "subscription_outcome".to_owned(),
-                            Value::from(subscription.outcome),
-                        ),
-                        ("config_id".to_owned(), Value::from(subscription.config_id)),
-                        ("feed_url".to_owned(), Value::from(subscription.feed_url)),
-                        ("feed_type".to_owned(), Value::from(subscription.feed_type)),
-                        (
-                            "feed_format".to_owned(),
-                            Value::from(subscription.feed_format),
-                        ),
-                        (
-                            "backfill_task_id".to_owned(),
-                            option_i64(subscription.backfill_task_id),
-                        ),
-                    ]))
+                    let resolved_url = subscription.feed_url.clone();
+                    let mut result = feed_subscription_fields(subscription);
+                    result.insert("resolved_kind".to_owned(), Value::from("feed"));
+                    result.insert("resolved_url".to_owned(), Value::from(resolved_url));
+                    Ok(result)
                 }
                 BriefingActionInput::Content(input) => {
                     let submitted = submit_content_action(
@@ -497,6 +464,27 @@ impl ShareActionApplicator<'_> {
             ("content_id".to_owned(), option_i64(content_id)),
         ]))
     }
+}
+
+fn feed_subscription_fields(subscription: AppliedShareFeedSubscription) -> Map<String, Value> {
+    Map::from_iter([
+        ("subscribed".to_owned(), Value::Bool(true)),
+        (
+            "subscription_outcome".to_owned(),
+            Value::from(subscription.outcome),
+        ),
+        ("config_id".to_owned(), Value::from(subscription.config_id)),
+        ("feed_url".to_owned(), Value::from(subscription.feed_url)),
+        ("feed_type".to_owned(), Value::from(subscription.feed_type)),
+        (
+            "feed_format".to_owned(),
+            Value::from(subscription.feed_format),
+        ),
+        (
+            "backfill_task_id".to_owned(),
+            option_i64(subscription.backfill_task_id),
+        ),
+    ])
 }
 
 /// Applies one already-validated Share Action host input using only bounded SQL and atomic queue
@@ -789,18 +777,8 @@ fn bounded_github_identity(identity: String, owner: &str, repo: &str) -> String 
         "github:{}/{}:file:{}",
         owner.to_ascii_lowercase(),
         repo.to_ascii_lowercase(),
-        hex_encode(&Sha256::digest(identity.as_bytes()))
+        sha256_hex(identity.as_bytes())
     )
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
 }
 
 #[derive(Debug, Error)]

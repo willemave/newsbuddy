@@ -41,6 +41,32 @@ pub struct DebugUserPatch {
     pub reading_experience: Option<String>,
 }
 
+/// Loads the account already bound to an Apple identity.
+///
+/// # Errors
+///
+/// Returns [`UserProfileRepositoryError`] when `PostgreSQL` cannot load the profile.
+pub async fn find_apple_user(
+    transaction: &mut Transaction<'_, Postgres>,
+    apple_id: &str,
+) -> Result<Option<AppleUserUpsert>, UserProfileRepositoryError> {
+    let user_id =
+        sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE apple_id = $1 FOR SHARE")
+            .bind(apple_id)
+            .fetch_optional(&mut **transaction)
+            .await?;
+    let Some(user_id) = user_id else {
+        return Ok(None);
+    };
+    let profile = load_profile(&mut **transaction, user_id)
+        .await?
+        .ok_or(UserProfileRepositoryError::LostUser(user_id))?;
+    Ok(Some(AppleUserUpsert {
+        profile,
+        is_new_user: false,
+    }))
+}
+
 /// Find an Apple identity or create its active Newsly account. Existing users
 /// retain their stored profile fields, matching the established sign-in behavior.
 ///

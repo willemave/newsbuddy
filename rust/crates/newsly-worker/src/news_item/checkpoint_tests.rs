@@ -27,7 +27,7 @@ async fn summary_checkpoint_survives_relation_failure_but_rejects_changed_input(
     }))
     .unwrap();
     assert!(
-        checkpoint_summary(&queue, &claim, &prepared.snapshot, &summary, &[])
+        checkpoint_summary(&queue, &claim, &prepared.snapshot, &summary)
             .await
             .unwrap()
     );
@@ -44,7 +44,7 @@ async fn summary_checkpoint_survives_relation_failure_but_rejects_changed_input(
     .await
     .unwrap();
     assert!(
-        !checkpoint_summary(&queue, &claim, &prepared.snapshot, &summary, &[])
+        !checkpoint_summary(&queue, &claim, &prepared.snapshot, &summary)
             .await
             .unwrap()
     );
@@ -54,7 +54,7 @@ async fn summary_checkpoint_survives_relation_failure_but_rejects_changed_input(
     tx.commit().await.unwrap();
     sqlx::query("UPDATE processing_tasks SET lease_expires_at = now() - interval '1 second' WHERE id::bigint = $1").bind(claim.id).execute(&pool).await.unwrap();
     assert!(
-        !checkpoint_summary(&queue, &claim, &changed.snapshot, &summary, &[])
+        !checkpoint_summary(&queue, &claim, &changed.snapshot, &summary)
             .await
             .unwrap()
     );

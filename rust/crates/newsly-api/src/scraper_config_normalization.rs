@@ -23,7 +23,7 @@ pub(super) fn normalize_create_input(
     scraper_type: ScraperType,
     config: Map<String, Value>,
 ) -> Result<Map<String, Value>, ConfigValidationError> {
-    let mut config = normalize_for_type(scraper_type.as_str(), config)?;
+    let mut config = normalize_for_type(scraper_type, config)?;
     config
         .entry("limit".to_owned())
         .or_insert_with(|| Value::Number(Number::from(DEFAULT_NEW_FEED_LIMIT)));
@@ -68,11 +68,8 @@ pub(super) fn normalize_for_stored_type(
     scraper_type: &str,
     config: Map<String, Value>,
 ) -> Result<Map<String, Value>, ConfigValidationError> {
-    normalize_for_type(scraper_type, config)
-}
-
-pub(super) fn requires_feed_probe(scraper_type: &str) -> bool {
-    matches!(scraper_type, "substack" | "atom" | "podcast_rss")
+    let kind = scraper_type.parse().map_err(ConfigValidationError::new)?;
+    normalize_for_type(kind, config)
 }
 
 pub(super) fn apply_validated_feed_url(config: &mut Map<String, Value>, effective_url: &str) {
@@ -98,15 +95,16 @@ pub(super) fn response_limit(config: &Map<String, Value>) -> Option<i64> {
 }
 
 fn normalize_for_type(
-    scraper_type: &str,
+    scraper_type: ScraperType,
     config: Map<String, Value>,
 ) -> Result<Map<String, Value>, ConfigValidationError> {
     match scraper_type {
-        "youtube" => normalize_youtube_config(config),
-        "reddit" => normalize_reddit_config(config),
-        "aggregator" => normalize_aggregator_config(config),
-        "substack" | "atom" | "podcast_rss" => normalize_feed_config(config),
-        _ => Err(ConfigValidationError::new("Unsupported scraper_type")),
+        ScraperType::Youtube => normalize_youtube_config(config),
+        ScraperType::Reddit => normalize_reddit_config(config),
+        ScraperType::Aggregator => normalize_aggregator_config(config),
+        ScraperType::Substack | ScraperType::Atom | ScraperType::PodcastRss => {
+            normalize_feed_config(config)
+        }
     }
 }
 
@@ -190,7 +188,10 @@ fn normalize_reddit_config(
 fn normalize_aggregator_config(
     mut config: Map<String, Value>,
 ) -> Result<Map<String, Value>, ConfigValidationError> {
-    let key = compatibility_string(config.get("key"))
+    let key = config
+        .get("key")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
         .trim()
         .to_lowercase();
     if key.is_empty() {
@@ -281,16 +282,6 @@ fn truthy(value: Option<&Value>) -> bool {
         Some(Value::String(value)) => !value.is_empty(),
         Some(Value::Array(value)) => !value.is_empty(),
         Some(Value::Object(value)) => !value.is_empty(),
-    }
-}
-
-fn compatibility_string(value: Option<&Value>) -> String {
-    match value {
-        None | Some(Value::Null) => String::new(),
-        Some(Value::String(value)) => value.clone(),
-        Some(Value::Bool(true)) => "True".to_owned(),
-        Some(Value::Bool(false)) => "False".to_owned(),
-        Some(value) => value.to_string(),
     }
 }
 

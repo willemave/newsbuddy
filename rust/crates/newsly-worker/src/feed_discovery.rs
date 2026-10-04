@@ -12,9 +12,9 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::onboarding_discovery::normalize_seeds;
-use crate::task_tools::{ExaSearchUsage, record_exa_tool_usage};
+use crate::task_tools::record_exa_tool_usage;
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
     TaskFinalizerResult, TaskHandler,
@@ -143,7 +143,7 @@ async fn execute_feed_discovery(
         );
     }
     let (profile_summary, inferred_topics) = discovery_context(&snapshot);
-    let usage = Arc::new(AgentUsageSink::new(
+    let usage = Arc::new(AgentUsageRecorder::new(
         services.pool.clone(),
         AgentUsageAttribution {
             operation: "onboarding.fast_discover".to_owned(),
@@ -158,8 +158,7 @@ async fn execute_feed_discovery(
     let events: Arc<dyn newsly_agent_runtime::AgentEventSink> = usage.clone();
     let result = services
         .provider
-        .with_events(events)
-        .fast_discover(&profile_summary, &inferred_topics)
+        .fast_discover(&profile_summary, &inferred_topics, events)
         .await;
     usage.finish().await;
     let outcome = match result {
@@ -173,17 +172,7 @@ async fn execute_feed_discovery(
         request.user_id,
         &format!("task-{}-attempt-{}", task.task_id, task.retry_count),
         "feed_discovery.search",
-        ExaSearchUsage {
-            request_count: outcome.exa_usage.request_count,
-            result_count: outcome.exa_usage.result_count,
-            summary_count: outcome.exa_usage.summary_count,
-            text_count: outcome.exa_usage.text_count,
-            summary_requested: false,
-            text_requested: true,
-            livecrawl_fallback: false,
-            estimated_cost_usd: outcome.exa_usage.estimated_cost_usd,
-            known_estimated_cost_usd: outcome.exa_usage.known_estimated_cost_usd,
-        },
+        outcome.exa_usage.into(),
     )
     .await;
     if lease.ownership_lost() {

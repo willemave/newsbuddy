@@ -1,62 +1,44 @@
-use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Extension, Path, Query, State};
-use axum::http::header::{ACCEPT, CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use newsly_contracts::{
-    ContentDiscussionResponse, ContentStatus, ContentType, ConvertNewsItemResponse,
-    ConvertNewsResponse, DiscussionCommentResponse, DiscussionMode, MixedSearchFeedResultResponse,
-    MixedSearchResponse, NarrationResponse, NarrationTargetType, PaginationMetadata,
-    PodcastEpisodeSearchResponse, PodcastEpisodeSearchResultResponse, SubmissionContentResult,
+    ContentStatus, ContentType, ConvertNewsItemResponse, ConvertNewsResponse,
+    MixedSearchFeedResultResponse, MixedSearchResponse, PaginationMetadata,
+    PodcastEpisodeSearchResultResponse, SubmissionContentResult,
     SubmissionFeedSubscriptionResponse, SubmissionFeedSubscriptionResult, SubmissionKind,
     SubmissionLearningDeckResult, SubmissionNoActionResult, SubmissionOutcome, SubmissionResult,
     SubmissionStatusListResponse, SubmissionStatusResponse, TweetSuggestion,
     TweetSuggestionsRequest, TweetSuggestionsResponse,
 };
 use newsly_db::{
-    ContentMiscRepositoryError, DiscussionRefreshPlan, DiscussionTargetKind, NewNarrationTtsUsage,
-    SubmissionProjection, finalize_article_conversion, list_active_feed_urls,
-    list_submission_projections, persist_content_discussion, persist_news_discussion,
-    prepare_content_conversion, prepare_content_discussion_refresh, prepare_content_narration,
-    prepare_news_conversion, prepare_news_discussion_refresh, prepare_tweet_content,
-    record_narration_tts_usage, search_visible_content,
+    ContentMiscRepositoryError, SubmissionProjection, finalize_article_conversion,
+    find_visible_content_detail, list_active_feed_urls, list_submission_projections,
+    prepare_content_conversion, prepare_news_conversion, search_visible_content,
 };
-use newsly_providers::{
-    ContentMiscGatewayError, DiscussionRefreshResult, FeedDiscoveryHit, PodcastEpisodeHit,
-};
+use newsly_providers::{ContentMiscGatewayError, FeedDiscoveryHit, PodcastEpisodeHit};
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::auth::AuthenticatedUser;
 use crate::content_read::presentation;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::model_usage::ApiAgentUsageSink;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, require_operation, verify_stamp,
-};
+use crate::pagination_cursor::{self, InvalidCursor};
+use crate::write_support::{bad_request, decode_json, internal_error};
 use crate::{AppState, request_id_from_headers};
 
 pub(crate) mod download_more;
 
 pub(crate) use download_more::download_more_from_series;
-
-const CONVERT_CONTENT_OPERATION_ID: &str = "convertContentNewsToArticle";
-const CONVERT_NEWS_OPERATION_ID: &str = "convertNewsItemToArticle";
-const TWEET_OPERATION_ID: &str = "getContentTweetSuggestions";
-const REFRESH_CONTENT_DISCUSSION_OPERATION_ID: &str = "refreshContentDiscussion";
-const REFRESH_NEWS_DISCUSSION_OPERATION_ID: &str = "refreshNewsItemDiscussion";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -73,28 +55,12 @@ pub(super) fn router() -> Router<AppState> {
             post(download_more_from_series),
         )
         .route(
-            "/api/content/narration/{target_type}/{target_id}",
-            get(get_narration),
-        )
-        .route(
             "/api/content/{content_id}/tweet-suggestions",
             post(get_tweet_suggestions),
         )
         .route(
             "/api/content/submissions/list",
             get(list_submission_statuses),
-        )
-        .route(
-            "/api/content/{content_id}/discussion/refresh",
-            post(refresh_content_discussion),
-        )
-        .route(
-            "/api/news/items/{news_item_id}/discussion/refresh",
-            post(refresh_news_item_discussion),
-        )
-        .route(
-            "/api/content/search/podcasts",
-            get(search_podcast_episode_matches),
         )
         .route("/api/content/search/mixed", get(search_mixed_contents))
 }
@@ -121,10 +87,9 @@ pub(super) async fn convert_content_news_to_article(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<ConvertNewsResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CONVERT_CONTENT_OPERATION_ID, &request_id)?;
     let content_id = positive_path_id(path, "content_id", &request_id)?;
     let plan = prepare_content_conversion(state.database.pool(), current_user.id, content_id)
         .await
@@ -174,10 +139,9 @@ pub(super) async fn convert_news_item_to_article(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<ConvertNewsItemResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, CONVERT_NEWS_OPERATION_ID, &request_id)?;
     let news_item_id = positive_path_id(path, "news_item_id", &request_id)?;
     let plan = prepare_news_conversion(state.database.pool(), current_user.id, news_item_id)
         .await
@@ -217,13 +181,8 @@ async fn finalize_conversion(
     news_metadata: Option<&Value>,
     request_id: &str,
 ) -> Result<newsly_db::ConvertedArticle, ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     let converted = finalize_article_conversion(
         &mut transaction,
         user_id,
@@ -249,124 +208,8 @@ async fn finalize_conversion(
         .enqueue_many_in_transaction(&mut transaction, requests)
         .await
         .map_err(|error| queue_error(error, request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
+    crate::write_support::commit(transaction, request_id).await?;
     Ok(converted)
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/content/narration/{target_type}/{target_id}",
-    operation_id = "getContentNarration",
-    tag = "content",
-    params(
-        ("target_type" = NarrationTargetType, Path, description = "Narration target type"),
-        ("target_id" = i64, Path, minimum = 1)
-    ),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = NarrationResponse, content_type = "application/json"),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Content not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 503, description = "Narration audio unavailable", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn get_narration(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    path: Result<Path<(String, i64)>, PathRejection>,
-    current_user: AuthenticatedUser,
-) -> Result<Response, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let Path((target_type, target_id)) =
-        path.map_err(|rejection| validation_error(rejection.body_text(), &request_id))?;
-    if target_type != "content" || target_id <= 0 {
-        return Err(not_found_message("Content not found", &request_id));
-    }
-    let plan = prepare_content_narration(state.database.pool(), current_user.id, target_id)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?
-        .ok_or_else(|| not_found_message("Content not found", &request_id))?;
-    let title = presentation::present_content_detail(plan.content.clone()).map_or_else(
-        |_| {
-            plan.content
-                .title
-                .clone()
-                .unwrap_or_else(|| format!("Content {target_id}"))
-        },
-        |value| value.display_title,
-    );
-    let narration_text = build_summary_narration(&title, &plan.content.content_metadata);
-    if accepts_audio(&headers) {
-        let narration = state
-            .content_misc
-            .synthesize_narration_mp3(&narration_text)
-            .await
-            .map_err(|error| narration_error(&error, &request_id))?;
-        persist_narration_usage_best_effort(
-            &state,
-            &request_id,
-            current_user.id,
-            target_id,
-            &narration,
-        )
-        .await;
-        let mut response = narration.audio.into_response();
-        response
-            .headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("audio/mpeg"));
-        response
-            .headers_mut()
-            .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-        if let Ok(value) =
-            HeaderValue::from_str(&format!("inline; filename=\"content-{target_id}.mp3\""))
-        {
-            response.headers_mut().insert(CONTENT_DISPOSITION, value);
-        }
-        return Ok(response);
-    }
-    Ok(Json(NarrationResponse {
-        target_type: NarrationTargetType::Content,
-        target_id,
-        title,
-        narration_text,
-    })
-    .into_response())
-}
-
-async fn persist_narration_usage_best_effort(
-    state: &AppState,
-    request_id: &str,
-    user_id: i64,
-    content_id: i64,
-    narration: &newsly_providers::SynthesizedNarration,
-) {
-    let mut transaction = match state.database.pool().begin().await {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            tracing::warn!(error = %error, request_id, "narration usage transaction unavailable");
-            return;
-        }
-    };
-    let usage = NewNarrationTtsUsage {
-        request_id,
-        user_id,
-        content_id,
-        model: &narration.model,
-        request_count: i32::try_from(narration.request_count).unwrap_or(i32::MAX),
-        text_chars: narration.text_chars,
-        standard_pricing: narration.standard_pricing,
-    };
-    if let Err(error) = record_narration_tts_usage(&mut transaction, &usage).await {
-        tracing::warn!(error = %error, request_id, user_id, content_id, "narration usage insert failed");
-        return;
-    }
-    if let Err(error) = transaction.commit().await {
-        tracing::warn!(error = %error, request_id, user_id, content_id, "narration usage commit failed");
-    }
 }
 
 #[utoipa::path(
@@ -392,11 +235,10 @@ pub(super) async fn get_tweet_suggestions(
     headers: HeaderMap,
     path: Result<Path<i64>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
     payload: Result<Json<TweetSuggestionsRequest>, JsonRejection>,
 ) -> Result<Json<TweetSuggestionsResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, TWEET_OPERATION_ID, &request_id)?;
     let content_id = positive_path_id(path, "content_id", &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     if !(1..=10).contains(&payload.creativity) {
@@ -415,17 +257,21 @@ pub(super) async fn get_tweet_suggestions(
             &request_id,
         ));
     }
-    let plan = prepare_tweet_content(state.database.pool(), current_user.id, content_id)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?
-        .ok_or_else(|| not_found_message("Content not found", &request_id))?;
-    if !matches!(plan.status.as_str(), "completed" | "failed") {
+    let content_detail =
+        find_visible_content_detail(state.database.pool(), current_user.id, content_id)
+            .await
+            .map_err(|error| internal_error(error, &request_id))?
+            .ok_or_else(|| not_found_message("Content not found", &request_id))?;
+    if !matches!(content_detail.status.as_str(), "completed" | "failed") {
         return Err(bad_request(
-            format!("Content not ready for tweets (status: {})", plan.status),
+            format!(
+                "Content not ready for tweets (status: {})",
+                content_detail.status
+            ),
             &request_id,
         ));
     }
-    let context = tweet_context(&plan);
+    let tweet_source = tweet_context(&content_detail);
     let usage = Arc::new(ApiAgentUsageSink::new(
         state.database.pool().clone(),
         Some(current_user.id),
@@ -435,7 +281,7 @@ pub(super) async fn get_tweet_suggestions(
     let generated = state
         .content_misc
         .generate_tweet_suggestions_with_events(
-            &context,
+            &tweet_source,
             plan_guidance(payload.message.as_deref()),
             payload.creativity,
             payload.length.as_str(),
@@ -513,7 +359,7 @@ pub(super) async fn list_submission_statuses(
         .as_deref()
         .map(decode_submission_cursor)
         .transpose()
-        .map_err(|message| bad_request(message, &request_id))?;
+        .map_err(|error| bad_request(error.to_string(), &request_id))?;
     let page =
         list_submission_projections(state.database.pool(), current_user.id, cursor, query.limit)
             .await
@@ -522,7 +368,9 @@ pub(super) async fn list_submission_statuses(
         .has_more
         .then(|| page.items.last())
         .flatten()
-        .map(encode_submission_cursor);
+        .map(encode_submission_cursor)
+        .transpose()
+        .map_err(|error| internal_error(error, &request_id))?;
     let submissions = page
         .items
         .into_iter()
@@ -540,152 +388,6 @@ pub(super) async fn list_submission_statuses(
     }))
 }
 
-#[utoipa::path(
-    post,
-    path = "/api/content/{content_id}/discussion/refresh",
-    operation_id = "refreshContentDiscussion",
-    tag = "content",
-    params(("content_id" = i64, Path, minimum = 1)),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = ContentDiscussionResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Content not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn refresh_content_discussion(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    path: Result<Path<i64>, PathRejection>,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-) -> Result<Json<ContentDiscussionResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REFRESH_CONTENT_DISCUSSION_OPERATION_ID, &request_id)?;
-    let content_id = positive_path_id(path, "content_id", &request_id)?;
-    verify_operation_now(&state, &stamp, &request_id).await?;
-    let plan =
-        prepare_content_discussion_refresh(state.database.pool(), current_user.id, content_id)
-            .await
-            .map_err(|error| internal_error(error, &request_id))?
-            .ok_or_else(|| not_found_message("Content not found", &request_id))?;
-    refresh_and_persist_discussion(&state, &stamp, plan, &request_id).await
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/news/items/{news_item_id}/discussion/refresh",
-    operation_id = "refreshNewsItemDiscussion",
-    tag = "news",
-    params(("news_item_id" = i64, Path, minimum = 1)),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = ContentDiscussionResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "News item not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn refresh_news_item_discussion(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    path: Result<Path<i64>, PathRejection>,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-) -> Result<Json<ContentDiscussionResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REFRESH_NEWS_DISCUSSION_OPERATION_ID, &request_id)?;
-    let news_item_id = positive_path_id(path, "news_item_id", &request_id)?;
-    verify_operation_now(&state, &stamp, &request_id).await?;
-    let plan =
-        prepare_news_discussion_refresh(state.database.pool(), current_user.id, news_item_id)
-            .await
-            .map_err(|error| internal_error(error, &request_id))?
-            .ok_or_else(|| not_found_message("News item not found", &request_id))?;
-    refresh_and_persist_discussion(&state, &stamp, plan, &request_id).await
-}
-
-async fn refresh_and_persist_discussion(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    plan: DiscussionRefreshPlan,
-    request_id: &str,
-) -> Result<Json<ContentDiscussionResponse>, ApiError> {
-    let provider_result = state
-        .content_misc
-        .refresh_discussion(
-            plan.platform.as_deref(),
-            plan.discussion_url.as_deref(),
-            plan.external_id.as_deref(),
-        )
-        .await;
-    let (result, status, error_message) = match provider_result {
-        Ok(result) => (Some(result), "completed", None),
-        Err(error) => {
-            tracing::warn!(error = %error, target_id = plan.id, "discussion refresh failed");
-            (None, "failed", Some("Discussion refresh failed".to_owned()))
-        }
-    };
-    let data = result.as_ref().map_or_else(
-        || {
-            json!({
-                "mode": "none",
-                "source_url": plan.discussion_url,
-                "comments": [],
-                "discussion_groups": [],
-                "links": [],
-                "stats": {},
-            })
-        },
-        discussion_json,
-    );
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
-    match plan.kind {
-        DiscussionTargetKind::Content => {
-            persist_content_discussion(
-                &mut transaction,
-                &plan,
-                status,
-                &data,
-                error_message.as_deref(),
-            )
-            .await
-            .map_err(|error| internal_error(error, request_id))?;
-        }
-        DiscussionTargetKind::NewsItem => {
-            persist_news_discussion(
-                &mut transaction,
-                &plan,
-                status,
-                &data,
-                error_message.as_deref(),
-            )
-            .await
-            .map_err(|error| internal_error(error, request_id))?;
-        }
-    }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    Ok(Json(present_refreshed_discussion(
-        &plan,
-        result,
-        error_message,
-    )))
-}
-
 #[derive(Debug, Deserialize)]
 pub(super) struct ExternalSearchQuery {
     q: String,
@@ -693,43 +395,26 @@ pub(super) struct ExternalSearchQuery {
     limit: usize,
 }
 
-const fn default_external_limit() -> usize {
-    10
+impl ExternalSearchQuery {
+    fn validate(&self, request_id: &str) -> Result<(), ApiError> {
+        if !(2..=200).contains(&self.q.chars().count()) {
+            return Err(validation_error(
+                "q must contain between 2 and 200 characters",
+                request_id,
+            ));
+        }
+        if !(1..=25).contains(&self.limit) {
+            return Err(validation_error(
+                "limit must be between 1 and 25",
+                request_id,
+            ));
+        }
+        Ok(())
+    }
 }
 
-#[utoipa::path(
-    get,
-    path = "/api/content/search/podcasts",
-    operation_id = "searchContentPodcastEpisodeMatches",
-    tag = "content",
-    params(
-        ("q" = String, Query, min_length = 2, max_length = 200),
-        ("limit" = Option<usize>, Query, minimum = 1, maximum = 25)
-    ),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = PodcastEpisodeSearchResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 502, description = "Search provider failed", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn search_podcast_episode_matches(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    query: Result<Query<ExternalSearchQuery>, QueryRejection>,
-    _current_user: AuthenticatedUser,
-) -> Result<Json<PodcastEpisodeSearchResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let Query(query) = parse_external_query(query, &request_id)?;
-    let hits = state
-        .content_misc
-        .search_podcast_episodes(&query.q, query.limit)
-        .await
-        .map_err(|error| provider_bad_gateway(&error, &request_id))?;
-    Ok(Json(PodcastEpisodeSearchResponse {
-        results: hits.into_iter().map(present_podcast_hit).collect(),
-    }))
+const fn default_external_limit() -> usize {
+    10
 }
 
 #[utoipa::path(
@@ -833,115 +518,22 @@ async fn active_feed_urls(
     Ok(values)
 }
 
-async fn verify_operation_now(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))
-}
-
-fn build_summary_narration(title: &str, metadata: &Value) -> String {
-    let summary = metadata.get("summary");
-    let artifact_payload = summary
-        .and_then(|value| value.get("artifact"))
-        .and_then(|value| value.get("payload"));
-    let narrative = artifact_payload
-        .and_then(|value| value.get("overview"))
-        .and_then(value_as_clean_string)
-        .or_else(|| {
-            summary.and_then(|value| match value {
-                Value::String(value) => clean_text(value, 3_600),
-                Value::Object(object) => ["editorial_narrative", "overview", "summary", "hook"]
-                    .into_iter()
-                    .find_map(|key| object.get(key).and_then(value_as_clean_string)),
-                _ => None,
-            })
-        });
-    let takeaway = artifact_payload
-        .and_then(|value| value.get("takeaway"))
-        .and_then(value_as_clean_string)
-        .or_else(|| {
-            summary
-                .and_then(|value| value.get("takeaway"))
-                .and_then(value_as_clean_string)
-        });
-    let mut points = Vec::new();
-    for container in [summary, artifact_payload, Some(metadata)]
-        .into_iter()
-        .flatten()
-    {
-        for key in ["key_points", "bullet_points", "points", "insights"] {
-            let Some(items) = container.get(key).and_then(Value::as_array) else {
-                continue;
-            };
-            for item in items {
-                let text = match item {
-                    Value::String(value) => clean_text(value, 280),
-                    Value::Object(object) => ["point", "text", "insight", "content"]
-                        .into_iter()
-                        .find_map(|field| object.get(field).and_then(value_as_clean_string)),
-                    _ => None,
-                };
-                if let Some(text) = text
-                    && !points
-                        .iter()
-                        .any(|existing: &String| existing.eq_ignore_ascii_case(&text))
-                {
-                    points.push(text);
-                }
-                if points.len() >= 10 {
-                    break;
-                }
-            }
-        }
-    }
-    let mut parts = vec![format!("Here is the full summary for {title}.")];
-    if let Some(narrative) = narrative {
-        parts.push(narrative);
-    }
-    if !points.is_empty() {
-        parts.push(format!(
-            "Key points. {}",
-            points
-                .iter()
-                .enumerate()
-                .map(|(index, point)| format!("Point {}: {point}", index + 1))
-                .collect::<Vec<_>>()
-                .join(" ")
-        ));
-    }
-    if let Some(takeaway) = takeaway {
-        parts.push(format!("Takeaway: {takeaway}"));
-    }
-    if parts.len() == 1 {
-        parts.push("I don't have a complete processed summary yet.".to_owned());
-    }
-    truncate_chars(&parts.join(" "), 8_000)
-}
-
-fn tweet_context(plan: &newsly_db::TweetContentPlan) -> String {
-    let summary = plan
-        .metadata
+fn tweet_context(content: &newsly_db::ContentDetailProjection) -> String {
+    let summary = content
+        .content_metadata
         .get("summary")
         .map(Value::to_string)
         .unwrap_or_default();
     format!(
         "Title: {}\nType: {}\nSource: {}\nURL: {}\nSummary: {}",
-        plan.title,
-        plan.content_type,
-        plan.source.as_deref().unwrap_or("unknown"),
-        plan.url,
+        content
+            .title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .map_or_else(|| format!("Content {}", content.id), ToOwned::to_owned),
+        content.content_type,
+        content.source.as_deref().unwrap_or("unknown"),
+        content.url,
         truncate_chars(&summary, 12_000)
     )
 }
@@ -950,97 +542,6 @@ fn plan_guidance(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-fn discussion_json(result: &DiscussionRefreshResult) -> Value {
-    json!({
-        "mode": "comments",
-        "source_url": result.source_url,
-        "comments": result.comments.iter().map(|comment| json!({
-            "comment_id": comment.comment_id,
-            "parent_id": comment.parent_id,
-            "author": comment.author,
-            "text": comment.text,
-            "compact_text": Value::Null,
-            "depth": comment.depth,
-            "created_at": comment.created_at,
-            "source_url": comment.source_url,
-        })).collect::<Vec<_>>(),
-        "discussion_groups": [],
-        "links": [],
-        "stats": result.stats,
-    })
-}
-
-fn present_refreshed_discussion(
-    plan: &DiscussionRefreshPlan,
-    result: Option<DiscussionRefreshResult>,
-    error_message: Option<String>,
-) -> ContentDiscussionResponse {
-    let (platform, source_url, comments, discussion_stats) = result.map_or_else(
-        || {
-            (
-                plan.platform.clone(),
-                plan.discussion_url.clone(),
-                Vec::new(),
-                BTreeMap::new(),
-            )
-        },
-        |result| {
-            (
-                Some(result.platform),
-                Some(result.source_url),
-                result
-                    .comments
-                    .into_iter()
-                    .map(|comment| DiscussionCommentResponse {
-                        comment_id: comment.comment_id,
-                        parent_id: comment.parent_id,
-                        author: comment.author,
-                        text: comment.text,
-                        compact_text: None,
-                        depth: comment.depth,
-                        created_at: comment.created_at,
-                        source_url: comment.source_url,
-                    })
-                    .collect(),
-                result.stats,
-            )
-        },
-    );
-    let status = if error_message.is_some() {
-        "failed"
-    } else if comments.is_empty() {
-        "partial"
-    } else {
-        "completed"
-    };
-    ContentDiscussionResponse {
-        content_id: plan.id,
-        status: status.to_owned(),
-        mode: if comments.is_empty() {
-            DiscussionMode::None
-        } else {
-            DiscussionMode::Comments
-        },
-        platform,
-        source_url: source_url.clone(),
-        discussion_url: source_url,
-        fetched_at: Some(Utc::now()),
-        error_message,
-        comments,
-        discussion_groups: Vec::new(),
-        links: Vec::new(),
-        summary: None,
-        comment_count: discussion_stats
-            .get("comment_count")
-            .and_then(Value::as_i64),
-        stats: discussion_stats,
-    }
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "canonical result construction and agreeing compatibility mirrors must stay together"
-)]
 fn present_submission(row: SubmissionProjection) -> SubmissionStatusResponse {
     let content_type = row
         .content_type
@@ -1053,21 +554,7 @@ fn present_submission(row: SubmissionProjection) -> SubmissionStatusResponse {
         .as_deref()
         .and_then(|value| ContentStatus::from_str(value).ok())
         .unwrap_or_else(|| task_content_status(&row.task_status));
-    let url = row
-        .content_url
-        .clone()
-        .or_else(|| nested_string(&row.input, &["url"]))
-        .or_else(|| {
-            row.action_input
-                .as_ref()
-                .and_then(|value| nested_string(value, &["source_url"]))
-        })
-        .or_else(|| {
-            row.action_input
-                .as_ref()
-                .and_then(|value| nested_string(value, &["url"]))
-        })
-        .unwrap_or_else(|| format!("newsly://share-actions/{}", row.id));
+    let url = submission_url(&row);
     let no_action = row.task_status == "completed"
         && row.output.get("action").and_then(Value::as_str) == Some("no_action");
     let rationale = if no_action {
@@ -1079,15 +566,15 @@ fn present_submission(row: SubmissionProjection) -> SubmissionStatusResponse {
     let feed_subscription = row
         .content_metadata
         .as_ref()
-        .and_then(processing_metadata)
-        .and_then(|value| value.get("feed_subscription"))
+        .and_then(Value::as_object)
+        .and_then(|value| newsly_db::content_metadata::runtime_value(value, "feed_subscription"))
         .cloned()
         .and_then(|value| serde_json::from_value::<SubmissionFeedSubscriptionResponse>(value).ok());
     let detected_feed = row
         .content_metadata
         .as_ref()
-        .and_then(processing_metadata)
-        .and_then(|value| value.get("detected_feed"))
+        .and_then(Value::as_object)
+        .and_then(|value| newsly_db::content_metadata::runtime_value(value, "detected_feed"))
         .cloned()
         .and_then(|value| serde_json::from_value(value).ok());
     let outcome = if no_action {
@@ -1151,6 +638,23 @@ fn present_submission(row: SubmissionProjection) -> SubmissionStatusResponse {
     }
 }
 
+fn submission_url(row: &SubmissionProjection) -> String {
+    row.content_url
+        .clone()
+        .or_else(|| nested_string(&row.input, &["url"]))
+        .or_else(|| {
+            row.action_input
+                .as_ref()
+                .and_then(|value| nested_string(value, &["source_url"]))
+        })
+        .or_else(|| {
+            row.action_input
+                .as_ref()
+                .and_then(|value| nested_string(value, &["url"]))
+        })
+        .unwrap_or_else(|| format!("newsly://share-actions/{}", row.id))
+}
+
 fn submission_kind(row: &SubmissionProjection) -> SubmissionKind {
     match (row.mode.as_str(), row.action_name.as_deref()) {
         ("presentation", _) | (_, Some("create_learning_deck")) => SubmissionKind::LearningDeck,
@@ -1202,59 +706,36 @@ fn feed_outcome(
     }
 }
 
-fn processing_metadata(metadata: &Value) -> Option<&Map<String, Value>> {
-    metadata
-        .get("domain")
-        .and_then(|value| value.get("processing"))
-        .and_then(Value::as_object)
-        .or_else(|| metadata.get("processing").and_then(Value::as_object))
-        .or_else(|| metadata.as_object())
-}
-
 fn nested_string(value: &Value, path: &[&str]) -> Option<String> {
     path.iter()
         .try_fold(value, |current, key| current.get(*key))
         .and_then(value_as_clean_string)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SubmissionCursor {
     last_id: i64,
     last_created_at: String,
-    #[serde(default)]
-    filters_hash: Option<String>,
 }
 
-fn decode_submission_cursor(cursor: &str) -> Result<(DateTime<Utc>, i64), &'static str> {
-    let decoded = URL_SAFE
-        .decode(cursor)
-        .or_else(|_| URL_SAFE_NO_PAD.decode(cursor))
-        .map_err(|_| "Invalid pagination cursor")?;
-    let cursor: SubmissionCursor =
-        serde_json::from_slice(&decoded).map_err(|_| "Invalid pagination cursor")?;
-    if cursor.last_id <= 0 || cursor.filters_hash.is_some_and(|value| !value.is_empty()) {
-        return Err("Invalid pagination cursor");
+fn decode_submission_cursor(cursor: &str) -> Result<(DateTime<Utc>, i64), InvalidCursor> {
+    let cursor: SubmissionCursor = pagination_cursor::decode(cursor)?;
+    if cursor.last_id <= 0 {
+        return Err(InvalidCursor);
     }
-    let created_at = DateTime::parse_from_rfc3339(&cursor.last_created_at)
-        .map(|value| value.with_timezone(&Utc))
-        .ok()
-        .or_else(|| {
-            NaiveDateTime::parse_from_str(&cursor.last_created_at, "%Y-%m-%dT%H:%M:%S%.f")
-                .map(|value| value.and_utc())
-                .ok()
-        })
-        .ok_or("Invalid pagination cursor")?;
+    let created_at = pagination_cursor::decode_timestamp(&cursor.last_created_at)?.and_utc();
     Ok((created_at, cursor.last_id))
 }
 
-fn encode_submission_cursor(row: &SubmissionProjection) -> String {
-    let payload = format!(
-        "{{\"last_created_at\": \"{}\", \"last_id\": {}}}",
-        row.created_at.naive_utc().format("%Y-%m-%dT%H:%M:%S%.f"),
-        row.id
-    );
-    URL_SAFE.encode(payload)
+fn encode_submission_cursor(row: &SubmissionProjection) -> Result<String, InvalidCursor> {
+    if row.id <= 0 {
+        return Err(InvalidCursor);
+    }
+    pagination_cursor::encode(&SubmissionCursor {
+        last_id: row.id,
+        last_created_at: pagination_cursor::encode_timestamp(row.created_at.naive_utc()),
+    })
 }
 
 fn present_podcast_hit(hit: PodcastEpisodeHit) -> PodcastEpisodeSearchResultResponse {
@@ -1279,9 +760,10 @@ fn present_feed_hit(
         id: hit.id,
         title: hit.title,
         site_url: hit.site_url,
-        is_subscribed: subscribed_urls
-            .iter()
-            .any(|value| canonical_feed_url(value) == canonical_feed_url(&hit.feed_url)),
+        is_subscribed: subscribed_urls.iter().any(|value| {
+            newsly_db::canonicalize_feed_url(value)
+                == newsly_db::canonicalize_feed_url(&hit.feed_url)
+        }),
         feed_url: hit.feed_url,
         feed_type: hit.feed_type,
         feed_format: hit.feed_format,
@@ -1291,43 +773,14 @@ fn present_feed_hit(
     }
 }
 
-fn canonical_feed_url(value: &str) -> String {
-    value.trim().trim_end_matches('/').to_ascii_lowercase()
-}
-
-fn parse_external_query<T>(
-    query: Result<Query<T>, QueryRejection>,
+fn parse_external_query(
+    query: Result<Query<ExternalSearchQuery>, QueryRejection>,
     request_id: &str,
-) -> Result<Query<T>, ApiError>
-where
-    T: ExternalQuery,
-{
+) -> Result<Query<ExternalSearchQuery>, ApiError> {
     let Query(query) =
         query.map_err(|rejection| validation_error(rejection.body_text(), request_id))?;
     query.validate(request_id)?;
     Ok(Query(query))
-}
-
-trait ExternalQuery {
-    fn validate(&self, request_id: &str) -> Result<(), ApiError>;
-}
-
-impl ExternalQuery for ExternalSearchQuery {
-    fn validate(&self, request_id: &str) -> Result<(), ApiError> {
-        if !(2..=200).contains(&self.q.chars().count()) {
-            return Err(validation_error(
-                "q must contain between 2 and 200 characters",
-                request_id,
-            ));
-        }
-        if !(1..=25).contains(&self.limit) {
-            return Err(validation_error(
-                "limit must be between 1 and 25",
-                request_id,
-            ));
-        }
-        Ok(())
-    }
 }
 
 fn positive_path_id(
@@ -1364,20 +817,12 @@ fn conversion_message(already_exists: bool) -> String {
     .to_owned()
 }
 
-fn accepts_audio(headers: &HeaderMap) -> bool {
-    headers
-        .get(ACCEPT)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.to_ascii_lowercase().contains("audio/mpeg"))
-}
-
-fn clean_text(value: &str, limit: usize) -> Option<String> {
-    let cleaned = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!cleaned.is_empty()).then(|| truncate_chars(&cleaned, limit))
-}
-
 fn value_as_clean_string(value: &Value) -> Option<String> {
-    value.as_str().and_then(|value| clean_text(value, 3_600))
+    value
+        .as_str()
+        .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_chars(&value, 3_600))
 }
 
 fn truncate_chars(value: &str, limit: usize) -> String {
@@ -1409,17 +854,6 @@ fn provider_bad_gateway(error: &ContentMiscGatewayError, request_id: &str) -> Ap
     .with_retryable(true)
 }
 
-fn narration_error(error: &ContentMiscGatewayError, request_id: &str) -> ApiError {
-    tracing::warn!(error = %error, "narration audio request failed");
-    ApiError::new(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "narration_unavailable",
-        "Narration audio is unavailable",
-        request_id,
-    )
-    .with_retryable(true)
-}
-
 fn queue_error(error: QueueError, request_id: &str) -> ApiError {
     internal_error(error, request_id)
 }
@@ -1429,16 +863,30 @@ fn not_found_message(message: &str, request_id: &str) -> ApiError {
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id,
-    )
-    .with_details(
-        json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation detail is an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
+}
+
+#[cfg(test)]
+mod submission_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn submission_cursor_round_trips_without_filter_fields() {
+        let cursor = pagination_cursor::encode(&SubmissionCursor {
+            last_id: 17,
+            last_created_at: "2026-08-30T12:34:56.000000Z".to_owned(),
+        })
+        .expect("cursor encodes");
+        let (created_at, id) = decode_submission_cursor(&cursor).expect("cursor decodes");
+        assert_eq!(id, 17);
+        assert_eq!(created_at.to_rfc3339(), "2026-08-30T12:34:56+00:00");
+
+        let with_hash = pagination_cursor::encode(&serde_json::json!({
+            "last_id": 17,
+            "last_created_at": "2026-08-30T12:34:56.000000Z",
+            "filters_hash": "unexpected"
+        }))
+        .expect("fixture encodes");
+        assert!(decode_submission_cursor(&with_hash).is_err());
+    }
 }

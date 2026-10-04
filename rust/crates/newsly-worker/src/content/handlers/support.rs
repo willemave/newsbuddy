@@ -147,21 +147,7 @@ pub(super) fn payload_string<'a>(payload: &'a Map<String, Value>, key: &str) -> 
 }
 
 pub(super) fn runtime_value<'a>(metadata: &'a Value, key: &str) -> Option<&'a Value> {
-    let object = metadata.as_object()?;
-    object
-        .get(key)
-        .or_else(|| {
-            object
-                .get("processing")
-                .and_then(Value::as_object)
-                .and_then(|processing| processing.get(key))
-        })
-        .or_else(|| {
-            object
-                .get("domain")
-                .and_then(Value::as_object)
-                .and_then(|domain| domain.get(key))
-        })
+    newsly_db::content_metadata::legacy_root_first_value(metadata.as_object()?, key)
 }
 
 pub(super) fn runtime_bool(metadata: &Value, key: &str) -> bool {

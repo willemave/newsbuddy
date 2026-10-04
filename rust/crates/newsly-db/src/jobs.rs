@@ -1,5 +1,4 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
-use serde_json::{Map, Value};
 use sqlx::{FromRow, PgPool};
 use thiserror::Error;
 
@@ -23,7 +22,6 @@ pub struct JobStatusProjection {
     pub status: String,
     pub queue_name: String,
     pub content_id: Option<i64>,
-    pub payload: Map<String, Value>,
     pub retry_count: i32,
     pub created_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
@@ -74,7 +72,6 @@ pub async fn find_job_for_user(
         status: row.status,
         queue_name: row.queue_name,
         content_id: row.content_id,
-        payload: Map::new(),
         retry_count: row.retry_count,
         created_at: row.created_at.map(|value| value.and_utc()),
         started_at: row.started_at.map(|value| value.and_utc()),

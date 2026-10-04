@@ -8,8 +8,8 @@ use crate::{ReadingExperience, UserResponse};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
 pub struct AppleSignInRequest {
     pub id_token: String,
-    pub email: Option<String>,
     pub full_name: Option<String>,
+    pub nonce: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
@@ -77,4 +77,35 @@ fn default_token_type() -> String {
 
 fn default_deletion_status() -> String {
     "deletion_scheduled".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppleSignInRequest;
+
+    #[test]
+    fn apple_sign_in_accepts_legacy_email_but_does_not_model_it() {
+        let request: AppleSignInRequest = serde_json::from_value(serde_json::json!({
+            "id_token": "token",
+            "email": "untrusted@example.com",
+            "full_name": "Ada Lovelace"
+        }))
+        .expect("legacy request remains decodable");
+
+        assert_eq!(request.id_token, "token");
+        assert_eq!(request.full_name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(request.nonce, None);
+    }
+
+    #[test]
+    fn apple_sign_in_preserves_the_raw_nonce() {
+        let request: AppleSignInRequest = serde_json::from_value(serde_json::json!({
+            "id_token": "token",
+            "full_name": null,
+            "nonce": "raw-nonce"
+        }))
+        .expect("nonce request decodes");
+
+        assert_eq!(request.nonce.as_deref(), Some("raw-nonce"));
+    }
 }

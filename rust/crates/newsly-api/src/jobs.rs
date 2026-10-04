@@ -78,7 +78,7 @@ pub(super) async fn get_job(
         status: job.status,
         queue_name: job.queue_name,
         content_id: job.content_id,
-        payload: job.payload,
+        payload: serde_json::Map::new(),
         retry_count: job.retry_count,
         created_at: job.created_at,
         started_at: job.started_at,

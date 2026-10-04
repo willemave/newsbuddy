@@ -73,8 +73,6 @@ pub enum E2bError {
     },
     #[error("command stream ended without a terminal event")]
     MissingTerminalEvent,
-    #[error("execution {execution_tag} could not be recovered without risking duplicate start")]
-    RecoveryUnavailable { execution_tag: String },
     #[error("VM bootstrap {operation} failed with exit code {exit_code}: {message}")]
     VmBootstrapFailed {
         operation: &'static str,
@@ -89,9 +87,7 @@ impl E2bError {
     #[must_use]
     pub fn disposition(&self) -> ErrorDisposition {
         match self {
-            Self::AmbiguousDelivery { .. } | Self::RecoveryUnavailable { .. } => {
-                ErrorDisposition::Ambiguous
-            }
+            Self::AmbiguousDelivery { .. } => ErrorDisposition::Ambiguous,
             Self::TransportBeforeDelivery { .. }
             | Self::RetryableTransport { .. }
             | Self::StreamInterrupted { .. }
@@ -121,9 +117,9 @@ impl E2bError {
     pub fn delivery_state(&self) -> DeliveryState {
         match self {
             Self::TransportBeforeDelivery { .. } => DeliveryState::NotDelivered,
-            Self::RetryableTransport { .. }
-            | Self::AmbiguousDelivery { .. }
-            | Self::RecoveryUnavailable { .. } => DeliveryState::Unknown,
+            Self::RetryableTransport { .. } | Self::AmbiguousDelivery { .. } => {
+                DeliveryState::Unknown
+            }
             _ => DeliveryState::Delivered,
         }
     }

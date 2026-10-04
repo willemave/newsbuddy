@@ -22,11 +22,11 @@ use super::model::{
 const TOKEN_EXPIRY_SKEW_SECONDS: i64 = 60;
 const BOOKMARK_SYNC_MAX_PAGES: usize = 10;
 const BOOKMARK_SYNC_PAGE_SIZE: u8 = 5;
-const UNRECOVERABLE_REFRESH_MARKERS: [&str; 4] = [
-    "X API 400: invalid_request",
-    "X API 400: invalid_grant",
-    "X API 400: invalid_client",
-    "X API 400: unauthorized_client",
+const UNRECOVERABLE_REFRESH_CODES: [&str; 4] = [
+    "invalid_request",
+    "invalid_grant",
+    "invalid_client",
+    "unauthorized_client",
 ];
 
 #[derive(Debug, Clone)]
@@ -536,10 +536,13 @@ fn local_crypto_failure(
 }
 
 fn unrecoverable_refresh_error(error: &XSyncGatewayError) -> bool {
-    let message = error.to_string();
-    UNRECOVERABLE_REFRESH_MARKERS
-        .iter()
-        .any(|marker| message.contains(marker))
+    matches!(
+        error,
+        XSyncGatewayError::Provider {
+            status: 400,
+            detail,
+        } if UNRECOVERABLE_REFRESH_CODES.contains(&detail.as_str())
+    )
 }
 
 fn payload_string<'a>(payload: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
@@ -607,6 +610,22 @@ mod pagination_tests {
             included_tweets: BTreeMap::new(),
             next_token: (offset + 5 < 61).then(|| (offset + 5).to_string()),
         }
+    }
+
+    #[test]
+    fn refresh_reauthentication_matches_the_structured_oauth_error() {
+        assert!(unrecoverable_refresh_error(&XSyncGatewayError::Provider {
+            status: 400,
+            detail: "invalid_grant".to_owned(),
+        }));
+        assert!(!unrecoverable_refresh_error(&XSyncGatewayError::Provider {
+            status: 401,
+            detail: "invalid_grant".to_owned(),
+        }));
+        assert!(!unrecoverable_refresh_error(&XSyncGatewayError::Provider {
+            status: 400,
+            detail: "invalid_grant: expired".to_owned(),
+        }));
     }
 
     #[tokio::test]

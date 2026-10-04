@@ -259,3 +259,98 @@ async fn visibility_migration_normalizes_aggregator_configs(pool: PgPool) {
         "canonical configs are not rewritten"
     );
 }
+
+#[sqlx::test(migrations = false)]
+async fn aggregator_subscription_creates_reactivates_and_narrows_topics(pool: PgPool) {
+    use crate::scraper_configs::{FeedSubscriptionMutation, apply_aggregator_subscription};
+    use newsly_domain::AggregatorKey;
+
+    crate::run_migrations(&pool).await.unwrap();
+    let language = global_news(&pool, "arxiv", "2609.00011", Some("cs.CL")).await;
+    let vision = global_news(&pool, "arxiv", "2609.00012", Some("cs.CV")).await;
+    let candidates = [language, vision];
+    let user_id = user(&pool, "chat-aggregator").await;
+    let apply = |topics: Option<&'static [&'static str]>| {
+        let pool = pool.clone();
+        async move {
+            let mut transaction = pool.begin().await.unwrap();
+            let applied = apply_aggregator_subscription(
+                &mut transaction,
+                user_id,
+                AggregatorKey::Arxiv,
+                topics,
+            )
+            .await
+            .unwrap();
+            transaction.commit().await.unwrap();
+            applied
+        }
+    };
+
+    let created = apply(None).await;
+    assert_eq!(created.mutation, FeedSubscriptionMutation::Created);
+    assert_eq!(
+        created.config.feed_url.as_deref(),
+        Some("aggregator://arxiv")
+    );
+    assert_eq!(created.config.display_name.as_deref(), Some("arXiv"));
+    assert_eq!(created.config.config, json!({"key": "arxiv", "limit": 1}));
+    assert_eq!(
+        visible_ids(&pool, user_id, &candidates).await,
+        BTreeSet::from([language, vision])
+    );
+
+    let narrowed = apply(Some(&["cs.CL"])).await;
+    assert_eq!(
+        narrowed.mutation,
+        FeedSubscriptionMutation::AlreadySubscribed
+    );
+    assert_eq!(narrowed.config.id, created.config.id);
+    assert_eq!(
+        visible_ids(&pool, user_id, &candidates).await,
+        BTreeSet::from([language])
+    );
+
+    sqlx::query("UPDATE user_scraper_configs SET is_active = FALSE WHERE id = $1")
+        .bind(i32::try_from(created.config.id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let reactivated = apply(None).await;
+    assert_eq!(reactivated.mutation, FeedSubscriptionMutation::Reactivated);
+    assert_eq!(reactivated.config.config["topics"], json!(["cs.CL"]));
+
+    let widened = apply(Some(&[])).await;
+    assert!(widened.config.config.get("topics").is_none());
+    assert_eq!(
+        visible_ids(&pool, user_id, &candidates).await,
+        BTreeSet::from([language, vision])
+    );
+}
+
+#[sqlx::test(migrations = false)]
+async fn read_paths_agree_on_owned_news_and_inactive_subscriptions(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let owner = user(&pool, "visibility-owner").await;
+    let other = user(&pool, "visibility-other").await;
+    let subscribed = global_news(&pool, "hfpapers", "owned-active", None).await;
+    let inactive = global_news(&pool, "arxiv", "owned-inactive", None).await;
+    subscribe(&pool, owner, json!({"key": "hfpapers"})).await;
+    let inactive_config = subscribe(&pool, owner, json!({"key": "arxiv"})).await;
+    sqlx::query("UPDATE user_scraper_configs SET is_active = false WHERE id::bigint = $1")
+        .bind(inactive_config)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut owned = Vec::new();
+    for (account, key) in [(owner, "owned-self"), (other, "owned-other")] {
+        owned.push(sqlx::query_scalar::<_, i64>(
+            "INSERT INTO news_items(ingest_key,visibility_scope,owner_user_id,platform,status,summary_text,raw_metadata,ingested_at,created_at)
+             VALUES ($1,'user',$2::bigint::integer,'reddit','ready','Owned summary','{}',now(),now()) RETURNING id::bigint"
+        ).bind(key).bind(account).fetch_one(&pool).await.unwrap());
+    }
+    assert_eq!(
+        visible_ids(&pool, owner, &[subscribed, inactive, owned[0], owned[1]]).await,
+        BTreeSet::from([subscribed, owned[0]])
+    );
+}

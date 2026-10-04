@@ -4,17 +4,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
-    ToolPolicy,
+    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
+    ResponseContract, ToolPolicy,
 };
 use schemars::JsonSchema;
-use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use thiserror::Error;
 
-use crate::{ModelSpec, OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
+use crate::{ModelSpec, ProviderCredentials, RigAgentEngine};
+
+use crate::agent_support::NoTools;
+use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_CONTENT_ANALYSIS_MODEL: &str = "openai:gpt-6-luna";
 const MAX_ANALYSIS_TEXT_CHARS: usize = 8_000;
@@ -117,20 +118,13 @@ impl ContentAnalysisGateway {
         let model_spec = env::var("CONTENT_ANALYSIS_MODEL")
             .unwrap_or_else(|_| DEFAULT_CONTENT_ANALYSIS_MODEL.to_owned());
         ModelSpec::parse(&model_spec)?;
-        let engine = RigAgentEngine::new(
-            ProviderCredentials {
-                openai: secret_env("OPENAI_API_KEY"),
-                anthropic: secret_env("ANTHROPIC_API_KEY"),
-                google: secret_env("GOOGLE_API_KEY").or_else(|| secret_env("GEMINI_API_KEY")),
-                openrouter: secret_env("OPENROUTER_API_KEY"),
-            },
-            OpenRouterPrivacyPolicy::default(),
-        )?;
-        let timeout_seconds = env::var("CONTENT_ANALYSIS_TIMEOUT_SECONDS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(90)
-            .clamp(5, 180);
+        let engine = RigAgentEngine::new(ProviderCredentials::from_env());
+        let timeout_seconds = u64_from_env(
+            "CONTENT_ANALYSIS_TIMEOUT_SECONDS",
+            90,
+            "an unsigned integer number of seconds",
+        )?
+        .clamp(5, 180);
         Ok(Self {
             engine,
             model_spec,
@@ -144,21 +138,11 @@ impl ContentAnalysisGateway {
     ///
     /// Returns a typed provider, schema, or semantic validation error. No database state is
     /// touched by this operation.
-    pub async fn analyze(
-        &self,
-        url: &str,
-        page_text: &str,
-        instruction: Option<&str>,
-    ) -> Result<GeneratedContentAnalysis, ContentAnalysisGatewayError> {
-        self.analyze_with_events(url, page_text, instruction, Arc::new(NoEvents))
-            .await
-    }
-
     /// Classifies extracted content while publishing per-response model observations.
     ///
     /// # Errors
     ///
-    /// Returns the same URL, provider, schema, and semantic errors as [`Self::analyze`].
+    /// Returns URL, provider, schema, and semantic errors from analysis.
     pub async fn analyze_with_events(
         &self,
         url: &str,
@@ -333,39 +317,10 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .map(SecretString::from)
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async move {
-            Err(AgentRuntimeError::Tool(format!(
-                "content analysis does not expose tool {}",
-                call.name
-            )))
-        })
-    }
-}
-
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum ContentAnalysisGatewayError {
+    #[error(transparent)]
+    Config(#[from] ProviderEnvError),
     #[error("content analysis URL is invalid: {0}")]
     InvalidUrl(String),
     #[error("content analysis model omitted its structured output")]
@@ -374,8 +329,6 @@ pub enum ContentAnalysisGatewayError {
     InvalidOutput(&'static str),
     #[error(transparent)]
     Agent(#[from] AgentRuntimeError),
-    #[error(transparent)]
-    Engine(#[from] crate::RigAgentEngineError),
     #[error(transparent)]
     ModelSpec(#[from] crate::ModelSpecError),
     #[error(transparent)]

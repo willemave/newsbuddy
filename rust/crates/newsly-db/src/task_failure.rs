@@ -1,11 +1,26 @@
 use sqlx::{Postgres, Transaction};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalTaskSettlement {
+    None,
+    Scrape,
+    BackfillFeeds,
+    Content,
+    Artwork,
+    LlmTask,
+    NewsItem,
+    ChatTurn,
+    AudioEpisode,
+    OnboardingDiscover,
+    FeedDiscover,
+}
+
 /// Settle public state when a terminal queue failure bypasses a feature finalizer.
 /// The caller must hold the queue's exact-lease finalization fence.
 pub async fn settle_failed_task(
     tx: &mut Transaction<'_, Postgres>,
     task_id: i64,
-    task_type: &str,
+    settlement: TerminalTaskSettlement,
     content_id: Option<i64>,
     owner_user_id: Option<i64>,
     message: &str,
@@ -22,7 +37,7 @@ pub async fn settle_failed_task(
         settle_related_workflow(
             tx,
             task_id,
-            task_type,
+            settlement,
             user_id,
             retry_count,
             payload,
@@ -30,10 +45,8 @@ pub async fn settle_failed_task(
         )
         .await?;
     }
-    if task_type == "run_llm_task" {
-        let id = payload
-            .get("llm_task_id")
-            .and_then(serde_json::Value::as_i64);
+    if settlement == TerminalTaskSettlement::LlmTask {
+        let id = required_payload_id(payload, "llm_task_id")?;
         sqlx::query(
             r"
             UPDATE llm_tasks
@@ -54,10 +67,8 @@ pub async fn settle_failed_task(
         .execute(&mut **tx)
         .await?;
     }
-    if task_type == "process_news_item" {
-        let id = payload
-            .get("news_item_id")
-            .and_then(serde_json::Value::as_i64);
+    if settlement == TerminalTaskSettlement::NewsItem {
+        let id = required_payload_id(payload, "news_item_id")?;
         sqlx::query(
             r"
             UPDATE news_items
@@ -73,17 +84,9 @@ pub async fn settle_failed_task(
         .execute(&mut **tx)
         .await?;
     }
-    if task_type == "generate_image" {
+    if settlement == TerminalTaskSettlement::Artwork {
         settle_failed_artwork(tx, task_id, content_id, message).await?;
-    } else if matches!(
-        task_type,
-        "analyze_url"
-            | "process_content"
-            | "summarize"
-            | "process_podcast_media"
-            | "download_tweet_video_audio"
-            | "transcribe_tweet_video"
-    ) {
+    } else if settlement == TerminalTaskSettlement::Content {
         sqlx::query(
             r"
             UPDATE contents
@@ -99,20 +102,23 @@ pub async fn settle_failed_task(
         .execute(&mut **tx)
         .await?;
     }
-    if matches!(task_type, "scrape" | "backfill_feeds") {
-        settle_failed_sources(tx, task_type, owner_user_id, payload).await?;
+    if matches!(
+        settlement,
+        TerminalTaskSettlement::Scrape | TerminalTaskSettlement::BackfillFeeds
+    ) {
+        settle_failed_sources(tx, settlement, owner_user_id, payload).await?;
     }
     Ok(())
 }
 
 async fn settle_failed_sources(
     tx: &mut Transaction<'_, Postgres>,
-    task_type: &str,
+    settlement: TerminalTaskSettlement,
     owner_user_id: Option<i64>,
     payload: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), sqlx::Error> {
     let mut keys = Vec::new();
-    if task_type == "backfill_feeds" {
+    if settlement == TerminalTaskSettlement::BackfillFeeds {
         if let Some(ids) = payload
             .get("config_ids")
             .and_then(serde_json::Value::as_array)
@@ -168,16 +174,14 @@ async fn settle_failed_sources(
 async fn settle_related_workflow(
     tx: &mut Transaction<'_, Postgres>,
     task_id: i64,
-    task_type: &str,
+    settlement: TerminalTaskSettlement,
     user_id: i64,
     retry_count: i32,
     payload: &serde_json::Map<String, serde_json::Value>,
     message: &str,
 ) -> Result<(), sqlx::Error> {
-    if matches!(task_type, "chat_turn" | "dig_deeper") {
-        let message_id = payload
-            .get("message_id")
-            .and_then(serde_json::Value::as_i64);
+    if settlement == TerminalTaskSettlement::ChatTurn {
+        let message_id = required_payload_id(payload, "message_id")?;
         let current = sqlx::query_as::<_, (i64, Option<i32>)>(
             r"
             SELECT message.session_id::bigint, message.stream_generation
@@ -223,7 +227,7 @@ async fn settle_related_workflow(
             crate::fail_chat_turn(
                 tx,
                 &crate::ChatTaskRejection {
-                    message_id,
+                    message_id: Some(message_id),
                     session_id: Some(session_id),
                     user_id,
                     llm_task_id,
@@ -237,10 +241,8 @@ async fn settle_related_workflow(
             .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
         }
     }
-    if task_type == "generate_audio_episode" {
-        let id = payload
-            .get("audio_episode_id")
-            .and_then(serde_json::Value::as_i64);
+    if settlement == TerminalTaskSettlement::AudioEpisode {
+        let id = required_payload_id(payload, "audio_episode_id")?;
         let started = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
             r"
             SELECT started_at AT TIME ZONE 'UTC'
@@ -264,13 +266,13 @@ async fn settle_related_workflow(
         .bind(task_id)
         .fetch_optional(&mut **tx)
         .await?;
-        if let (Some(id), Some(started)) = (id, started) {
+        if let Some(started) = started {
             crate::fail_audio_episode_generation(tx, user_id, id, started, message, false)
                 .await
                 .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
         }
     }
-    if task_type == "onboarding_discover" {
+    if settlement == TerminalTaskSettlement::OnboardingDiscover {
         let run = sqlx::query_as::<_, (i64, i32)>(
             r"
             SELECT id::bigint, discovery_retry_count
@@ -301,7 +303,7 @@ async fn settle_related_workflow(
             .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
         }
     }
-    if task_type == "discover_feeds" {
+    if settlement == TerminalTaskSettlement::FeedDiscover {
         let run = sqlx::query_as::<_, (i64, i32)>(
             r"
             SELECT id::bigint, discovery_retry_count
@@ -335,6 +337,17 @@ async fn settle_related_workflow(
     Ok(())
 }
 
+fn required_payload_id(
+    payload: &serde_json::Map<String, serde_json::Value>,
+    field: &'static str,
+) -> Result<i64, sqlx::Error> {
+    payload
+        .get(field)
+        .and_then(serde_json::Value::as_i64)
+        .filter(|id| *id > 0)
+        .ok_or_else(|| sqlx::Error::Protocol(format!("terminal task payload is missing {field}")))
+}
+
 async fn settle_failed_artwork(
     tx: &mut Transaction<'_, Postgres>,
     task_id: i64,
@@ -365,22 +378,14 @@ async fn settle_failed_artwork(
     let Some(root) = metadata.as_object_mut() else {
         return Ok(());
     };
-    let generated = root
-        .get("domain")
-        .and_then(|domain| domain.get("image_generated_at"))
-        .or_else(|| root.get("image_generated_at"))
+    let generated = crate::content_metadata::runtime_value(root, "image_generated_at")
         .is_some_and(|value| !value.is_null());
-    let status = serde_json::Value::from(if generated { "ready" } else { "failed" });
-    let error = serde_json::Value::from(message);
-    if let Some(domain) = root
-        .get_mut("domain")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        domain.insert("artwork_status".to_owned(), status.clone());
-        domain.insert("artwork_error".to_owned(), error.clone());
-    }
-    root.insert("artwork_status".to_owned(), status);
-    root.insert("artwork_error".to_owned(), error);
+    crate::content_metadata::set_field(
+        root,
+        "artwork_status",
+        serde_json::Value::from(if generated { "ready" } else { "failed" }),
+    );
+    crate::content_metadata::set_field(root, "artwork_error", serde_json::Value::from(message));
     sqlx::query(
         r"
         UPDATE contents

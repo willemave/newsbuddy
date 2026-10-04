@@ -3,10 +3,11 @@
 use super::{
     Acquire, ChatTaskRepositoryError, ChatTurnKind, ChatTurnProcessingContext, ChatTurnPublication,
     Postgres, Transaction,
-    context::{i64_bound, status_entry, truncate_chars},
+    context::{i64_bound, status_entry},
     json,
     preparation::{canonical_provider, validate_positive},
 };
+use newsly_domain::truncate_chars;
 
 /// Cancel the attempt-owned LLM ledger without mutating canonical chat state.
 ///
@@ -302,7 +303,7 @@ pub(super) async fn record_chat_usage(
             provider, model, feature, operation, source, request_id,
             task_id, content_id, session_id, message_id, user_id,
             input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens,
-            request_count, currency, pricing_version, metadata, created_at
+            request_count, currency, metadata, created_at
         )
         SELECT
             $1, $2, 'chat', $3, $4, $5,
@@ -310,7 +311,7 @@ pub(super) async fn record_chat_usage(
             $9::bigint::integer, account.id,
             $10::bigint::integer, $11::bigint::integer, $12::bigint::integer,
             $13::bigint::integer, $14::bigint::integer, $15::bigint::integer,
-            'USD', '2026-08-02', $16, timezone('UTC', clock_timestamp())
+            'USD', $16, timezone('UTC', clock_timestamp())
         FROM users AS account
         WHERE account.id::bigint = $17 AND account.is_active = TRUE
         "#,

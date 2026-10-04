@@ -4,6 +4,7 @@ use newsly_db::BriefingRefreshConfig;
 use thiserror::Error;
 
 const DEFAULT_MASTHEAD_TITLE: &str = "The Unread Times";
+pub(super) const MAX_COMPOSE_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefingRefreshWorkerConfig {
@@ -12,7 +13,6 @@ pub struct BriefingRefreshWorkerConfig {
     pub embedding_batch_size: usize,
     pub event_similarity: f64,
     pub max_figures_deep: usize,
-    pub max_compose_attempts: usize,
 }
 
 impl BriefingRefreshWorkerConfig {
@@ -40,7 +40,6 @@ impl BriefingRefreshWorkerConfig {
             embedding_batch_size: parse_usize("BRIEFING_CATEGORY_EMBEDDING_BATCH_SIZE", 32)?,
             event_similarity: parse_f64("BRIEFING_NEWS_EVENT_SIMILARITY", 0.78)?,
             max_figures_deep: parse_usize("BRIEFING_MAX_FIGURES_DEEP", 12)?,
-            max_compose_attempts: 3,
         };
         config.validate()?;
         Ok(config)
@@ -68,11 +67,6 @@ impl BriefingRefreshWorkerConfig {
         if self.max_figures_deep > 50 {
             return Err(BriefingRefreshWorkerConfigError::Range(
                 "BRIEFING_MAX_FIGURES_DEEP",
-            ));
-        }
-        if self.max_compose_attempts == 0 || self.max_compose_attempts > 10 {
-            return Err(BriefingRefreshWorkerConfigError::Range(
-                "Briefing composition attempts",
             ));
         }
         Ok(())
@@ -146,7 +140,6 @@ mod tests {
             embedding_batch_size: 32,
             event_similarity: 0.78,
             max_figures_deep: 12,
-            max_compose_attempts: 4,
         }
     }
 

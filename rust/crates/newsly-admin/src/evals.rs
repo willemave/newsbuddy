@@ -7,35 +7,35 @@ use thiserror::Error;
 const MAX_TITLE_CLUSTERING_ROWS: i64 = 100_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
-pub struct TitleClusteringSourceRow {
-    pub content_id: i32,
-    pub content_type: String,
-    pub url: String,
-    pub title: Option<String>,
-    pub source: Option<String>,
-    pub status: String,
-    pub classification: Option<String>,
-    pub content_metadata: Value,
-    pub created_at: NaiveDateTime,
-    pub updated_at: Option<NaiveDateTime>,
-    pub processed_at: Option<NaiveDateTime>,
-    pub publication_date: Option<NaiveDateTime>,
-    pub platform: Option<String>,
-    pub source_url: Option<String>,
-    pub news_item_id: Option<i32>,
-    pub news_item_status: Option<String>,
-    pub news_item_summary_title: Option<String>,
-    pub news_item_article_title: Option<String>,
-    pub news_item_summary_text: Option<String>,
-    pub news_item_article_url: Option<String>,
-    pub news_item_article_domain: Option<String>,
-    pub news_item_discussion_url: Option<String>,
-    pub news_item_source_label: Option<String>,
-    pub news_item_source_type: Option<String>,
-    pub news_item_visibility_scope: Option<String>,
-    pub news_item_representative_id: Option<i32>,
-    pub news_item_cluster_size: Option<i32>,
-    pub news_item_ingested_at: Option<NaiveDateTime>,
+pub(crate) struct TitleClusteringSourceRow {
+    pub(crate) content_id: i32,
+    pub(crate) content_type: String,
+    pub(crate) url: String,
+    pub(crate) title: Option<String>,
+    pub(crate) source: Option<String>,
+    pub(crate) status: String,
+    pub(crate) classification: Option<String>,
+    pub(crate) content_metadata: Value,
+    pub(crate) created_at: NaiveDateTime,
+    pub(crate) updated_at: Option<NaiveDateTime>,
+    pub(crate) processed_at: Option<NaiveDateTime>,
+    pub(crate) publication_date: Option<NaiveDateTime>,
+    pub(crate) platform: Option<String>,
+    pub(crate) source_url: Option<String>,
+    pub(crate) news_item_id: Option<i32>,
+    pub(crate) news_item_status: Option<String>,
+    pub(crate) news_item_summary_title: Option<String>,
+    pub(crate) news_item_article_title: Option<String>,
+    pub(crate) news_item_summary_text: Option<String>,
+    pub(crate) news_item_article_url: Option<String>,
+    pub(crate) news_item_article_domain: Option<String>,
+    pub(crate) news_item_discussion_url: Option<String>,
+    pub(crate) news_item_source_label: Option<String>,
+    pub(crate) news_item_source_type: Option<String>,
+    pub(crate) news_item_visibility_scope: Option<String>,
+    pub(crate) news_item_representative_id: Option<i32>,
+    pub(crate) news_item_cluster_size: Option<i32>,
+    pub(crate) news_item_ingested_at: Option<NaiveDateTime>,
 }
 
 /// Loads bounded, read-only relational inputs for offline title-clustering evaluation.
@@ -46,7 +46,7 @@ pub struct TitleClusteringSourceRow {
 ///
 /// Returns [`EvalExportError::InvalidLimit`] when the requested row count is out of bounds, or
 /// [`EvalExportError::Sqlx`] when `PostgreSQL` cannot execute or decode the read-only query.
-pub async fn load_title_clustering_source(
+pub(crate) async fn load_title_clustering_source(
     pool: &PgPool,
     limit: i64,
 ) -> Result<Vec<TitleClusteringSourceRow>, EvalExportError> {
@@ -104,7 +104,7 @@ pub async fn load_title_clustering_source(
 }
 
 #[derive(Debug, Error)]
-pub enum EvalExportError {
+pub(crate) enum EvalExportError {
     #[error("limit must be between 1 and {maximum}")]
     InvalidLimit { maximum: i64 },
     #[error(transparent)]

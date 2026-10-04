@@ -17,12 +17,6 @@ pub struct ScrapeConfigSnapshot {
     pub fingerprint: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedScrapeSources {
-    pub first_edition_user_id: Option<i64>,
-    pub configs: Vec<ScrapeConfigSnapshot>,
-}
-
 #[derive(Debug, FromRow)]
 struct ScrapeConfigRow {
     id: i64,
@@ -41,7 +35,7 @@ pub async fn prepare_scrape_sources(
     config_id: Option<i64>,
     owner_user_id: Option<i64>,
     scraper_types: &[&str],
-) -> Result<PreparedScrapeSources, ScrapeRepositoryError> {
+) -> Result<Vec<ScrapeConfigSnapshot>, ScrapeRepositoryError> {
     let mut transaction = pool.begin().await?;
     let first_edition_user_id = if let Some(run_id) = first_edition_run_id {
         sqlx::query_scalar::<_, i64>(
@@ -100,10 +94,7 @@ pub async fn prepare_scrape_sources(
             fingerprint: config_fingerprint(&row),
         })
         .collect();
-    Ok(PreparedScrapeSources {
-        first_edition_user_id,
-        configs,
-    })
+    Ok(configs)
 }
 
 /// Re-lock source configs and return only exact snapshot matches. Results from disabled, deleted,
@@ -198,7 +189,14 @@ pub async fn persist_scraped_content(
     .bind(&record.title)
     .bind(&record.source)
     .bind(&record.platform)
-    .bind(&record.metadata)
+    .bind(record.metadata.as_object().map_or_else(
+        || record.metadata.clone(),
+        |metadata| {
+            Value::Object(crate::content_metadata::initialize_metadata(
+                metadata.clone(),
+            ))
+        },
+    ))
     .bind(record.published_at.map(|value| value.naive_utc()))
     .fetch_optional(&mut **transaction)
     .await?;

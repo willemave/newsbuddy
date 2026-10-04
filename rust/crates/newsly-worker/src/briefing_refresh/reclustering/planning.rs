@@ -34,7 +34,7 @@ pub(super) fn input(
     snapshot: &NewsCategorySnapshot,
     prior: Option<&CandidateState>,
 ) -> NewsLensReclusteringInput {
-    let model = format!("openrouter:{}", snapshot.model);
+    let model = super::super::centroid_model(&snapshot.model);
     let width = snapshot.stories.first().map(|s| s.vector.len());
     let mut existing_clusters = Vec::new();
     let compatible_prior = prior.filter(|prior| {
@@ -106,7 +106,7 @@ pub(super) fn current_publication_matches(
     {
         return false;
     }
-    let centroid_model = format!("openrouter:{}", snapshot.model);
+    let centroid_model = super::super::centroid_model(&snapshot.model);
     candidate.clusters.iter().all(|cluster| {
         let Some(lens) = snapshot
             .lenses

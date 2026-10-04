@@ -1,23 +1,20 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use newsly_agent_runtime::{
     AgentEventSink, AgentRuntimeError, BoxToolFuture, ToolCall, ToolDefinition, ToolExecutor,
     ToolOutput,
 };
 use newsly_contracts::{AssistantFeedOption, FeedType};
 use newsly_db::{
-    ChatContentFilters, ChatTaskSnapshot, create_deep_research_handoff, list_unread_chat_news,
-    mark_content_read, mark_content_unread, prepare_chat_article_conversion,
-    remove_content_from_knowledge, save_content_to_knowledge, search_accessible_content,
-    search_chat_news,
+    ChatContentFilters, ChatTaskSnapshot, apply_aggregator_subscription, canonicalize_feed_url,
+    create_deep_research_handoff, list_unread_chat_news, load_active_feed_urls, mark_content_read,
+    mark_content_unread, prepare_chat_article_conversion, remove_content_from_knowledge,
+    save_content_to_knowledge, search_accessible_content, search_chat_news,
 };
-use newsly_e2b::{
-    CommandEvent, CommandRequest, DirectE2bProvider, ExecutionTag, NetworkPolicy, OutputLimits,
-    SandboxProvider, SandboxUser,
-};
+use newsly_domain::{AGGREGATOR_KEY_NAMES, AggregatorKey};
+use newsly_e2b::{DirectE2bProvider, OutputLimits};
 use newsly_providers::{FeedValidator, OnboardingGateway};
 use newsly_queue::QueueKernel;
 use schemars::{JsonSchema, schema_for};
@@ -30,9 +27,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::content_body_store::ContentBodyStore;
-use crate::knowledge_tools::{
-    KnowledgeReferenceInput, ReadKnowledgeInput, read_authorized_knowledge_item,
-};
+use crate::knowledge_tools::{ReadKnowledgeInput, read_authorized_knowledge_item};
 use crate::onboarding_discovery::normalize_seeds;
 use crate::share_actions::submission::{
     ShareSubmissionPolicy, apply_validated_feed_action, submit_content_action,
@@ -40,28 +35,20 @@ use crate::share_actions::submission::{
 use crate::share_actions::workflows::{
     ContentActionInput, FeedActionInput, validated_scraper_type,
 };
-use crate::task_sandbox::{AcquiredTaskSandbox, TaskSandboxOwner};
+use crate::task_sandbox::{
+    AcquiredTaskSandbox, SandboxCommand, TaskSandboxOwner, agent_network_policy,
+    run_command as run_sandbox_command,
+};
 use crate::task_tools::{ExaSearchClient, TaskToolExecutor, record_exa_tool_usage};
 
 #[path = "tools/support.rs"]
 mod support;
 use support::{
-    assistant_feed_option, bounded_query, chat_output_limits, clean, looks_like_podcast_query,
-    tail_chars, valid_url,
+    aggregator_feed_option, assistant_feed_option, bounded_query, clean, looks_like_podcast_query,
+    valid_url,
 };
 
-const DEEP_RESEARCH_MODEL: &str = "o4-mini-deep-research-2025-06-26";
-const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
-    "10.0.0.0/8",
-    "100.64.0.0/10",
-    "169.254.0.0/16",
-    "172.16.0.0/12",
-    "192.0.0.0/24",
-    "192.168.0.0/16",
-    "198.18.0.0/15",
-    "fc00::/7",
-    "fe80::/10",
-];
+use super::DEEP_RESEARCH_MODEL;
 
 #[derive(Debug, Clone)]
 pub(super) struct ChatToolDependencies {
@@ -83,7 +70,8 @@ pub(super) struct ChatToolExecutor {
     dependencies: ChatToolDependencies,
     snapshot: ChatTaskSnapshot,
     sandbox: Mutex<Option<ChatSandboxState>>,
-    render_metadata: StdMutex<Option<Value>>,
+    /// Subscription cards from every discovery call this turn, first occurrence wins.
+    feed_options: StdMutex<Vec<AssistantFeedOption>>,
 }
 
 #[derive(Debug)]
@@ -92,43 +80,19 @@ struct ChatSandboxState {
     executor: TaskToolExecutor,
 }
 
-struct PendingChatSandbox {
-    acquired: Option<AcquiredTaskSandbox>,
-    message_id: i64,
-}
-
 impl ChatToolExecutor {
     pub(super) fn new(dependencies: ChatToolDependencies, snapshot: ChatTaskSnapshot) -> Self {
         Self {
             dependencies,
             snapshot,
             sandbox: Mutex::new(None),
-            render_metadata: StdMutex::new(None),
+            feed_options: StdMutex::new(Vec::new()),
         }
     }
 
     pub(super) fn definitions() -> Vec<ToolDefinition> {
-        vec![
-            definition::<ExecuteBashInput>(
-                "execute_bash",
-                "Run one bounded bash command inside this turn's task sandbox.",
-            ),
-            definition::<WriteFileInput>(
-                "write_file",
-                "Write UTF-8 text to a chat-workspace relative file.",
-            ),
-            definition::<EditFileInput>(
-                "edit_file",
-                "Replace exact text in a chat-workspace relative UTF-8 file.",
-            ),
-            definition::<ReadFileInput>(
-                "read_file",
-                "Read bounded UTF-8 text from the task-scoped chat workspace.",
-            ),
-            definition::<ListFilesInput>(
-                "list_files",
-                "List files below the task-scoped chat workspace.",
-            ),
+        let mut definitions = TaskToolExecutor::sandbox_definitions();
+        definitions.extend([
             definition::<WebSearchInput>(
                 "exa_web_search",
                 "Search the public web through Exa and return title, URL, and snippet records.",
@@ -145,10 +109,6 @@ impl ChatToolExecutor {
                 "read_knowledge_item",
                 "Read one typed Knowledge reference through the host without starting a sandbox.",
             ),
-            definition::<WriteKnowledgeInput>(
-                "write_knowledge_items",
-                "Copy selected Knowledge references into input/knowledge in this turn's task sandbox.",
-            ),
             definition::<ContentSearchInput>(
                 "search_content",
                 "List or search accessible inbox and saved articles/podcast episodes. Query is optional lexical text; omit it to browse. Source is a followed show/publication name matched to ownership, not title/body mentions. Optional unread_only and saved_only filters apply before paging. Limit 1-25, offset starts at zero. Returns individual titles, links, snippets, dates, read/saved state, total_count (query matches), scope_total_count (items before text filtering) and next_offset. Ambiguous source names return candidates without items; unknown sources and empty searches do not substitute unrelated results.",
@@ -160,7 +120,10 @@ impl ChatToolExecutor {
             ),
             definition::<WebSearchInput>(
                 "find_feed_options",
-                "Discover new blogs, newsletters, podcast shows or RSS feeds to follow. Returns source/subscription recommendations and feed URLs, not individual articles or episodes. Recommendations are attached as reviewable subscription cards.",
+                &format!(
+                    "Discover sources to follow: Newsly's built-in news aggregators ({}) and new blogs, newsletters, podcast shows or RSS feeds. Built-in aggregators that match the query are listed first with feed_type \"aggregator\"; a query that asks for aggregators generally lists all of them. Returns source/subscription recommendations, feed URLs and is_subscribed, not individual articles or episodes. Recommendations are attached as reviewable subscription cards.",
+                    aggregator_catalog_summary()
+                ),
             ),
             definition::<ContentUrlInput>(
                 "add_item_to_feed",
@@ -169,6 +132,10 @@ impl ChatToolExecutor {
             definition::<SubscribeInput>(
                 "subscribe_to_feed",
                 "Subscribe to a direct feed URL explicitly requested by the user.",
+            ),
+            definition::<SubscribeAggregatorInput>(
+                "subscribe_to_aggregator",
+                "Follow one of Newsly's built-in news aggregators that the user explicitly asked to add, or change its topic filter. Use the aggregator key, not a URL.",
             ),
             definition::<ContentIdInput>(
                 "save_to_knowledge",
@@ -188,14 +155,33 @@ impl ChatToolExecutor {
                 "start_deep_research_handoff",
                 "Create a durable deep-research chat handoff for a long-running question.",
             ),
-        ]
+        ]);
+        definitions
     }
 
     pub(super) fn render_metadata(&self) -> Option<Value> {
-        self.render_metadata.lock().map_or_else(
+        let feed_options = self.feed_options.lock().map_or_else(
             |poisoned| poisoned.into_inner().clone(),
             |value| value.clone(),
-        )
+        );
+        if feed_options.is_empty() {
+            return None;
+        }
+        serde_json::to_value(ChatRenderMetadata { feed_options }).ok()
+    }
+
+    /// Later discovery calls in a turn often narrow an earlier one, and the answer can cite
+    /// both, so cards accumulate rather than replace each other.
+    fn attach_feed_options(&self, options: &[AssistantFeedOption]) {
+        let mut attached = self
+            .feed_options
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for option in options {
+            if !attached.iter().any(|existing| existing.id == option.id) {
+                attached.push(option.clone());
+            }
+        }
     }
 
     pub(super) async fn close(&self) -> Result<(), AgentRuntimeError> {
@@ -231,6 +217,7 @@ impl ChatToolExecutor {
             "mark_content_unread" => self.mutate_content(call, Mutation::Unread).await,
             "add_item_to_feed" => self.submit_content(call).await,
             "subscribe_to_feed" => self.subscribe(call).await,
+            "subscribe_to_aggregator" => self.subscribe_aggregator(call).await,
             "convert_news_to_article_tool" => self.convert_news(call).await,
             "start_deep_research_handoff" => self.deep_research_handoff(call).await,
             other => Err(AgentRuntimeError::Tool(format!(
@@ -249,96 +236,7 @@ impl ChatToolExecutor {
             *state = Some(self.acquire_sandbox().await?);
         }
         let state = state.as_ref().expect("chat sandbox state was initialized");
-        if call.name == "execute_bash" {
-            self.execute_bash_streaming(state, &call, &events).await
-        } else {
-            state.executor.execute(call, events).await
-        }
-    }
-
-    async fn execute_bash_streaming(
-        &self,
-        state: &ChatSandboxState,
-        call: &ToolCall,
-        events: &Arc<dyn AgentEventSink>,
-    ) -> Result<ToolOutput, AgentRuntimeError> {
-        let input: ExecuteBashInput = arguments(call)?;
-        let timeout = Duration::from_secs(input.timeout_seconds.unwrap_or(120).clamp(1, 300));
-        let requested_deadline = Instant::now()
-            .checked_add(timeout)
-            .ok_or_else(|| AgentRuntimeError::Tool("chat command deadline overflow".to_owned()))?;
-        let deadline = requested_deadline.min(self.dependencies.deadline);
-        let request = CommandRequest {
-            command: "/bin/bash".to_owned(),
-            args: vec!["-lc".to_owned(), input.command],
-            env: BTreeMap::new(),
-            cwd: Some(self.snapshot.workspace_path.clone()),
-            username: Some(
-                SandboxUser::parse("user")
-                    .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?,
-            ),
-            tag: ExecutionTag::new(),
-            stdin_enabled: false,
-            absolute_deadline: deadline,
-            idle_timeout: timeout.min(Duration::from_secs(60)),
-            output_limits: chat_output_limits(self.dependencies.max_output_chars),
-        };
-        let mut stream = self
-            .dependencies
-            .provider
-            .start_process(
-                &state.acquired.sandbox,
-                request,
-                self.dependencies.cancellation.child_token(),
-            )
-            .await
-            .map_err(db_tool_error)?;
-        let mut stdout = String::new();
-        let mut stderr = String::new();
-        let mut terminal = None;
-        while let Some(event) = stream.next().await {
-            match event.map_err(db_tool_error)? {
-                CommandEvent::Stdout { text, .. } | CommandEvent::Pty { text, .. } => {
-                    stdout.push_str(&text);
-                    events.publish(newsly_agent_runtime::AgentEvent::ToolProgress {
-                        id: call.id.clone(),
-                        text: tail_chars(&text, 2_000),
-                    })?;
-                }
-                CommandEvent::Stderr { text, .. } => {
-                    stderr.push_str(&text);
-                    events.publish(newsly_agent_runtime::AgentEvent::ToolProgress {
-                        id: call.id.clone(),
-                        text: format!("stderr: {}", tail_chars(&text, 1_990)),
-                    })?;
-                }
-                CommandEvent::Exited {
-                    status,
-                    exit_code,
-                    error,
-                    ..
-                } => terminal = Some((status, exit_code, error)),
-                CommandEvent::Started { .. }
-                | CommandEvent::KeepAlive { .. }
-                | CommandEvent::TransportDisconnected { .. } => {}
-            }
-        }
-        let Some((status, exit_code, error)) = terminal else {
-            return Err(AgentRuntimeError::Tool(
-                "chat command stream ended without a terminal event".to_owned(),
-            ));
-        };
-        Ok(ToolOutput {
-            is_error: exit_code != 0,
-            content: json!({
-                "ok": exit_code == 0,
-                "stdout": stdout,
-                "stderr": stderr,
-                "status": format!("{status:?}").to_ascii_lowercase(),
-                "exit_code": exit_code,
-                "error": error,
-            }),
-        })
+        state.executor.execute(call, events).await
     }
 
     async fn acquire_sandbox(&self) -> Result<ChatSandboxState, AgentRuntimeError> {
@@ -359,10 +257,10 @@ impl ChatToolExecutor {
             )
             .await
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        let mut pending = PendingChatSandbox::new(acquired, self.snapshot.message_id);
-        let sandbox = pending.sandbox().clone();
+        let sandbox = acquired.sandbox.clone();
         if let Err(error) = self.prepare_sandbox(&sandbox).await {
-            pending.cleanup().await;
+            cleanup_chat_sandbox(acquired, self.snapshot.message_id, "chat sandbox bootstrap")
+                .await;
             return Err(error);
         }
         let executor = match TaskToolExecutor::new(
@@ -379,11 +277,11 @@ impl ChatToolExecutor {
         ) {
             Ok(executor) => executor,
             Err(error) => {
-                pending.cleanup().await;
+                cleanup_chat_sandbox(acquired, self.snapshot.message_id, "chat sandbox bootstrap")
+                    .await;
                 return Err(AgentRuntimeError::Tool(error.to_string()));
             }
         };
-        let acquired = pending.disarm();
         Ok(ChatSandboxState { acquired, executor })
     }
 
@@ -395,45 +293,25 @@ impl ChatToolExecutor {
             .provider
             .update_network(
                 &sandbox.sandbox_id,
-                &NetworkPolicy {
-                    deny_out: PRIVATE_NETWORK_DENIALS
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect(),
-                    allow_internet_access: Some(true),
-                    ..NetworkPolicy::default()
-                },
+                &agent_network_policy(None, false, "chat").await,
             )
             .await
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        let stream = self
-            .dependencies
-            .provider
-            .start_process(
-                sandbox,
-                CommandRequest {
-                    command: "/bin/mkdir".to_owned(),
-                    args: vec!["-p".to_owned(), self.snapshot.workspace_path.clone()],
-                    env: BTreeMap::new(),
-                    cwd: None,
-                    username: Some(
-                        SandboxUser::parse("user")
-                            .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?,
-                    ),
-                    tag: ExecutionTag::new(),
-                    stdin_enabled: false,
-                    absolute_deadline: self.dependencies.deadline,
-                    idle_timeout: Duration::from_secs(60),
-                    output_limits: OutputLimits::default(),
-                },
-                self.dependencies.cancellation.child_token(),
-            )
-            .await
-            .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        let result = stream
-            .collect_result()
-            .await
-            .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
+        let result = run_sandbox_command(
+            &self.dependencies.provider,
+            sandbox,
+            SandboxCommand {
+                command: "/bin/mkdir".to_owned(),
+                args: vec!["-p".to_owned(), self.snapshot.workspace_path.clone()],
+                cwd: None,
+                deadline: self.dependencies.deadline,
+                idle_timeout: Duration::from_secs(60),
+                output_limits: OutputLimits::default(),
+            },
+            self.dependencies.cancellation.child_token(),
+        )
+        .await
+        .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
         if result.exit_code != 0 {
             return Err(AgentRuntimeError::Tool(format!(
                 "chat sandbox workspace bootstrap exited with {}: {}",
@@ -475,31 +353,66 @@ impl ChatToolExecutor {
         let input: WebSearchInput = arguments(&call)?;
         let query = bounded_query(&input.query)?;
         let limit = input.limit.or(input.num_results).unwrap_or(5).clamp(1, 5);
+        // Aggregators are never podcasts, so podcast discovery skips the catalog.
+        let mut options = if looks_like_podcast_query(query) {
+            Vec::new()
+        } else {
+            AggregatorKey::matching_query(query)
+                .into_iter()
+                .map(aggregator_feed_option)
+                .collect::<Vec<_>>()
+        };
+        // Catalog matches need no network, so they survive a failed web discovery.
+        let discovery_error = match self.discover_feeds(&call.id, query, events).await {
+            Ok(mut discovered) => {
+                discovered.truncate(limit);
+                options.extend(discovered);
+                None
+            }
+            Err(error) if !options.is_empty() => Some(error.to_string()),
+            Err(error) => return Err(error),
+        };
+        let active_feed_urls =
+            load_active_feed_urls(&self.dependencies.pool, self.snapshot.user_id)
+                .await
+                .map_err(db_tool_error)?;
+        for option in &mut options {
+            option.is_subscribed =
+                active_feed_urls.contains(&canonicalize_feed_url(&option.feed_url));
+        }
+        self.attach_feed_options(&options);
+        let payload = AssistantFeedOptionsResult {
+            query: query.to_owned(),
+            options,
+            discovery_error,
+        };
+        Ok(success(serde_json::to_value(payload).map_err(|error| {
+            AgentRuntimeError::Tool(error.to_string())
+        })?))
+    }
+
+    /// Web discovery of blogs, newsletters and podcasts, validated as feeds. Podcast queries
+    /// rank podcast feeds first.
+    async fn discover_feeds(
+        &self,
+        call_id: &str,
+        query: &str,
+        events: Arc<dyn AgentEventSink>,
+    ) -> Result<Vec<AssistantFeedOption>, AgentRuntimeError> {
         let topics = vec![query.to_owned()];
         let outcome = Box::pin(
             self.dependencies
                 .onboarding
-                .with_events(events)
-                .fast_discover(query, &topics),
+                .fast_discover(query, &topics, events),
         )
         .await
         .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
         record_exa_tool_usage(
             &self.dependencies.pool,
             self.snapshot.user_id,
-            &call.id,
+            call_id,
             "chat_tool.find_feed_options",
-            crate::task_tools::ExaSearchUsage {
-                request_count: outcome.exa_usage.request_count,
-                result_count: outcome.exa_usage.result_count,
-                summary_count: outcome.exa_usage.summary_count,
-                text_count: outcome.exa_usage.text_count,
-                summary_requested: false,
-                text_requested: true,
-                livecrawl_fallback: false,
-                estimated_cost_usd: outcome.exa_usage.estimated_cost_usd,
-                known_estimated_cost_usd: outcome.exa_usage.known_estimated_cost_usd,
-            },
+            outcome.exa_usage.into(),
         )
         .await;
         let suggestions = normalize_seeds(
@@ -521,22 +434,7 @@ impl ChatToolExecutor {
         if looks_like_podcast_query(query) {
             options.sort_by_key(|option| u8::from(option.feed_type != FeedType::PodcastRss));
         }
-        options.truncate(limit);
-        let payload = AssistantFeedOptionsResult {
-            query: query.to_owned(),
-            options: options.clone(),
-        };
-        let metadata = serde_json::to_value(ChatRenderMetadata {
-            feed_options: options,
-        })
-        .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        match self.render_metadata.lock() {
-            Ok(mut value) => *value = Some(metadata.clone()),
-            Err(poisoned) => *poisoned.into_inner() = Some(metadata.clone()),
-        }
-        Ok(success(serde_json::to_value(payload).map_err(|error| {
-            AgentRuntimeError::Tool(error.to_string())
-        })?))
+        Ok(options)
     }
 
     async fn search_content_kind(
@@ -723,6 +621,47 @@ impl ChatToolExecutor {
         })))
     }
 
+    async fn subscribe_aggregator(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
+        let input: SubscribeAggregatorInput = arguments(&call)?;
+        let key =
+            AggregatorKey::from_key(&input.key.trim().to_ascii_lowercase()).ok_or_else(|| {
+                AgentRuntimeError::Tool(format!(
+                    "unknown aggregator key {:?}; valid keys: {}",
+                    input.key,
+                    AGGREGATOR_KEY_NAMES.join(", ")
+                ))
+            })?;
+        let topics = input
+            .topics
+            .map(|topics| canonical_aggregator_topics(key, &topics))
+            .transpose()?;
+        let mut transaction = self
+            .dependencies
+            .pool
+            .begin()
+            .await
+            .map_err(db_tool_error)?;
+        let applied = apply_aggregator_subscription(
+            &mut transaction,
+            self.snapshot.user_id,
+            key,
+            topics.as_deref(),
+        )
+        .await
+        .map_err(db_tool_error)?;
+        transaction.commit().await.map_err(db_tool_error)?;
+        Ok(success(json!({
+            "subscribed": true,
+            "aggregator": key.as_str(),
+            "title": key.display_name(),
+            "subscription_outcome": applied.mutation.as_str(),
+            "config_id": applied.config.id,
+            "feed_url": applied.config.feed_url,
+            "topics": applied.config.config.get("topics").cloned().unwrap_or(Value::Null),
+            "offered_topics": key.topics(),
+        })))
+    }
+
     async fn convert_news(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
         let input: ContentIdInput = arguments(&call)?;
         let mut transaction = self
@@ -815,56 +754,6 @@ impl ChatToolExecutor {
     }
 }
 
-impl PendingChatSandbox {
-    fn new(acquired: AcquiredTaskSandbox, message_id: i64) -> Self {
-        Self {
-            acquired: Some(acquired),
-            message_id,
-        }
-    }
-
-    fn sandbox(&self) -> &newsly_e2b::SandboxHandle {
-        &self
-            .acquired
-            .as_ref()
-            .expect("pending chat sandbox must own its acquired session")
-            .sandbox
-    }
-
-    fn disarm(mut self) -> AcquiredTaskSandbox {
-        self.acquired
-            .take()
-            .expect("pending chat sandbox must own its acquired session")
-    }
-
-    async fn cleanup(&mut self) {
-        let Some(acquired) = self.acquired.take() else {
-            return;
-        };
-        cleanup_chat_sandbox(acquired, self.message_id, "chat sandbox bootstrap").await;
-    }
-}
-
-impl Drop for PendingChatSandbox {
-    fn drop(&mut self) {
-        let Some(acquired) = self.acquired.take() else {
-            return;
-        };
-        let message_id = self.message_id;
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            tracing::error!(
-                message_id,
-                "cannot schedule cancellation cleanup for a pending chat sandbox"
-            );
-            drop(acquired);
-            return;
-        };
-        runtime.spawn(async move {
-            cleanup_chat_sandbox(acquired, message_id, "cancelled chat sandbox bootstrap").await;
-        });
-    }
-}
-
 async fn cleanup_chat_sandbox(
     acquired: AcquiredTaskSandbox,
     message_id: i64,
@@ -920,59 +809,6 @@ impl Mutation {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ExecuteBashInput {
-    command: String,
-    timeout_seconds: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
-)]
-struct WriteFileInput {
-    path: String,
-    text: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
-)]
-struct EditFileInput {
-    path: String,
-    old_text: String,
-    new_text: String,
-    #[serde(default)]
-    replace_all: bool,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
-)]
-struct ReadFileInput {
-    path: String,
-    max_bytes: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
-)]
-struct ListFilesInput {
-    path: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 struct WebSearchInput {
     query: String,
     limit: Option<usize>,
@@ -1024,17 +860,6 @@ struct SearchInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared task executor"
-)]
-struct WriteKnowledgeInput {
-    references: Vec<KnowledgeReferenceInput>,
-    directory: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 struct UnreadInput {
     limit: Option<usize>,
 }
@@ -1056,6 +881,16 @@ struct SubscribeInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct SubscribeAggregatorInput {
+    /// Aggregator key from the catalog, for example "arxiv" or "hfpapers".
+    key: String,
+    /// Topic filter for aggregators that offer topics. Replaces the current filter; an empty
+    /// list follows every topic. Omit it to keep the current filter (every topic when new).
+    topics: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ContentIdInput {
     content_id: i64,
 }
@@ -1070,11 +905,55 @@ struct DeepResearchInput {
 struct AssistantFeedOptionsResult {
     query: String,
     options: Vec<AssistantFeedOption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discovery_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct ChatRenderMetadata {
     feed_options: Vec<AssistantFeedOption>,
+}
+
+fn aggregator_catalog_summary() -> String {
+    AggregatorKey::ALL
+        .into_iter()
+        .map(|key| match key.topics() {
+            [] => format!("{} \"{}\"", key.display_name(), key.as_str()),
+            topics => format!(
+                "{} \"{}\" with topics {}",
+                key.display_name(),
+                key.as_str(),
+                topics.join("/")
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Catalog-spells and de-duplicates requested topics, rejecting any the aggregator doesn't offer.
+fn canonical_aggregator_topics(
+    key: AggregatorKey,
+    topics: &[String],
+) -> Result<Vec<&'static str>, AgentRuntimeError> {
+    let mut canonical = BTreeSet::new();
+    for topic in topics
+        .iter()
+        .map(|topic| topic.trim())
+        .filter(|topic| !topic.is_empty())
+    {
+        let spelled = key.canonical_topic(topic).ok_or_else(|| {
+            AgentRuntimeError::Tool(match key.topics() {
+                [] => format!("{} has no topic filter", key.display_name()),
+                offered => format!(
+                    "{} does not offer topic {topic:?}; offered topics: {}",
+                    key.display_name(),
+                    offered.join(", ")
+                ),
+            })
+        })?;
+        canonical.insert(spelled);
+    }
+    Ok(canonical.into_iter().collect())
 }
 
 fn definition<T: JsonSchema>(name: &str, description: &str) -> ToolDefinition {
@@ -1134,5 +1013,66 @@ mod content_search_input_tests {
             let input: ContentSearchInput = serde_json::from_value(input).unwrap();
             assert!(input.into_filters(false).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod aggregator_tool_tests {
+    use super::*;
+
+    #[test]
+    fn feed_discovery_names_every_catalog_aggregator() {
+        let definitions = ChatToolExecutor::definitions();
+        let discovery = definitions
+            .iter()
+            .find(|definition| definition.name == "find_feed_options")
+            .unwrap();
+        for key in AggregatorKey::ALL {
+            assert!(
+                discovery.description.contains(key.display_name()),
+                "{key:?}"
+            );
+            assert!(discovery.description.contains(key.as_str()), "{key:?}");
+        }
+        assert!(
+            definitions
+                .iter()
+                .any(|definition| definition.name == "subscribe_to_aggregator")
+        );
+    }
+
+    #[test]
+    fn aggregator_topics_are_catalog_spelled_and_scoped() {
+        let topics = ["CS.cl".to_owned(), " cs.CL ".to_owned(), String::new()];
+        assert_eq!(
+            canonical_aggregator_topics(AggregatorKey::Arxiv, &topics).unwrap(),
+            vec!["cs.CL"]
+        );
+        assert!(
+            canonical_aggregator_topics(AggregatorKey::Arxiv, &["physics".to_owned()]).is_err()
+        );
+        assert!(
+            canonical_aggregator_topics(AggregatorKey::HfPapers, &["cs.CL".to_owned()]).is_err()
+        );
+        assert!(
+            canonical_aggregator_topics(AggregatorKey::HfPapers, &[])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn aggregator_cards_subscribe_by_catalog_feed_url() {
+        let option = aggregator_feed_option(AggregatorKey::HfPapers);
+        assert_eq!(option.feed_type, FeedType::Aggregator);
+        assert_eq!(option.feed_url, "aggregator://hfpapers");
+        assert_eq!(option.site_url, "https://huggingface.co/papers");
+        assert!(option.rationale.is_none());
+        assert!(
+            aggregator_feed_option(AggregatorKey::Arxiv)
+                .rationale
+                .unwrap()
+                .contains("cs.CL")
+        );
     }
 }

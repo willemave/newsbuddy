@@ -3,18 +3,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use newsly_db::Database;
-use newsly_domain::{ResourceKey, RuntimeOwner};
-use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
-};
+use newsly_queue::{QueueKernel, TaskType};
+use newsly_worker::HandlerRegistry;
 use newsly_worker::learning_deck::LearningDeckTaskExecutor;
 use newsly_worker::process::{
-    initialize_observability, notification_database_url, spawn_shutdown_signal,
+    QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
 use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
 use newsly_worker::run_llm_task::RunLlmTaskHandler;
 use newsly_worker::share_actions::{ShareActionAgentRuntime, ShareActionTaskExecutor};
-use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 const DEFAULT_SANDBOX_ROOT: &str = "/data/workspace";
 
@@ -54,35 +51,21 @@ pub(crate) async fn main() -> Result<()> {
         share_actions,
         learning_decks,
     ))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [ResourceKey::new(TaskType::RunLlmTask.as_str())?],
-    )?;
-    let mut claim = ClaimRequest::for_queue(process.worker_id.clone(), TaskQueue::Llm, scope);
-    claim.task_type = Some(TaskType::RunLlmTask);
-    claim.lease_duration = process.lease_duration;
-    let mut worker_config = WorkerConfig::new(claim);
-    worker_config.max_retries = process.max_retries;
-
-    let notification_hub =
-        QueueNotificationHub::spawn(notification_database_url(process.database_url()));
-    let notifications = notification_hub.subscribe();
-    let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
-
-    tracing::info!(
-        worker_id = %process.worker_id,
-        queue = %TaskQueue::Llm,
-        task_type = %TaskType::RunLlmTask,
-        "Newsly Rust run-llm-task worker started; only rows stamped for the Rust runtime are claimable"
-    );
-    let run_result = worker.run(shutdown_rx).await;
-    shutdown_task.abort();
-    notification_hub.close().await;
-    database.close().await;
-    let summary = run_result.context("Newsly Rust run-llm-task worker stopped unexpectedly")?;
-    tracing::info!(?summary, "Newsly Rust run-llm-task worker stopped");
-    Ok(())
+    run_queue_worker(
+        database,
+        queue,
+        handlers,
+        notification_database_url(process.database_url()),
+        QueueWorkerRunConfig {
+            process_name: "Newsly Rust run-llm-task worker",
+            worker_id: &process.worker_id,
+            lease_duration: process.lease_duration,
+            max_retries: process.max_retries,
+            task_types: &[TaskType::RunLlmTask],
+            task_type_filter: Some(TaskType::RunLlmTask),
+        },
+    )
+    .await
 }
 
 fn sandbox_root() -> String {

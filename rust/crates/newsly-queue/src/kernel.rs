@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     ClaimRuntimeScope, ClaimedTask, EnqueueRequest, FinalizationOutcome, OwnedWorkPlan,
-    PayloadError, QueueModelError, ResolvedFinalization, TaskExecutorStamp, TaskQueue, TaskResult,
-    TaskStatus, TaskTransition, TaskType, UnknownQueueValue, compatibility_canonical_json,
+    PayloadError, QueueModelError, ResolvedFinalization, TaskQueue, TaskResult, TaskStatus,
+    TaskTransition, TaskType, UnknownQueueValue, compatibility_canonical_json,
 };
 
 const QUEUE_NOTIFY_CHANNEL: &str = "processing_tasks";
@@ -70,10 +70,6 @@ impl QueueKernel {
             pool,
             retry_bucket_cursors: Arc::new(Mutex::new(HashMap::new())),
         }
-    }
-
-    pub const fn pool(&self) -> &PgPool {
-        &self.pool
     }
 
     /// Enqueues a batch atomically, stamping each row with the active task-runtime decision.
@@ -193,21 +189,6 @@ impl QueueKernel {
             .into_iter()
             .next()
             .ok_or(QueueError::MissingEnqueueResult)
-    }
-
-    /// Grants an active user access to poll an existing task.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a missing/inactive user, missing task, or database failure.
-    pub async fn grant_access(&self, task_id: i64, user_id: i64) -> Result<(), QueueError> {
-        database_id(task_id, "task_id")?;
-        database_id(user_id, "user_id")?;
-        let mut transaction = self.pool.begin().await?;
-        self.grant_access_in_transaction(&mut transaction, task_id, user_id)
-            .await?;
-        transaction.commit().await?;
-        Ok(())
     }
 
     /// Grants polling access inside an existing product-state transaction.
@@ -404,99 +385,6 @@ impl QueueKernel {
         }))
     }
 
-    /// Converts a still-pending task to a terminal failed/cancelled representation for an
-    /// unscoped maintenance operation. Runtime task handlers should use
-    /// [`Self::cancel_pending_fenced`] or [`Self::cancel_claim`]. The public task status contract
-    /// has no `cancelled` state, so cancellation is represented by `failed` plus a stable reason.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid identifier/reason or a database failure.
-    pub async fn cancel_pending(&self, task_id: i64, reason: &str) -> Result<bool, QueueError> {
-        database_id(task_id, "task_id")?;
-        validate_reason(reason)?;
-        let result = sqlx::query(
-            r"
-            UPDATE processing_tasks
-            SET
-                status = 'failed',
-                completed_at = timezone('UTC', now()),
-                error_message = $1,
-                locked_at = NULL,
-                locked_by = NULL,
-                lease_token = NULL,
-                lease_expires_at = NULL
-            WHERE id::bigint = $2 AND status = 'pending'
-            ",
-        )
-        .bind(reason)
-        .bind(task_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(result.rows_affected() == 1)
-    }
-
-    /// Cancels one pending task only when its immutable executor stamp is still exactly the one
-    /// observed by the caller.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid identifier/reason or a database failure.
-    pub async fn cancel_pending_fenced(
-        &self,
-        task_id: i64,
-        executor: &TaskExecutorStamp,
-        reason: &str,
-    ) -> Result<bool, QueueError> {
-        database_id(task_id, "task_id")?;
-        validate_reason(reason)?;
-        let result = sqlx::query(
-            r"
-            UPDATE processing_tasks
-            SET
-                status = 'failed',
-                completed_at = timezone('UTC', now()),
-                error_message = $1,
-                locked_at = NULL,
-                locked_by = NULL,
-                lease_token = NULL,
-                lease_expires_at = NULL
-            WHERE
-                id::bigint = $2
-                AND status = 'pending'
-                AND executor_runtime = $3
-                AND executor_version = $4
-                AND executor_namespace = $5
-            ",
-        )
-        .bind(reason)
-        .bind(task_id)
-        .bind(executor.runtime.as_str())
-        .bind(executor.ownership_version.get())
-        .bind(executor.namespace.as_str())
-        .execute(&self.pool)
-        .await?;
-        Ok(result.rows_affected() == 1)
-    }
-
-    /// Cancels a processing task only for the exact unexpired claim owner.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid reason/durable value or a database failure.
-    pub async fn cancel_claim(
-        &self,
-        claim: &ClaimedTask,
-        reason: &str,
-    ) -> Result<Option<TaskTransition>, QueueError> {
-        validate_reason(reason)?;
-        let result = TaskResult::fail(Some(reason.to_owned()), false);
-        let Some(finalization) = self.begin_fenced_finalization(claim, &result, 0).await? else {
-            return Ok(None);
-        };
-        finalization.finish().await
-    }
-
     /// Deletes pending account-owned work and reports whether any other account task is still
     /// processing. This preserves the account-deletion kernel's transactional contract.
     ///
@@ -658,7 +546,7 @@ impl TryFrom<EnqueueRequest> for PreparedEnqueueWithoutStamp {
         }
         let payload = request.task_type.normalize_payload(request.payload)?;
         let spec = request.task_type.spec();
-        let queue_name = request.queue_name.unwrap_or(spec.queue);
+        let queue_name = spec.queue;
         let owner_user_id = request
             .owner_user_id
             .map(|value| positive_id(value, "owner_user_id"))
@@ -1363,14 +1251,6 @@ fn postgres_integer(value: i64, field: &'static str) -> Result<i32, QueueError> 
     i32::try_from(value).map_err(|_| QueueError::IdentifierOutOfRange(field))
 }
 
-fn validate_reason(reason: &str) -> Result<(), QueueError> {
-    if reason.trim().is_empty() {
-        Err(QueueError::EmptyCancellationReason)
-    } else {
-        Ok(())
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum QueueError {
     #[error("PostgreSQL queue operation failed")]
@@ -1427,8 +1307,6 @@ pub enum QueueError {
     InvalidClaim(i64, &'static str),
     #[error("retry/deferred finalization is missing its resolved delay")]
     MissingRetryDelay,
-    #[error("cancellation reason must be nonblank")]
-    EmptyCancellationReason,
     #[error("owned task {0} identity is missing or inconsistent")]
     OwnedTaskIdentityMismatch(i64),
 }

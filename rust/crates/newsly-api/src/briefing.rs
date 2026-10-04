@@ -1,19 +1,17 @@
+use newsly_domain::truncate_chars;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fmt::Write as _;
 use std::str::FromStr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH, VARY};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use chrono::NaiveDateTime;
 use newsly_contracts::{
     BRIEFING_DIG_FRAGMENT_MAX_LENGTH, BriefingBlockDto, BriefingDigSearchRequest,
@@ -34,31 +32,25 @@ use newsly_db::{
     load_briefing_lens_page, load_briefing_refresh_task, mark_briefing_lens_read,
     mark_briefing_sources_read, recent_briefing_dig_count, record_briefing_dig_usage,
 };
-use newsly_providers::{BriefingDigGateway, BriefingDigGatewayError, BriefingWebSearchResult};
+use newsly_providers::{BriefingDigGatewayError, BriefingWebSearchResult};
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::model_usage::ApiAgentUsageSink;
-use crate::write_support::{
-    bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
-};
+use crate::pagination_cursor::{self, InvalidCursor};
+use crate::write_support::{bad_request, decode_json, internal_error, not_found};
 use crate::{AppState, request_id_from_headers};
 
 pub(crate) mod narration;
 use narration::{chaptered_narration, legacy_narration, narration_status, retry_narration};
+#[cfg(test)]
+mod cursor_tests;
 mod presentation;
 
-const READ_OPERATION_ID: &str = "markBriefingRead";
-const LENS_READ_OPERATION_ID: &str = "markBriefingLensesLensRead";
-const REFRESH_OPERATION_ID: &str = "refreshBriefing";
-const REFRESH_STATUS_OPERATION_ID: &str = "getBriefingRefreshStatus";
-const DIG_SEARCH_OPERATION_ID: &str = "digBriefingSearch";
-const DIG_SUMMARIZE_OPERATION_ID: &str = "digBriefingSummarize";
 const BRIEFING_LENS_PAGE_MAX: usize = 12;
 const DIG_SYSTEM_PROMPT: &str = concat!(
     "You expand a selected fragment from a personal news briefing into a grounded mini-explainer. ",
@@ -71,8 +63,6 @@ const DIG_SYSTEM_PROMPT: &str = concat!(
     "Format with light markdown: **bold** the two to four most load-bearing terms or figures and use ",
     "'-' bullets — no headings, no preamble, no 'based on the search results'. Aim for 160-240 words."
 );
-
-static DIG_GATEWAY: OnceLock<Result<BriefingDigGateway, String>> = OnceLock::new();
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -155,10 +145,7 @@ pub(super) async fn get_index(
     if response_body.first_run.is_some() {
         let bytes = serde_json::to_vec(&response_body)
             .map_err(|error| internal_error(error, &request_id))?;
-        let mut hex = String::new();
-        for byte in Sha256::digest(bytes) {
-            write!(&mut hex, "{byte:02x}").expect("String writing cannot fail");
-        }
+        let hex = newsly_domain::sha256_hex(&bytes);
         etag = format!("W/\"warm-{}\"", &hex[..24]);
     }
     let mut response = Json(response_body).into_response();
@@ -227,7 +214,7 @@ pub(super) async fn get_lens(
         .as_deref()
         .map(decode_lens_cursor)
         .transpose()
-        .map_err(|message| bad_request(message, &request_id))?;
+        .map_err(|error| bad_request(error.to_string(), &request_id))?;
     let projection = load_briefing_lens_page(
         state.database.pool(),
         current_user.id,
@@ -260,28 +247,19 @@ pub(super) async fn mark_read(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<BriefingReadMarkRequest>, JsonRejection>,
 ) -> Result<Json<BriefingReadMarkResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, READ_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_source_keys(&payload.source_keys, &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let result =
         mark_briefing_sources_read(&mut transaction, current_user.id, &payload.source_keys)
             .await
             .map_err(|error| internal_error(error, &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(present_read_mark(&result)))
 }
 
@@ -306,26 +284,17 @@ pub(super) async fn mark_lens_read(
     headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<BriefingReadMarkResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, LENS_READ_OPERATION_ID, &request_id)?;
     let Path(lens_key) = path.map_err(|error| validation_error(error.body_text(), &request_id))?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let result = mark_briefing_lens_read(&mut transaction, current_user.id, &lens_key)
         .await
         .map_err(|error| internal_error(error, &request_id))?
         .ok_or_else(|| not_found("Briefing lens", &request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(present_read_mark(&result)))
 }
 
@@ -346,17 +315,11 @@ pub(super) async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
 ) -> Result<Json<BriefingRefreshResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REFRESH_OPERATION_ID, &request_id)?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let version = ensure_briefing_state_version(&mut transaction, current_user.id)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
@@ -388,10 +351,7 @@ pub(super) async fn refresh(
             .await
             .map_err(|error| internal_error(error, &request_id))?
     };
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(BriefingRefreshResponse {
         enqueued: inserted || expedited,
         task_id,
@@ -418,11 +378,10 @@ pub(super) async fn refresh_status(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    _stamp: RouteOwnershipStamp,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<BriefingRefreshStatusResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, REFRESH_STATUS_OPERATION_ID, &request_id)?;
     let Path(task_id) = path.map_err(|error| validation_error(error.body_text(), &request_id))?;
     if task_id <= 0 {
         return Err(validation_error(
@@ -472,16 +431,15 @@ pub(super) async fn dig_search(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<BriefingDigSearchRequest>, JsonRejection>,
 ) -> Result<Json<BriefingDigSearchResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DIG_SEARCH_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_fragment(&payload.fragment, &request_id)?;
-    verify_external_operation(&state, &stamp, &request_id).await?;
     let started_at = Instant::now();
-    let outcome = dig_gateway(&request_id)?
+    let outcome = state
+        .briefing_dig
         .search(&truncate_chars(&payload.fragment, 200))
         .await
         .map_err(|error| provider_error(&error, &request_id))?;
@@ -543,11 +501,10 @@ pub(super) async fn dig_summarize(
     State(state): State<AppState>,
     headers: HeaderMap,
     current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
+    stamp: RouteOwnershipStamp,
     payload: Result<Json<BriefingDigSummarizeRequest>, JsonRejection>,
 ) -> Result<Json<BriefingDigSummarizeResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DIG_SUMMARIZE_OPERATION_ID, &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_fragment(&payload.fragment, &request_id)?;
     if payload.passage_context.chars().count() > 2_000 {
@@ -571,7 +528,7 @@ pub(super) async fn dig_summarize(
         )
         .with_retryable(true));
     }
-    verify_external_operation(&state, &stamp, &request_id).await?;
+    crate::write_support::verify_route_now(state.database.pool(), &stamp, &request_id).await?;
     let prompt = summary_prompt(&payload);
     let started_at = Instant::now();
     let usage = Arc::new(ApiAgentUsageSink::new(
@@ -580,7 +537,8 @@ pub(super) async fn dig_summarize(
         "briefing_dig.summarize",
         None,
     ));
-    let summary = dig_gateway(&request_id)?
+    let summary = state
+        .briefing_dig
         .summarize_with_events(DIG_SYSTEM_PROMPT.to_owned(), prompt, usage.clone())
         .await;
     usage.finish().await;
@@ -591,16 +549,6 @@ pub(super) async fn dig_summarize(
         model: summary.model,
         elapsed_ms,
     }))
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct NarrationDeliveryQuery {
-    #[serde(default = "default_delivery")]
-    delivery: String,
-}
-
-fn default_delivery() -> String {
-    "background".to_owned()
 }
 
 fn present_index(
@@ -792,13 +740,18 @@ fn present_lens(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     let next_cursor = if projection.has_more {
-        projection.segments.last().map(|segment| {
-            encode_lens_cursor(
-                projection.lens.id,
-                segment.id,
-                segment.created_at.naive_utc(),
-            )
-        })
+        projection
+            .segments
+            .last()
+            .map(|segment| {
+                encode_lens_cursor(
+                    projection.lens.id,
+                    segment.id,
+                    segment.created_at.naive_utc(),
+                )
+            })
+            .transpose()
+            .map_err(|error| internal_error(error, request_id))?
     } else {
         None
     };
@@ -1020,24 +973,6 @@ fn present_read_mark(result: &BriefingReadMarkProjection) -> BriefingReadMarkRes
     }
 }
 
-async fn verify_external_operation(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn persist_dig_usage(
     state: &AppState,
@@ -1051,13 +986,8 @@ async fn persist_dig_usage(
     output_tokens: Option<i64>,
     metadata: Value,
 ) -> Result<(), ApiError> {
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    verify_stamp(&mut transaction, stamp, request_id).await?;
+    let mut transaction =
+        crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
     record_briefing_dig_usage(
         &mut transaction,
         user_id,
@@ -1071,26 +1001,7 @@ async fn persist_dig_usage(
     )
     .await
     .map_err(|error| internal_error(error, request_id))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, request_id))
-}
-
-fn dig_gateway(request_id: &str) -> Result<&'static BriefingDigGateway, ApiError> {
-    DIG_GATEWAY
-        .get_or_init(|| BriefingDigGateway::from_env().map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|error| {
-            tracing::error!(error, "Briefing Dig provider configuration failed");
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "provider_unavailable",
-                "Briefing Dig is unavailable",
-                request_id.to_owned(),
-            )
-            .with_retryable(true)
-        })
+    crate::write_support::commit(transaction, request_id).await
 }
 
 fn provider_error(error: &BriefingDigGatewayError, request_id: &str) -> ApiError {
@@ -1197,12 +1108,9 @@ fn parse_bool(value: &str) -> Option<bool> {
 }
 
 fn briefing_etag(user_id: i64, version: i32, run_id: i64, revision: i32) -> String {
-    let digest =
-        Sha256::digest(format!("briefing:{user_id}:v{version}:o{run_id}.{revision}").as_bytes());
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
-    }
+    let hex = newsly_domain::sha256_hex(
+        format!("briefing:{user_id}:v{version}:o{run_id}.{revision}").as_bytes(),
+    );
     format!("W/\"{}\"", &hex[..24])
 }
 
@@ -1215,35 +1123,36 @@ fn apply_cache_headers(headers: &mut HeaderMap, etag: &str) {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LensCursorWire {
     lens_id: i64,
     segment_id: i64,
     created_at: String,
 }
 
-fn encode_lens_cursor(lens_id: i64, segment_id: i64, created_at: NaiveDateTime) -> String {
-    let payload = LensCursorWire {
+fn encode_lens_cursor(
+    lens_id: i64,
+    segment_id: i64,
+    created_at: NaiveDateTime,
+) -> Result<String, InvalidCursor> {
+    if lens_id <= 0 || segment_id <= 0 {
+        return Err(InvalidCursor);
+    }
+    pagination_cursor::encode(&LensCursorWire {
         lens_id,
         segment_id,
-        created_at: created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
-    };
-    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).expect("cursor serializes"))
+        created_at: pagination_cursor::encode_timestamp(created_at),
+    })
 }
 
-fn decode_lens_cursor(value: &str) -> Result<BriefingLensCursorProjection, &'static str> {
+fn decode_lens_cursor(value: &str) -> Result<BriefingLensCursorProjection, InvalidCursor> {
     if value.is_empty() || value.len() > 512 {
-        return Err("Malformed Briefing cursor");
+        return Err(InvalidCursor);
     }
-    let bytes = URL_SAFE_NO_PAD
-        .decode(value)
-        .or_else(|_| URL_SAFE.decode(value))
-        .map_err(|_| "Malformed Briefing cursor")?;
-    let payload = serde_json::from_slice::<LensCursorWire>(&bytes)
-        .map_err(|_| "Malformed Briefing cursor")?;
-    let created_at = NaiveDateTime::parse_from_str(&payload.created_at, "%Y-%m-%dT%H:%M:%S%.f")
-        .map_err(|_| "Malformed Briefing cursor")?;
+    let payload = pagination_cursor::decode::<LensCursorWire>(value)?;
+    let created_at = pagination_cursor::decode_timestamp(&payload.created_at)?;
     if payload.lens_id <= 0 || payload.segment_id <= 0 {
-        return Err("Malformed Briefing cursor");
+        return Err(InvalidCursor);
     }
     Ok(BriefingLensCursorProjection {
         lens_id: payload.lens_id,
@@ -1272,18 +1181,7 @@ fn lens_repository_error(error: BriefingRepositoryError, request_id: &str) -> Ap
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
-    ApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        "Request validation failed",
-        request_id.to_owned(),
-    )
-    .with_details(
-        json!({"errors": [{"message": message.into()}]})
-            .as_object()
-            .expect("validation details are an object")
-            .clone(),
-    )
+    ApiError::validation(message, request_id)
 }
 
 fn queue_error(error: QueueError, request_id: &str) -> ApiError {
@@ -1293,10 +1191,6 @@ fn queue_error(error: QueueError, request_id: &str) -> ApiError {
 
 fn elapsed_millis(started_at: Instant) -> u64 {
     u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    value.chars().take(max).collect()
 }
 
 fn positive_metadata_number(metadata: &Map<String, Value>, key: &str) -> Option<i64> {
@@ -1488,15 +1382,6 @@ fn json_string_values(value: &Value) -> Vec<String> {
         .flatten()
         .filter_map(Value::as_str)
         .map(str::to_owned)
-        .collect()
-}
-
-fn json_i64_values(value: &Value) -> Vec<i64> {
-    value
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
         .collect()
 }
 

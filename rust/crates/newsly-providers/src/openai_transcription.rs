@@ -58,18 +58,6 @@ pub trait TranscriptionUsageObserver: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
 }
 
-#[derive(Debug)]
-struct NoTranscriptionUsageObserver;
-
-impl TranscriptionUsageObserver for NoTranscriptionUsageObserver {
-    fn observe(
-        &self,
-        _usage: TranscriptionChunkUsage,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
-        Box::pin(async { Ok(()) })
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioDurationSource {
     Ffprobe,
@@ -126,28 +114,6 @@ impl OpenAiTranscriptionGateway {
 
     pub const fn model_name() -> &'static str {
         MODEL
-    }
-
-    /// Transcribes one completed upload without retaining the file after the call.
-    ///
-    /// Files above `OpenAI`'s 25 MiB boundary are split into ten-minute chunks with ffmpeg. Provider
-    /// calls are retried at most three times, matching the legacy service's bounded retry policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns a typed error for local media failures, provider failures, timeouts, or malformed
-    /// provider responses.
-    pub async fn transcribe_upload(
-        &self,
-        path: &Path,
-        original_filename: &str,
-    ) -> Result<TranscriptionResult, OpenAiTranscriptionError> {
-        self.transcribe_upload_observed(
-            path,
-            original_filename,
-            Arc::new(NoTranscriptionUsageObserver),
-        )
-        .await
     }
 
     /// Transcribes an upload and reports each successful provider response before decoding it.
