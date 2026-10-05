@@ -889,4 +889,12 @@ mod submission_cursor_tests {
         .expect("fixture encodes");
         assert!(decode_submission_cursor(&with_hash).is_err());
     }
+
+    #[test]
+    fn decodes_server_issued_legacy_submission_cursor() {
+        let cursor = "eyJsYXN0X2NyZWF0ZWRfYXQiOiAiMjAyNi0wOC0zMFQxMjozNDo1Ni40NTY3ODkiLCAibGFzdF9pZCI6IDE3fQ==";
+        let (created_at, id) = decode_submission_cursor(cursor).expect("legacy cursor decodes");
+        assert_eq!(id, 17);
+        assert_eq!(created_at.to_rfc3339(), "2026-08-30T12:34:56.456789+00:00");
+    }
 }

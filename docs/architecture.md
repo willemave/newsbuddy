@@ -165,6 +165,14 @@ semantics. Rust preserves those semantics through explicit boundaries:
 Rust never persists Rig, `async-openai`, ConnectRPC, or E2B SDK types. Agent
 history uses a versioned Newsly transcript with an explicit legacy decoder.
 
+Pagination emits unpadded URL-safe cursors with UTC timestamps and route-bound filter hashes.
+The API retains decode-only support for cursors issued before the October 2026 consolidation:
+canonical padded URL-safe encoding, naive UTC timestamps and each route's original filter hash.
+Legacy hashes must still match the active filters; hashless cursors are rejected. Remove this
+compatibility only after installed-client cursor evidence establishes that persisted old cursors
+are no longer in use. Invalid Briefing lens cursors return `409 stale_cursor`, allowing installed
+clients to discard their saved continuation and reload; other cursor validation stays route-owned.
+
 ### 4.3 Canonical product identities
 
 Long-form/legacy Content and short-form News are separate concepts with

@@ -1,5 +1,5 @@
 use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -16,7 +16,10 @@ pub(super) fn encode<T: Serialize>(payload: &T) -> Result<String, InvalidCursor>
 }
 
 pub(super) fn decode<T: DeserializeOwned>(value: &str) -> Result<T, InvalidCursor> {
-    let bytes = URL_SAFE_NO_PAD.decode(value).map_err(|_| InvalidCursor)?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .or_else(|_| URL_SAFE.decode(value))
+        .map_err(|_| InvalidCursor)?;
     serde_json::from_slice(&bytes).map_err(|_| InvalidCursor)
 }
 
@@ -28,13 +31,14 @@ pub(super) fn encode_timestamp(value: NaiveDateTime) -> String {
 pub(super) fn decode_timestamp(value: &str) -> Result<NaiveDateTime, InvalidCursor> {
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.naive_utc())
+        .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f"))
         .map_err(|_| InvalidCursor)
 }
 
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
     use chrono::NaiveDateTime;
     use serde::{Deserialize, Serialize};
 
@@ -83,17 +87,34 @@ mod tests {
     }
 
     #[test]
-    fn rejects_padding_unknown_fields_and_naive_timestamps() {
-        let cursor = encode(&Fixture {
+    fn accepts_legacy_padding_and_naive_timestamp() {
+        let fixture = Fixture {
             timestamp: "2026-01-02T03:04:05.000000Z".to_owned(),
             rank: 1.0,
-        })
-        .expect("cursor encodes");
-        assert!(decode::<Fixture>(&format!("{cursor}=")).is_err());
+        };
+        let padded = URL_SAFE.encode(serde_json::to_vec(&fixture).expect("fixture serializes"));
+        assert_eq!(
+            decode::<Fixture>(&padded)
+                .expect("padded cursor decodes")
+                .rank
+                .to_bits(),
+            1.0_f64.to_bits()
+        );
+        assert_eq!(
+            decode_timestamp("2026-01-02T03:04:05.000000"),
+            Ok(NaiveDateTime::parse_from_str(
+                "2026-01-02T03:04:05.000000",
+                "%Y-%m-%dT%H:%M:%S%.6f"
+            )
+            .expect("valid timestamp"))
+        );
+    }
 
+    #[test]
+    fn rejects_unknown_fields_and_non_wire_timestamp_variants() {
         let unknown = URL_SAFE_NO_PAD
             .encode(br#"{"timestamp":"2026-01-02T03:04:05.000000Z","rank":1.0,"extra":true}"#);
         assert!(decode::<Fixture>(&unknown).is_err());
-        assert!(decode_timestamp("2026-01-02T03:04:05.000000").is_err());
+        assert!(decode_timestamp("2026-01-02 03:04:05.000000").is_err());
     }
 }

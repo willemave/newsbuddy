@@ -11,6 +11,7 @@ use newsly_db::{
 };
 use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::auth::AuthenticatedUser;
 use crate::content_read::presentation;
@@ -475,6 +476,7 @@ struct CursorPayload {
 #[derive(Debug)]
 struct CursorBinding {
     filters_hash: String,
+    legacy_filters_hash: String,
     rank_required: bool,
 }
 
@@ -483,8 +485,10 @@ fn decode_cursor(
     filters: &CursorBinding,
 ) -> Result<ContentFeedCursor, InvalidCursor> {
     let payload: CursorPayload = pagination_cursor::decode(cursor)?;
+    let filters_match = payload.filters_hash == filters.filters_hash
+        || payload.filters_hash == filters.legacy_filters_hash;
     if payload.last_id <= 0
-        || payload.filters_hash != filters.filters_hash
+        || !filters_match
         || payload.last_rank.is_some_and(|rank| !rank.is_finite())
         || (filters.rank_required && payload.last_rank.is_none())
     {
@@ -544,6 +548,18 @@ fn list_filters(content_types: &[String], date: Option<&str>, read_filter: &str)
             date,
             read_filter,
         }),
+        legacy_filters_hash: legacy_filter_hash(&legacy_filter_object([
+            (
+                "content_type",
+                (!content_types.is_empty()).then(|| {
+                    let mut values = content_types.to_vec();
+                    values.sort();
+                    Value::Array(values.into_iter().map(Value::String).collect())
+                }),
+            ),
+            ("date", date.map(|value| Value::String(value.to_owned()))),
+            ("read_filter", Some(Value::String(read_filter.to_owned()))),
+        ])),
         rank_required: false,
     }
 }
@@ -562,6 +578,17 @@ fn recent_filters(content_types: &[String], date: Option<&str>) -> CursorBinding
             content_type: normalized_content_types(content_types),
             date,
         }),
+        legacy_filters_hash: legacy_filter_hash(&legacy_filter_object([
+            (
+                "content_type",
+                (!content_types.is_empty()).then(|| {
+                    let mut values = content_types.to_vec();
+                    values.sort();
+                    Value::Array(values.into_iter().map(Value::String).collect())
+                }),
+            ),
+            ("date", date.map(|value| Value::String(value.to_owned()))),
+        ])),
         rank_required: false,
     }
 }
@@ -578,6 +605,10 @@ fn knowledge_filters(query: Option<&str>) -> CursorBinding {
             route: "knowledge",
             q: query,
         }),
+        legacy_filters_hash: legacy_filter_hash(&legacy_filter_object([(
+            "q",
+            query.map(|value| Value::String(value.to_owned())),
+        )])),
         rank_required: query.is_some(),
     }
 }
@@ -596,7 +627,50 @@ fn search_filters(query: &str, content_type: &str) -> CursorBinding {
             q: query,
             content_type,
         }),
+        legacy_filters_hash: legacy_filter_hash(&legacy_filter_object([
+            ("q", Some(Value::String(query.to_owned()))),
+            ("type", Some(Value::String(content_type.to_owned()))),
+        ])),
         rank_required: true,
+    }
+}
+
+fn legacy_filter_hash(filters: &Value) -> String {
+    newsly_domain::sha256_hex(legacy_cursor_json(filters).as_bytes())
+}
+
+fn legacy_filter_object<const N: usize>(entries: [(&str, Option<Value>); N]) -> Value {
+    Value::Object(
+        entries
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value)))
+            .collect(),
+    )
+}
+
+fn legacy_cursor_json(value: &Value) -> String {
+    match value {
+        Value::Object(object) => format!(
+            "{{{}}}",
+            object
+                .iter()
+                .map(|(key, value)| format!(
+                    "{}: {}",
+                    serde_json::to_string(key).expect("JSON key serialization is infallible"),
+                    legacy_cursor_json(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(legacy_cursor_json)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        other => serde_json::to_string(other).expect("JSON value serialization is infallible"),
     }
 }
 
@@ -655,5 +729,51 @@ mod tests {
         };
         let invalid = pagination_cursor::encode(&invalid).expect("fixture encodes");
         assert!(decode_cursor(&invalid, &filters).is_err());
+    }
+
+    #[test]
+    fn decodes_server_issued_legacy_content_list_cursor() {
+        let cursor = "eyJmaWx0ZXJzX2hhc2giOiAiNmQ4MDc1NmVmNWJkMzgyZGQxMTc5NzQ5Njc5ZjA2NTg5YTEwNjExNTRhOGVkNTgwODA0MWVhYjNhOWU2YjY2MSIsICJsYXN0X2NyZWF0ZWRfYXQiOiAiMjAyNi0wOC0zMFQxMjozNDo1Ni42NTQzMjEiLCAibGFzdF9pZCI6IDc3fQ==";
+        let filters = list_filters(&["podcast".to_owned(), "article".to_owned()], None, "all");
+        assert_legacy_cursor(cursor, &filters, None);
+        assert!(decode_cursor(cursor, &recent_filters(&[], None)).is_err());
+    }
+
+    #[test]
+    fn decodes_server_issued_legacy_recently_read_cursor() {
+        let cursor = "eyJmaWx0ZXJzX2hhc2giOiAiYTk1NjQzMGMzOTNiYjVlYzliM2E5ZjE4ZGYzYTM0MWE1MGQ0N2U0MDJjMzUwNGMwN2M3MDEwNTA5MmQ3NzdkNCIsICJsYXN0X2NyZWF0ZWRfYXQiOiAiMjAyNi0wOC0zMFQxMjozNDo1Ni42NTQzMjEiLCAibGFzdF9pZCI6IDc3fQ==";
+        let filters = recent_filters(&["article".to_owned()], Some("2026-08-30"));
+        assert_legacy_cursor(cursor, &filters, None);
+        assert!(decode_cursor(cursor, &recent_filters(&["article".to_owned()], None)).is_err());
+    }
+
+    #[test]
+    fn decodes_server_issued_legacy_knowledge_cursor() {
+        let cursor = "eyJmaWx0ZXJzX2hhc2giOiAiYzNhYTRlZjcyMDRmYTg3OWM4NmE2ZDU0ZTBkNDUzMmU4ZTc0MGE3NGMyYzI2ZDRhODUxM2QzNmU4MmQ1MWYxNiIsICJsYXN0X2NyZWF0ZWRfYXQiOiAiMjAyNi0wOC0zMFQxMjozNDo1Ni42NTQzMjEiLCAibGFzdF9pZCI6IDc3LCAibGFzdF9yYW5rIjogMC4zfQ==";
+        let filters = knowledge_filters(Some("machine learning"));
+        assert_legacy_cursor(cursor, &filters, Some(0.3));
+        assert!(decode_cursor(cursor, &knowledge_filters(Some("other query"))).is_err());
+    }
+
+    #[test]
+    fn decodes_server_issued_legacy_search_cursor() {
+        let cursor = "eyJmaWx0ZXJzX2hhc2giOiAiMDg2ZGYyNzZjZGU3MTE5M2U5ZmQ1ZmQzODdlZGI5NTdmZGY4ODQzMzljZWQ4ZDU5MjEzOWQ0YTNkYzcwZmM1NiIsICJsYXN0X2NyZWF0ZWRfYXQiOiAiMjAyNi0wOC0zMFQxMjozNDo1Ni42NTQzMjEiLCAibGFzdF9pZCI6IDc3LCAibGFzdF9yYW5rIjogMC4zfQ==";
+        let filters = search_filters("machine learning", "article");
+        assert_legacy_cursor(cursor, &filters, Some(0.3));
+        assert!(decode_cursor(cursor, &search_filters("machine learning", "all")).is_err());
+    }
+
+    fn assert_legacy_cursor(cursor: &str, filters: &CursorBinding, rank: Option<f64>) {
+        let decoded = decode_cursor(cursor, filters).expect("legacy cursor decodes");
+        assert_eq!(decoded.last_id, 77);
+        assert_eq!(
+            decoded.last_timestamp,
+            chrono::NaiveDateTime::parse_from_str(
+                "2026-08-30T12:34:56.654321",
+                "%Y-%m-%dT%H:%M:%S%.6f"
+            )
+            .expect("valid timestamp")
+        );
+        assert_eq!(decoded.last_rank, rank);
     }
 }

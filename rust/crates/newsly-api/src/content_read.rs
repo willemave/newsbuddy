@@ -250,7 +250,10 @@ struct CursorPayload {
 
 fn decode_cursor(cursor: &str, read_filter: &str) -> Result<NewsListCursor, InvalidCursor> {
     let payload: CursorPayload = pagination_cursor::decode(cursor)?;
-    if payload.last_id <= 0 || payload.filters_hash != filters_hash(read_filter) {
+    if payload.last_id <= 0
+        || ![filters_hash(read_filter), legacy_filters_hash(read_filter)]
+            .contains(&payload.filters_hash)
+    {
         return Err(InvalidCursor);
     }
     let last_sort_timestamp = pagination_cursor::decode_timestamp(&payload.last_created_at)?;
@@ -272,6 +275,12 @@ fn filters_hash(read_filter: &str) -> String {
         read_filter,
     })
     .expect("cursor filter serialization is infallible");
+    newsly_domain::sha256_hex(&bytes)
+}
+
+fn legacy_filters_hash(read_filter: &str) -> String {
+    let bytes = serde_json::to_vec(&serde_json::json!({"read_filter": read_filter}))
+        .expect("cursor filter serialization is infallible");
     newsly_domain::sha256_hex(&bytes)
 }
 
@@ -317,5 +326,18 @@ mod cursor_tests {
         assert_eq!(decoded.last_id, 42);
         assert_eq!(decoded.last_sort_timestamp, timestamp);
         assert!(decode_cursor(&cursor, "read").is_err());
+    }
+
+    #[test]
+    fn decodes_server_issued_legacy_news_cursor() {
+        let cursor = "eyJmaWx0ZXJzX2hhc2giOiIzZGE1MTliMWJiZWJiNDI5NjAyZThhOTkxZGE0MGI2Mjc2NGY1NGY3ODczNjBiODg2ZmJkYmFkZmQxN2QyMzlkIiwibGFzdF9jcmVhdGVkX2F0IjoiMjAyNi0wOC0zMFQxMjozNDo1Ni45OTk5OTkiLCJsYXN0X2lkIjo0Mn0=";
+        let decoded = decode_cursor(cursor, "unread").expect("legacy cursor decodes");
+        assert_eq!(decoded.last_id, 42);
+        assert_eq!(
+            decoded.last_sort_timestamp,
+            NaiveDateTime::parse_from_str("2026-08-30T12:34:56.999999", "%Y-%m-%dT%H:%M:%S%.6f")
+                .expect("valid timestamp")
+        );
+        assert!(decode_cursor(cursor, "read").is_err());
     }
 }

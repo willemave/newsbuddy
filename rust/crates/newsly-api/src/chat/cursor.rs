@@ -25,7 +25,13 @@ pub(super) fn decode(
     news_item_id: Option<i64>,
 ) -> Result<ChatListCursor, InvalidCursor> {
     let payload: CursorPayload = pagination_cursor::decode(cursor)?;
-    if payload.last_id <= 0 || payload.filters_hash != filters_hash(content_id, news_item_id) {
+    if payload.last_id <= 0
+        || ![
+            filters_hash(content_id, news_item_id),
+            legacy_filters_hash(content_id, news_item_id),
+        ]
+        .contains(&payload.filters_hash)
+    {
         return Err(InvalidCursor);
     }
     Ok(ChatListCursor {
@@ -60,6 +66,15 @@ fn filters_hash(content_id: Option<i64>, news_item_id: Option<i64>) -> String {
     newsly_domain::sha256_hex(&bytes)
 }
 
+fn legacy_filters_hash(content_id: Option<i64>, news_item_id: Option<i64>) -> String {
+    let normalized = match (content_id, news_item_id) {
+        (Some(content_id), None) => format!(r#"{{"content_id": {content_id}}}"#),
+        (None, Some(news_item_id)) => format!(r#"{{"news_item_id": {news_item_id}}}"#),
+        _ => "{}".to_owned(),
+    };
+    newsly_domain::sha256_hex(normalized.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +100,17 @@ mod tests {
         })
         .expect("fixture encodes");
         assert!(decode(&cursor, None, None).is_err());
+    }
+
+    #[test]
+    fn decodes_server_issued_legacy_chat_cursor() {
+        let cursor = "eyJmaWx0ZXJzX2hhc2giOiIzZTgyNzg5MWRlNmQ4OTIwM2QzNWRmMTIzMDhlNmQ3ZjEzMzZjZjJjMWRkYmE2NWFiMjA2NGVjOTkxNzY0ZjgzIiwibGFzdF9jcmVhdGVkX2F0IjoiMjAyNi0wOC0zMFQxMjozNDo1Ni4xMjM0NTYiLCJsYXN0X2lkIjo0Mn0=";
+        let decoded = decode(cursor, None, Some(9)).expect("legacy cursor decodes");
+        assert_eq!(decoded.last_id, 42);
+        assert_eq!(
+            decoded.last_activity_at.to_rfc3339(),
+            "2026-08-30T12:34:56.123456+00:00"
+        );
+        assert!(decode(cursor, Some(9), None).is_err());
     }
 }

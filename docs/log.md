@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-04 — `main` — Preserve installed pagination cursors
+
+- **Status:** Corrected locally during independent release review.
+- **Scope:** Shared API cursor codec and Briefing, chat, content, news and submission continuation decoders.
+- **Decisions:** Preserve only the old server's evidenced padded encoding, naive UTC timestamps and route-specific filter hashes, alongside the current emitted format. Legacy hashes still bind the active filters; malformed/hashless cursors remain rejected. Keep the decode-only compatibility until installed-client evidence proves old cached cursors absent.
+- **Changes:** Restore precise legacy hash spacing/filter normalization and add old-wire fixtures for each route. Invalid Briefing lens cursors use `409 stale_cursor` so installed clients can discard their saved continuation and reload; length, ID, rank and filter checks remain.
+- **Validation:** Nineteen focused cursor tests, API warning-denied Clippy and formatting pass. Bounded Opus 5.5 review found no remaining material findings in the correction set; the combined clean release gate remains required.
+- **Remaining:** Corrected exact-SHA release validation before push.
+- **Commits:** Included in the topical pagination correction.
+
 ### 2026-10-04 — `main` — Explicit council release cutover and gate cleanup
 
 - **Status:** Implemented locally; corrected exact-SHA gates and deployment pending.

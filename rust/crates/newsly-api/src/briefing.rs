@@ -199,22 +199,11 @@ pub(super) async fn get_lens(
             &request_id,
         ));
     }
-    if query
-        .cursor
-        .as_ref()
-        .is_some_and(|cursor| cursor.is_empty() || cursor.chars().count() > 512)
-    {
-        return Err(validation_error(
-            "cursor must contain between 1 and 512 characters",
-            &request_id,
-        ));
-    }
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_lens_cursor)
-        .transpose()
-        .map_err(|error| bad_request(error.to_string(), &request_id))?;
+        .map(|value| decode_lens_cursor_or_stale(value, &request_id))
+        .transpose()?;
     let projection = load_briefing_lens_page(
         state.database.pool(),
         current_user.id,
@@ -1161,6 +1150,13 @@ fn decode_lens_cursor(value: &str) -> Result<BriefingLensCursorProjection, Inval
     })
 }
 
+fn decode_lens_cursor_or_stale(
+    value: &str,
+    request_id: &str,
+) -> Result<BriefingLensCursorProjection, ApiError> {
+    decode_lens_cursor(value).map_err(|_| stale_cursor_error(request_id))
+}
+
 fn lens_repository_error(error: BriefingRepositoryError, request_id: &str) -> ApiError {
     match error {
         BriefingRepositoryError::CursorWrongLens => {
@@ -1169,15 +1165,19 @@ fn lens_repository_error(error: BriefingRepositoryError, request_id: &str) -> Ap
         BriefingRepositoryError::CursorAnchorMismatch => {
             bad_request("Briefing cursor anchor does not match", request_id)
         }
-        BriefingRepositoryError::StaleCursor => ApiError::new(
-            StatusCode::CONFLICT,
-            "stale_cursor",
-            "Briefing cursor anchor is no longer active",
-            request_id.to_owned(),
-        ),
+        BriefingRepositoryError::StaleCursor => stale_cursor_error(request_id),
         BriefingRepositoryError::InvalidNarration(error) => internal_error(error, request_id),
         BriefingRepositoryError::Sqlx(error) => internal_error(error, request_id),
     }
+}
+
+fn stale_cursor_error(request_id: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "stale_cursor",
+        "Briefing cursor anchor is no longer active",
+        request_id.to_owned(),
+    )
 }
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
