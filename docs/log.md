@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-04 — `main` — Settle unprepared Dig Deeper failures
+
+- **Status:** Corrected locally during independent release review.
+- **Scope:** DB terminal task settlement and focused regressions.
+- **Changes:** A missing or null optional message ID skips chat-message settlement so a terminal preparation failure can commit the task's failed state. Present IDs still require positive integers and retain ownership, generation and newer-task fences.
+- **Validation:** Four focused task-failure tests, including isolated PostgreSQL settlement/failed-transition commit, formatting and warning-denied DB Clippy pass. The initial integrated checkpoint passed 734 Rust tests and both Python-island gates; corrected exact-SHA validation remains required.
+- **Remaining:** Combined final review and release gate before push.
+- **Commits:** Included in the topical release correction.
+
 ### 2026-10-04 — `main` — Integrated release preparation
 
 - **Status:** Release preparation in progress; commit, push and production deployment requested through build-test-deploy.

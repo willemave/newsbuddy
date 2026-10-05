@@ -181,7 +181,9 @@ async fn settle_related_workflow(
     message: &str,
 ) -> Result<(), sqlx::Error> {
     if settlement == TerminalTaskSettlement::ChatTurn {
-        let message_id = required_payload_id(payload, "message_id")?;
+        let Some(message_id) = optional_payload_id(payload, "message_id")? else {
+            return Ok(());
+        };
         let current = sqlx::query_as::<_, (i64, Option<i32>)>(
             r"
             SELECT message.session_id::bigint, message.stream_generation
@@ -348,6 +350,22 @@ fn required_payload_id(
         .ok_or_else(|| sqlx::Error::Protocol(format!("terminal task payload is missing {field}")))
 }
 
+fn optional_payload_id(
+    payload: &serde_json::Map<String, serde_json::Value>,
+    field: &'static str,
+) -> Result<Option<i64>, sqlx::Error> {
+    match payload.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_i64()
+            .filter(|id| *id > 0)
+            .map(Some)
+            .ok_or_else(|| {
+                sqlx::Error::Protocol(format!("terminal task payload has invalid {field}"))
+            }),
+    }
+}
+
 async fn settle_failed_artwork(
     tx: &mut Transaction<'_, Postgres>,
     task_id: i64,
@@ -404,6 +422,88 @@ async fn settle_failed_artwork(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[sqlx::test]
+    async fn terminal_dig_deeper_without_message_id_can_commit_failed_queue_transition(
+        pool: sqlx::PgPool,
+    ) {
+        crate::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('terminal-dig-deeper', 'terminal-dig-deeper@example.test', FALSE, TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let task_id: i64 = sqlx::query_scalar(
+            r#"
+            INSERT INTO processing_tasks (
+                task_type, status, payload, owner_user_id,
+                executor_runtime, executor_version, executor_namespace
+            )
+            VALUES ('dig_deeper', 'processing', $1, $2::integer, 'rust', 1, 'dig_deeper')
+            RETURNING id::bigint
+            "#,
+        )
+        .bind(serde_json::json!({"user_id": user_id}))
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        settle_failed_task(
+            &mut transaction,
+            task_id,
+            TerminalTaskSettlement::ChatTurn,
+            None,
+            Some(user_id),
+            "preparation failed",
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE processing_tasks SET status = 'failed', error_message = $2 WHERE id::bigint = $1",
+        )
+        .bind(task_id)
+        .bind("preparation failed")
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let (status, error_message): (String, Option<String>) = sqlx::query_as(
+            "SELECT status, error_message FROM processing_tasks WHERE id::bigint = $1",
+        )
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "failed");
+        assert_eq!(error_message.as_deref(), Some("preparation failed"));
+    }
+
+    #[test]
+    fn optional_payload_id_preserves_optional_and_valid_ids() {
+        let missing = serde_json::Map::new();
+        let null = serde_json::Map::from_iter([("message_id".to_owned(), serde_json::Value::Null)]);
+        let valid =
+            serde_json::Map::from_iter([("message_id".to_owned(), serde_json::Value::from(42))]);
+        assert_eq!(optional_payload_id(&missing, "message_id").unwrap(), None);
+        assert_eq!(optional_payload_id(&null, "message_id").unwrap(), None);
+        assert_eq!(optional_payload_id(&valid, "message_id").unwrap(), Some(42));
+    }
+
+    #[test]
+    fn optional_payload_id_rejects_invalid_present_values() {
+        for value in [
+            serde_json::Value::from(0),
+            serde_json::Value::from(-1),
+            serde_json::Value::from("1"),
+        ] {
+            let payload = serde_json::Map::from_iter([("message_id".to_owned(), value)]);
+            assert!(optional_payload_id(&payload, "message_id").is_err());
+        }
+    }
 
     #[sqlx::test]
     async fn terminal_artwork_failure_keeps_long_form_content_blocked(pool: sqlx::PgPool) {
