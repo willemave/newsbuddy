@@ -93,6 +93,13 @@ variable select the mode.
 
 Migration `20261002010000` requires an explicit maintenance barrier on a populated database.
 Normal blue-green deployment refuses this pending migration while old writers remain online.
+The GitHub workflow probes SQLx history before syncing the host. A normal push refuses a pending
+retirement before mutating production. For the authorized one-time cutover, dispatch `Docker
+Deploy` on the tested `main` SHA with `council_maintenance_cutover=true`. The workflow passes the
+maintenance flag only while this migration is pending; later runs use online deployment even if
+the input was selected. Direct script calls with a stale maintenance flag refuse before draining
+writers. Retire this dispatch input, history probe and maintenance mode after production cutover
+verification and the recovery window closes.
 Before scheduling the cutover, run the exact target image's read-only `newsly-db
 verify-council-retirement` command. It reports processing message IDs and malformed session IDs
 without transcript content. Drain council work with the old worker before proceeding; stuck or

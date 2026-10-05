@@ -13,6 +13,7 @@ with_live_smoke=false
 allow_live_provider_costs=false
 service_pid=""
 gate_database_name=""
+gate_database_created=false
 maintenance_database_url=""
 
 usage() {
@@ -82,7 +83,7 @@ if [[ "$with_live_smoke" == true && "$allow_live_provider_costs" != true ]]; the
   die "--with-live-smoke requires --allow-live-provider-costs"
 fi
 
-for command_name in cargo createdb curl docker dropdb git jq uv xcodebuild xcrun; do
+for command_name in cargo createdb curl docker dropdb git jq rg uv xcodebuild xcrun; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing required command: $command_name"
 done
 command -v axe >/dev/null 2>&1 || die "missing required command: axe"
@@ -100,15 +101,6 @@ newsly_load_dotenv "$env_file"
 newsly_normalize_database_environment
 newsly_require_database_url
 maintenance_database_url="$DATABASE_URL"
-gate_database_name="newsly_gate_${release_sha:0:12}_$$"
-createdb --maintenance-db="$maintenance_database_url" "$gate_database_name"
-database_url_without_query="${maintenance_database_url%%\?*}"
-database_url_query=""
-if [[ "$maintenance_database_url" == *\?* ]]; then
-  database_url_query="?${maintenance_database_url#*\?}"
-fi
-export DATABASE_URL="${database_url_without_query%/*}/${gate_database_name}${database_url_query}"
-export NEWSLY_DATABASE_URL="$DATABASE_URL"
 
 IFS=$'\t' read -r api_scheme api_host api_port api_use_https \
   < <(newsly_parse_api_base_url "$api_base_url")
@@ -130,16 +122,29 @@ cleanup() {
     wait "$service_pid" 2>/dev/null || true
     service_pid=""
   fi
-  if [[ -n "$gate_database_name" ]]; then
+  if [[ "$gate_database_created" == true ]]; then
     dropdb --if-exists --force \
       --maintenance-db="$maintenance_database_url" \
       "$gate_database_name" >/dev/null 2>&1 || true
     gate_database_name=""
+    gate_database_created=false
   fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Validate the origin and install teardown before creating any local state.
+gate_database_name="newsly_gate_${release_sha:0:12}_$$"
+createdb --maintenance-db="$maintenance_database_url" "$gate_database_name"
+gate_database_created=true
+database_url_without_query="${maintenance_database_url%%\?*}"
+database_url_query=""
+if [[ "$maintenance_database_url" == *\?* ]]; then
+  database_url_query="?${maintenance_database_url#*\?}"
+fi
+export DATABASE_URL="${database_url_without_query%/*}/${gate_database_name}${database_url_query}"
+export NEWSLY_DATABASE_URL="$DATABASE_URL"
 
 echo "Release SHA: $release_sha"
 echo "Evidence: $result_root"

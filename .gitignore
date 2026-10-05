@@ -31,6 +31,14 @@ docker/local-data/
 logs/
 logs_from_server/
 static/
+# Retained runtime databases pending an owner audit; never stage these in a release.
+/client/newsly/news_app.db
+/news_app.db-shm
+/news_app.db-wal
+/tmp/prod/news_app.db
+/tmp/prod/news_app.db-shm
+/tmp/prod/news_app.db-wal
+/tmp/prod/news_app_retry.db
 
 # Visual artifacts; retain product and reference assets
 *.png

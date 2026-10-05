@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-04 — `main` — Explicit council release cutover and gate cleanup
+
+- **Status:** Implemented locally; corrected exact-SHA gates and deployment pending.
+- **Scope:** Docker Deploy dispatch/history probe, maintenance script/harness, retained-artifact ignores and disposable release database teardown.
+- **Decisions:** Require an explicit per-run cutover dispatch while council migration `20261002010000` is pending. Refuse ordinary push deployment before host sync; use normal deployment after the migration is applied. Direct stale or unverifiable maintenance requests refuse before writer drain/backup. Preserve exact-image dual preflights, fresh verified backup, barrier attestation and stopped old writers after ambiguous failure.
+- **Changes:** Version-parameterized migration-state probe with fail-closed unknown handling; narrow ignores for seven retained database artifacts; validate the loopback origin and install teardown before creating the gate DB, dropping it only after successful creation; declare `rg` prerequisite.
+- **Validation:** Mocked deploy ordering/recovery tests including applied/unknown cutover refusal, shell syntax, pinned actionlint and diff checks pass. Live read-only host checks confirm required provider/configuration shapes, DEBUG absent and `/data` root; root storage has 1.6 TB available against a roughly 3 GB database. The interrupted checkpoint database was removed. Bounded Opus 5.5 correction verification is running.
+- **Remaining:** Clean corrected release gate, authorized live smoke, exact-image transcript inventory/council preflight, push and explicit cutover dispatch, independent runtime proof and same-SHA E2B template publication. No host mutation or Apple distribution.
+- **Commits:** Included in the topical release safeguards correction.
+
 ### 2026-10-04 — `main` — Settle unprepared Dig Deeper failures
 
 - **Status:** Corrected locally during independent release review.

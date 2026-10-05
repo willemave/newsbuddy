@@ -47,6 +47,18 @@ if [[ "$*" == *"pg_restore --list"* ]]; then
   cat >/dev/null
   exit 0
 fi
+if [[ "$*" == *"exec newsly-postgres"* && "$*" == *"to_regclass"* ]]; then
+  printf 't\n'
+  exit 0
+fi
+if [[ "$*" == *"exec newsly-postgres"* && "$*" == *"version = 20261002010000"* ]]; then
+  case "${HARNESS_COUNCIL_MIGRATION_STATE:-pending}" in
+    applied) printf 't\n' ;;
+    pending) printf 'f\n' ;;
+    unknown) exit 1 ;;
+  esac
+  exit 0
+fi
 
 if [[ "$*" == *" stop "*"workers scheduler" && "${HARNESS_STOP_FAIL}" == "true" ]]; then
   exit 1
@@ -203,6 +215,7 @@ run_deploy() {
     HARNESS_POST_STOP_PREFLIGHT_FAIL="${post_stop_preflight_failure}" \
     HARNESS_BASELINE_PREFLIGHT_FAIL="${baseline_preflight_failure}" \
     HARNESS_BACKUP_FAIL="${backup_failure}" \
+    HARNESS_COUNCIL_MIGRATION_STATE="${HARNESS_COUNCIL_MIGRATION_STATE:-pending}" \
     HARNESS_WRITERS_RUNNING="${HARNESS_WRITERS_RUNNING:-true}" \
     HARNESS_STATE_DIR="${harness_root}/state" \
     NEWSLY_DEPLOY_COMPOSE_FILE="${harness_root}/docker-compose.production.yml" \
@@ -289,6 +302,14 @@ assert_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_l
 assert_before " stop api_blue api_green workers scheduler" "exec pg_dump" "${cutover_log}"
 assert_before "pg_restore --list" "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_log}"
 assert_before "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "switch green" "${cutover_log}"
+
+for migration_state in applied unknown; do
+  guarded_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_COUNCIL_MIGRATION_STATE="${migration_state}" run_deploy "cutover-${migration_state}" false 2)"
+  assert_not_contains "verify-council-retirement" "${guarded_log}"
+  assert_not_contains " stop api_blue api_green workers scheduler" "${guarded_log}"
+  assert_not_contains "exec pg_dump" "${guarded_log}"
+  assert_not_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${guarded_log}"
+done
 
 cutover_failed_log="$(HARNESS_MAINTENANCE_CUTOVER=true run_deploy cutover-public-failure true 1)"
 assert_contains "exec pg_dump" "${cutover_failed_log}"

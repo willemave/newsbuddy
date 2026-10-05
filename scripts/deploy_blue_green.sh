@@ -164,6 +164,8 @@ postgres_scalar() {
 }
 
 authority_migration_state() {
+  local version="$1"
+  [[ "$version" =~ ^[0-9]+$ ]] || { printf '%s\n' unknown; return; }
   local migrations_table_exists
   if ! migrations_table_exists="$(
     postgres_scalar "SELECT to_regclass('public._sqlx_migrations') IS NOT NULL;" 2>/dev/null \
@@ -172,26 +174,27 @@ authority_migration_state() {
     printf '%s\n' unknown
     return
   fi
-  if [[ "${migrations_table_exists}" != "t" ]]; then
-    printf '%s\n' not_applied
-    return
-  fi
+  case "${migrations_table_exists}" in
+    t) ;;
+    f) printf '%s\n' not_applied; return ;;
+    *) printf '%s\n' unknown; return ;;
+  esac
 
   local authority_migration_applied
   if ! authority_migration_applied="$(
     postgres_scalar \
-      "SELECT EXISTS (SELECT 1 FROM public._sqlx_migrations WHERE version = 20260831000000 AND success);" \
+      "SELECT EXISTS (SELECT 1 FROM public._sqlx_migrations WHERE version = ${version} AND success);" \
       2>/dev/null \
       | tr -d '[:space:]'
   )"; then
     printf '%s\n' unknown
     return
   fi
-  if [[ "${authority_migration_applied}" == "t" ]]; then
-    printf '%s\n' applied
-  else
-    printf '%s\n' not_applied
-  fi
+  case "${authority_migration_applied}" in
+    t) printf '%s\n' applied ;;
+    f) printf '%s\n' not_applied ;;
+    *) printf '%s\n' unknown ;;
+  esac
 }
 
 create_verified_database_backup() {
@@ -256,6 +259,10 @@ trap restore_processes_after_failed_deploy EXIT
 
 case "${deployment_mode}" in
   council_retirement)
+    if [[ "$(authority_migration_state 20261002010000)" != not_applied ]]; then
+      echo "Council retirement is already applied or unverifiable; use normal deployment after verifying its state" >&2
+      exit 2
+    fi
     echo "Running read-only council retirement preflight before stopping writers"
     compose --profile ops run --rm --no-deps \
       --entrypoint /usr/local/bin/newsly-db \
@@ -336,7 +343,7 @@ case "${deployment_mode}" in
       -e NEWSLY_SQLX_BASELINE_ADOPTION=true \
       -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
       migrate; then
-      migration_state="$(authority_migration_state)"
+      migration_state="$(authority_migration_state 20260831000000)"
       if [[ "${migration_state}" == "applied" ]]; then
         failure_restore_policy="none"
         echo "Rust authority committed before migration validation failed; prior runtime remains stopped" >&2

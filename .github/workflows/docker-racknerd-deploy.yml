@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      council_maintenance_cutover:
+        description: Run the council retirement maintenance cutover if migration 20261002010000 is pending
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -216,6 +221,7 @@ jobs:
           IMAGE_EXTRACTOR_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}-extractor
           IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}
           REGISTRY: ${{ env.REGISTRY }}
+          COUNCIL_CUTOVER_REQUESTED: ${{ inputs.council_maintenance_cutover == true }}
         run: |
           set -euo pipefail
 
@@ -233,6 +239,34 @@ jobs:
           SSH_OPTS=(-p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes)
           REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
           OWNER_GROUP="${DEPLOY_SSH_USER}:${DEPLOY_SSH_USER}"
+
+          # This one-time authority migration needs a per-run operator request. Probe before
+          # syncing files or pulling images so ordinary pushes cannot attempt it online.
+          council_migration_applied="$(ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s <<'REMOTE_COUNCIL_STATE'
+          set -euo pipefail
+          docker exec newsly-postgres sh -c \
+            'psql --no-psqlrc --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --tuples-only --no-align --command "SELECT EXISTS (SELECT 1 FROM public._sqlx_migrations WHERE version = 20261002010000 AND success);"'
+          REMOTE_COUNCIL_STATE
+          )"
+          deploy_args=()
+          case "$council_migration_applied" in
+            t)
+              if [[ "$COUNCIL_CUTOVER_REQUESTED" == true ]]; then
+                echo "::notice::Council retirement already applied; using normal online deployment"
+              fi
+              ;;
+            f)
+              if [[ "$COUNCIL_CUTOVER_REQUESTED" != true ]]; then
+                echo "Council retirement is pending. Drain council work, verify readiness, then dispatch with council_maintenance_cutover=true." >&2
+                exit 1
+              fi
+              deploy_args=(--maintenance-cutover)
+              ;;
+            *)
+              echo "Could not verify council migration state; refusing deployment" >&2
+              exit 1
+              ;;
+          esac
 
           EXCLUDES=(
             ".git/"
@@ -324,7 +358,7 @@ jobs:
 
           echo "→ Deploying inactive API slot"
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
-            "sudo env NEWSLY_DEPLOY_APP_DIR='$REMOTE_DIR' NEWSLY_EXTRACTOR_IMAGE='$IMAGE_EXTRACTOR_TAG' '$REMOTE_DIR/scripts/deploy_blue_green.sh' '$IMAGE_TAG'"
+            "sudo env NEWSLY_DEPLOY_APP_DIR='$REMOTE_DIR' NEWSLY_EXTRACTOR_IMAGE='$IMAGE_EXTRACTOR_TAG' '$REMOTE_DIR/scripts/deploy_blue_green.sh' '$IMAGE_TAG' ${deploy_args[*]:-}"
 
           echo "→ Verifying production runtime"
           ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s <<'REMOTE_VERIFY'
