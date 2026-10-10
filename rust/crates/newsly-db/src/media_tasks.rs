@@ -109,7 +109,7 @@ pub async fn prepare_media_content(
             source_url,
             platform,
             status,
-            COALESCE(content_metadata, '{}'::json) AS content_metadata,
+            COALESCE(content_metadata, '{}'::json) AS content_metadata
         FROM contents
         WHERE id::bigint = $1
         "#,
@@ -633,6 +633,10 @@ pub enum MediaTaskRepositoryError {
     #[error("PostgreSQL media task operation failed")]
     Sqlx(#[from] sqlx::Error),
 }
+
+#[cfg(test)]
+#[path = "media_tasks/prepare_tests.rs"]
+mod prepare_tests;
 
 #[cfg(test)]
 mod tests {

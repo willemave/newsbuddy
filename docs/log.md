@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-10 — `main` — Correct production podcast snapshot SQL
+
+- **Status:** Complete locally.
+- **Scope:** `newsly-db` media preparation query and isolated PostgreSQL regression test; preserve unrelated staged feed and working-tree changes.
+- **Evidence:** Production task `1948718` for podcast `60973` exhausted three retries; PostgreSQL rejected all four attempts with `42601` because the deployed SELECT list ends with a comma before FROM.
+- **Changes:** Reuse the existing local comma correction and regression test for an owned podcast snapshot with populated/empty metadata and missing-content behavior.
+- **Validation:** All 180 database crate tests pass against isolated SQLx-managed PostgreSQL test databases, including the podcast snapshot regression. Workspace formatting, database all-target warning-denied Clippy, module size guardrails and scoped diff checks pass. Commit hooks run on the isolated scoped checkout.
+- **Remaining:** Push, release and production item recovery are separate from this local commit. Alert delivery needs a destination. News capacity investigation is read-only.
+- **Commits:** Included in the scoped podcast SQL commit on main.
+
 ### 2026-10-04 — `main` — Preserve installed pagination cursors
 
 - **Status:** Corrected locally during independent release review.
