@@ -22,6 +22,8 @@ struct E2EVisualStateView: View {
             OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .loading)) { _ in }
         case "briefing-dig-markdown":
             E2EBriefingDigMarkdownVisualState()
+        case "briefing-list-metadata":
+            E2EBriefingListMetadataVisualState()
         case "briefing-loading":
             BriefingLoadingView()
         case "briefing-header":
@@ -50,6 +52,10 @@ struct E2EVisualStateView: View {
             E2EKnowledgeSourceActivityVisualState()
         case "learning-deck-create":
             E2ELearningDeckCreateVisualState()
+        case "learning-deck-reader":
+            E2ELearningDeckReaderVisualState()
+        case "assistant-source-activity":
+            E2EAssistantSourceActivityVisualState()
         case "modal-share", "modal-download", "modal-knowledge-actions", "modal-feedback", "modal-filters":
             E2EMiniSheetVisualState(state: state)
         case "briefing-tier-error":

@@ -192,6 +192,11 @@ final class RootDependencyFactory {
             chatService: dependencies.chatService,
             messageCompletionRegistry: activeSessionManager.messageCompletionRegistry,
             deckService: dependencies.learningDeckService,
+            transcriptionService: dependencies.speechTranscriber,
+            refreshTranscriptionAvailability: {
+                [openAIService = dependencies.openAIService] in
+                await openAIService.refreshTranscriptionAvailability()
+            },
             deckStatusRegistry: dependencies.learningDeckStatusRegistry
         )
     }

@@ -376,7 +376,7 @@ private struct ContentDetailContentView: View {
                     activeLearningDeckReader = nil
                 }
             )
-            .ignoresSafeArea()
+            .ignoresSafeArea(.container)
         }
     }
 

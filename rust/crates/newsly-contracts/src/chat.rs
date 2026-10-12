@@ -203,6 +203,41 @@ pub struct AssistantFeedOption {
     pub evidence_url: Option<String>,
     #[serde(default)]
     pub is_subscribed: bool,
+    /// Observed activity, never a complete publisher archive. Absent in older stored cards.
+    #[serde(default)]
+    pub publishing_activity: Option<AssistantSourceActivity>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceActivityBasis {
+    FeedSnapshot,
+    NewslyCorpus,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct AssistantPublishedItem {
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub published_at: Option<DateTime<Utc>>,
+    pub collected_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct AssistantSourceActivity {
+    pub basis: SourceActivityBasis,
+    pub checked_at: DateTime<Utc>,
+    pub window_start: DateTime<Utc>,
+    pub year_window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+    pub latest_item: Option<AssistantPublishedItem>,
+    /// Known dated entries observed in the trailing 90 days; null means no dated evidence.
+    pub observed_count: Option<i64>,
+    /// Known dated entries observed in the trailing 365 days; also a lower bound.
+    pub observed_year_count: Option<i64>,
+    pub undated_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -384,4 +419,26 @@ pub struct MessageStatusResponse {
     #[schema(minimum = 0)]
     pub tool_progress_revision: Option<i32>,
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod source_activity_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_card_decodes_and_emits_null_activity() {
+        let card: AssistantFeedOption = serde_json::from_value(serde_json::json!({
+            "id": "12345678", "title": "Publication", "site_url": "https://example.com",
+            "feed_url": "https://example.com/feed", "feed_type": "substack"
+        }))
+        .unwrap();
+        assert!(card.publishing_activity.is_none());
+        assert!(serde_json::to_value(card).unwrap()["publishing_activity"].is_null());
+    }
+
+    #[test]
+    fn unknown_activity_basis_does_not_drop_stored_cards() {
+        let basis: SourceActivityBasis = serde_json::from_str("\"future_archive\"").unwrap();
+        assert_eq!(basis, SourceActivityBasis::Unknown);
+    }
 }

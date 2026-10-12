@@ -7482,6 +7482,7 @@ struct APIAssistantFeedOption: Codable {
     let rationale: String?
     let evidenceUrl: String?
     let isSubscribed: Bool
+    let publishingActivity: APIAssistantSourceActivity?
 
     init(
         id: String,
@@ -7493,7 +7494,8 @@ struct APIAssistantFeedOption: Codable {
         description: String?,
         rationale: String?,
         evidenceUrl: String?,
-        isSubscribed: Bool = false
+        isSubscribed: Bool = false,
+        publishingActivity: APIAssistantSourceActivity? = nil
     ) {
         self.id = id
         self.title = title
@@ -7505,6 +7507,7 @@ struct APIAssistantFeedOption: Codable {
         self.rationale = rationale
         self.evidenceUrl = evidenceUrl
         self.isSubscribed = isSubscribed
+        self.publishingActivity = publishingActivity
     }
 
     enum CodingKeys: String, CodingKey {
@@ -7518,6 +7521,7 @@ struct APIAssistantFeedOption: Codable {
         case rationale = "rationale"
         case evidenceUrl = "evidence_url"
         case isSubscribed = "is_subscribed"
+        case publishingActivity = "publishing_activity"
     }
 
     init(from decoder: Decoder) throws {
@@ -7532,6 +7536,7 @@ struct APIAssistantFeedOption: Codable {
         rationale = try container.decode(String?.self, forKey: .rationale)
         evidenceUrl = try container.decode(String?.self, forKey: .evidenceUrl)
         isSubscribed = try container.decodeIfPresent(Bool.self, forKey: .isSubscribed) ?? false
+        publishingActivity = try container.decodeIfPresent(APIAssistantSourceActivity.self, forKey: .publishingActivity) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -7546,6 +7551,7 @@ struct APIAssistantFeedOption: Codable {
         try container.encode(rationale, forKey: .rationale)
         try container.encode(evidenceUrl, forKey: .evidenceUrl)
         try container.encode(isSubscribed, forKey: .isSubscribed)
+        try container.encode(publishingActivity, forKey: .publishingActivity)
     }
 }
 
@@ -7928,6 +7934,94 @@ struct APISubmissionFeedInitialDownloadResponse: Codable {
     }
 }
 
+struct APIAssistantSourceActivity: Codable {
+    let basis: APISourceActivityBasis
+    let checkedAt: Date
+    let windowStart: Date
+    let yearWindowStart: Date
+    let windowEnd: Date
+    let latestItem: APIAssistantPublishedItem?
+    let observedCount: Int?
+    let observedYearCount: Int?
+    let undatedCount: Int
+
+    init(
+        basis: APISourceActivityBasis,
+        checkedAt: Date,
+        windowStart: Date,
+        yearWindowStart: Date,
+        windowEnd: Date,
+        latestItem: APIAssistantPublishedItem?,
+        observedCount: Int?,
+        observedYearCount: Int?,
+        undatedCount: Int
+    ) {
+        self.basis = basis
+        self.checkedAt = checkedAt
+        self.windowStart = windowStart
+        self.yearWindowStart = yearWindowStart
+        self.windowEnd = windowEnd
+        self.latestItem = latestItem
+        self.observedCount = observedCount
+        self.observedYearCount = observedYearCount
+        self.undatedCount = undatedCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case basis = "basis"
+        case checkedAt = "checked_at"
+        case windowStart = "window_start"
+        case yearWindowStart = "year_window_start"
+        case windowEnd = "window_end"
+        case latestItem = "latest_item"
+        case observedCount = "observed_count"
+        case observedYearCount = "observed_year_count"
+        case undatedCount = "undated_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        basis = try container.decode(APISourceActivityBasis.self, forKey: .basis)
+        let checkedAtRaw = try container.decode(String.self, forKey: .checkedAt)
+        guard let checkedAtParsed = ServerDate.parse(checkedAtRaw) else {
+            throw DecodingError.dataCorruptedError(forKey: .checkedAt, in: container, debugDescription: "Unparseable date for checkedAt")
+        }
+        checkedAt = checkedAtParsed
+        let windowStartRaw = try container.decode(String.self, forKey: .windowStart)
+        guard let windowStartParsed = ServerDate.parse(windowStartRaw) else {
+            throw DecodingError.dataCorruptedError(forKey: .windowStart, in: container, debugDescription: "Unparseable date for windowStart")
+        }
+        windowStart = windowStartParsed
+        let yearWindowStartRaw = try container.decode(String.self, forKey: .yearWindowStart)
+        guard let yearWindowStartParsed = ServerDate.parse(yearWindowStartRaw) else {
+            throw DecodingError.dataCorruptedError(forKey: .yearWindowStart, in: container, debugDescription: "Unparseable date for yearWindowStart")
+        }
+        yearWindowStart = yearWindowStartParsed
+        let windowEndRaw = try container.decode(String.self, forKey: .windowEnd)
+        guard let windowEndParsed = ServerDate.parse(windowEndRaw) else {
+            throw DecodingError.dataCorruptedError(forKey: .windowEnd, in: container, debugDescription: "Unparseable date for windowEnd")
+        }
+        windowEnd = windowEndParsed
+        latestItem = try container.decode(APIAssistantPublishedItem?.self, forKey: .latestItem)
+        observedCount = try container.decode(Int?.self, forKey: .observedCount)
+        observedYearCount = try container.decode(Int?.self, forKey: .observedYearCount)
+        undatedCount = try container.decode(Int.self, forKey: .undatedCount)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(basis, forKey: .basis)
+        try container.encode(ServerDate.format(checkedAt), forKey: .checkedAt)
+        try container.encode(ServerDate.format(windowStart), forKey: .windowStart)
+        try container.encode(ServerDate.format(yearWindowStart), forKey: .yearWindowStart)
+        try container.encode(ServerDate.format(windowEnd), forKey: .windowEnd)
+        try container.encode(latestItem, forKey: .latestItem)
+        try container.encode(observedCount, forKey: .observedCount)
+        try container.encode(observedYearCount, forKey: .observedYearCount)
+        try container.encode(undatedCount, forKey: .undatedCount)
+    }
+}
+
 struct APIBriefingRun: Codable {
     let kind: APIBriefingRunKind
     let text: String
@@ -8013,5 +8107,61 @@ struct APILearningDeckTimelineEntry: Codable {
         try container.encode(status, forKey: .status)
         try container.encode(note, forKey: .note)
         try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
+    }
+}
+
+struct APIAssistantPublishedItem: Codable {
+    let title: String?
+    let url: String?
+    let publishedAt: Date?
+    let collectedAt: Date?
+
+    init(
+        title: String?,
+        url: String?,
+        publishedAt: Date?,
+        collectedAt: Date?
+    ) {
+        self.title = title
+        self.url = url
+        self.publishedAt = publishedAt
+        self.collectedAt = collectedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title = "title"
+        case url = "url"
+        case publishedAt = "published_at"
+        case collectedAt = "collected_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String?.self, forKey: .title)
+        url = try container.decode(String?.self, forKey: .url)
+        if let publishedAtRaw = try container.decode(String?.self, forKey: .publishedAt) {
+            guard let publishedAtParsed = ServerDate.parse(publishedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .publishedAt, in: container, debugDescription: "Unparseable date for publishedAt")
+            }
+            publishedAt = publishedAtParsed
+        } else {
+            publishedAt = nil
+        }
+        if let collectedAtRaw = try container.decode(String?.self, forKey: .collectedAt) {
+            guard let collectedAtParsed = ServerDate.parse(collectedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .collectedAt, in: container, debugDescription: "Unparseable date for collectedAt")
+            }
+            collectedAt = collectedAtParsed
+        } else {
+            collectedAt = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(url, forKey: .url)
+        try container.encode(publishedAt.map(ServerDate.format), forKey: .publishedAt)
+        try container.encode(collectedAt.map(ServerDate.format), forKey: .collectedAt)
     }
 }

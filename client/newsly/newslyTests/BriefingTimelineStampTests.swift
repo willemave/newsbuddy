@@ -103,6 +103,34 @@ final class BriefingTimelineStampTests: XCTestCase {
         )
     }
 
+    func testOnlyNewsLensRetainsTimelineDividers() {
+        let segments = [
+            APIBriefingSegment(
+                id: 1, createdAt: date("2026-06-06T12:00:00Z"),
+                status: "active", narrationText: ""
+            ),
+            APIBriefingSegment(
+                id: 2, createdAt: date("2026-06-06T08:00:00Z"),
+                status: "active", narrationText: ""
+            ),
+        ]
+        for tier in APIBriefingTier.allCases {
+            let lens = APIBriefingLensResponse(
+                version: 1,
+                lens: APIBriefingLensSummary(
+                    key: tier.rawValue, tier: tier, title: tier.rawValue,
+                    deck: "", position: 0, segmentCount: 2, unreadSourceCount: 0
+                ),
+                segments: segments, nextCursor: nil
+            )
+            XCTAssertEqual(
+                BriefingLensRenderModel(lens: lens).timelineSeparatorSegmentIDs,
+                tier == .news ? [2] : [],
+                tier.rawValue
+            )
+        }
+    }
+
     private func date(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
     }

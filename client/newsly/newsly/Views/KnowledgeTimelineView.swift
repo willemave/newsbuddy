@@ -119,7 +119,7 @@ struct KnowledgeView: View {
                 onClose: { deckReaderDestination = nil }
             )
             .dynamicTypeSize(contentTextSize)
-            .ignoresSafeArea()
+            .ignoresSafeArea(.container)
         }
         .task(id: activationTaskID) {
             guard isVisible,

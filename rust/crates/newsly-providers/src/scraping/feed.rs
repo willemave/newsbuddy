@@ -32,7 +32,9 @@ pub fn normalize_feed_document(
     target: &FeedScrapeTarget,
     bytes: &[u8],
 ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-    let feed = feed_rs::parser::parse(bytes)
+    let normalized = crate::feed_document::preserve_direct_media_urls(bytes)
+        .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
+    let feed = feed_rs::parser::parse(normalized.as_slice())
         .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
     let feed_metadata = FeedMetadata {
         title: feed

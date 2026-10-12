@@ -11557,7 +11557,8 @@
           "description",
           "rationale",
           "evidence_url",
-          "is_subscribed"
+          "is_subscribed",
+          "publishing_activity"
         ],
         "properties": {
           "id": {
@@ -11609,6 +11610,54 @@
           },
           "is_subscribed": {
             "type": "boolean"
+          },
+          "publishing_activity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantSourceActivity",
+                "description": "Observed activity, never a complete publisher archive. Absent in older stored cards."
+              }
+            ]
+          }
+        }
+      },
+      "AssistantPublishedItem": {
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "published_at",
+          "collected_at"
+        ],
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "collected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         }
       },
@@ -11686,6 +11735,71 @@
               "null"
             ],
             "maxLength": 100
+          }
+        }
+      },
+      "AssistantSourceActivity": {
+        "type": "object",
+        "required": [
+          "basis",
+          "checked_at",
+          "window_start",
+          "year_window_start",
+          "window_end",
+          "latest_item",
+          "observed_count",
+          "observed_year_count",
+          "undated_count"
+        ],
+        "properties": {
+          "basis": {
+            "$ref": "#/components/schemas/SourceActivityBasis"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "year_window_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latest_item": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantPublishedItem"
+              }
+            ]
+          },
+          "observed_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Known dated entries observed in the trailing 90 days; null means no dated evidence."
+          },
+          "observed_year_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Known dated entries observed in the trailing 365 days; also a lower bound."
+          },
+          "undated_count": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -17516,6 +17630,14 @@
             }
           }
         }
+      },
+      "SourceActivityBasis": {
+        "type": "string",
+        "enum": [
+          "feed_snapshot",
+          "newsly_corpus",
+          "unknown"
+        ]
       },
       "SubmissionContentResult": {
         "type": "object",

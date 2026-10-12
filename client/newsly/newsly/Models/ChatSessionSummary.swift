@@ -175,8 +175,12 @@ struct ChatSessionSummary: Identifiable, Hashable {
         switch llmProvider.lowercased() {
         case "openai":
             switch llmModel {
-            case "openai:gpt-5.6-sol":
+            case "openai:gpt-6.1-sol":
                 return ChatModelProvider.openai.chatDisplayName
+            case "openai:gpt-6-sol":
+                return "GPT-6 Sol"
+            case "openai:gpt-5.6-sol":
+                return "GPT-5.6 Sol"
             case "openai:gpt-5.6-terra":
                 return "GPT-5.6 Terra"
             case "openai:gpt-5.5":

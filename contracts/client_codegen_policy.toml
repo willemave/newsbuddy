@@ -109,6 +109,11 @@ targets = ["app_swift"]
 open = false
 
 [[enums]]
+schema = "SourceActivityBasis"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
 schema = "AudioEpisodeKind"
 targets = ["app_swift"]
 open = true
@@ -570,6 +575,7 @@ lenient_fields = [
   "ContentDetailResponse.topics",
   "MixedSearchFeedResultResponse.is_subscribed",
   "AssistantFeedOption.is_subscribed",
+  "AssistantFeedOption.publishing_activity",
   "ChatMessageDto.feed_options",
   "ChatMessageDto.council_candidates",
   "ChatMessageDto.active_council_child_session_id",

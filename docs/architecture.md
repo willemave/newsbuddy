@@ -437,6 +437,26 @@ Briefing uses durable source/pending/publication state and versioned client
 observation. Publication is atomic; partial provider success cannot expose a
 half-assembled edition.
 
+While the first news cohort is unsettled, incremental refreshes name at most one
+new semantic category and publish one complete news window per durable task.
+New categories take precedence over additional windows in existing categories;
+unchanged inputs in composition cooldown are skipped. Remaining identities stay
+pending, and the normal fenced finalizer schedules the next pass. Initial passes
+defer compaction; explicit Full rebuilds retain complete preparation/publication.
+Other refreshes name categories in ordered batches of at most four provider calls.
+A failed batch stops later batches; cancellation drops in-flight requests. Names
+retain source-cluster order before fenced assignment.
+News event grouping reuses the shared story embedding cache only when input hash,
+model, encoder and vector validation match; only cache misses reach the provider.
+Cache reads release database connections before external work. Stage timings
+separate cache lookup, embedding requests, naming and composition provider work.
+Normal news catch-up admits at most 40 new pending stories per refresh and bounds
+each unassigned routing snapshot and the total assigned-news composition snapshot
+to 40. Admission shares slots across source/topic streams; composition shares
+slots across active news lenses, retaining oldest pending order within each lens.
+Deferred sources remain eligible or pending for later sweeps. Full rebuilds keep
+their complete source set so partial preparation cannot retire existing coverage.
+
 Nightly news-category maintenance is a separate `recluster_news_lenses` task
 and worker process. The authenticated profile owns a revisioned IANA timezone;
 iOS reports it after validated authentication and real foreground transitions.
@@ -570,6 +590,16 @@ requests run concurrently under strict time and body bounds, and `feed-rs`
 parses inert bytes. E2B remains the boundary for browser, shell, and
 model-authored execution, where network policy is restored to deny-by-default
 on success, failure, timeout, or cancellation.
+
+Chat source-discovery cards retain an optional measured activity snapshot. Feed
+validation computes latest publication evidence and deduplicated observed
+90/365-day counts from the same bounded parse; paired discovery normalization
+passes that evidence to chat without changing persisted onboarding suggestions.
+Built-in aggregators use one shared global-corpus query for separately labeled
+collection counts and latest collected item. Neither snapshot proves complete
+publisher output. The wire shape retains its check date, evidence basis, and
+unknown values so old stored cards remain readable and measurement limits stay
+visible on the client.
 
 ## 9. Agents, providers, and direct E2B
 

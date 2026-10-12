@@ -37,6 +37,35 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** Push, release and production item recovery are separate from this local commit. Alert delivery needs a destination. News capacity investigation is read-only.
 - **Commits:** Included in the scoped podcast SQL commit on main.
 
+### 2026-10-07 — `main` — Put list date and time in article metadata
+
+- **Status:** Complete locally.
+- **Scope:** Briefing Articles and Podcasts metadata and timeline dividers only. News and saved-content lists retain their existing presentation.
+- **Decisions:** Keep existing timestamp ownership and source navigation; show localized date plus exact time per work instead of a separate Briefing divider. Preserve unrelated checkout edits.
+- **Changes:** Show localized month/day and exact time on every headed work, retaining the segment timestamp used by the old divider. Metadata wraps for long publishers and accessibility text, and VoiceOver includes the timestamp. Suppress date/time dividers for Articles and Podcasts; preserve News dividers. Update Briefing law B5 and add a DEBUG fixture using the real list renderer.
+- **Validation:** `newsly` builds for iOS 26.4 Simulator; 50 focused headline, timeline and read-marking tests pass, including the News-only divider regression. Before/after inspection on iPhone 17e covers close timestamps, day gaps, missing/long publishers, both content types, light/dark mode and accessibility-extra-large text. Evidence: `/tmp/newsly-briefing-metadata-evidence`; result bundle `test_sim_2026-10-08T02-16-06-932Z_pid13613_286b3594.xcresult`. Scoped diff checks pass.
+- **Remaining:** No release or installed-device validation performed.
+- **Commits:** Uncommitted.
+
+### 2026-10-06 — `main` — Repair podcast and weekly feed preparation SQL
+
+- **Status:** Complete locally.
+- **Scope:** `newsly-db` media and feed-discovery preparation queries, with isolated PostgreSQL regression coverage.
+- **Changes:** Remove the trailing SELECT comma that prevented podcast snapshots from loading. Read saved-content summaries from `content_metadata.summary` through the existing decoder instead of the nonexistent `contents.short_summary` column.
+- **Validation:** Regression tests reproduced PostgreSQL `42601` for podcast preparation and `42703` for feed discovery before correction. All 183 database crate tests pass against isolated migrated local PostgreSQL databases; workspace formatting and database all-target warning-denied Clippy pass. Tests cover owned podcast snapshots, empty metadata, missing content, summary formats, saved-content ownership/limits, retry reuse, and completed-run reuse.
+- **Remaining:** Local commit is blocked by the unrelated chat-worker module size guard (1,106 lines, limit 1,078). Production release and failed-task recovery require separate authorization. No push, deployment, restart, or production retry performed; unrelated checkout changes remain uncommitted.
+- **Commits:** Uncommitted; the six scoped files remain staged after the pre-commit rejection. Repository hooks were not bypassed.
+
+### 2026-10-04 — `main` — Fit deck chat above the keyboard and add persistent voice input
+
+- **Status:** Complete locally.
+- **Scope:** Native Learning Deck reader, chat flyover/composer, existing dictation dependency wiring, and focused native tests.
+- **Decisions:** Respect keyboard safe areas at both reader presentation sites, keep the slide as the keyboard-independent layer, and reuse the existing session-owned voice controller and durable deck send path. Keep a microphone available in both peek and expanded states; enlarge the peek bar and lift it above the bottom container safe area.
+- **Changes:** Add a backend-free DEBUG reader fixture to reproduce the real keyboard overlap; separate the chat-opening action from voice input; preserve typed drafts when dictating and cancel capture on exit/background. Use keyboard-independent phone orientation and remove container padding above the keyboard. Release the microphone after staging a durable send rather than waiting for the assistant reply.
+- **Validation:** Current checkout builds for iOS 26.4 Simulator. Reproduced the original overlap and inspected repaired keyboard, collapsed-bar, recording and landscape screenshots on iPhone 17 Pro and smaller iPhone 17e. Final 24 focused unit/UI tests pass, including delayed transcription after backgrounding, queued voice turns and keyboard-gap bounds. Read-only Oracle Fable review and correction confirmation both used `claude-opus-5-5`, with no remaining material findings. Evidence: `/tmp/newsly-deck-chat-verified-evidence`; final result bundle `test_sim_2026-10-05T03-31-38-718Z_pid18940_84b4d8f5.xcresult`. Diff checks pass.
+- **Remaining:** Real microphone/provider capture was not exercised; voice validation uses injected transcribers. The broader deck-theme and Sonnet generation changes remain planned separately. Oracle identified optional shared-controller hardening for unusually late canceled operations after foregrounding; session fences already reject stale transcripts.
+- **Commits:** Uncommitted.
+
 ### 2026-10-04 — `main` — Preserve installed pagination cursors
 
 - **Status:** Corrected locally during independent release review.
@@ -3080,3 +3109,80 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** App build passes; 36 focused unit tests and two native UI tests pass on iPhone 17 Pro / iOS 26.4, covering activity ordering, terminal states, duplicate rows, processing redraws, and related-item open/delete menus. Diff check passes. An initial test build encountered a concurrent unrelated detail-view compiler error; the owning task fixed it and the final run passed.
 - **Remaining:** None for this local scope. No commit, push, deployment, or device distribution requested.
 - **Commits:** Uncommitted.
+
+### 2026-10-05 — `main` — GPT-6.1 Sol switch and model audit
+
+- **Status:** Complete locally.
+- **Scope:** Shared new-chat/fallback model, iOS chat labels, offline Sol judge default and examples, agent preference, and source/production model inventory.
+- **Decisions:** Use `openai:gpt-6.1-sol` for newly created OpenAI chats and missing-model fallbacks. Preserve persisted explicit selections and their truthful version labels. Keep GPT-6 Luna routine text and specialized models separate. The existing forward-only price catalog already includes Sol 6.1.
+- **Changes:** Update shared Sol default and native labels, pipeline Sol judge and current examples; retain historical fixtures and migrations.
+- **Validation:** Rust format/diff checks, two API model-selection tests, affected DB/API all-target Clippy with warnings denied, and public-contract drift pass. Python Ruff/MyPy pass; 43 tests pass and 5 skip. Simulator build and six native model-label tests pass. Explicit `claude-opus-5-5` read-only review finds no must-fix issues. Read-only production usage/config/rates confirm Luna routine work, eleven recent unpriced 5.6 Sol calls, and an existing 6.1 price row. Full evidence and remaining drift are recorded in `docs/initiatives/2026-10-05-model-audit.md`.
+- **Remaining:** None for this scoped local switch and audit. Release gate, backend deployment/native distribution, paid 6.1 canary, and non-Sol/legacy audit followups remain separate. Existing explicit sessions retain their model. No commit, push, deployment, production mutation, or paid model evaluation performed.
+- **Commits:** Uncommitted.
+
+## 2026-10-05 — Source discovery activity (main, in progress)
+
+- Scope: chat subscription recommendations for newsletters, RSS/Atom, podcasts, and built-in aggregators. Preserve concurrent Learning Deck/chat-default edits; no commit or release.
+- Decisions: reuse host feed validation for latest published item and observed 90/365-day counts; no archive crawl or extra fetch. Aggregators use separately labeled global collection counts and latest collected item because publication dates are often missing or update-derived. All history is limited evidence with a check date; unknown is distinct from zero.
+- Contract: optional activity on stored cards, open basis, safe bounded latest links/titles, compatible absent/null decoding. Paired normalization keeps onboarding storage unchanged.
+- Review: Claude Opus 5.5 planning consultation completed; rejected oldest-item-as-coverage inference because it cannot prove a complete archive.
+- Validation: provider fixtures and warning-denied provider Clippy passed; integrated Rust/DB/contracts/native checks and final Opus review pending.
+
+### 2026-10-05 — Source discovery activity validation follow-up (main)
+
+- Validation: 13 provider fixtures; integrated activity tests (2 contract, 2 DB including isolated PostgreSQL corpus projection, 6 provider, 2 worker mapping) and 9 chat-turn tests pass. Worker/DB/contracts/API all-target Clippy passes with warnings denied; Rustfmt, diff check, generated-contract drift pass.
+- Native: Debug build and all 15 ChatMessageDisplayTests pass on Newsly Regression / iOS 26.5. Real card fixture inspected in Simulator for recent newsletter, old podcast/zero observed quarter, aggregator collection counts, and unavailable history; screenshots under ignored `test-results/source-discovery-activity/`.
+- Remaining: final Claude Opus 5.5 implementation review pending. No commit, push, deployment, native distribution, or live provider smoke performed.
+
+- Native follow-up: all 16 ChatMessageDisplayTests pass, including decoding the populated server activity JSON with UTC dates, null collection date, and quarter/year counts. DEBUG fixture uses the canonical `aggregator://hfpapers` identity.
+
+### 2026-10-05 — Source discovery activity review corrections (main)
+
+- Verified and fixed Opus findings: explicit GUIDs govern feed deduplication so distinct episodes sharing a homepage remain distinct; publication-feed activity counts all entries while only podcast recommendations select the separately computed audio snapshot; corpus counts scan at most 365 days and indexed latest-row lookup extracts metadata only for that row. Both feed snapshots share one parse/check timestamp.
+- Added regression fixtures for shared homepage/audio GUIDs, anonymous fallback identity, and mixed newsletter written/audio posts. Provider: 16 tests and all-target warning-denied Clippy pass. Native: 16 tests pass after compacting card copy; latest collection date unknown has a collection-specific label. Final card screenshots refreshed.
+- Follow-up Opus verification and final integrated Rust checks pending; no release performed.
+
+### 2026-10-05 — Source discovery activity completion (main)
+
+- Status: complete locally. Follow-up read-only Claude Opus 5.5 verifies all three corrections with no material findings.
+- Final validation: 16 provider fixtures and provider all-target Clippy; integrated contract, isolated PostgreSQL, provider activity, card mapping, and chat-turn tests; worker/DB/contracts/API all-target warning-denied Clippy; native build and 16 ChatMessageDisplayTests; Rustfmt, diff check, and canonical contract drift all pass. Final Simulator card captures show published vs collected evidence and explicit unavailable history.
+- Remaining: no scoped implementation work. Full release gate, paid live smoke, production deployment, and native distribution were not requested or performed. All changes remain uncommitted and unrelated checkout edits are preserved.
+
+### 2026-10-08 — `main` — Audio onboarding live local validation
+
+- Ran current Debug `newsly` on iPhone 17e/iOS 26.4 against isolated local `newsly_onboarding_20261008`, restored through the canonical production-sync script. Production SHA matches HEAD `081a0c6`; production debug-new-user route is unavailable (404), so no fresh production onboarding or production mutation was performed. Preserved unrelated working-tree changes.
+- Tested real 19.31-second synthesized audio through recording, silence stop, upload, transcription, and discovery for AI, climate/energy, space, economics, and Formula One; selected 4 newsletters, 3 podcast feeds, 4 aggregators, and 5 subreddits. Physical AXe taps were required; default simulator taps dispatched without navigation.
+- iOS incremental build ~14s; Rust dev build 150s. Voice start to picks ~46s (transcription 2.35s; planning 6.87s; discovery 12.38s). Completion to Briefing shell 4.56s; first eight readable news segments 133.24s. Warm corpus supplied 590 selected news representatives immediately. Selection/screenshot time is separate.
+- Full readiness FAILED: subsequent Briefing refresh repeatedly panics at `semantic_lenses.rs:596` (`packed[index] = packed.remove(index).merge(group)`), blocking publication despite four completed articles. Independent read-only reproduction confirms panic for last slot and candidate loss for other slots. Same committed code is deployed; bounded production log sample showed no matching panic. Two Planetary Radio episodes failed OpenAI transcription; four other podcasts awaited images. At 5m39s after completion, UI still showed zero ready articles/podcasts. No successful podcast playback proof. Economics and F1 were recognized but absent from newsletter/podcast recommendations.
+- Fixed two setup blockers in `scripts/sync_production_state.sh`: use psql stdin for bound variables (not `-c`), and load configured asset destinations with the shared dotenv parser instead of missing `read_env_value`. Extended existing shell safety harness for configured asset paths; shell syntax, harness, live separate-database restore, isolated asset sync, and scoped diff check passed.
+- Evidence: `test-results/onboarding-audio-20261008/summary.json`, SQL snapshots, build/voice/worker logs, and `run1/` screenshots/UI trees. Stopped test workers and extractor at cutoff to stop further provider spending; API remains on port 8010 for inspection. Product defects remain unfixed; no commit, push, or deployment.
+
+### 2026-10-08 — `main` — Onboarding failure repairs and first-news latency
+
+- Scope: repair the reproduced semantic-cluster merge panic/candidate loss; diagnose and fix exact episode transcription failures 60974/60975 in isolated onboarding DB; evaluate bounded first-news speed improvements from the measured 133-second initial publication.
+- Preserve all unrelated/staged changes; no commit, push, or production mutation. Separate episode worker slice delegated; oracle-fable Opus 5.5 read-only design review requested for concurrency options. Validation and final findings to follow.
+
+- Reproduced the merge defect with two red tests (last-slot panic and shifted-sibling source loss), then fixed remove/merge/reinsert. Both previously panicking local refresh tasks completed (23.28s and 14.90s), with Articles visible in Simulator screenshots.
+- Episode failures were exact HTML-media selection, not an inferred quota issue: feed-rs replaced Omny's direct media:content URL with its nested player URL. Namespace-aware XML normalization preserves direct media URLs across ingestion, validation and Apple resolution; explicit HTML responses are rejected before transcription. Same-GUID repairs and bounded retries of local contents 60974/60975 produced 62,861/61,626-character transcripts in 74.31/75.66s, seven chunks each, estimated recorded transcription cost $0.54868305 with no unpriced rows.
+- Semantic category naming now overlaps at most four calls, retains cluster order, stops later batches on failure, and drops in-flight work on cancellation. Naming uses the dedicated configured model and provides the existing validator's precise key/title/deck bounds in the prompt. Atomic edition publication remains unchanged.
+- Fresh local aggregator-only user 5, same four aggregator selections: API completion 0.022s; ten categories named in 18.37s (prior eight: 66.65s); ten news segments published in 97.724s after worker claim (prior 129.53s). End-to-end observation was 169.67s due to 71.8s waiting behind old-account recovery. These are single live runs with different category counts, not a controlled benchmark; event planning/composition remain the largest measured post-naming phase. Naming has ten unpriced usage rows, so total new-run cost is unknown.
+- Follow-up recovery exposed an additional catch-up defect: after the first cohort settled, normal admission loaded 21,678 historical news rows for user 4, including 21,149 older than 24 hours. Stopped the CPU-bound test processes; bounding normal admission and preparation is being verified separately without marking deferred sources read or changing Full rebuild semantics.
+- Opus 5.5 consultation failed with expired Claude OAuth and empty modelUsage; no substitute model was presented as Oracle. Independent agent review and focused tests are being used, with the Oracle review gap retained. Evidence lives under test-results/onboarding-fixes-20261008/.
+- Completed normal catch-up bounds: admit at most 40 new stories fairly across source/topic streams; cap each unassigned routing snapshot at 40 and total assigned-news composition input at 40 across active lenses. Existing pending identities stay durable; Full rebuilds remain complete. Exact lease, version and captured-source fences are unchanged. B15 and architecture notes updated. Independent review caught and closed the additional assigned-backlog path; extreme nondefault window-minimum/lens-count combinations can still defer a lens until the age threshold.
+- Final validation: 135 provider tests passed (one ignored), 35 worker Briefing tests passed, 20 database Briefing tests passed, seven warm-corpus tests passed, four media worker tests passed; warning-denied Clippy across DB/provider/worker, formatting and scoped diff checks passed. Rebuilt final worker in 13.30s. The formerly CPU-bound task 1905395 recovered through an expired lease and completed in 14.95s durable task time (15.009s full worker attempt), publishing the first Podcast and another Article; it stopped cleanly after one attempt.
+- Final full recovery: all seven Article segments and all six Podcast segments are active, including repaired Planetary Radio contents 60974/60975. Five additional bounded refreshes completed without errors in a 169.26s observation window; the worker stopped automatically afterward. Final source identities are in final-publication.json; news, Articles and Podcast screenshots are retained beside speed-result.json and podcast-retry-result.json. API remains available on local port 8010; test provider workers are stopped. No commit, push, deployment, or production mutation.
+
+### 2026-10-09 — `main` — Progressive onboarding categories and cached event grouping
+
+- Initial incremental refreshes name one new semantic category and publish one complete news window per durable task, prioritizing new categories, skipping exact cooling composition inputs and deferring compaction. Remaining pending identities and first-cohort membership survive; Full/noninitial category processing stays complete. No schema or client contract changes. B15 and architecture updated.
+- Event grouping had re-embedded cached starting stories in ten sequential requests before any composition. It now uses the canonical exact-input/model/encoder-validated story cache and calls the embedding provider only for misses. New timings separate cache reads, embedding requests, category planning and composition. Old records cannot attribute the entire post-naming gap to embedding latency.
+- Final validation: all45 focused worker Briefing tests pass, including real planner regressions for16stories/fourclusters at a three-category cap, successive one-category passes, cache compatibility/alignment/provider failures and fingerprint cooldown readiness. Warning-denied worker Clippy and scoped diff checks pass; worker build10.86s. Independent read-only review found no material correctness issue; actual selection is additionally exercised by the live progressive run. Opus5.5 review unavailable because Claude OAuth expired (empty modelUsage); no substitute used.
+- Fresh isolated local user6, same four aggregator selections and40warm cohort stories: first readable four-event category21.27s, second47.66s, third66.31s. First task21.10s: category planning6.10s, four cached vectors23ms, composition13.36s; queue-ready wait12ms. Zero event-embedding requests. Three active segments cover12distinct stories/events;28remaining pending and cohort unsettled. Compared with prior97.724s worker publishing all ten categories together, this measures an earlier publication boundary, not equal throughput. First result still exceeds the10–15s target due to naming/writing latency.
+- Native iPhone17e screenshots confirm three readable categories. Evidence: test-results/onboarding-categories-20261009/timing-result.json, durable-result.json, worker.log and screenshots. Worker stopped at cutoff; it had already named the fourth category, leaving its leased test task for normal recovery. Known composition subtotal$0.00352265; four unpriced naming rows make total cost unknown. API remains on8010. Production debug-new-user remains unavailable from the previous production check; no production mutation, commit, push or deployment.
+
+### 2026-10-11 — `main` — Integrated build-test-deploy
+
+- **Scope:** User explicitly authorized release of all current Newsly changes: source-discovery activity/contracts, GPT-6.1 Sol defaults, native Learning Deck chat/voice and Briefing metadata, progressive onboarding/embedding-cache and bounded backlog repairs, podcast media normalization, local PDF extraction, provider-reported Firecrawl credit accounting, saved-summary preparation, eval examples, state-sync fixes, and associated design/documentation artifacts. Include existing local podcast SQL commit `3dfc4b8f`.
+- **Decisions:** Reconcile current `origin/main`, preserve the initial working/staged snapshots under ignored release evidence, commit the integrated source, and run the canonical clean-SHA gate with paid provider/E2B smoke before pushing. Resolve module-size failures through coherent extraction rather than changing guardrails. Apple distribution remains separate.
+- **Preflight:** Production remains on `081a0c6d` with healthy API/extractor/database; operator reports zero failing sources, overdue tasks, terminal mismatches or missing checks, plus five undelivered alerts and one other active alert. Local PostgreSQL available; started Colima for the disposable live matrix. Read-only Claude Opus 5.5 integrated implementation review requested with explicit routing.
+- **Validation:** In progress; exact-SHA gate and workflow/runtime proof must complete before release is reported successful. Evidence: `test-results/release-preflight-20261011/` and the canonical SHA-keyed release-gate directory.

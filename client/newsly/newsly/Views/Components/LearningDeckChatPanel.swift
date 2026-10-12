@@ -99,44 +99,54 @@ struct LearningDeckChatFlyover: View {
     }
 
     private var peekBar: some View {
-        Button {
-            presentation = .compact
-        } label: {
-            VStack(spacing: 6) {
-                Capsule()
-                    .fill(Color.outlineVariant.opacity(0.45))
-                    .frame(width: 36, height: 5)
-                    .padding(.top, 10)
+        VStack(spacing: 6) {
+            Capsule()
+                .fill(Color.outlineVariant.opacity(0.45))
+                .frame(width: 36, height: 5)
+                .padding(.top, 10)
 
-                HStack(spacing: 8) {
-                    Image(systemName: "bubble.left.and.text.bubble.right")
-                        .font(.appSymbol(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.brandPrimary)
-
-                    Text("Ask about this slide")
-                        .font(.terracottaBodyMedium.weight(.semibold))
-                        .foregroundStyle(Color.onSurface)
-
-                    Spacer()
-
-                    if viewModel.isSending {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(Color.brandPrimary)
-                            .accessibilityLabel("Deck chat is responding")
+            HStack(spacing: 12) {
+                Button {
+                    presentation = .compact
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bubble.left.and.text.bubble.right")
+                            .font(.appSymbol(size: 18, weight: .semibold))
+                            .foregroundStyle(Color.brandPrimary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Ask about this slide")
+                                .font(.terracottaBodyMedium.weight(.semibold))
+                                .foregroundStyle(Color.onSurface)
+                            Text(viewModel.currentSlideContext.title ?? "Open deck chat")
+                                .font(.terracottaBodySmall)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        if viewModel.isSending {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Color.brandPrimary)
+                                .accessibilityLabel("Deck chat is responding")
+                        }
                     }
-
-                    if let label = learningDeckSlideLabel(for: viewModel.currentSlideContext) {
-                        LearningDeckChatSlidePill(label: label)
-                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-                .padding(.bottom, 14)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open deck chat")
+                .accessibilityIdentifier("learning_deck.chat.peek")
+
+                LearningDeckChatVoiceButton(viewModel: viewModel) {
+                    presentation = .compact
+                    viewModel.performToggleVoiceRecording()
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 72)
-            .contentShape(Rectangle())
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.bottom, 14)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 84)
+        .contentShape(Rectangle())
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
@@ -146,8 +156,6 @@ struct LearningDeckChatFlyover: View {
                     )
                 }
         )
-        .accessibilityLabel("Open deck chat")
-        .accessibilityIdentifier("learning_deck.chat.peek")
     }
 }
 

@@ -160,3 +160,47 @@ async fn correction_budget_survives_new_jobs_and_changed_input_recovers(pool: Pg
         "unchanged input receives a bounded later recovery attempt"
     );
 }
+
+#[sqlx::test]
+async fn progressive_readiness_skips_only_the_exact_cooling_input(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('progressive-ready','progressive-ready@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+    let fake = RejectedComposer::default();
+    let (task, fence) = claim(&pool, user).await;
+    let context = CompositionContext {
+        pool: &pool,
+        task_id: task,
+        user_id: user,
+        fence: &fence,
+    };
+    assert!(
+        composition_is_ready(fake.model_spec(), 0, &unit("Cooling category"), context)
+            .await
+            .unwrap()
+    );
+    assert!(
+        compose_unit(&fake, unit("Cooling category"), 1, 0, context)
+            .await
+            .is_err()
+    );
+    assert!(
+        !composition_is_ready(fake.model_spec(), 0, &unit("Cooling category"), context)
+            .await
+            .unwrap()
+    );
+    assert!(
+        composition_is_ready(fake.model_spec(), 0, &unit("Next category"), context)
+            .await
+            .unwrap()
+    );
+    assert!(
+        composition_is_ready("different:model", 0, &unit("Cooling category"), context)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        fake.0.lock().unwrap().len(),
+        1,
+        "readiness checks must not call the provider"
+    );
+}

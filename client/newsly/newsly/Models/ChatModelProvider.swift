@@ -39,7 +39,7 @@ enum ChatModelProvider: String, Codable, CaseIterable {
     var chatDisplayName: String {
         switch self {
         case .openai:
-            return "GPT-5.6 Sol"
+            return "GPT-6.1 Sol"
         default:
             return displayName
         }

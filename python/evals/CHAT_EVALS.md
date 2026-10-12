@@ -18,8 +18,8 @@ SQLX_OFFLINE=true cargo build --manifest-path rust/Cargo.toml \
 uv run --project python/evals newsly-evals chat run \
   python/evals/datasets/chat/podcast_history.yaml \
   --env-file /absolute/path/to/local.env \
-  --model openai:gpt-5.6-sol \
-  --judge-model gpt-5.6-sol \
+  --model openai:gpt-6.1-sol \
+  --judge-model gpt-6.1-sol \
   --case episode_links
 ```
 
@@ -167,7 +167,7 @@ Rejudge a saved answer without another candidate call:
 ```bash
 uv run --project python/evals newsly-evals chat judge \
   test-results/chat-evals/RUN/episode_links/judge-input.txt \
-  --model gpt-5.6-sol --output test-results/chat-evals/rejudgment.json
+  --model gpt-6.1-sol --output test-results/chat-evals/rejudgment.json
 ```
 
 Keep a few known good/bad answers as judge calibration controls. A no-link answer and an

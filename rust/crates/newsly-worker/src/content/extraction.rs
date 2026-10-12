@@ -5,10 +5,9 @@ use newsly_extraction::{
     ExtractionSuccess, PubMedDelegation, PublicUrl,
 };
 
+use super::FirecrawlUsage;
 use super::firecrawl::{FirecrawlClient, FirecrawlError};
-use super::model::{
-    ExtractedArticle, ExtractionUsageBatch, FeedCandidate, FirecrawlUsage, UsageWrite,
-};
+use super::model::{ExtractedArticle, ExtractionUsageBatch, FeedCandidate, UsageWrite};
 
 #[derive(Debug, Clone)]
 pub struct ContentExtractionRuntime {
@@ -259,10 +258,35 @@ impl ContentExtractionRuntime {
             request_id: firecrawl_request_id,
             url: fallback.url.to_string(),
             status_code: result.status_code,
+            credit_cost_usd: result.credit_cost_usd,
+            credits_used: result.credits_used,
+            num_pages: result.num_pages,
+            total_pages: result.total_pages,
+            scrape_id: result.scrape_id,
             cost_usd: result.cost_usd,
         }));
+        if let Some(message) = result.error {
+            return firecrawl_failure(
+                &FirecrawlError::HttpStatus {
+                    status: reqwest::StatusCode::from_u16(result.status_code)
+                        .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+                    message,
+                },
+                usage,
+            );
+        }
+        let Some(markdown) = result.markdown else {
+            return firecrawl_failure(&FirecrawlError::EmptyMarkdown, usage);
+        };
+        let final_url = match PublicUrl::parse(result.final_url.trim()) {
+            Ok(url) => url,
+            Err(error) => return client_failure(&error, usage),
+        };
+        if let Err(error) = final_url.validate_dns().await {
+            return client_failure(&error, usage);
+        }
         let title = result.title.unwrap_or_else(|| "Untitled".to_owned());
-        let final_url = result.final_url.to_string();
+        let final_url = final_url.to_string();
         ExtractionAttempt::Success {
             article: ExtractedArticle {
                 original_url: original_url.to_owned(),
@@ -270,7 +294,7 @@ impl ContentExtractionRuntime {
                 title,
                 author: None,
                 published_at: result.published_at,
-                body: result.markdown,
+                body: markdown,
                 feed_candidates: Vec::new(),
                 extraction_method: "firecrawl".to_owned(),
                 warnings: vec![format!(
@@ -326,7 +350,15 @@ fn success_attempt(
             published_at: success.published_at,
             body,
             feed_candidates,
-            extraction_method: extraction_method(success.method).to_owned(),
+            extraction_method: if success
+                .usage_events
+                .iter()
+                .any(|event| event.kind == "pdf_page")
+            {
+                "pdf_text".to_owned()
+            } else {
+                extraction_method(success.method).to_owned()
+            },
             warnings: success.warnings,
             timings: success.timings,
             used_firecrawl: false,
@@ -535,3 +567,7 @@ mod tests {
         assert!(!is_pubmed_article(&search));
     }
 }
+
+#[cfg(test)]
+#[path = "extraction/firecrawl_tests.rs"]
+mod firecrawl_tests;

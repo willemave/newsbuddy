@@ -15,6 +15,7 @@ mod content_misc;
 mod discussion_fetch;
 mod elevenlabs;
 mod exa;
+mod feed_document;
 mod feed_validation;
 mod image_generation;
 mod media;
@@ -72,8 +73,8 @@ pub use discussion_fetch::{
 };
 pub use exa::ExaSearchUsage;
 pub use feed_validation::{
-    FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat, ValidatedSharedItem,
-    ValidatedSharedTarget,
+    FeedPublishedItem, FeedPublishingActivity, FeedValidationError, FeedValidator, ValidatedFeed,
+    ValidatedFeedFormat, ValidatedSharedItem, ValidatedSharedTarget,
 };
 pub use image_generation::{
     GeneratedImage, GoogleImageAuth, ImageGenerationError, ImageGenerationGateway,

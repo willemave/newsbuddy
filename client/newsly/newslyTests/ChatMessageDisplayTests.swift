@@ -197,6 +197,95 @@ final class ChatMessageDisplayTests: XCTestCase {
         XCTAssertEqual(message.feedOptions[0].title, "lucumr")
         XCTAssertEqual(message.feedOptions[0].feedTypeLabel, "Atom")
         XCTAssertFalse(message.feedOptions[0].isSubscribed)
+        XCTAssertNil(message.feedOptions[0].publishingActivity)
+    }
+
+    func testAssistantSourceActivityKeepsUnknownAndZeroCountsDistinct() {
+        let unknown = AssistantSourceActivityPresentation(activity: nil)
+        XCTAssertEqual(unknown.quarterCountText, "90 days: count unavailable")
+        XCTAssertEqual(unknown.yearCountText, "365 days: count unavailable")
+        XCTAssertEqual(unknown.latestDateLabel, "Latest publication date unavailable")
+        XCTAssertEqual(
+            AssistantSourceActivityPresentation(activity: makeSourceActivity(basis: .newsly_corpus)).latestDateLabel,
+            "Latest collection date unavailable"
+        )
+
+        let snapshot = AssistantSourceActivityPresentation(activity: makeSourceActivity(quarter: 0, year: nil))
+        XCTAssertEqual(snapshot.quarterCountText, "90 days: 0 observed")
+        XCTAssertEqual(snapshot.yearCountText, "365 days: count unavailable")
+        XCTAssertEqual(snapshot.evidenceText, "Published items in the current feed; history may be incomplete.")
+        XCTAssertEqual(snapshot.undatedText, "2 undated items excluded from counts.")
+    }
+
+    func testAssistantFeedOptionDecodesMeasuredActivityDatesAndCounts() throws {
+        let data = Data("""
+        {
+          "id":"source123", "title":"Source", "site_url":"https://example.com",
+          "feed_url":"https://example.com/feed", "feed_type":"atom", "feed_format":"rss",
+          "description":null, "rationale":null, "evidence_url":null,
+          "publishing_activity": {
+            "basis":"feed_snapshot", "checked_at":"2026-10-05T12:00:00Z",
+            "window_start":"2026-07-07T12:00:00Z", "year_window_start":"2025-10-05T12:00:00Z",
+            "window_end":"2026-10-05T12:00:00Z", "observed_count":0,
+            "observed_year_count":12, "undated_count":2,
+            "latest_item": {"title":"Latest article", "url":"https://example.com/latest",
+                            "published_at":"2026-06-27T12:00:00Z", "collected_at":null}
+          }
+        }
+        """.utf8)
+        let option = try JSONDecoder().decode(AssistantFeedOption.self, from: data)
+        let activity = try XCTUnwrap(option.publishingActivity)
+        XCTAssertEqual(activity.basis, .feed_snapshot)
+        XCTAssertEqual(activity.checkedAt, ServerDate.parse("2026-10-05T12:00:00Z"))
+        XCTAssertEqual(activity.observedCount, 0)
+        XCTAssertEqual(activity.observedYearCount, 12)
+        XCTAssertEqual(activity.latestItem?.publishedAt, ServerDate.parse("2026-06-27T12:00:00Z"))
+        XCTAssertNil(activity.latestItem?.collectedAt)
+    }
+
+    func testAssistantSourceActivityDistinguishesCollectionDatesAndRejectsUnsafeLinks() {
+        let collectedAt = Date(timeIntervalSince1970: 100)
+        let activity = makeSourceActivity(
+            basis: .newsly_corpus,
+            latest: APIAssistantPublishedItem(title: "Paper", url: "javascript:alert(1)", publishedAt: nil, collectedAt: collectedAt)
+        )
+        let presentation = AssistantSourceActivityPresentation(activity: activity)
+        XCTAssertEqual(presentation.latestDate, collectedAt)
+        XCTAssertEqual(presentation.latestDateLabel, "Latest collected by Newsly")
+        XCTAssertEqual(presentation.evidenceText, "Items collected by Newsly; publisher totals may differ.")
+        XCTAssertNil(presentation.latestURL)
+
+        let published = AssistantSourceActivityPresentation(activity: makeSourceActivity(
+            latest: APIAssistantPublishedItem(title: nil, url: "https://example.com/latest", publishedAt: collectedAt, collectedAt: nil)
+        ))
+        XCTAssertEqual(published.latestDateLabel, "Latest observed publication")
+        XCTAssertEqual(published.latestDisplayTitle, "Latest observed item")
+        XCTAssertEqual(published.latestURL?.absoluteString, "https://example.com/latest")
+    }
+
+    func testAssistantFeedOptionEqualityIncludesActivity() {
+        func option(_ activity: APIAssistantSourceActivity) -> AssistantFeedOption {
+            AssistantFeedOption(
+                id: "source", title: "Source", siteUrl: "https://example.com", feedUrl: "https://example.com/feed",
+                feedType: .atom, description: nil, rationale: nil, evidenceUrl: nil, publishingActivity: activity
+            )
+        }
+        XCTAssertEqual(option(makeSourceActivity(quarter: 3)), option(makeSourceActivity(quarter: 3)))
+        XCTAssertNotEqual(option(makeSourceActivity(quarter: 3)), option(makeSourceActivity(quarter: 4)))
+    }
+
+    private func makeSourceActivity(
+        basis: APISourceActivityBasis = .feed_snapshot,
+        latest: APIAssistantPublishedItem? = nil,
+        quarter: Int? = 3,
+        year: Int? = 12
+    ) -> APIAssistantSourceActivity {
+        APIAssistantSourceActivity(
+            basis: basis, checkedAt: Date(timeIntervalSince1970: 1_000),
+            windowStart: Date(timeIntervalSince1970: 100), yearWindowStart: Date(timeIntervalSince1970: 0),
+            windowEnd: Date(timeIntervalSince1970: 1_000), latestItem: latest,
+            observedCount: quarter, observedYearCount: year, undatedCount: 2
+        )
     }
 
     func testAssistantFeedOptionPresentsBuiltInAggregators() throws {

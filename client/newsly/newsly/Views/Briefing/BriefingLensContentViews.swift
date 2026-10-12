@@ -198,9 +198,9 @@ final class BriefingLensRenderModel {
             }
             return BriefingSegmentRenderModel(segment: segment, sourcesByKey: sourcesByKey)
         }
-        let separatorIndices = BriefingTimelineSeparatorPolicy.separatorIndices(
-            for: lens.segments.map(\.createdAt)
-        )
+        let separatorIndices = lens.lens.tier == .news
+            ? BriefingTimelineSeparatorPolicy.separatorIndices(for: lens.segments.map(\.createdAt))
+            : []
         self.timelineSeparatorSegmentIDs = Set(
             separatorIndices.map { lens.segments[$0].id }
         )

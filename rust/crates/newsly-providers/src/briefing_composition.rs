@@ -71,9 +71,10 @@ at least once.";
 
 const LENS_NAMING_SYSTEM_PROMPT: &str = r"Name one semantic cluster of unread Fast Reads for Newsly.
 
-Return JSON matching the supplied schema. The key must be a stable URL-safe key beginning with
-`news-`. The title must be a specific reader-facing title under 40 characters. The deck must be one
-sentence explaining what connects the sources. Describe the shared theme across most sources, not
+Return JSON matching the supplied schema. The key must begin with `news-`, contain only lowercase
+ASCII letters, digits, and hyphens, and be at most 64 characters. The title must be a specific
+reader-facing title of 2-40 characters. The deck must be one sentence of 8-180 characters explaining
+what connects the sources. Describe the shared theme across most sources, not
 the most vivid single story. If the sources are only loosely related, choose a broad but honest
 title. Avoid vague labels such as Updates, Briefs, News, or Misc unless the sources are genuinely
 mixed. Do not name a lens after one source unless nearly every source is about that topic.";
@@ -275,11 +276,14 @@ impl BriefingLensName {
             && key
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
-        if !valid_key
-            || !(2..=40).contains(&title.chars().count())
-            || !(8..=180).contains(&deck.chars().count())
-        {
-            return Err("lens name has an invalid key, title, or deck".to_owned());
+        if !valid_key {
+            return Err("lens key must use news- followed by lowercase letters, digits, or hyphens, at most 64 characters".to_owned());
+        }
+        if !(2..=40).contains(&title.chars().count()) {
+            return Err("lens title must contain 2-40 characters".to_owned());
+        }
+        if !(8..=180).contains(&deck.chars().count()) {
+            return Err("lens deck must contain 8-180 characters".to_owned());
         }
         Ok(Self {
             key: key.to_owned(),
@@ -465,15 +469,19 @@ impl BriefingCompositionGateway {
         }
         let user_prompt = serde_json::to_string_pretty(sources)?;
         let outcome = self
-            .run_structured(StructuredRunRequest {
-                feature: "briefing_lens_naming",
-                system_prompt: LENS_NAMING_SYSTEM_PROMPT,
-                user_prompt,
-                schema_name: "briefing_lens_name_v1",
-                schema: schemars::schema_for!(BriefingLensName),
-                output_tokens: 320,
-                validation_retries: 1,
-            })
+            .run_structured_with_model(
+                StructuredRunRequest {
+                    feature: "briefing_lens_naming",
+                    system_prompt: LENS_NAMING_SYSTEM_PROMPT,
+                    user_prompt,
+                    schema_name: "briefing_lens_name_v1",
+                    schema: schemars::schema_for!(BriefingLensName),
+                    output_tokens: 320,
+                    validation_retries: 1,
+                },
+                &self.naming_model_spec,
+                None,
+            )
             .await?;
         let value = outcome
             .structured_output

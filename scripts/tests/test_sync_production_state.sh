@@ -28,7 +28,12 @@ cat > "${harness_root}/bin/psql" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'psql %s\n' "$*" >> "${HARNESS_LOG}"
-if [[ "$*" == *"SELECT 1 FROM pg_database"* ]]; then
+sql="$*"
+if [[ "$*" == *"-f -"* ]]; then
+  sql="$(cat)"
+  printf 'psql stdin %s\n' "${sql}" >> "${HARNESS_LOG}"
+fi
+if [[ "${sql}" == *"SELECT 1 FROM pg_database"* ]]; then
   printf '1\n'
 fi
 EOF
@@ -165,6 +170,15 @@ assert_contains "pg_restore --list ${fresh_dump}.partial" "${fresh_log}"
 assert_before "pg_restore --list ${fresh_dump}.partial" "dropdb " "${fresh_log}"
 [[ -s "${fresh_dump}" ]]
 [[ ! -e "${fresh_dump}.partial" ]]
+
+asset_log="${harness_root}/assets.log"
+printf 'IMAGES_BASE_DIR=%s/custom-images\n' "${harness_root}" >> "${harness_root}/.env"
+env PATH="${harness_root}/bin:${PATH}" HARNESS_LOG="${asset_log}" \
+  bash "${repo_root}/scripts/sync_production_state.sh" \
+  --env-file "${harness_root}/.env" --skip-db --asset-dir images \
+  --no-restart-server > "${harness_root}/assets.out" 2>&1
+assert_contains "tar -xf - -C ${harness_root}/custom-images" "${asset_log}"
+assert_not_contains "command not found" "${harness_root}/assets.out"
 
 worker_list="$(sed -n '/^worker_processes=(/,/^)/p' "${repo_root}/scripts/start_services.sh")"
 grep -Eq '^[[:space:]]+news_recluster$' <<< "${worker_list}" || {

@@ -47,7 +47,7 @@ python/evals/.venv/bin/newsly-evals pipeline run \
   --binary-dir /path/to/rust/binaries \
   --env-file /path/to/local.env \
   --model openai:gpt-5.6-luna \
-  --judge-model gpt-5.6-sol \
+  --judge-model gpt-6.1-sol \
   --output test-results/pipeline-evals/run-1
 ```
 
@@ -112,7 +112,7 @@ shared judge command (`chat judge` accepts the same five-criterion schema):
 ```sh
 python/evals/.venv/bin/newsly-evals chat judge \
   test-results/pipeline-evals/run-1/article_numbers/judge-input.txt \
-  --model gpt-5.6-sol --output /tmp/rejudged.json
+  --model gpt-6.1-sol --output /tmp/rejudged.json
 ```
 
 No-cost focused validation, including real API fixture bootstrap:

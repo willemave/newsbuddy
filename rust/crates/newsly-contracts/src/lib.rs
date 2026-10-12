@@ -59,11 +59,12 @@ pub use briefing::{
     LegacyBriefingNarrationRequest,
 };
 pub use chat::{
-    AssistantFeedOption, AssistantScreenContextDto, AssistantTurnRequest, AssistantTurnResponse,
-    ChatMessageDisplayType, ChatMessageDto, ChatMessageRole, ChatSessionDetailDto,
-    ChatSessionListResponse, ChatSessionSummaryDto, ChatToolProgressDto, CouncilCandidate,
-    CreateChatSessionRequest, CreateChatSessionResponse, FeedFormat, FeedType, LlmProvider,
-    MessageProcessingStatus, MessageStatusResponse, SendChatMessageRequest, SendMessageResponse,
+    AssistantFeedOption, AssistantPublishedItem, AssistantScreenContextDto,
+    AssistantSourceActivity, AssistantTurnRequest, AssistantTurnResponse, ChatMessageDisplayType,
+    ChatMessageDto, ChatMessageRole, ChatSessionDetailDto, ChatSessionListResponse,
+    ChatSessionSummaryDto, ChatToolProgressDto, CouncilCandidate, CreateChatSessionRequest,
+    CreateChatSessionResponse, FeedFormat, FeedType, LlmProvider, MessageProcessingStatus,
+    MessageStatusResponse, SendChatMessageRequest, SendMessageResponse, SourceActivityBasis,
     UpdateChatSessionRequest,
 };
 pub use chat_council::{CouncilRetryRequest, CouncilSelectRequest, CouncilStartRequest};

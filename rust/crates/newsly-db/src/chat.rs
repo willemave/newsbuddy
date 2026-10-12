@@ -17,7 +17,7 @@ use crate::chat_transcripts::{
 };
 
 const DEFAULT_PROVIDER: &str = "openai";
-pub const DEFAULT_CHAT_MODEL: &str = "openai:gpt-5.6-sol";
+pub const DEFAULT_CHAT_MODEL: &str = "openai:gpt-6.1-sol";
 const KNOWLEDGE_SESSION_TYPE: &str = "knowledge_chat";
 
 #[derive(Debug, Clone, PartialEq)]

@@ -17,6 +17,7 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
         XCTAssertEqual(headline.title, "Runway’s WorldPrompt")
         XCTAssertEqual(headline.publisher, "Latent Space")
         XCTAssertEqual(headline.meta, "Article · 12 min read")
+        XCTAssertEqual(headline.createdAt, Date(timeIntervalSince1970: 1_800_000_000))
     }
 
     func testPodcastSegmentUsesDurationAndOmitsBlankPublisher() throws {

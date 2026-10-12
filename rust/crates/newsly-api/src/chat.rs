@@ -945,7 +945,7 @@ mod model_selection_tests {
     fn openai_chat_defaults_to_sol_and_preserves_explicit_selection() {
         assert_eq!(
             resolve_model(None, None),
-            ("openai", "openai:gpt-5.6-sol".to_owned())
+            ("openai", "openai:gpt-6.1-sol".to_owned())
         );
         assert_eq!(
             resolve_model(Some(LlmProvider::Openai), Some("openai:gpt-5.6-terra")),

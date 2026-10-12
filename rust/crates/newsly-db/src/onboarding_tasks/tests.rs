@@ -1,3 +1,6 @@
+#[path = "feed_tests.rs"]
+mod feed_tests;
+
 use sqlx::PgPool;
 
 use super::{WeeklySeed, short_digest, weekly_message};

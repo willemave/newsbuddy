@@ -11,7 +11,7 @@ pub use extraction::ContentExtractionRuntime;
 pub(crate) use extraction::ExtractionAttempt;
 pub use firecrawl::FirecrawlClient;
 pub use handlers::{AnalyzeUrlHandler, ContentWorkerServices, ProcessContentHandler};
-pub(crate) use model::UsageWrite;
+pub(crate) use model::{FirecrawlUsage, UsageWrite};
 pub(crate) use repository::{UsageInsert, insert_usage};
 pub use storage::{ContentBodyStoreError, LocalContentBodyStore};
 

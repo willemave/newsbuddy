@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use chrono::Utc;
+use futures_util::future::join_all;
 use newsly_db::{
     BriefingLensAssignmentPlan, BriefingLensAssignmentUsage, BriefingLensCentroidMutation,
     BriefingPendingLensAssignment, BriefingPlannedLens, BriefingRefreshConfig,
@@ -11,9 +12,14 @@ use newsly_providers::{
 };
 use thiserror::Error;
 
+mod vectors;
+
+use vectors::{cosine, mean_vector};
+
 use super::{EMBEDDING_PROVIDER, centroid_model, nonempty, split_model_spec};
 
 const LENS_NAMING_ATTEMPTS: usize = 2;
+const LENS_NAMING_PARALLELISM: usize = 4;
 
 pub(super) async fn plan_semantic_lenses(
     gateway: &BriefingCompositionGateway,
@@ -21,7 +27,35 @@ pub(super) async fn plan_semantic_lenses(
     config: &BriefingRefreshConfig,
     embedding_batch_size: usize,
     source_vectors: Vec<Vec<f64>>,
+    new_category_budget: usize,
 ) -> Result<BriefingLensAssignmentPlan, SemanticLensPlanningError> {
+    plan_semantic_lenses_with_namer(
+        gateway,
+        seed,
+        config,
+        embedding_batch_size,
+        source_vectors,
+        new_category_budget,
+        |candidates| async move { name_cluster(gateway, &candidates).await },
+    )
+    .await
+}
+
+async fn plan_semantic_lenses_with_namer<F, Fut>(
+    gateway: &BriefingCompositionGateway,
+    seed: &PreparedBriefingRefreshSeed,
+    config: &BriefingRefreshConfig,
+    embedding_batch_size: usize,
+    source_vectors: Vec<Vec<f64>>,
+    new_category_budget: usize,
+    namer: F,
+) -> Result<BriefingLensAssignmentPlan, SemanticLensPlanningError>
+where
+    F: Fn(Vec<Candidate>) -> Fut,
+    Fut: std::future::Future<
+            Output = Result<newsly_providers::GeneratedBriefingLensName, SemanticLensPlanningError>,
+        >,
+{
     let snapshot = &seed.lens_assignment;
     if snapshot.pending_sources.is_empty() {
         return Ok(empty_plan(seed));
@@ -123,6 +157,7 @@ pub(super) async fn plan_semantic_lenses(
         .iter()
         .filter(|key| *key != "misc")
         .count();
+    let starting_active_count = active_count;
     let mut next_position = snapshot.next_news_position;
     let mut misc_plan = None;
     if active_count >= config.max_news_lenses {
@@ -160,13 +195,20 @@ pub(super) async fn plan_semantic_lenses(
                 .cmp(&left.candidates.len())
                 .then_with(|| oldest(left).cmp(&oldest(right)))
         });
+        // A first edition can name and publish one coherent category while
+        // other clusters remain in the durable, frozen onboarding cohort.
+        ready.truncate(new_category_budget);
+        let mut names = name_clusters(
+            &ready,
+            config.max_news_lenses.saturating_sub(active_count),
+            config.news_window_max,
+            |candidates| namer(candidates.to_vec()),
+        )
+        .await?
+        .into_iter();
         for cluster in ready {
             if active_count < config.max_news_lenses {
-                let generated = name_cluster(
-                    gateway,
-                    &cluster.candidates[..cluster.candidates.len().min(config.news_window_max)],
-                )
-                .await?;
+                let generated = names.next().expect("each new lens has a planned name");
                 let (provider, fallback_model) = split_model_spec(gateway.naming_model_spec());
                 usage.push(BriefingLensAssignmentUsage {
                     provider: provider.to_owned(),
@@ -257,7 +299,10 @@ pub(super) async fn plan_semantic_lenses(
             .active_news_lens_keys
             .iter()
             .any(|key| key == "misc");
-        if misc_active || active_count < config.max_news_lenses {
+        if misc_active
+            || (active_count < config.max_news_lenses
+                && active_count.saturating_sub(starting_active_count) < new_category_budget)
+        {
             if !misc_active {
                 misc_plan = Some(misc_lens(next_position));
             }
@@ -391,6 +436,31 @@ pub(super) async fn plan_nonsemantic_lenses(
         new_lenses,
         usage,
     })
+}
+
+// Only provider work overlaps. Batches retain cluster order and a failed batch
+// prevents further requests; keys, positions, and assignments remain sequential.
+async fn name_clusters<'a, F, Fut>(
+    clusters: &'a [Cluster],
+    available_slots: usize,
+    source_limit: usize,
+    name: F,
+) -> Result<Vec<newsly_providers::GeneratedBriefingLensName>, SemanticLensPlanningError>
+where
+    F: Fn(&'a [Candidate]) -> Fut,
+    Fut: std::future::Future<
+            Output = Result<newsly_providers::GeneratedBriefingLensName, SemanticLensPlanningError>,
+        >,
+{
+    let mut names = Vec::new();
+    for batch in clusters[..clusters.len().min(available_slots)].chunks(LENS_NAMING_PARALLELISM) {
+        let results = join_all(batch.iter().map(|cluster| {
+            name(&cluster.candidates[..cluster.candidates.len().min(source_limit)])
+        }))
+        .await;
+        names.extend(results.into_iter().collect::<Result<Vec<_>, _>>()?);
+    }
+    Ok(names)
 }
 
 async fn name_cluster(
@@ -593,7 +663,8 @@ fn pack_small_clusters(
             let target = nearest_cluster_index(&group, &packed, Some(maximum))
                 .or_else(|| nearest_cluster_index(&group, &packed, None));
             if let Some(index) = target {
-                packed[index] = packed.remove(index).merge(group);
+                let merged = packed.remove(index).merge(group);
+                packed.insert(index, merged);
                 continue;
             }
         }
@@ -880,45 +951,6 @@ fn unique_lens_key(raw: &str, used: &mut HashSet<String>) -> String {
     }
     used.insert(key.clone());
     key
-}
-
-fn cosine(left: &[f64], right: &[f64]) -> f64 {
-    if left.is_empty() || left.len() != right.len() {
-        return -1.0;
-    }
-    let numerator = left
-        .iter()
-        .zip(right)
-        .map(|(left, right)| left * right)
-        .sum::<f64>();
-    let left_norm = left.iter().map(|value| value * value).sum::<f64>().sqrt();
-    let right_norm = right.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if left_norm <= f64::EPSILON || right_norm <= f64::EPSILON {
-        -1.0
-    } else {
-        numerator / (left_norm * right_norm)
-    }
-}
-
-fn mean_vector(vectors: &[Vec<f64>]) -> Vec<f64> {
-    let Some(width) = vectors.first().map(Vec::len).filter(|width| *width > 0) else {
-        return Vec::new();
-    };
-    let valid = vectors
-        .iter()
-        .filter(|vector| vector.len() == width)
-        .collect::<Vec<_>>();
-    if valid.is_empty() {
-        return Vec::new();
-    }
-    let mut totals = vec![0.0; width];
-    for vector in &valid {
-        for (total, value) in totals.iter_mut().zip(vector.iter()) {
-            *total += value;
-        }
-    }
-    let count = valid.len() as f64;
-    totals.into_iter().map(|total| total / count).collect()
 }
 
 #[derive(Debug, Error)]

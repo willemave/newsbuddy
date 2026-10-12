@@ -1567,19 +1567,15 @@ async fn persist_extraction_usage(
                         content_id: None,
                         user_id,
                         request_count: Some(1),
-                        resource_count: Some(1),
+                        resource_count: usage.resource_count(),
                         input_tokens: None,
                         cache_read_tokens: None,
                         cache_write_tokens: None,
                         output_tokens: None,
                         total_tokens: None,
                         cost_usd: usage.cost_usd,
-                        pricing_version: Some("configured-v1"),
-                        metadata: json!({
-                            "news_item_id": news_item_id,
-                            "url": usage.url,
-                            "status_code": usage.status_code,
-                        }),
+                        pricing_version: usage.pricing_version(),
+                        metadata: usage.metadata(Some(news_item_id)),
                     },
                 )
                 .await?;
@@ -1618,3 +1614,7 @@ pub(super) use error::NewsRepositoryError;
 #[cfg(test)]
 #[path = "checkpoint_tests.rs"]
 mod checkpoint_tests;
+
+#[cfg(test)]
+#[path = "firecrawl_usage_tests.rs"]
+mod firecrawl_usage_tests;

@@ -118,6 +118,7 @@ async fn execute_refresh(
     let initial = match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND NOT news_seed_settled)").bind(user_id).fetch_one(&services.pool).await {
         Ok(value) => value, Err(error) => return plain_failure(error.to_string(), true),
     };
+    let progressive = initial && mode != BriefingRefreshMode::Full;
     if initial {
         repository_config.pending_max_age_seconds = 0;
     }
@@ -174,6 +175,7 @@ async fn execute_refresh(
     let failed_sources = readiness.failed;
     let missing = readiness.requests;
     let waiting_for_news = !missing.is_empty();
+    let lens_planning_started = std::time::Instant::now();
     let mut lens_plan = {
         let lens_planning = plan_semantic_lenses(
             &services.gateway,
@@ -181,6 +183,7 @@ async fn execute_refresh(
             &repository_config,
             services.config.embedding_batch_size,
             cached_vectors,
+            if progressive { 1 } else { usize::MAX },
         );
         tokio::pin!(lens_planning);
         let result = tokio::select! {
@@ -194,6 +197,14 @@ async fn execute_refresh(
             Err(error) => return plain_failure(error.to_string(), true),
         }
     };
+    tracing::info!(
+        task_id = plan.task_id,
+        user_id,
+        elapsed_ms = lens_planning_started.elapsed().as_millis(),
+        new_categories = lens_plan.new_lenses.len(),
+        progressive,
+        "Briefing category planning completed"
+    );
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost after Briefing lens planning", true);
     }
@@ -203,6 +214,11 @@ async fn execute_refresh(
         &failed_sources,
         &repository_config,
     );
+    let new_category_keys = lens_plan
+        .new_lenses
+        .iter()
+        .map(|lens| lens.key.clone())
+        .collect::<Vec<_>>();
     let composition_fence = seed.claim_fence.clone();
     let prepared = {
         let mut transaction = match services.pool.begin().await {
@@ -245,7 +261,13 @@ async fn execute_refresh(
         return plain_failure("queue lease was lost before Briefing composition", true);
     }
 
-    let external = build_publication(services, prepared, &composition_fence);
+    let external = build_publication(
+        services,
+        prepared,
+        &composition_fence,
+        progressive,
+        &new_category_keys,
+    );
     tokio::pin!(external);
     let publication = tokio::select! {
         result = &mut external => result,
@@ -279,14 +301,33 @@ async fn build_publication(
     services: &BriefingRefreshWorkerServices,
     prepared: PreparedBriefingRefresh,
     fence: &newsly_db::BriefingRefreshClaimFence,
+    progressive: bool,
+    new_category_keys: &[String],
 ) -> Result<BriefingRefreshPublication, BriefingRefreshExecutionError> {
     let mut units = Vec::new();
     let mut embedding_usage = Vec::new();
     let mut ordinal = 0_usize;
     let mut compaction_selected = vec![false; prepared.compaction_batches.len()];
+    let context = CompositionContext {
+        pool: &services.pool,
+        task_id: prepared.task_id,
+        user_id: prepared.user_id,
+        fence,
+    };
+    let mut batches = prepared.append_batches.iter().collect::<Vec<_>>();
+    if progressive {
+        batches.sort_by_key(|batch| {
+            (
+                batch.lens.tier != "news",
+                !new_category_keys.contains(&batch.lens.key),
+                batch.lens.position,
+            )
+        });
+    }
 
-    for batch in &prepared.append_batches {
+    'append_batches: for batch in batches {
         let planned = plan_windows(
+            &services.pool,
             &services.gateway,
             &batch.sources,
             &batch.lens.tier,
@@ -333,18 +374,44 @@ async fn build_publication(
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            units.push(CompositionUnit {
+            let unit = CompositionUnit {
                 ordinal,
                 lens: batch.lens.clone(),
                 window,
                 kind: CompositionUnitKind::Append { pending_rows },
-            });
+            };
+            if progressive {
+                if !composition_is_ready(
+                    services.gateway.model_spec(),
+                    services.config.max_figures_deep,
+                    &unit,
+                    context,
+                )
+                .await?
+                {
+                    continue;
+                }
+                units.push(unit);
+                if batch.lens.tier == "news" {
+                    // Do not plan or request embeddings for later categories
+                    // before publishing this complete window.
+                    break 'append_batches;
+                }
+            } else {
+                units.push(unit);
+            }
             ordinal += 1;
         }
     }
 
-    for (batch_index, batch) in prepared.compaction_batches.iter().enumerate() {
+    for (batch_index, batch) in prepared
+        .compaction_batches
+        .iter()
+        .enumerate()
+        .filter(|_| !progressive)
+    {
         let planned = plan_windows(
+            &services.pool,
             &services.gateway,
             &batch.sources,
             &batch.lens.tier,
@@ -380,12 +447,6 @@ async fn build_publication(
     let gateway = &services.gateway;
     let max_attempts = super::config::MAX_COMPOSE_ATTEMPTS;
     let max_figures_deep = services.config.max_figures_deep;
-    let context = CompositionContext {
-        pool: &services.pool,
-        task_id: prepared.task_id,
-        user_id: prepared.user_id,
-        fence,
-    };
     let mut composed = stream::iter(units.into_iter().map(|unit| async move {
         compose_unit(gateway, unit, max_attempts, max_figures_deep, context).await
     }))
@@ -496,6 +557,44 @@ impl BriefingComposer for BriefingCompositionGateway {
     }
 }
 
+fn composition_request(unit: &CompositionUnit) -> BriefingCompositionRequest {
+    BriefingCompositionRequest {
+        lens_title: unit.lens.title.clone(),
+        tier: unit.lens.tier.clone(),
+        sources: unit.window.sources.iter().map(composition_source).collect(),
+    }
+}
+
+fn composition_fingerprint(
+    model: &str,
+    max_figures_deep: usize,
+    request: &BriefingCompositionRequest,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!(
+        "{BRIEFING_COMPOSITION_PROMPT_VERSION}|{model}|{max_figures_deep}|{request:?}"
+    ));
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
+}
+
+async fn composition_is_ready(
+    model: &str,
+    max_figures_deep: usize,
+    unit: &CompositionUnit,
+    context: CompositionContext<'_>,
+) -> Result<bool, BriefingRefreshExecutionError> {
+    let fingerprint = composition_fingerprint(model, max_figures_deep, &composition_request(unit));
+    Ok(
+        !newsly_db::briefing_attempts::cooling_down(context.pool, context.user_id, &fingerprint)
+            .await?,
+    )
+}
+
 async fn compose_unit(
     gateway: &impl BriefingComposer,
     unit: CompositionUnit,
@@ -503,23 +602,8 @@ async fn compose_unit(
     max_figures_deep: usize,
     context: CompositionContext<'_>,
 ) -> Result<ComposedUnit, BriefingRefreshExecutionError> {
-    use sha2::{Digest, Sha256};
-    let request = BriefingCompositionRequest {
-        lens_title: unit.lens.title.clone(),
-        tier: unit.lens.tier.clone(),
-        sources: unit.window.sources.iter().map(composition_source).collect(),
-    };
-    let digest = Sha256::digest(format!(
-        "{BRIEFING_COMPOSITION_PROMPT_VERSION}|{}|{}|{request:?}",
-        gateway.model_spec(),
-        max_figures_deep
-    ));
-    let fingerprint = digest
-        .iter()
-        .fold(String::with_capacity(64), |mut text, byte| {
-            let _ = write!(text, "{byte:02x}");
-            text
-        });
+    let request = composition_request(&unit);
+    let fingerprint = composition_fingerprint(gateway.model_spec(), max_figures_deep, &request);
     if newsly_db::briefing_attempts::cooling_down(context.pool, context.user_id, &fingerprint)
         .await?
     {
@@ -532,7 +616,10 @@ async fn compose_unit(
     let mut feedback = None;
     for attempt in 1..=max_attempts {
         let attempt_id = uuid::Uuid::new_v4();
-        let generated = match gateway.compose(&request, feedback.as_deref()).await {
+        let provider_started = std::time::Instant::now();
+        let generated = gateway.compose(&request, feedback.as_deref()).await;
+        tracing::info!(task_id = context.task_id, user_id = context.user_id, lens_key = %unit.lens.key, attempt, elapsed_ms = provider_started.elapsed().as_millis(), source_count = request.sources.len(), succeeded = generated.is_ok(), "Briefing composition provider attempt completed");
+        let generated = match generated {
             Ok(generated) => generated,
             Err(error) => {
                 let retryable = error.retryable();

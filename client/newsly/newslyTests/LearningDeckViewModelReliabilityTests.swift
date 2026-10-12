@@ -250,6 +250,7 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
                 statusService: NoopLearningDeckReaderChatService()
             ),
             deckService: service,
+            transcriptionService: TestUnavailableSpeechTranscriber(),
             viewerPollIntervalNanoseconds: 1_000_000,
             viewerPollAttemptLimit: 1
         )
@@ -348,6 +349,7 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
                 statusService: NoopLearningDeckReaderChatService()
             ),
             deckService: service,
+            transcriptionService: TestUnavailableSpeechTranscriber(),
             viewerPollIntervalNanoseconds: 1_000_000,
             viewerPollAttemptLimit: 5
         )

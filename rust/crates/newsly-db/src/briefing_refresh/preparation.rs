@@ -16,6 +16,10 @@ use super::{
     },
 };
 
+// Bound normal catch-up as well as the frozen first cohort. Full rebuilds retain
+// their complete source set; unprocessed normal sources remain durable for later sweeps.
+pub(super) const NEWS_REFRESH_BATCH_SIZE: i64 = 40;
+
 pub async fn prepare_briefing_refresh(
     transaction: &mut Transaction<'_, Postgres>,
     task_id: i64,
@@ -46,8 +50,8 @@ pub async fn prepare_briefing_refresh(
     let pending_added = seed_content_pending(transaction, user_id, full).await?
         + seed_news_pending(transaction, user_id, full).await?;
     prune_ineligible_pending(transaction, user_id).await?;
-    let assigned = assign_nonsemantic_pending_lenses(transaction, user_id).await?;
-    let lens_assignment = load_lens_assignment_snapshot(transaction, user_id).await?;
+    let assigned = assign_nonsemantic_pending_lenses(transaction, user_id, full).await?;
+    let lens_assignment = load_lens_assignment_snapshot(transaction, user_id, full).await?;
     Ok(PrepareBriefingRefreshOutcome::Ready(
         PreparedBriefingRefreshSeed {
             task_id,
@@ -277,10 +281,10 @@ pub(crate) async fn seed_news_pending(
                     )
                 )
                 INSERT INTO onboarding_first_edition_items(run_id,source_kind,source_id)
-                SELECT $2::bigint::integer,'news',id FROM ranked ORDER BY source_rank,arrival DESC,id DESC LIMIT 40
+                SELECT $2::bigint::integer,'news',id FROM ranked ORDER BY source_rank,arrival DESC,id DESC LIMIT $3
                 ON CONFLICT DO NOTHING
             "#, visible_news=visible_news_sql())))
-                .bind(user_id).bind(run_id).execute(&mut **transaction).await?;
+                .bind(user_id).bind(run_id).bind(NEWS_REFRESH_BATCH_SIZE).execute(&mut **transaction).await?;
             // Leave an empty corpus open until ready news actually arrives.
             sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news') WHERE id::bigint=$1")
                 .bind(run_id).execute(&mut **transaction).await?;
@@ -307,6 +311,10 @@ pub(crate) async fn seed_news_pending(
         WHERE (NOT EXISTS (SELECT 1 FROM onboarding_first_edition_runs r WHERE r.user_id::bigint=$1 AND r.status='active' AND NOT r.news_seed_settled)
             OR EXISTS (SELECT 1 FROM onboarding_first_edition_items i JOIN onboarding_first_edition_runs r ON r.id=i.run_id WHERE r.user_id::bigint=$1 AND r.status='active' AND i.source_kind='news' AND i.source_id=news.id))
           AND NOT EXISTS (
+              SELECT 1 FROM briefing_pending_sources p
+              WHERE p.user_id::bigint = $1 AND p.source_kind = 'news' AND p.source_id = news.id
+          )
+          AND NOT EXISTS (
             SELECT 1
             FROM news_items AS member
             JOIN news_item_read_status AS read_status ON read_status.news_item_id = member.id
@@ -323,12 +331,18 @@ pub(crate) async fn seed_news_pending(
                     AND source_key.value = 'news:' || news.id::text
               )
           )
+        ORDER BY row_number() OVER (
+            PARTITION BY news.platform, news.raw_metadata::jsonb #>> '{{aggregator,topic}}'
+            ORDER BY COALESCE(news.published_at,news.ingested_at) DESC, news.id DESC
+        ), COALESCE(news.published_at,news.ingested_at) DESC, news.id DESC
+        LIMIT $3
         ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
         "#,
         visible_news = visible_news_sql()
     )))
     .bind(user_id)
     .bind(full)
+    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE))
     .execute(&mut **transaction)
     .await?
     .rows_affected() as usize)
@@ -402,6 +416,7 @@ pub(super) async fn prune_ineligible_pending(
 pub(super) async fn assign_nonsemantic_pending_lenses(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
+    full: bool,
 ) -> Result<usize, sqlx::Error> {
     let mut changed = sqlx::query(
         r#"
@@ -416,7 +431,7 @@ pub(super) async fn assign_nonsemantic_pending_lenses(
     .execute(&mut **transaction)
     .await?
     .rows_affected() as usize;
-    let unassigned = unassigned_news_rows(transaction, user_id).await?;
+    let unassigned = unassigned_news_rows(transaction, user_id, full).await?;
     if unassigned.is_empty() {
         return Ok(changed);
     }
@@ -444,8 +459,9 @@ pub(super) async fn assign_nonsemantic_pending_lenses(
 pub(super) async fn load_lens_assignment_snapshot(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
+    full: bool,
 ) -> Result<BriefingLensAssignmentSnapshot, BriefingRefreshRepositoryError> {
-    let pending_sources = unassigned_news_rows(transaction, user_id)
+    let pending_sources = unassigned_news_rows(transaction, user_id, full)
         .await?
         .into_iter()
         .map(|row| BriefingUnassignedSource {
@@ -486,6 +502,7 @@ pub(super) async fn load_lens_assignment_snapshot(
 pub(super) async fn unassigned_news_rows(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
+    full: bool,
 ) -> Result<Vec<UnassignedNewsRow>, sqlx::Error> {
     sqlx::query_as(
         r#"
@@ -500,9 +517,11 @@ pub(super) async fn unassigned_news_rows(
         WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'news'
           AND pending.lens_key IS NULL
         ORDER BY pending.enqueued_at, pending.id
+        LIMIT $2
         "#,
     )
     .bind(user_id)
+    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE))
     .fetch_all(&mut **transaction)
     .await
 }
@@ -566,7 +585,8 @@ pub(super) async fn load_append_batches(
 ) -> Result<Vec<BriefingAppendBatch>, BriefingRefreshRepositoryError> {
     let lenses = active_lenses(transaction, user_id).await?;
     let content_rows = pending_content_rows(transaction, user_id).await?;
-    let news_rows = pending_news_rows(transaction, user_id).await?;
+    let news_rows =
+        pending_news_rows(transaction, user_id, mode == BriefingRefreshMode::Full).await?;
     let mut rows_by_lens: HashMap<
         String,
         Vec<(
@@ -683,6 +703,7 @@ pub(super) async fn pending_content_rows(
 pub(super) async fn pending_news_rows(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
+    full: bool,
 ) -> Result<Vec<PendingNewsRow>, sqlx::Error> {
     sqlx::query_as(
         r#"
@@ -694,12 +715,18 @@ pub(super) async fn pending_news_rows(
                news.published_at, news.processed_at, news.ingested_at, news.created_at
         FROM briefing_pending_sources AS pending
         JOIN news_items AS news ON news.id = pending.source_id
+        JOIN briefing_lenses AS lens ON lens.user_id = pending.user_id AND lens.key = pending.lens_key
+          AND lens.status = 'active' AND lens.tier = 'news'
         WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'news'
           AND pending.lens_key IS NOT NULL
-        ORDER BY pending.lens_key, pending.enqueued_at, pending.id
+        ORDER BY row_number() OVER (
+            PARTITION BY pending.lens_key ORDER BY pending.enqueued_at, pending.id
+        ), pending.enqueued_at, pending.id
+        LIMIT $2
         "#,
     )
     .bind(user_id)
+    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE))
     .fetch_all(&mut **transaction)
     .await
 }

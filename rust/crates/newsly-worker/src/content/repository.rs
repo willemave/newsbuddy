@@ -1391,18 +1391,15 @@ async fn persist_usage(
                         content_id,
                         user_id,
                         request_count: Some(1),
-                        resource_count: Some(1),
+                        resource_count: usage.resource_count(),
                         input_tokens: None,
                         cache_read_tokens: None,
                         cache_write_tokens: None,
                         output_tokens: None,
                         total_tokens: None,
                         cost_usd: usage.cost_usd,
-                        pricing_version: Some("configured-v1"),
-                        metadata: json!({
-                            "url": usage.url,
-                            "status_code": usage.status_code,
-                        }),
+                        pricing_version: usage.pricing_version(),
+                        metadata: usage.metadata(None),
                     },
                 )
                 .await?;
@@ -1689,3 +1686,7 @@ pub(super) enum ContentRepositoryError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "repository/firecrawl_usage_tests.rs"]
+mod firecrawl_usage_tests;

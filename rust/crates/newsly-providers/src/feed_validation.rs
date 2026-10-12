@@ -3,14 +3,15 @@
 //! Candidate documents are fetched as inert bytes through a public-network-only HTTP client,
 //! then parsed by Rust. No candidate content is executed, so validation does not require a VM.
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use crate::public_http::{
     MAX_SOURCE_RESPONSE_BYTES, PublicDocument, PublicHttpError, fetch_public,
 };
-use feed_rs::model::FeedType;
+use chrono::{DateTime, Utc};
+use feed_rs::model::{Entry, Feed, FeedType, Text};
 use futures_util::{StreamExt as _, stream};
-use newsly_extraction::ExtractionClientError;
+use newsly_extraction::{ExtractionClientError, PublicUrl};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -40,6 +41,33 @@ pub struct ValidatedFeed {
     pub effective_url: String,
     pub format: ValidatedFeedFormat,
     pub has_audio_entries: bool,
+    /// All feed publications, including articles in feeds that also contain audio.
+    pub publishing_activity: FeedPublishingActivity,
+    /// Audio episode publications, selected by the caller for podcast subscriptions.
+    pub podcast_publishing_activity: FeedPublishingActivity,
+}
+
+/// Publication evidence from the fetched feed snapshot, not a complete archive count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedPublishingActivity {
+    pub checked_at: DateTime<Utc>,
+    pub window_start: DateTime<Utc>,
+    pub year_window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+    pub latest_item: Option<FeedPublishedItem>,
+    /// Unique dated publications observed within the inclusive trailing 90-day window.
+    /// Unknown when the feed has no non-future publication dates.
+    pub observed_count: Option<i64>,
+    /// The same observed lower bound over the trailing 365 days.
+    pub observed_year_count: Option<i64>,
+    pub undated_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedPublishedItem {
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub published_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +78,7 @@ pub struct ValidatedSharedItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidatedSharedTarget {
-    Feed(ValidatedFeed),
+    Feed(Box<ValidatedFeed>),
     Item(ValidatedSharedItem),
 }
 
@@ -121,6 +149,7 @@ impl FeedValidator {
             return Ok(None);
         };
         Ok(validated_feed_document(&document)
+            .map(Box::new)
             .map(ValidatedSharedTarget::Feed)
             .or_else(|| validated_shared_item_document(&document).map(ValidatedSharedTarget::Item)))
     }
@@ -254,7 +283,14 @@ fn validated_feed_document(document: &PublicDocument) -> Option<ValidatedFeed> {
     if !has_feed_document_root(&document.body) {
         return None;
     }
-    let parsed = match feed_rs::parser::parse(document.body.as_slice()) {
+    let normalized = crate::feed_document::preserve_direct_media_urls(&document.body).ok()?;
+    // Missing IDs must remain missing: generated title hashes are not identity evidence.
+    let parsed = match feed_rs::parser::Builder::new()
+        .id_generator(|_, _, _| String::new())
+        .base_uri(Some(document.effective_url.as_str()))
+        .build()
+        .parse(normalized.as_slice())
+    {
         Ok(parsed) => parsed,
         Err(error) => {
             tracing::debug!(
@@ -269,11 +305,131 @@ fn validated_feed_document(document: &PublicDocument) -> Option<ValidatedFeed> {
     if !has_feed_semantics(&parsed) {
         return None;
     }
+    let has_audio_entries = has_audio_entries(&parsed);
+    let checked_at = Utc::now();
     Some(ValidatedFeed {
         effective_url: document.effective_url.to_string(),
         format,
-        has_audio_entries: has_audio_entries(&parsed),
+        has_audio_entries,
+        publishing_activity: publishing_activity(&parsed, false, checked_at),
+        podcast_publishing_activity: publishing_activity(&parsed, true, checked_at),
     })
+}
+
+fn publishing_activity(
+    feed: &Feed,
+    audio_only: bool,
+    checked_at: DateTime<Utc>,
+) -> FeedPublishingActivity {
+    let window_start = checked_at - chrono::Duration::days(90);
+    let year_window_start = checked_at - chrono::Duration::days(365);
+    let mut entries: Vec<_> = feed
+        .entries
+        .iter()
+        .filter(|entry| !audio_only || entry_audio_url(entry).is_some())
+        .collect();
+    // Prefer actual, current publication evidence when duplicate entries disagree.
+    entries
+        .sort_by_key(|entry| std::cmp::Reverse(entry.published.filter(|date| *date <= checked_at)));
+    let mut identities = HashSet::new();
+    let mut latest_item = None;
+    let mut observed_count = None;
+    let mut observed_year_count = None;
+    let mut undated_count = 0;
+    for entry in entries {
+        // Explicit IDs are authoritative: publishers may reuse a homepage or audio URL.
+        // Without an ID, links are the strongest available evidence. Fully anonymous
+        // entries remain distinct rather than inventing identity from their title.
+        let identity = if entry.id.is_empty() {
+            entry_item_url(entry)
+                .or_else(|| entry_audio_url(entry).and_then(|url| safe_item_url(&url)))
+                .map(|url| format!("url:{url}"))
+        } else {
+            Some(format!("id:{}", entry.id))
+        };
+        if identity.is_some_and(|identity| !identities.insert(identity)) {
+            continue;
+        }
+        let Some(published_at) = entry.published else {
+            undated_count += 1;
+            continue;
+        };
+        if published_at > checked_at {
+            continue;
+        }
+        let count = observed_count.get_or_insert(0);
+        if published_at >= window_start {
+            *count += 1;
+        }
+        let year_count = observed_year_count.get_or_insert(0);
+        if published_at >= year_window_start {
+            *year_count += 1;
+        }
+        if latest_item.is_none() {
+            latest_item = Some(FeedPublishedItem {
+                title: entry.title.as_ref().and_then(readable_title),
+                url: entry_item_url(entry),
+                published_at,
+            });
+        }
+    }
+    FeedPublishingActivity {
+        checked_at,
+        window_start,
+        year_window_start,
+        window_end: checked_at,
+        latest_item,
+        observed_count,
+        observed_year_count,
+        undated_count,
+    }
+}
+
+fn safe_item_url(raw_url: &str) -> Option<String> {
+    if raw_url.len() > 2_048 {
+        return None;
+    }
+    let url = PublicUrl::parse(raw_url).ok()?.to_string();
+    (url.len() <= 2_048).then_some(url)
+}
+
+fn entry_item_url(entry: &Entry) -> Option<String> {
+    entry
+        .links
+        .iter()
+        .filter(|link| link.rel.as_deref().is_none_or(|rel| rel == "alternate"))
+        .find_map(|link| safe_item_url(&link.href))
+        .or_else(|| safe_item_url(&entry.id))
+}
+
+fn readable_title(title: &Text) -> Option<String> {
+    let plain = if title.content_type.as_str() == "text/plain" {
+        title.content.clone()
+    } else {
+        scraper::Html::parse_fragment(&title.content)
+            .root_element()
+            .text()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let plain: String = plain
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    let title: String = plain
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(300)
+        .collect();
+    (!title.is_empty()).then_some(title)
 }
 
 fn has_feed_document_root(body: &[u8]) -> bool {
@@ -365,11 +521,261 @@ pub enum FeedValidationError {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
     use feed_rs::model::FeedType;
+    use std::fmt::Write as _;
 
     use super::{
         ValidatedFeedFormat, has_audio_entries, has_feed_document_root, validated_feed_format,
     };
+
+    fn checked_at() -> DateTime<Utc> {
+        "2026-10-05T12:00:00Z".parse().unwrap()
+    }
+
+    fn activity(xml: &str) -> super::FeedPublishingActivity {
+        activity_with_mode(xml, false)
+    }
+
+    fn activity_with_mode(xml: &str, audio_only: bool) -> super::FeedPublishingActivity {
+        let feed = feed_rs::parser::Builder::new()
+            .id_generator(|_, _, _| String::new())
+            .build()
+            .parse(xml.as_bytes())
+            .expect("fixture parses");
+        super::publishing_activity(&feed, audio_only, checked_at())
+    }
+
+    fn atom_activity(entries: &str) -> super::FeedPublishingActivity {
+        activity(&format!(
+            "<feed xmlns=\"http://www.w3.org/2005/Atom\"><title>Feed</title>{entries}</feed>"
+        ))
+    }
+
+    #[test]
+    fn rss_activity_uses_latest_publication_and_deduplicates_unsorted_entries() {
+        let activity = activity(
+            r#"<rss version="2.0"><channel><title>News</title>
+            <item><guid isPermaLink="false">old</guid><title>Old</title><pubDate>Sun, 05 Apr 2026 12:00:00 GMT</pubDate></item>
+            <item><guid isPermaLink="false">new</guid><title>Latest</title><link>https://example.com/latest</link><pubDate>Mon, 05 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><guid isPermaLink="false">middle</guid><title>Middle</title><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><guid isPermaLink="false">new</guid><title>Duplicate</title><pubDate>Mon, 05 Oct 2026 12:00:00 GMT</pubDate></item>
+            </channel></rss>"#,
+        );
+        assert_eq!(activity.observed_count, Some(2));
+        assert_eq!(activity.observed_year_count, Some(3));
+        assert_eq!(activity.undated_count, 0);
+        let latest = activity.latest_item.unwrap();
+        assert_eq!(latest.title.as_deref(), Some("Latest"));
+        assert_eq!(latest.url.as_deref(), Some("https://example.com/latest"));
+        assert_eq!(latest.published_at, checked_at());
+    }
+
+    #[test]
+    fn atom_activity_observes_inclusive_cutoff_without_updated_fallback() {
+        let activity = atom_activity(
+            r"
+            <entry><id>before</id><published>2026-07-07T11:59:59Z</published></entry>
+            <entry><id>cutoff</id><published>2026-07-07T12:00:00Z</published></entry>
+            <entry><id>now</id><published>2026-10-05T12:00:00Z</published></entry>
+            <entry><id>future</id><published>2026-10-05T12:00:01Z</published></entry>
+            <entry><id>updated</id><updated>2026-10-05T11:00:00Z</updated></entry>
+            <entry><id>missing</id></entry>",
+        );
+        assert_eq!(
+            activity.window_start,
+            "2026-07-07T12:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(activity.window_end, checked_at());
+        assert_eq!(activity.observed_count, Some(2));
+        assert_eq!(activity.undated_count, 2);
+        assert_eq!(activity.latest_item.unwrap().published_at, checked_at());
+    }
+
+    #[test]
+    fn activity_distinguishes_unknown_dates_from_observed_zero() {
+        for entries in [
+            "",
+            "<entry><id>undated</id></entry>",
+            "<entry><id>future</id><published>2026-10-06T00:00:00Z</published></entry>",
+            "<entry><id>updated-only</id><updated>2026-10-01T00:00:00Z</updated></entry>",
+        ] {
+            let activity = atom_activity(entries);
+            assert_eq!(activity.observed_count, None);
+            assert_eq!(activity.observed_year_count, None);
+            assert_eq!(activity.latest_item, None);
+        }
+        let activity =
+            atom_activity("<entry><id>old</id><published>2026-01-01T00:00:00Z</published></entry>");
+        assert_eq!(activity.observed_count, Some(0));
+        assert!(activity.latest_item.is_some());
+    }
+
+    #[test]
+    fn activity_uses_inclusive_year_window_and_excludes_malformed_dates() {
+        let activity = atom_activity(
+            r"
+            <entry><id>before-year</id><published>2025-10-05T11:59:59Z</published></entry>
+            <entry><id>year-cutoff</id><published>2025-10-05T12:00:00Z</published></entry>
+            <entry><id>bad-date</id><published>not-a-date</published></entry>",
+        );
+        assert_eq!(
+            activity.year_window_start,
+            "2025-10-05T12:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(activity.observed_count, Some(0));
+        assert_eq!(activity.observed_year_count, Some(1));
+        assert_eq!(activity.undated_count, 1);
+    }
+
+    #[test]
+    fn latest_item_resolves_relative_links_and_strips_title_controls() {
+        let mut feed = feed_rs::parser::Builder::new()
+            .id_generator(|_, _, _| String::new())
+            .base_uri(Some("https://example.com/feeds/news.xml"))
+            .build()
+            .parse(br#"<feed xmlns="http://www.w3.org/2005/Atom"><title>News</title><entry><id>relative</id><title>A title</title><link href="../latest"/><published>2026-10-01T00:00:00Z</published></entry></feed>"#.as_slice())
+            .unwrap();
+        feed.entries[0].title.as_mut().unwrap().content = "A\u{0007}\n title".to_owned();
+        let latest = super::publishing_activity(&feed, false, checked_at())
+            .latest_item
+            .unwrap();
+        assert_eq!(latest.url.as_deref(), Some("https://example.com/latest"));
+        assert_eq!(latest.title.as_deref(), Some("A title"));
+    }
+
+    #[test]
+    fn activity_preserves_distinct_ids_and_does_not_invent_anonymous_ids() {
+        let activity = atom_activity(
+            r#"
+            <entry><id>a</id><link href="https://example.com/a"/><published>2026-10-04T00:00:00Z</published></entry>
+            <entry><id>b</id><link href="https://example.com/b"/><published>2026-10-03T00:00:00Z</published></entry>
+            <entry><id>a</id><link href="https://example.com/b"/><published>2026-10-02T00:00:00Z</published></entry>
+            <entry><id>a</id></entry>
+            <entry><title>Same title</title><published>2026-10-01T00:00:00Z</published></entry>
+            <entry><title>Same title</title><published>2026-09-30T00:00:00Z</published></entry>"#,
+        );
+        assert_eq!(activity.observed_count, Some(4));
+        assert_eq!(activity.undated_count, 0);
+    }
+
+    #[test]
+    fn mixed_podcast_activity_counts_only_unique_audio_episodes() {
+        let activity = activity_with_mode(
+            r#"<rss version="2.0"><channel><title>Mixed</title>
+            <item><guid isPermaLink="false">article</guid><pubDate>Mon, 05 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><guid isPermaLink="false">episode</guid><title>Episode</title><enclosure url="https://cdn.example/episode.mp3" type="audio/mpeg"/><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><guid isPermaLink="false">episode</guid><enclosure url="https://cdn.example/episode.mp3" type="audio/mpeg"/><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><title>Undated episode</title><enclosure url="https://cdn.example/other.mp3" type="audio/mpeg"/></item>
+            </channel></rss>"#,
+            true,
+        );
+        assert_eq!(activity.observed_count, Some(1));
+        assert_eq!(activity.undated_count, 1);
+        assert_eq!(
+            activity.latest_item.unwrap().title.as_deref(),
+            Some("Episode")
+        );
+    }
+
+    #[test]
+    fn podcast_activity_preserves_distinct_guids_with_a_shared_homepage_and_audio() {
+        let mut entries = String::new();
+        for index in 0..3 {
+            write!(entries, r#"<item><guid isPermaLink="false">episode-{index}</guid><link>https://example.com/show</link><enclosure url="https://cdn.example/episode.mp3" type="audio/mpeg"/><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>"#).unwrap();
+        }
+        let activity = activity_with_mode(
+            &format!("<rss version=\"2.0\"><channel><title>Show</title>{entries}</channel></rss>"),
+            true,
+        );
+        assert_eq!(activity.observed_count, Some(3));
+        assert_eq!(activity.observed_year_count, Some(3));
+    }
+
+    #[test]
+    fn anonymous_activity_deduplicates_by_article_link_then_audio_url() {
+        let activity = activity(
+            r#"<rss version="2.0"><channel><title>Anonymous</title>
+            <item><link>https://example.com/article</link><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><link>https://example.com/article</link><pubDate>Wed, 30 Sep 2026 12:00:00 GMT</pubDate></item>
+            <item><enclosure url="https://cdn.example/episode.mp3" type="audio/mpeg"/><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><enclosure url="https://cdn.example/episode.mp3" type="audio/mpeg"/><pubDate>Wed, 30 Sep 2026 12:00:00 GMT</pubDate></item>
+            </channel></rss>"#,
+        );
+        assert_eq!(activity.observed_count, Some(2));
+    }
+
+    #[test]
+    fn mixed_newsletter_keeps_article_activity_separate_from_podcast_activity() {
+        let xml = r#"<rss version="2.0"><channel><title>Mixed newsletter</title>
+            <item><guid isPermaLink="false">article</guid><title>Latest article</title><pubDate>Mon, 05 Oct 2026 12:00:00 GMT</pubDate></item>
+            <item><guid isPermaLink="false">episode</guid><title>Episode</title><enclosure url="https://cdn.example/episode.mp3" type="audio/mpeg"/><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item>
+            </channel></rss>"#;
+        let all = activity(xml);
+        let audio = activity_with_mode(xml, true);
+        assert_eq!(all.observed_count, Some(2));
+        assert_eq!(
+            all.latest_item.unwrap().title.as_deref(),
+            Some("Latest article")
+        );
+        assert_eq!(audio.observed_count, Some(1));
+        assert_eq!(audio.latest_item.unwrap().title.as_deref(), Some("Episode"));
+        let document = super::PublicDocument {
+            effective_url: super::PublicUrl::parse("https://example.com/feed.xml").unwrap(),
+            body: xml.as_bytes().to_vec(),
+        };
+        let validated = super::validated_feed_document(&document).unwrap();
+        assert!(validated.has_audio_entries);
+        assert_eq!(
+            validated
+                .publishing_activity
+                .latest_item
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("Latest article")
+        );
+        assert_eq!(
+            validated
+                .podcast_publishing_activity
+                .latest_item
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("Episode")
+        );
+        assert_eq!(
+            validated.publishing_activity.checked_at,
+            validated.podcast_publishing_activity.checked_at
+        );
+    }
+
+    #[test]
+    fn latest_item_title_is_plain_bounded_text_and_url_is_safe() {
+        let activity = atom_activity(
+            r#"<entry><id>entry</id><title type="html">&lt;b&gt; A &amp;amp; B &lt;/b&gt;</title><link href="javascript:alert(1)"/><published>2026-10-01T00:00:00Z</published></entry>"#,
+        );
+        let latest = activity.latest_item.unwrap();
+        assert_eq!(latest.title.as_deref(), Some("A & B"));
+        assert_eq!(latest.url, None);
+        assert_eq!(
+            super::safe_item_url("https://user:secret@example.com/item"),
+            None
+        );
+        assert_eq!(super::safe_item_url("http://127.0.0.1/item"), None);
+        assert_eq!(
+            super::safe_item_url(&format!("https://example.com/{}", "x".repeat(2_048))),
+            None
+        );
+        let activity = atom_activity(&format!(
+            "<entry><id>long</id><title>{}</title><published>2026-10-01T00:00:00Z</published></entry>",
+            "é".repeat(500)
+        ));
+        assert_eq!(
+            activity.latest_item.unwrap().title.unwrap().chars().count(),
+            300
+        );
+    }
 
     #[test]
     fn feed_root_check_accepts_namespaced_rss_and_atom_only() {

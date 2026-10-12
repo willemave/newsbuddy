@@ -166,6 +166,7 @@ impl MediaGateway {
         let response = self
             .send_public_get(raw_url, Some("audio/*,application/octet-stream"))
             .await?;
+        reject_html_media(response.headers())?;
         if response
             .content_length()
             .is_some_and(|length| length > self.config.max_media_bytes)
@@ -501,6 +502,22 @@ impl MediaGateway {
     }
 }
 
+fn reject_html_media(headers: &reqwest::header::HeaderMap) -> Result<(), MediaGatewayError> {
+    let is_html = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| {
+            let value = value.trim();
+            value.eq_ignore_ascii_case("text/html")
+                || value.eq_ignore_ascii_case("application/xhtml+xml")
+        });
+    if is_html {
+        return Err(MediaGatewayError::HtmlMediaResponse);
+    }
+    Ok(())
+}
+
 fn map_public_http_error(error: PublicHttpError) -> MediaGatewayError {
     match error {
         PublicHttpError::Url(error) => MediaGatewayError::PublicUrl(error),
@@ -535,7 +552,9 @@ fn resolve_feed_audio(
     bytes: &[u8],
     target_title: &str,
 ) -> Result<Option<String>, MediaGatewayError> {
-    let feed = feed_rs::parser::parse(bytes)
+    let normalized = crate::feed_document::preserve_direct_media_urls(bytes)
+        .map_err(|error| MediaGatewayError::Feed(error.to_string()))?;
+    let feed = feed_rs::parser::parse(normalized.as_slice())
         .map_err(|error| MediaGatewayError::Feed(error.to_string()))?;
     let target_normalized = normalized_title(target_title);
     let target_tokens = title_tokens(target_title);
@@ -907,6 +926,8 @@ pub enum MediaGatewayError {
     ResponseTooLarge { limit: u64 },
     #[error("media download exceeded the {limit}-byte limit")]
     MediaTooLarge { limit: u64 },
+    #[error("media URL returned an HTML page instead of audio")]
+    HtmlMediaResponse,
     #[error("media response was empty")]
     EmptyMedia,
     #[error("media file is missing")]
@@ -940,49 +961,4 @@ pub enum MediaGatewayError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        apple_show_id, decode_anchor_redirect, is_apple_podcasts_url, is_terminal_ytdlp_error,
-        is_youtube_url, media_extension, percent_decode,
-    };
-    use reqwest::Url;
-
-    #[test]
-    fn parses_apple_show_ids_and_audio_extensions() {
-        let url =
-            Url::parse("https://podcasts.apple.com/us/podcast/example/id123456789?i=1000123456789")
-                .unwrap();
-        assert_eq!(apple_show_id(&url).as_deref(), Some("123456789"));
-        assert!(is_apple_podcasts_url(url.as_str()));
-        assert_eq!(
-            media_extension("https://cdn.example.test/audio.M4A?x=1"),
-            "m4a"
-        );
-    }
-
-    #[test]
-    fn decodes_anchor_redirects_and_classifies_terminal_provider_errors() {
-        assert_eq!(
-            percent_decode("https%3A%2F%2Fcdn.example.test%2Faudio.mp3").unwrap(),
-            "https://cdn.example.test/audio.mp3"
-        );
-        assert_eq!(
-            decode_anchor_redirect(
-                "https://anchor.fm/s/show/https%3A%2F%2Fcdn.example.test%2Faudio.mp3"
-            )
-            .unwrap(),
-            "https://cdn.example.test/audio.mp3"
-        );
-        assert!(is_terminal_ytdlp_error("Video unavailable"));
-        assert!(!is_terminal_ytdlp_error("temporary network failure"));
-    }
-
-    #[test]
-    fn recognizes_only_supported_youtube_video_shapes() {
-        assert!(is_youtube_url("https://youtu.be/abc"));
-        assert!(is_youtube_url("https://www.youtube.com/watch?v=abc"));
-        assert!(is_youtube_url("https://youtube.com/shorts/abc"));
-        assert!(!is_youtube_url("https://youtube.com/channel/abc"));
-        assert!(!is_youtube_url("https://youtu.be/"));
-    }
-}
+mod tests;

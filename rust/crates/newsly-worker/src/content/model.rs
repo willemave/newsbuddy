@@ -74,7 +74,47 @@ pub(crate) struct FirecrawlUsage {
     pub(crate) request_id: String,
     pub(crate) url: String,
     pub(crate) status_code: u16,
+    pub(crate) credit_cost_usd: f64,
+    pub(crate) credits_used: Option<u64>,
+    pub(crate) num_pages: Option<u64>,
+    pub(crate) total_pages: Option<u64>,
+    pub(crate) scrape_id: Option<String>,
     pub(crate) cost_usd: Option<f64>,
+}
+
+impl FirecrawlUsage {
+    pub(crate) fn resource_count(&self) -> Option<i32> {
+        self.credits_used
+            .and_then(|credits| i32::try_from(credits).ok())
+    }
+
+    pub(crate) const fn pricing_version(&self) -> Option<&'static str> {
+        if self.cost_usd.is_some() {
+            Some("configured-per-credit-v2")
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn metadata(&self, news_item_id: Option<i64>) -> Value {
+        let mut metadata = serde_json::json!({
+            "url": self.url,
+            "status_code": self.status_code,
+            "unit": "credit",
+            "quantity": self.credits_used,
+            "credits_used": self.credits_used,
+            "configured_credit_cost_usd": self.credit_cost_usd,
+            "num_pages": self.num_pages,
+            "total_pages": self.total_pages,
+            "provider_scrape_id": self.scrape_id,
+            "credit_usage_basis": if self.credits_used.is_some() { "provider_reported" } else { "unknown" },
+            "cost_basis": if self.cost_usd.is_some() { "configured_rate" } else { "unknown" },
+        });
+        if let Some(id) = news_item_id {
+            metadata["news_item_id"] = Value::from(id);
+        }
+        metadata
+    }
 }
 
 #[derive(Debug, Clone)]

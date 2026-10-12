@@ -111,6 +111,8 @@ struct AssistantFeedOptionsSection: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
+                    publishingActivity(for: option)
+
                     actionRow(for: option)
                 }
                 .padding(12)
@@ -128,6 +130,11 @@ struct AssistantFeedOptionsSection: View {
 }
 
 private extension AssistantFeedOptionsSection {
+    func publishingActivity(for option: AssistantFeedOption) -> some View {
+        AssistantSourceActivityView(presentation: AssistantSourceActivityPresentation(activity: option.publishingActivity))
+            .accessibilityIdentifier("chat.feed.activity.\(option.id)")
+    }
+
     func actionRow(for option: AssistantFeedOption) -> some View {
         HStack(spacing: 8) {
             Button {
@@ -186,6 +193,51 @@ private extension AssistantFeedOptionsSection {
             return "\(status) \(option.title)"
         }
         return "Add \(option.title)"
+    }
+}
+
+private struct AssistantSourceActivityView: View {
+    let presentation: AssistantSourceActivityPresentation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let title = presentation.latestDisplayTitle {
+                if let url = presentation.latestURL {
+                    Link(destination: url) {
+                        Text(title)
+                            .foregroundStyle(Color.brandPrimary)
+                    }
+                    .accessibilityLabel("Open latest observed item: \(title)")
+                } else {
+                    Text(title).foregroundStyle(Color.onSurface)
+                }
+            } else {
+                Text("Latest item unavailable")
+            }
+
+            if let date = presentation.latestDate {
+                Text("\(presentation.latestDateLabel) · \(date.formatted(date: .abbreviated, time: .omitted))")
+            } else {
+                Text(presentation.latestDateLabel)
+            }
+
+            Text("\(presentation.quarterCountText) · \(presentation.yearCountText)")
+                .font(.appCaption.weight(.medium))
+                .foregroundStyle(Color.onSurface)
+
+            if let evidence = presentation.evidenceText {
+                Text(evidence)
+            }
+            if let undated = presentation.undatedText {
+                Text(undated)
+            }
+            if let activity = presentation.activity {
+                Text("As of \(activity.checkedAt.formatted(date: .abbreviated, time: .omitted))")
+            }
+        }
+        .font(.appCaption)
+        .foregroundStyle(Color.onSurfaceSecondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

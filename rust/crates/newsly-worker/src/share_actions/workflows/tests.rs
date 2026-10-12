@@ -48,6 +48,8 @@ fn add_feed_action_uses_the_host_validated_url_and_format() {
         effective_url: "https://this-week-in-rust.org/rss.xml".to_owned(),
         format: ValidatedFeedFormat::Rss,
         has_audio_entries: false,
+        publishing_activity: empty_activity(),
+        podcast_publishing_activity: empty_activity(),
     };
 
     let action = build_host_action(&snapshot, &result, Some(&validated))
@@ -112,6 +114,8 @@ fn add_to_briefing_feed_uses_host_validated_subscription_input() {
         effective_url: "https://example.test/canonical.xml".to_owned(),
         format: ValidatedFeedFormat::Rss,
         has_audio_entries: false,
+        publishing_activity: empty_activity(),
+        podcast_publishing_activity: empty_activity(),
     };
 
     let action = build_host_action(&snapshot("add_to_briefing"), &result, Some(&validated))
@@ -137,6 +141,8 @@ fn parsed_audio_evidence_wins_over_a_substack_host() {
         effective_url: "https://podcast.substack.com/feed".to_owned(),
         format: ValidatedFeedFormat::Rss,
         has_audio_entries: true,
+        publishing_activity: empty_activity(),
+        podcast_publishing_activity: empty_activity(),
     };
     assert_eq!(validated_scraper_type(&validated), "podcast_rss");
 }
@@ -161,11 +167,13 @@ fn snapshot(mode: &str) -> ShareActionAgentSnapshot {
 #[test]
 fn verified_sources_route_without_model_output_and_preserve_mode() {
     use newsly_providers::{ValidatedSharedItem, ValidatedSharedTarget};
-    let feed = ValidatedSharedTarget::Feed(ValidatedFeed {
+    let feed = ValidatedSharedTarget::Feed(Box::new(ValidatedFeed {
         effective_url: "https://example.test/feed".to_owned(),
         format: ValidatedFeedFormat::Rss,
         has_audio_entries: true,
-    });
+        publishing_activity: empty_activity(),
+        podcast_publishing_activity: empty_activity(),
+    }));
     let action = super::build_verified_source_action(&snapshot("add_to_briefing"), &feed).unwrap();
     assert_eq!(action.action_name, "add_to_briefing");
     let ShareActionHostInput::Briefing(super::BriefingActionInput::Feed(input)) =
@@ -187,4 +195,18 @@ fn verified_sources_route_without_model_output_and_preserve_mode() {
     assert_eq!(input.content_type.as_deref(), Some("podcast"));
     assert!(super::build_verified_source_action(&snapshot("add_feed"), &item).is_none());
     assert!(super::build_verified_source_action(&snapshot("presentation"), &feed).is_none());
+}
+
+fn empty_activity() -> newsly_providers::FeedPublishingActivity {
+    let checked_at = chrono::Utc::now();
+    newsly_providers::FeedPublishingActivity {
+        checked_at,
+        window_start: checked_at - chrono::Duration::days(90),
+        year_window_start: checked_at - chrono::Duration::days(365),
+        window_end: checked_at,
+        latest_item: None,
+        observed_count: None,
+        observed_year_count: None,
+        undated_count: 0,
+    }
 }

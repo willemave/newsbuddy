@@ -20,7 +20,7 @@ K9. Private deck links expire. Public sharing is explicit and remains available 
 
 K10. Deleting a deck cancels active generation, revokes access, and removes artifacts owned by that deck. Durable deletion succeeds even if immediate storage cleanup fails; recurring cleanup retries the artifacts without protecting them merely because the deleted deck still lists their keys.
 
-K11. Deck chat keeps the deck visible, uses the deck's identity, and remains secondary to the reading surface.
+K11. Deck chat keeps the deck visible, uses the deck's identity, and remains secondary to the reading surface. Its bottom bar and expanded composer both offer voice input. The composer and its actions remain reachable above the keyboard; collapsing chat dismisses text input. Dictated prompts follow the same durable send path as typed prompts, preserve any typed draft until submission, and recording stops when the reader closes or the app backgrounds.
 
 K12. Learning Deck generation may iterate within its execution deadline, with no application-level model-request or output-token ceiling. A high tool-call ceiling guards against runaway loops without truncating ordinary deck generation. The execution deadline, artifact size and contract checks, and browser validation remain mandatory safeguards.
 

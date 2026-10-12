@@ -7,6 +7,7 @@ struct BriefingSegmentHeadline: Equatable {
     let title: String
     let publisher: String?
     let meta: String
+    let createdAt: Date
 
     init?(segment: APIBriefingSegment, sourcesByKey: [String: APIBriefingSource]) {
         guard segment.sourceKeys.count == 1,
@@ -27,6 +28,7 @@ struct BriefingSegmentHeadline: Equatable {
         self.sourceKey = source.sourceKey
         self.title = title
         self.publisher = source.publisher.flatMap(Self.publisherName)
+        self.createdAt = segment.createdAt
     }
 
     /// Feed titles often append a tagline ("Show — Interviews", "Blog | Network");
@@ -57,25 +59,32 @@ struct BriefingSegmentHeadlineView: View {
     let segmentID: Int
     let onOpenSource: (String) -> Void
 
+    private var timestamp: String {
+        headline.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    }
+
     var body: some View {
         Button {
             onOpenSource(headline.sourceKey)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    if let publisher = headline.publisher {
-                        Text(publisher.uppercased())
-                            .font(.editorialMeta)
-                            .tracking(1.6)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        publisher
                         Spacer(minLength: 0)
+                        details
+                        timestampText
                     }
+                    .fixedSize(horizontal: true, vertical: false)
 
-                    Text(headline.meta)
-                        .font(.appFootnote)
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                        .fixedSize()
+                    VStack(alignment: .leading, spacing: 5) {
+                        publisher
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            details
+                            Spacer(minLength: 0)
+                            timestampText
+                        }
+                    }
                 }
                 .padding(.bottom, 7)
 
@@ -93,13 +102,39 @@ struct BriefingSegmentHeadlineView: View {
         .buttonStyle(BriefingHeadlineButtonStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            [headline.title, headline.publisher, headline.meta]
+            [headline.title, headline.publisher, headline.meta, timestamp]
                 .compactMap { $0 }
                 .joined(separator: ", ")
         )
         .accessibilityHint("Opens the full source")
         .accessibilityAddTraits([.isHeader, .isLink])
         .accessibilityIdentifier("briefing.segment_headline.\(segmentID)")
+    }
+
+    @ViewBuilder
+    private var publisher: some View {
+        if let publisher = headline.publisher {
+            Text(publisher.uppercased())
+                .font(.editorialMeta)
+                .tracking(1.6)
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var details: some View {
+        Text(headline.meta)
+            .font(.appFootnote)
+            .foregroundStyle(Color.onSurfaceTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var timestampText: some View {
+        Text(timestamp)
+            .font(.appFootnote)
+            .foregroundStyle(Color.onSurfaceTertiary)
+            .monospacedDigit()
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

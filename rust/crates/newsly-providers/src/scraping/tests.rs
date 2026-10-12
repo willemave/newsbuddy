@@ -109,6 +109,48 @@ fn podcast_feed_normalization_keeps_audio_and_episode_identity() {
 }
 
 #[test]
+fn podcast_feed_uses_audio_enclosure_instead_of_nested_html_player() {
+    let document = br#"<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+      <channel><title>Planetary Radio</title><item>
+        <guid isPermaLink="false">episode</guid><title>NIAC symposium</title>
+        <link>https://omny.fm/shows/planetary-radio/episode</link>
+        <media:content url="https://traffic.omny.fm/episode/audio.mp3" type="audio/mpeg">
+          <media:player url="https://omny.fm/shows/planetary-radio/episode/embed?media=Audio"/>
+        </media:content>
+        <enclosure url="https://traffic.omny.fm/episode/audio.mp3" type="audio/mpeg"/>
+      </item></channel></rss>"#;
+    let outcome = normalize_feed_document(&podcast_target(), document).unwrap();
+    let [ScrapedItem::Content(item)] = outcome.items.as_slice() else {
+        panic!("expected one episode: {outcome:#?}");
+    };
+    assert_eq!(
+        item.metadata["audio_url"],
+        "https://traffic.omny.fm/episode/audio.mp3"
+    );
+    assert_eq!(item.url, "https://omny.fm/shows/planetary-radio/episode");
+}
+
+#[test]
+fn podcast_feed_uses_media_content_without_enclosure_instead_of_player() {
+    let document = br#"<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+      <channel><title>Planetary Radio</title><item>
+        <guid isPermaLink="false">episode</guid><title>NIAC symposium</title>
+        <link>https://omny.fm/shows/planetary-radio/episode</link>
+        <media:content url="https://traffic.omny.fm/episode/audio.mp3" type="audio/mpeg">
+          <media:player url="https://omny.fm/shows/planetary-radio/episode/embed?media=Audio"/>
+        </media:content>
+      </item></channel></rss>"#;
+    let outcome = normalize_feed_document(&podcast_target(), document).unwrap();
+    let [ScrapedItem::Content(item)] = outcome.items.as_slice() else {
+        panic!("expected one episode: {outcome:#?}");
+    };
+    assert_eq!(
+        item.metadata["audio_url"],
+        "https://traffic.omny.fm/episode/audio.mp3"
+    );
+}
+
+#[test]
 fn podcast_feed_uses_unique_enclosures_when_entries_share_a_homepage() {
     let document = br#"<rss version="2.0">
         <channel>

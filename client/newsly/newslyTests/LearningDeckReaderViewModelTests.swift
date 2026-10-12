@@ -10,6 +10,189 @@ private func makeActiveLifecycle() -> AppLifecycle {
 
 @MainActor
 final class LearningDeckReaderViewModelTests: XCTestCase {
+    func testManualVoiceStopSendsTranscriptThroughDeckChat() async {
+        let transcriptionService = DeckSpeechTranscriber(transcript: "Explain this diagram")
+        let chatService = makeVoiceChatService()
+        let viewModel = makeVoiceViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+
+        await viewModel.toggleVoiceRecording()
+
+        XCTAssertEqual(viewModel.voiceState, .recording)
+        XCTAssertTrue(viewModel.isVoiceRecording)
+
+        await viewModel.toggleVoiceRecording()
+
+        let didSend = await waitUntil {
+            chatService.createdTurns.map(\.message) == ["Explain this diagram"]
+        }
+        XCTAssertTrue(didSend)
+        XCTAssertEqual(viewModel.voiceState, .idle)
+        XCTAssertEqual(transcriptionService.stopCallCount, 1)
+    }
+
+    func testVoiceTranscriptCombinesWithExistingDraftAfterRecording() async {
+        let transcriptionService = DeckSpeechTranscriber(transcript: "and why it matters")
+        let chatService = makeVoiceChatService()
+        let viewModel = makeVoiceViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+        viewModel.inputText = "Explain the sampling step"
+
+        await viewModel.toggleVoiceRecording()
+
+        XCTAssertEqual(viewModel.inputText, "Explain the sampling step")
+
+        await viewModel.toggleVoiceRecording()
+
+        let didSend = await waitUntil {
+            chatService.createdTurns.map(\.message)
+                == ["Explain the sampling step and why it matters"]
+        }
+        XCTAssertTrue(didSend)
+        XCTAssertEqual(
+            chatService.createdTurns.map(\.message),
+            ["Explain the sampling step and why it matters"]
+        )
+        XCTAssertEqual(viewModel.inputText, "")
+    }
+
+    func testVoiceCanStartAgainWhilePreviousReplyIsPending() async {
+        let replyGate = AsyncGate()
+        let transcriptionService = DeckSpeechTranscriber(transcript: "First voice question")
+        let chatService = MockLearningDeckReaderChatService(
+            createAssistantTurnHandler: { message, _, _ in
+                Self.assistantTurnResponse(message: message)
+            },
+            messageStatusHandler: { messageId in
+                await replyGate.wait()
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Assistant reply",
+                        status: .completed
+                    )
+                )
+            }
+        )
+        let viewModel = makeVoiceViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+
+        await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
+        let didStartReply = await waitUntil {
+            chatService.messageStatusCallCount > 0 && viewModel.isSending
+        }
+
+        await viewModel.toggleVoiceRecording()
+
+        XCTAssertTrue(didStartReply)
+        XCTAssertTrue(viewModel.isVoiceRecording)
+        XCTAssertFalse(viewModel.isVoiceActionInFlight)
+
+        viewModel.handleDisappear()
+        await replyGate.open()
+    }
+
+    func testSilenceAutoStopSendsDeckVoiceTranscript() async {
+        let transcriptionService = DeckSpeechTranscriber(transcript: "Auto stopped question")
+        let chatService = makeVoiceChatService()
+        let viewModel = makeVoiceViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+
+        await viewModel.toggleVoiceRecording()
+        await transcriptionService.completeAutomatically(reason: .silenceAutoStop)
+        let didSend = await waitUntil {
+            chatService.createdTurns.map(\.message) == ["Auto stopped question"]
+        }
+
+        XCTAssertTrue(didSend)
+        XCTAssertEqual(viewModel.voiceState, .idle)
+        XCTAssertEqual(transcriptionService.stopCallCount, 0)
+    }
+
+    func testReaderExitCancelsVoiceAndRejectsLateTranscript() async {
+        let transcriptionService = DeckSpeechTranscriber(transcript: "Must not send")
+        let chatService = makeVoiceChatService()
+        let viewModel = makeVoiceViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+        viewModel.inputText = "Keep this draft"
+
+        await viewModel.toggleVoiceRecording()
+        viewModel.handleDisappear()
+        await transcriptionService.completeAutomatically(reason: .silenceAutoStop)
+        await Task.yield()
+
+        XCTAssertEqual(viewModel.voiceState, .idle)
+        XCTAssertEqual(transcriptionService.cancelCallCount, 1)
+        XCTAssertEqual(viewModel.inputText, "Keep this draft")
+        XCTAssertTrue(chatService.createdTurns.isEmpty)
+    }
+
+    func testBackgroundCancelsActiveDeckVoiceRecording() async {
+        let lifecycle = makeActiveLifecycle()
+        let transcriptionService = DeckSpeechTranscriber(transcript: "Must not send")
+        let chatService = makeVoiceChatService()
+        let viewModel = makeVoiceViewModel(
+            lifecycle: lifecycle,
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+
+        await viewModel.toggleVoiceRecording()
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+        lifecycle.record(.background)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+
+        XCTAssertEqual(viewModel.voiceState, .idle)
+        XCTAssertEqual(transcriptionService.cancelCallCount, 1)
+        XCTAssertTrue(chatService.createdTurns.isEmpty)
+    }
+
+    func testBackgroundDuringManualTranscriptionRejectsDelayedTranscript() async {
+        let lifecycle = makeActiveLifecycle()
+        let stopGate = AsyncGate()
+        let transcriptionService = DeckSpeechTranscriber(
+            transcript: "Delayed transcript",
+            stopGate: stopGate
+        )
+        let chatService = makeVoiceChatService()
+        let viewModel = makeVoiceViewModel(
+            lifecycle: lifecycle,
+            chatService: chatService,
+            transcriptionService: transcriptionService
+        )
+        viewModel.inputText = "Keep this draft"
+
+        await viewModel.toggleVoiceRecording()
+        let stopTask = Task { await viewModel.toggleVoiceRecording() }
+        let didStartTranscribing = await waitUntil { viewModel.isVoiceTranscribing }
+
+        lifecycle.record(.background)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+        await stopGate.open()
+        await stopTask.value
+
+        XCTAssertTrue(didStartTranscribing)
+        XCTAssertEqual(viewModel.voiceState, .idle)
+        XCTAssertEqual(viewModel.inputText, "Keep this draft")
+        XCTAssertTrue(chatService.createdTurns.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testHandleDisappearKeepsPreAckSendAliveAndResumesPollingAfterAppear() async {
         let ackGate = AsyncGate()
         let chatService = MockLearningDeckReaderChatService(
@@ -36,7 +219,8 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService(client: makeTestAPIClient())
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: TestUnavailableSpeechTranscriber()
         )
 
         viewModel.performSendMessage(text: "Hello deck")
@@ -86,7 +270,8 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService(client: makeTestAPIClient())
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: TestUnavailableSpeechTranscriber()
         )
 
         viewModel.performSendMessage(text: "Keep this")
@@ -131,7 +316,8 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService(client: makeTestAPIClient())
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: TestUnavailableSpeechTranscriber()
         )
 
         viewModel.performSendMessage(text: "Keep polling")
@@ -184,7 +370,8 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService(client: makeTestAPIClient())
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: TestUnavailableSpeechTranscriber()
         )
 
         viewModel.performSendMessage(text: "One deck send")
@@ -263,7 +450,8 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
-            deckService: LearningDeckService(client: makeTestAPIClient())
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: TestUnavailableSpeechTranscriber()
         )
 
         viewModel.performSendMessage(text: "First")
@@ -337,7 +525,8 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: registry,
-            deckService: LearningDeckService(client: makeTestAPIClient())
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: TestUnavailableSpeechTranscriber()
         )
 
         viewModel.performSendMessage(text: "Explain this")
@@ -376,6 +565,42 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             latestRun: nil,
             createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
             updatedAt: nil
+        )
+    }
+
+    private func makeVoiceViewModel(
+        lifecycle: AppLifecycle? = nil,
+        chatService: MockLearningDeckReaderChatService,
+        transcriptionService: DeckSpeechTranscriber
+    ) -> LearningDeckReaderViewModel {
+        LearningDeckReaderViewModel(
+            lifecycle: lifecycle ?? makeActiveLifecycle(),
+            deck: Self.deck(),
+            chatService: chatService,
+            messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
+            deckService: LearningDeckService(client: makeTestAPIClient()),
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+    }
+
+    private func makeVoiceChatService() -> MockLearningDeckReaderChatService {
+        MockLearningDeckReaderChatService(
+            createAssistantTurnHandler: { message, _, _ in
+                Self.assistantTurnResponse(message: message)
+            },
+            messageStatusHandler: { messageId in
+                MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Assistant reply",
+                        status: .completed
+                    )
+                )
+            }
         )
     }
 
@@ -465,6 +690,76 @@ private final class MockLearningDeckReaderChatService: LearningDeckReaderChatSer
     func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
         messageStatusCallCount += 1
         return try await messageStatusHandler(messageId)
+    }
+}
+
+@MainActor
+private final class DeckSpeechTranscriber: SpeechTranscribing {
+    var isAvailable = true
+    private(set) var stopCallCount = 0
+    private(set) var cancelCallCount = 0
+
+    private let transcript: String
+    private let stopGate: AsyncGate?
+    private var activeSessionID: UUID?
+    private var continuation: AsyncStream<SpeechTranscriptionEvent>.Continuation?
+
+    init(transcript: String, stopGate: AsyncGate? = nil) {
+        self.transcript = transcript
+        self.stopGate = stopGate
+    }
+
+    func makeSession(
+        deadlines: SpeechRecordingDeadlines
+    ) throws -> SpeechTranscriptionSession {
+        _ = deadlines
+        guard activeSessionID == nil else { throw VoiceDictationError.sessionBusy }
+        let sessionID = UUID()
+        let pair = AsyncStream<SpeechTranscriptionEvent>.makeStream()
+        activeSessionID = sessionID
+        continuation = pair.continuation
+        return SpeechTranscriptionSession(
+            id: sessionID,
+            events: pair.stream,
+            start: { [weak self] id in
+                guard let self, self.activeSessionID == id else {
+                    throw VoiceDictationError.noActiveSession
+                }
+                self.continuation?.yield(.stateChange(.recording))
+            },
+            stop: { [weak self] id in
+                guard let self, self.activeSessionID == id else {
+                    throw VoiceDictationError.noActiveSession
+                }
+                if let stopGate = self.stopGate {
+                    await stopGate.wait()
+                }
+                self.stopCallCount += 1
+                let transcript = self.transcript
+                self.releaseSession()
+                return transcript
+            },
+            cancel: { [weak self] id in
+                guard let self, self.activeSessionID == id else { return }
+                self.cancelCallCount += 1
+                self.releaseSession()
+            }
+        )
+    }
+
+    func completeAutomatically(reason: SpeechStopReason) async {
+        continuation?.yield(.stateChange(.transcribing))
+        continuation?.yield(.transcriptFinal(transcript))
+        continuation?.yield(.stateChange(.idle))
+        continuation?.yield(.stopReason(reason))
+        releaseSession()
+        await Task.yield()
+    }
+
+    private func releaseSession() {
+        activeSessionID = nil
+        continuation?.finish()
+        continuation = nil
     }
 }
 

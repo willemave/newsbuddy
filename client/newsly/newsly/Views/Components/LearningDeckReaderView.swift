@@ -7,8 +7,8 @@ import SwiftUI
 import UIKit
 
 private enum LearningDeckReaderLayout {
-    static let flyoverHorizontalInset: CGFloat = 12
-    static let flyoverBottomInset: CGFloat = 8
+    static let flyoverHorizontalInset: CGFloat = 16
+    static let flyoverBottomInset: CGFloat = 10
     static let landscapeHorizontalSafeReserve: CGFloat = 76
 }
 
@@ -47,6 +47,7 @@ struct LearningDeckReaderView: View {
 private struct LearningDeckReaderContent: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private let lifecycle: AppLifecycle
     private let deck: LearningDeck
@@ -88,7 +89,8 @@ private struct LearningDeckReaderContent: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let isLandscape = geometry.size.width > geometry.size.height
+            // The keyboard shrinks geometry without changing the phone's orientation.
+            let isLandscape = verticalSizeClass == .compact
 
             Group {
                 if let url = viewModel.resolvedViewerURL {
@@ -150,7 +152,10 @@ private struct LearningDeckReaderContent: View {
     }
 
     private func portraitChatFlyover(geometry: GeometryProxy) -> some View {
-        LearningDeckChatFlyover(
+        let bottomInset = containerBottomInset
+        let keyboardIsPresented = geometry.safeAreaInsets.bottom > bottomInset
+
+        return LearningDeckChatFlyover(
             viewModel: viewModel,
             feedOptionActionModel: feedOptionActionModel,
             presentation: $portraitChatPresentation
@@ -173,7 +178,8 @@ private struct LearningDeckReaderContent: View {
         .padding(.horizontal, LearningDeckReaderLayout.flyoverHorizontalInset)
         .padding(
             .bottom,
-            max(geometry.safeAreaInsets.bottom, LearningDeckReaderLayout.flyoverBottomInset)
+            (keyboardIsPresented ? 0 : min(geometry.safeAreaInsets.bottom, bottomInset))
+                + LearningDeckReaderLayout.flyoverBottomInset
         )
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
@@ -455,5 +461,13 @@ private struct LearningDeckReaderContent: View {
             .compactMap { ($0 as? UIWindowScene)?.keyWindow }
             .first?.safeAreaInsets.top ?? 0
         return max(inset, 50) + 6
+    }
+
+    private var containerBottomInset: CGFloat {
+        // Geometry's bottom safe area can include the keyboard. Its height has
+        // already reduced the reader's available frame; don't apply it twice.
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+            .first?.safeAreaInsets.bottom ?? 0
     }
 }

@@ -7,7 +7,8 @@ use newsly_extraction::PublicUrl;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
@@ -18,7 +19,7 @@ pub struct FirecrawlClient {
     endpoint: Url,
     api_key: Option<SecretString>,
     http: Client,
-    cost_usd: f64,
+    credit_cost_usd: f64,
 }
 
 impl Debug for FirecrawlClient {
@@ -27,18 +28,24 @@ impl Debug for FirecrawlClient {
             .debug_struct("FirecrawlClient")
             .field("endpoint", &self.endpoint)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
-            .field("cost_usd", &self.cost_usd)
+            .field("credit_cost_usd", &self.credit_cost_usd)
             .finish_non_exhaustive()
     }
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct FirecrawlResult {
-    pub(super) final_url: PublicUrl,
-    pub(super) markdown: String,
+    pub(super) final_url: String,
+    pub(super) markdown: Option<String>,
+    pub(super) error: Option<String>,
     pub(super) title: Option<String>,
     pub(super) published_at: Option<DateTime<Utc>>,
     pub(super) status_code: u16,
+    pub(super) credit_cost_usd: f64,
+    pub(super) credits_used: Option<u64>,
+    pub(super) num_pages: Option<u64>,
+    pub(super) total_pages: Option<u64>,
+    pub(super) scrape_id: Option<String>,
     pub(super) cost_usd: Option<f64>,
 }
 
@@ -53,7 +60,7 @@ impl FirecrawlClient {
         endpoint: Url,
         api_key: Option<SecretString>,
         timeout: Duration,
-        cost_usd: f64,
+        credit_cost_usd: f64,
     ) -> Result<Self, FirecrawlError> {
         if !matches!(endpoint.scheme(), "http" | "https")
             || endpoint.host().is_none()
@@ -81,7 +88,7 @@ impl FirecrawlClient {
             endpoint,
             api_key,
             http,
-            cost_usd,
+            credit_cost_usd,
         })
     }
 
@@ -134,46 +141,62 @@ impl FirecrawlClient {
             }
             body.extend_from_slice(&chunk);
         }
-        let payload: FirecrawlResponse = serde_json::from_slice(&body)
-            .map_err(|source| FirecrawlError::InvalidResponse { status, source })?;
-        let data = payload.data.unwrap_or_default();
-        if !status.is_success() {
-            return Err(FirecrawlError::HttpStatus {
-                status,
-                message: bounded_message(payload.error.or(data.error)),
-            });
+        parse_response(status, &body, url, self.credit_cost_usd)
+    }
+}
+
+// Keep observed billing even when downstream content/URL validation rejects the response.
+fn parse_response(
+    status: StatusCode,
+    body: &[u8],
+    url: &PublicUrl,
+    credit_cost_usd: f64,
+) -> Result<FirecrawlResult, FirecrawlError> {
+    let payload: FirecrawlResponse = serde_json::from_slice(body)
+        .map_err(|source| FirecrawlError::InvalidResponse { status, source })?;
+    let data = payload.data.unwrap_or_default();
+    let metadata = data.metadata.unwrap_or_default();
+    let credits_used = metadata
+        .credits_used
+        .or(data.credits_used)
+        .or(payload.credits_used);
+    let cost_usd = credits_used.and_then(|credits| {
+        if credits == 0 {
+            return Some(0.0);
         }
-        let markdown = data
+        let cost = credits as f64 * credit_cost_usd;
+        (credit_cost_usd.is_finite() && credit_cost_usd > 0.0 && cost.is_finite()).then_some(cost)
+    });
+    let error = if !status.is_success() || payload.success == Some(false) {
+        Some(bounded_message(payload.error.or(data.error)))
+    } else {
+        None
+    };
+    Ok(FirecrawlResult {
+        final_url: metadata.source_url.unwrap_or_else(|| url.to_string()),
+        markdown: data
             .markdown
             .filter(|value| !value.trim().is_empty())
-            .ok_or(FirecrawlError::EmptyMarkdown)?
-            .trim()
-            .to_owned();
-        let metadata = data.metadata.unwrap_or_default();
-        let final_url = match metadata.source_url {
-            Some(candidate) => {
-                PublicUrl::parse(candidate.trim()).map_err(FirecrawlError::PublicUrl)?
-            }
-            None => url.clone(),
-        };
-        final_url
-            .validate_dns()
-            .await
-            .map_err(FirecrawlError::PublicUrl)?;
-        let published_at = metadata
+            .map(|value| value.trim().to_owned()),
+        error,
+        title: clean_optional(metadata.title, 500),
+        published_at: metadata
             .published_time
             .as_deref()
             .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .map(|value| value.with_timezone(&Utc));
-        Ok(FirecrawlResult {
-            final_url,
-            markdown,
-            title: clean_optional(metadata.title, 500),
-            published_at,
-            status_code: status.as_u16(),
-            cost_usd: Some(self.cost_usd),
-        })
-    }
+            .map(|value| value.with_timezone(&Utc)),
+        status_code: status.as_u16(),
+        credit_cost_usd,
+        credits_used,
+        num_pages: metadata.num_pages,
+        total_pages: metadata.total_pages,
+        scrape_id: metadata.scrape_id,
+        cost_usd,
+    })
+}
+
+fn optional_counter<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+    Ok(Option::<Value>::deserialize(deserializer)?.and_then(|value| value.as_u64()))
 }
 
 fn bounded_message(message: Option<String>) -> String {
@@ -210,6 +233,10 @@ struct FirecrawlLocation {
 #[derive(Debug, Default, Deserialize)]
 struct FirecrawlResponse {
     #[serde(default)]
+    success: Option<bool>,
+    #[serde(default, rename = "creditsUsed", deserialize_with = "optional_counter")]
+    credits_used: Option<u64>,
+    #[serde(default)]
     data: Option<FirecrawlData>,
     #[serde(default)]
     error: Option<String>,
@@ -217,6 +244,8 @@ struct FirecrawlResponse {
 
 #[derive(Debug, Default, Deserialize)]
 struct FirecrawlData {
+    #[serde(default, rename = "creditsUsed", deserialize_with = "optional_counter")]
+    credits_used: Option<u64>,
     #[serde(default)]
     markdown: Option<String>,
     #[serde(default)]
@@ -228,6 +257,14 @@ struct FirecrawlData {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FirecrawlMetadata {
+    #[serde(default, deserialize_with = "optional_counter")]
+    credits_used: Option<u64>,
+    #[serde(default, deserialize_with = "optional_counter")]
+    num_pages: Option<u64>,
+    #[serde(default, deserialize_with = "optional_counter")]
+    total_pages: Option<u64>,
+    #[serde(default)]
+    scrape_id: Option<String>,
     #[serde(default)]
     title: Option<String>,
     #[serde(default, rename = "sourceURL")]
@@ -278,3 +315,6 @@ impl FirecrawlError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

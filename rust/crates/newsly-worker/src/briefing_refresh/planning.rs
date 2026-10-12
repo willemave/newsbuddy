@@ -1,9 +1,12 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
+use std::time::Instant;
 
-use newsly_db::BriefingRefreshSource;
+use newsly_db::{BriefingRefreshSource, news_lens_embeddings};
 use newsly_providers::{BriefingCompositionGateway, BriefingEmbeddingBatch};
 use regex::Regex;
+use sqlx::PgPool;
+use tracing::Instrument;
 
 const MATCH_STOPWORDS: [&str; 20] = [
     "about", "after", "against", "along", "also", "amid", "been", "between", "from", "have",
@@ -25,6 +28,7 @@ pub(super) struct PlannedBriefingWindows {
 }
 
 pub(super) async fn plan_windows(
+    pool: &PgPool,
     gateway: &BriefingCompositionGateway,
     sources: &[BriefingRefreshSource],
     tier: &str,
@@ -32,6 +36,90 @@ pub(super) async fn plan_windows(
     event_similarity: f64,
     embedding_batch_size: usize,
 ) -> PlannedBriefingWindows {
+    let cached = if tier == "news" && sources.len() > 1 {
+        match cached_news_vectors(pool, sources, gateway.embedding_model()).await {
+            Ok(vectors) => vectors,
+            Err(error) => {
+                tracing::warn!(source_count = sources.len(), error = %error,
+                    "Briefing event embedding cache unavailable; requesting missing vectors");
+                vec![None; sources.len()]
+            }
+        }
+    } else {
+        vec![None; sources.len()]
+    };
+    plan_windows_with_embeddings(
+        sources,
+        tier,
+        news_window_max,
+        event_similarity,
+        embedding_batch_size,
+        cached,
+        |texts| async move { gateway.embed(&texts).await },
+    )
+    .await
+}
+
+// The cache owns model, exact-input, encoder, and vector validation. No connection
+// remains checked out during external requests.
+async fn cached_news_vectors(
+    pool: &PgPool,
+    sources: &[BriefingRefreshSource],
+    model: &str,
+) -> Result<Vec<Option<Vec<f64>>>, sqlx::Error> {
+    let started = Instant::now();
+    let work = async {
+        let mut connection = pool.acquire().await?;
+        let mut vectors = Vec::with_capacity(sources.len());
+        for source in sources {
+            vectors.push(if source.kind == "news" {
+                news_lens_embeddings::load(
+                    &mut connection,
+                    source.id,
+                    model,
+                    &source.embedding_text(),
+                )
+                .await?
+            } else {
+                None
+            });
+        }
+        Ok::<_, sqlx::Error>(vectors)
+    };
+    let result = work
+        .instrument(tracing::info_span!(
+            "briefing_event_cache_load",
+            source_count = sources.len(),
+            model
+        ))
+        .await;
+    tracing::info!(
+        stage = "briefing_event_cache_load",
+        source_count = sources.len(),
+        cache_hits = result
+            .as_ref()
+            .map_or(0, |vectors| vectors.iter().filter(|v| v.is_some()).count()),
+        elapsed_ms = started.elapsed().as_millis(),
+        succeeded = result.is_ok(),
+        "Briefing event planning timing"
+    );
+    result
+}
+
+async fn plan_windows_with_embeddings<F, Fut, E>(
+    sources: &[BriefingRefreshSource],
+    tier: &str,
+    news_window_max: usize,
+    event_similarity: f64,
+    embedding_batch_size: usize,
+    mut cached: Vec<Option<Vec<f64>>>,
+    embed: F,
+) -> PlannedBriefingWindows
+where
+    F: Fn(Vec<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<BriefingEmbeddingBatch, E>>,
+    E: std::fmt::Display,
+{
     if sources.is_empty() {
         return PlannedBriefingWindows {
             windows: Vec::new(),
@@ -51,32 +139,60 @@ pub(super) async fn plan_windows(
             embedding_batches: Vec::new(),
         };
     }
-
+    if cached.len() != sources.len() {
+        cached = vec![None; sources.len()];
+    }
     let mut embedding_batches = Vec::new();
-    let mut vectors = Vec::with_capacity(sources.len());
     if sources.len() > 1 {
-        for chunk in sources.chunks(embedding_batch_size.clamp(1, 128)) {
-            let texts = chunk
+        let missing: Vec<_> = cached
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| v.is_none().then_some(i))
+            .collect();
+        for indices in missing.chunks(embedding_batch_size.clamp(1, 128)) {
+            let texts = indices
                 .iter()
-                .map(BriefingRefreshSource::embedding_text)
-                .collect::<Vec<_>>();
-            match gateway.embed(&texts).await {
+                .map(|index| sources[*index].embedding_text())
+                .collect();
+            let started = Instant::now();
+            let result = embed(texts)
+                .instrument(tracing::info_span!(
+                    "briefing_event_embedding_request",
+                    source_count = indices.len()
+                ))
+                .await;
+            tracing::info!(
+                stage = "briefing_event_embedding_request",
+                source_count = indices.len(),
+                elapsed_ms = started.elapsed().as_millis(),
+                succeeded = result.is_ok(),
+                "Briefing event planning timing"
+            );
+            match result {
                 Ok(batch) => {
-                    vectors.extend(batch.vectors.iter().cloned());
+                    let valid_shape = batch.vectors.len() == indices.len();
+                    if valid_shape {
+                        for (index, vector) in indices.iter().zip(&batch.vectors) {
+                            cached[*index] = Some(vector.clone());
+                        }
+                    }
+                    // Only fresh provider calls carry usage, including an invalid result.
                     embedding_batches.push(batch);
+                    if !valid_shape {
+                        cached.clear();
+                        break;
+                    }
                 }
                 Err(error) => {
-                    tracing::warn!(
-                        source_count = sources.len(),
-                        error = %error,
-                        "Briefing event embeddings failed; preserving source arrival order"
-                    );
-                    vectors.clear();
+                    tracing::warn!(source_count=sources.len(), error=%error,
+                        "Briefing event embeddings failed; preserving source arrival order");
+                    cached.clear();
                     break;
                 }
             }
         }
     }
+    let vectors: Vec<_> = cached.into_iter().flatten().collect();
     let events = if vectors.len() == sources.len() && dimensions_match(&vectors) {
         group_news_sources(sources, &vectors, event_similarity)
     } else {
@@ -231,52 +347,4 @@ fn normalized_mean(indexes: &[usize], vectors: &[Vec<f64>]) -> Vec<f64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn source(id: i64, title: &str) -> BriefingRefreshSource {
-        BriefingRefreshSource {
-            source_key: format!("news:{id}"),
-            kind: "news".to_owned(),
-            id,
-            title: title.to_owned(),
-            source_name: None,
-            summary: None,
-            key_points: Vec::new(),
-            url: None,
-            image_url: None,
-            thumbnail_url: None,
-            published_at: None,
-            briefing_context: None,
-        }
-    }
-
-    #[test]
-    fn event_grouping_requires_similarity_and_a_distinctive_title_token() {
-        let sources = vec![
-            source(1, "Orbit launch succeeds"),
-            source(2, "Orbit launch reaches space"),
-            source(3, "Markets rally sharply"),
-        ];
-        let vectors = vec![vec![1.0, 0.0], vec![0.99, 0.01], vec![1.0, 0.0]];
-        assert_eq!(
-            group_news_sources(&sources, &vectors, 0.78),
-            vec![vec![0, 1], vec![2]]
-        );
-    }
-
-    #[test]
-    fn event_windows_are_balanced_without_splitting_events() {
-        let events = (0..9).map(|index| vec![index]).collect::<Vec<_>>();
-        let windows = balance_event_windows(&events, 4);
-        assert_eq!(windows.iter().map(Vec::len).collect::<Vec<_>>(), [3, 3, 3]);
-    }
-
-    #[test]
-    fn match_tokens_follow_the_persisted_stemming_contract() {
-        assert_eq!(
-            match_tokens("Launching rockets after tests"),
-            BTreeSet::from(["launch".to_owned(), "rocket".to_owned(), "test".to_owned()])
-        );
-    }
-}
+mod tests;

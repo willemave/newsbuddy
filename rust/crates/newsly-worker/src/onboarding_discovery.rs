@@ -8,8 +8,8 @@ use newsly_db::{
     settle_onboarding_discovery_attempt,
 };
 use newsly_providers::{
-    FeedValidationError, FeedValidator, OnboardingAudioLane, OnboardingDiscoverySeeds,
-    OnboardingGateway, OnboardingLaneTarget, OnboardingSuggestionSeed,
+    FeedPublishingActivity, FeedValidationError, FeedValidator, OnboardingAudioLane,
+    OnboardingDiscoverySeeds, OnboardingGateway, OnboardingLaneTarget, OnboardingSuggestionSeed,
 };
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
@@ -266,6 +266,21 @@ pub(crate) async fn normalize_seeds(
     profile_summary: &str,
     inferred_topics: &[String],
 ) -> Result<Vec<NewOnboardingSuggestion>, FeedValidationError> {
+    Ok(
+        normalize_seeds_with_activity(validator, seeds, profile_summary, inferred_topics)
+            .await?
+            .into_iter()
+            .map(|(suggestion, _)| suggestion)
+            .collect(),
+    )
+}
+
+pub(crate) async fn normalize_seeds_with_activity(
+    validator: &FeedValidator,
+    seeds: OnboardingDiscoverySeeds,
+    profile_summary: &str,
+    inferred_topics: &[String],
+) -> Result<Vec<(NewOnboardingSuggestion, Option<FeedPublishingActivity>)>, FeedValidationError> {
     let mut output = Vec::new();
     let mut validation_failures = normalize_feed_seeds(
         validator,
@@ -288,12 +303,14 @@ pub(crate) async fn normalize_seeds(
         .await,
     );
     let validated_feed_count = output.len();
+    let mut subreddits = Vec::new();
     normalize_subreddits(
         seeds.subreddits,
         profile_summary,
         inferred_topics,
-        &mut output,
+        &mut subreddits,
     );
+    output.extend(subreddits.into_iter().map(|suggestion| (suggestion, None)));
     if validated_feed_count == 0
         && let Some(error) = validation_failures.into_iter().next()
     {
@@ -308,7 +325,7 @@ async fn normalize_feed_seeds(
     suggestion_type: &str,
     profile_summary: &str,
     inferred_topics: &[String],
-    output: &mut Vec<NewOnboardingSuggestion>,
+    output: &mut Vec<(NewOnboardingSuggestion, Option<FeedPublishingActivity>)>,
 ) -> Vec<FeedValidationError> {
     let mut seen = HashSet::new();
     let mut requested = HashSet::new();
@@ -346,7 +363,7 @@ async fn normalize_feed_seeds(
     for ((title, rationale, score, site_url, candidate), validation) in
         candidates.into_iter().zip(validations)
     {
-        let Some(feed_url) = (match validation {
+        let Some(validated) = (match validation {
             Ok(Some(validated))
                 if suggestion_type == "podcast_rss" && !validated.has_audio_entries =>
             {
@@ -357,7 +374,7 @@ async fn normalize_feed_seeds(
                 without_audio += 1;
                 None
             }
-            Ok(Some(validated)) => Some(validated.effective_url),
+            Ok(Some(validated)) => Some(validated),
             Ok(None) => {
                 tracing::info!(url = %candidate, "onboarding candidate was not a feed");
                 not_a_feed += 1;
@@ -375,7 +392,7 @@ async fn normalize_feed_seeds(
         }) else {
             continue;
         };
-        let feed_url = newsly_db::canonicalize_feed_url(&feed_url);
+        let feed_url = newsly_db::canonicalize_feed_url(&validated.effective_url);
         if !seen.insert(feed_url.clone()) {
             continue;
         }
@@ -388,15 +405,22 @@ async fn normalize_feed_seeds(
                 inferred_topics,
             ))
         });
-        output.push(NewOnboardingSuggestion {
-            suggestion_type: suggestion_type.to_owned(),
-            title,
-            site_url,
-            feed_url: Some(feed_url),
-            subreddit: None,
-            rationale,
-            score: normalized_score(score),
-        });
+        output.push((
+            NewOnboardingSuggestion {
+                suggestion_type: suggestion_type.to_owned(),
+                title,
+                site_url,
+                feed_url: Some(feed_url),
+                subreddit: None,
+                rationale,
+                score: normalized_score(score),
+            },
+            Some(if suggestion_type == "podcast_rss" {
+                validated.podcast_publishing_activity
+            } else {
+                validated.publishing_activity
+            }),
+        ));
         if seen.len() >= MAX_SUGGESTIONS_PER_KIND {
             break;
         }

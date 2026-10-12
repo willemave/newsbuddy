@@ -11,8 +11,8 @@ use sqlx::types::Json;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
-use crate::canonicalize_feed_url;
 use crate::chat_transcripts::latest_assistant_text;
+use crate::{canonicalize_feed_url, chat::extract_short_summary};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OnboardingTaskLane {
@@ -130,7 +130,7 @@ struct FavoriteRow {
     source: Option<String>,
     url: String,
     content_type: String,
-    summary: Option<String>,
+    summary: Option<Json<Value>>,
 }
 
 /// Claims one persisted onboarding run for the current queue task and returns a connection-free
@@ -445,7 +445,7 @@ pub async fn prepare_feed_discovery_task(
             content.source,
             content.url,
             content.content_type,
-            content.short_summary AS summary
+            content.content_metadata -> 'summary' AS summary
         FROM content_knowledge_saves AS saved
         JOIN contents AS content ON content.id = saved.content_id
         WHERE saved.user_id::bigint = $1
@@ -530,7 +530,7 @@ pub async fn prepare_feed_discovery_task(
                     source: row.source,
                     url: row.url,
                     content_type: row.content_type,
-                    summary: row.summary,
+                    summary: extract_short_summary(row.summary.as_ref().map(|summary| &summary.0)),
                 })
                 .collect(),
         },

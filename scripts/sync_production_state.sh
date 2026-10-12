@@ -267,14 +267,14 @@ restore_database() {
 
   local existing
   existing="$(psql "${admin_database_url}" -X -At -v ON_ERROR_STOP=1 -v target_db="${target_db}" \
-    -c "SELECT 1 FROM pg_database WHERE datname = :'target_db'" | tr -d '[:space:]')"
+    -f - <<< "SELECT 1 FROM pg_database WHERE datname = :'target_db';" | tr -d '[:space:]')"
   if [[ -n "${existing}" && "${no_force}" == "true" ]]; then
     echo "database ${target_db} exists; omit --no-force to replace it" >&2
     exit 1
   fi
   if [[ -n "${existing}" ]]; then
     psql "${admin_database_url}" -X -v ON_ERROR_STOP=1 -v target_db="${target_db}" \
-      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target_db' AND pid <> pg_backend_pid()" >/dev/null
+      -f - <<< "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target_db' AND pid <> pg_backend_pid();" >/dev/null
     dropdb --maintenance-db="${admin_database_url}" --if-exists --force "${target_db}"
   fi
   createdb --maintenance-db="${admin_database_url}" "${target_db}"
@@ -294,7 +294,7 @@ asset_destination() {
     personal_markdown) key="PERSONAL_MARKDOWN_ROOT"; fallback="${repository_root}/data/personal_markdown" ;;
     *) echo "unsupported asset directory: ${name}" >&2; exit 2 ;;
   esac
-  configured="$(read_env_value "${key}")"
+  configured="$(newsly_load_dotenv "${env_file}"; printf '%s' "${!key:-}")"
   if [[ -z "${configured}" ]]; then
     printf '%s\n' "${fallback}"
   elif [[ "${configured}" == /data/* ]]; then

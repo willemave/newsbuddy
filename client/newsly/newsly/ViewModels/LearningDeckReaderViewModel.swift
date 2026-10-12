@@ -8,6 +8,7 @@ import Observation
 
 private enum LearningDeckReaderTaskKey: Hashable {
     case send
+    case voiceAction
     case viewer
 }
 
@@ -85,6 +86,12 @@ final class LearningDeckReaderViewModel {
     var errorMessage: String?
     var thinkingStartedAt: Date?
 
+    var voiceState: SpeechTranscriptionState { voiceInput.state }
+    var isVoiceRecording: Bool { voiceInput.isRecording }
+    var isVoiceTranscribing: Bool { voiceInput.isTranscribing }
+    var isVoiceActionInFlight: Bool { voiceInput.isActionInFlight }
+    var voiceDictationAvailable: Bool { voiceInput.isAvailable }
+
     var hasVisiblePartialResponse: Bool {
         timeline.contains { $0.message.isVisiblePartialResponse }
     }
@@ -121,6 +128,7 @@ final class LearningDeckReaderViewModel {
     private let deckService: any LearningDeckServicing
     private let deckStatusRegistry: LearningDeckStatusRegistry
     private let lifecycle: AppLifecycle
+    let voiceInput: ChatVoiceInputController
 
     @ObservationIgnored
     private let tasks = TaskBag<LearningDeckReaderTaskKey>()
@@ -137,6 +145,9 @@ final class LearningDeckReaderViewModel {
         chatService: any LearningDeckReaderChatServicing,
         messageCompletionRegistry: ChatMessageCompletionRegistry,
         deckService: any LearningDeckServicing,
+        transcriptionService: any SpeechTranscribing,
+        refreshTranscriptionAvailability: @escaping () async -> Bool = { false },
+        initialVoiceDictationAvailable: Bool = false,
         deckStatusRegistry: LearningDeckStatusRegistry? = nil,
         viewerPollIntervalNanoseconds: UInt64 = 3_000_000_000,
         viewerPollAttemptLimit: Int = 120
@@ -147,12 +158,26 @@ final class LearningDeckReaderViewModel {
         self.deckService = deckService
         self.lifecycle = lifecycle
         self.isViewActive = lifecycle.phase == .active
+        self.voiceInput = ChatVoiceInputController(
+            transcriptionService: transcriptionService,
+            refreshAvailability: refreshTranscriptionAvailability,
+            initiallyAvailable: initialVoiceDictationAvailable
+        )
         self.deckStatusRegistry = deckStatusRegistry ?? LearningDeckStatusRegistry(
             statusService: deckService,
             policy: .fixed(
                 intervalNanoseconds: viewerPollIntervalNanoseconds,
                 attemptLimit: viewerPollAttemptLimit
             )
+        )
+        voiceInput.configure(
+            onTranscriptReady: { [weak self] transcript in
+                await self?.sendVoiceTranscript(transcript)
+            },
+            onError: { [weak self] message in
+                guard let self, self.isRouteVisible, self.isViewActive else { return }
+                self.errorMessage = message
+            }
         )
     }
 
@@ -298,6 +323,10 @@ final class LearningDeckReaderViewModel {
     // MARK: - Chat
 
     func performSendMessage(text overrideText: String? = nil) {
+        startSendMessage(text: overrideText)
+    }
+
+    private func startSendMessage(text overrideText: String? = nil) {
         guard let pending = stagePendingSend(text: overrideText) else { return }
         if isSending || tasks.isRunning(.send) {
             enqueuePendingSend(pending)
@@ -310,6 +339,23 @@ final class LearningDeckReaderViewModel {
         }
     }
 
+    func performToggleVoiceRecording() {
+        tasks.runReplacing(.voiceAction) { [weak self] in
+            await self?.toggleVoiceRecording()
+        }
+    }
+
+    func toggleVoiceRecording() async {
+        guard isRouteVisible, isViewActive else { return }
+        if !isVoiceRecording {
+            errorMessage = nil
+        }
+        await voiceInput.toggle()
+        if !isRouteVisible || !isViewActive {
+            voiceInput.reset()
+        }
+    }
+
     func handleAppear() {
         isRouteVisible = true
         resumeVisibleRouteWorkIfPossible()
@@ -319,6 +365,8 @@ final class LearningDeckReaderViewModel {
         isRouteVisible = false
         isViewActive = false
         cancelViewerResolution()
+        tasks.cancel(.voiceAction)
+        voiceInput.reset()
 
         if pendingForegroundMessageId != nil {
             tasks.cancel(.send)
@@ -358,6 +406,8 @@ final class LearningDeckReaderViewModel {
 
     private func suspendVisibleRouteForBackground() {
         isViewActive = false
+        tasks.cancel(.voiceAction)
+        voiceInput.reset()
 
         if pendingForegroundMessageId != nil {
             tasks.cancel(.send)
@@ -370,6 +420,14 @@ final class LearningDeckReaderViewModel {
         if !isRetryingGeneration {
             cancelViewerResolution()
         }
+    }
+
+    private func sendVoiceTranscript(_ transcript: String) async {
+        guard isRouteVisible, isViewActive else { return }
+        let existingInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = existingInput.isEmpty ? transcript : "\(existingInput) \(transcript)"
+        inputText = ""
+        startSendMessage(text: message)
     }
 
     private func stagePendingSend(text overrideText: String?) -> PendingSend? {

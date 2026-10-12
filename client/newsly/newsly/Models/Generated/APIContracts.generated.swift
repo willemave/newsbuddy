@@ -459,6 +459,47 @@ enum APIScraperType: String, Codable, CaseIterable {
     case aggregator = "aggregator"
 }
 
+enum APISourceActivityBasis: Codable, Equatable, Hashable {
+    case feed_snapshot
+    case newsly_corpus
+    case unknown
+    case unknownRaw(String)
+
+    static let knownCases: [APISourceActivityBasis] = [
+        .feed_snapshot,
+        .newsly_corpus,
+        .unknown,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .feed_snapshot: "feed_snapshot"
+        case .newsly_corpus: "newsly_corpus"
+        case .unknown: "unknown"
+        case .unknownRaw(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "feed_snapshot": self = .feed_snapshot
+        case "newsly_corpus": self = .newsly_corpus
+        case "unknown": self = .unknown
+        default: self = .unknownRaw(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 enum APIAudioEpisodeKind: Codable, Equatable, Hashable {
     case fast_news_digest
     case content_council_discussion

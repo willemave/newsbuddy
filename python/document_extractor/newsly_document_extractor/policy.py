@@ -34,6 +34,7 @@ from newsly_document_extractor.models import (
     PubMedDelegation,
     UsageEvent,
 )
+from newsly_document_extractor.pdf import PdfFallbackRequired, extract_pdf_text, is_pdf
 from newsly_document_extractor.settings import ExtractorSettings
 from newsly_document_extractor.url_safety import (
     PublicFetch,
@@ -211,6 +212,7 @@ class StaticDocument:
     html: str
     downloaded_bytes: int
     issue: str | None
+    pdf_pages: int | None = None
 
 
 def _hostname(url: str) -> str:
@@ -573,6 +575,40 @@ class ExtractionPolicy:
             ),
             max_redirects=self._settings.max_redirects,
         )
+        if is_pdf(document):
+            try:
+                pdf = await extract_pdf_text(
+                    document,
+                    max_markdown_bytes=request.options.max_markdown_bytes,
+                    timeout_seconds=max(
+                        0.001, (request.absolute_deadline - datetime.now(UTC)).total_seconds()
+                    ),
+                )
+            except PdfFallbackRequired as exc:
+                return StaticDocument(
+                    final_url=document.final_url,
+                    title="PDF document",
+                    author=None,
+                    published_at=None,
+                    markdown="",
+                    feed_links=(),
+                    html="",
+                    downloaded_bytes=len(document.body),
+                    issue=str(exc),
+                    pdf_pages=0,
+                )
+            return StaticDocument(
+                final_url=document.final_url,
+                title=pdf.title,
+                author=pdf.author,
+                published_at=None,
+                markdown=pdf.markdown,
+                feed_links=(),
+                html="",
+                downloaded_bytes=len(document.body),
+                issue=None,
+                pdf_pages=pdf.page_count,
+            )
         return parse_static_document(document)
 
     async def _extract_document(self, request: ExtractRequest, started_at: float) -> ExtractResult:
@@ -584,6 +620,16 @@ class ExtractionPolicy:
             if exc.code in {"invalid_url", "response_too_large"}:
                 raise
             static_error = exc
+
+        if static_document is not None and static_document.pdf_pages is not None:
+            if static_document.issue:
+                return self._fallback(
+                    request,
+                    static_document.issue,
+                    started_at,
+                    usage_events=self._static_usage_events(static_document),
+                )
+            return self._success_from_static(request, static_document, started_at)
 
         if request.intent is ExtractIntent.STATIC_ANALYZE:
             if static_document is None:
@@ -873,6 +919,8 @@ class ExtractionPolicy:
         additional_usage_events: list[UsageEvent] | None = None,
     ) -> ExtractionSuccess:
         warnings = [warning] if warning else []
+        if document.pdf_pages is not None:
+            warnings.append(f"PDF text extracted locally; all {document.pdf_pages} pages retained")
         if len(document.markdown.encode("utf-8")) > request.options.max_markdown_bytes:
             markdown = _truncate_utf8(document.markdown, request.options.max_markdown_bytes)
             warnings.append("Extracted markdown was truncated at the configured byte limit")
@@ -937,7 +985,12 @@ class ExtractionPolicy:
                 kind="downloaded_body",
                 quantity=document.downloaded_bytes,
                 unit="byte",
-            )
+            ),
+            *(
+                [UsageEvent(kind="pdf_page", quantity=document.pdf_pages, unit="page")]
+                if document.pdf_pages
+                else []
+            ),
         ]
 
     @staticmethod
