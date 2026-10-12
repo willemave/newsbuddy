@@ -89,15 +89,19 @@ async def extract_pdf_text(
             pages.pop()
         if len(pages) != page_count:
             raise PdfFallbackRequired("Local PDF text does not cover every reported page")
-        images = (
-            await _run_tool(
+        try:
+            image_list = await _run_tool(
                 "pdfimages",
                 "-list",
                 str(pdf_path),
                 max_bytes=1_000_000,
                 timeout_seconds=timeout_seconds,
             )
-        ).decode("utf-8", errors="replace")
+        except UrlSafetyError as exc:
+            raise PdfFallbackRequired(
+                "PDF image inventory exceeds local inspection limits"
+            ) from exc
+        images = image_list.decode("utf-8", errors="replace")
         image_pages = {
             int(match) for match in re.findall(r"^\s*(\d+)\s+\d+\s", images, re.MULTILINE)
         }

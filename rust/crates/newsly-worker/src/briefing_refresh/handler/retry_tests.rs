@@ -204,3 +204,135 @@ async fn progressive_readiness_skips_only_the_exact_cooling_input(pool: PgPool) 
         "readiness checks must not call the provider"
     );
 }
+
+fn append_batch(id: i64, key: &str, tier: &str) -> newsly_db::BriefingAppendBatch {
+    let mut template = unit(key);
+    template.lens.id = id;
+    template.lens.key = key.to_owned();
+    template.lens.tier = tier.to_owned();
+    template.lens.position = i32::try_from(id).unwrap();
+    let mut source = template.window.sources.remove(0);
+    source.id = id;
+    source.kind = if tier == "news" { "news" } else { "content" }.to_owned();
+    source.source_key = format!("{}:{id}", source.kind);
+    newsly_db::BriefingAppendBatch {
+        lens: template.lens,
+        pending_rows: vec![BriefingPendingIdentity {
+            id,
+            source_kind: source.kind.clone(),
+            source_id: id,
+            lens_key: key.to_owned(),
+        }],
+        sources: vec![source],
+    }
+}
+
+#[sqlx::test]
+async fn progressive_selection_keeps_articles_and_podcasts_with_one_ready_news(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('progressive-sections','progressive-sections@example.com',true,false) RETURNING id::bigint")
+        .fetch_one(&pool).await.unwrap();
+    let (task, fence) = claim(&pool, user).await;
+    let services = BriefingRefreshWorkerServices::new(
+        pool.clone(),
+        QueueKernel::new(pool.clone()),
+        BriefingCompositionGateway::from_env().unwrap(),
+        BriefingRefreshWorkerConfig::from_env().unwrap(),
+    );
+    let context = CompositionContext {
+        pool: &pool,
+        task_id: task,
+        user_id: user,
+        fence: &fence,
+    };
+    let mut prepared = PreparedBriefingRefresh {
+        task_id: task,
+        user_id: user,
+        mode: BriefingRefreshMode::Append,
+        starting_version: 0,
+        prepared_state_changed: false,
+        // Deep sections precede News in the input to exercise progressive sorting.
+        append_batches: vec![
+            append_batch(4, "longform", "longform"),
+            append_batch(5, "audio", "audio"),
+            append_batch(1, "news-cooling", "news"),
+            append_batch(2, "news-ready", "news"),
+            append_batch(3, "news-later", "news"),
+        ],
+        compaction_batches: vec![],
+    };
+    let cooling = &prepared.append_batches[2];
+    let cooling_unit = CompositionUnit {
+        ordinal: 0,
+        lens: cooling.lens.clone(),
+        window: PlannedBriefingWindow {
+            sources: cooling.sources.clone(),
+            event_groups: vec![vec![cooling.sources[0].source_key.clone()]],
+        },
+        kind: CompositionUnitKind::Append {
+            pending_rows: cooling.pending_rows.clone(),
+        },
+    };
+    let fingerprint = composition_fingerprint(
+        services.gateway.model_spec(),
+        services.config.max_figures_deep,
+        &composition_request(&cooling_unit),
+    );
+    sqlx::query("INSERT INTO briefing_composition_cooldowns(user_id,fingerprint,retry_after) VALUES($1,$2,now() + interval '24 hours')")
+        .bind(user).bind(fingerprint).execute(&pool).await.unwrap();
+
+    // A later News batch must be skipped before its planned sources are resolved.
+    // If selected, this deliberately incomplete pending map would fail selection.
+    let later_pending = std::mem::take(&mut prepared.append_batches[4].pending_rows);
+    let (selected, usage) = select_append_units(&services, &prepared, true, &[], context)
+        .await
+        .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|unit| unit.lens.key.as_str())
+            .collect::<Vec<_>>(),
+        ["news-ready", "longform", "audio"]
+    );
+    assert_eq!(
+        selected.iter().map(|unit| unit.ordinal).collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert!(
+        usage.is_empty(),
+        "single-source windows require no provider calls"
+    );
+    for selected in &selected {
+        let CompositionUnitKind::Append { pending_rows } = &selected.kind else {
+            panic!("append selection produced a compaction");
+        };
+        assert_eq!(pending_rows.len(), 1);
+        assert_eq!(pending_rows[0].source_id, selected.window.sources[0].id);
+    }
+
+    prepared.append_batches[4].pending_rows = later_pending;
+    for mode in [BriefingRefreshMode::Append, BriefingRefreshMode::Full] {
+        prepared.mode = mode;
+        let (selected, usage) = select_append_units(&services, &prepared, false, &[], context)
+            .await
+            .unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|unit| unit.lens.key.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "longform",
+                "audio",
+                "news-cooling",
+                "news-ready",
+                "news-later"
+            ]
+        );
+        assert_eq!(
+            selected.iter().map(|unit| unit.ordinal).collect::<Vec<_>>(),
+            [0, 1, 2, 3, 4]
+        );
+        assert!(usage.is_empty());
+    }
+}

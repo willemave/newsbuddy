@@ -179,11 +179,25 @@ compose=(
 run_status=1
 cleanup_complete=false
 
+collect_learning_deck_logs() {
+  local storage_root="$run_data_root/content_bodies"
+  local source relative destination
+  [[ -d "$storage_root" ]] || return 0
+  # Copy only agent diagnostics from this disposable run, including the browser
+  # validation reports. Failed HTML remains in the remote sandbox, not /data.
+  while IFS= read -r -d '' source; do
+    relative="${source#"$storage_root/"}"
+    destination="$report_dir/learning-deck-logs/$relative"
+    mkdir -p "$(dirname "$destination")" && cp "$source" "$destination" || true
+  done < <(find "$storage_root" -type f -path '*/learning_deck_internal_logs/*/agent-log.jsonl' -print0)
+}
+
 collect_evidence() {
   "${compose[@]}" ps --all >"$report_dir/compose-ps.txt" 2>&1 || true
   "${compose[@]}" logs --no-color --timestamps --tail 2500 >"$report_dir/containers.log" 2>&1 || true
   "${compose[@]}" run --rm --no-deps --entrypoint /usr/local/bin/newsly-admin workers --output json usage summary --window-hours 24 --group-by feature >"$report_dir/usage.json" 2>"$report_dir/usage.stderr" || true
   "${compose[@]}" run --rm --no-deps --entrypoint /usr/local/bin/newsly-admin workers --output json tasks failures --window-hours 24 --limit 100 >"$report_dir/task-failures.json" 2>"$report_dir/task-failures.stderr" || true
+  collect_learning_deck_logs 2>>"$report_dir/learning-deck-logs.stderr" || true
 }
 
 cleanup() {

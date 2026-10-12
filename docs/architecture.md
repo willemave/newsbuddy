@@ -332,6 +332,16 @@ publisher cleanup, access-gate detection, table extraction, GitHub handling,
 PubMed delegation, and the decision that Firecrawl is required. Rust owns the
 Firecrawl credential and call, persistence, and retry policy.
 
+PDFs with a readable text layer use bounded local Poppler tools and retain every
+page. Scanned, malformed, or locally uninspectable PDFs request the existing
+Firecrawl fallback, including during static analysis; Rust alone owns any paid
+provider call. A complete text body exceeding the configured byte limit fails
+explicitly rather than dropping pages. Poppler subprocesses are deadline-bound
+and reaped on cancellation; container resource limits bound the process host.
+Firecrawl billing uses provider-reported credits and the configured per-credit
+rate. Missing credit quantities or a usable rate leave cost unknown, and usage
+survives downstream content rejection through the normal exact-lease finalizer.
+
 Content bodies are staged by hash and published only through the exact fenced
 transaction. Feed links returned by extraction are candidates; Rust validates
 and persists subscriptions/backfill work.

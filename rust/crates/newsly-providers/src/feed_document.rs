@@ -19,6 +19,11 @@ pub(crate) fn preserve_direct_media_urls(bytes: &[u8]) -> Result<Vec<u8>, quick_
         return Ok(bytes.to_vec());
     }
     let mut reader = NsReader::from_reader(bytes);
+    // Keep feed-rs' accepted text and trailing-markup tolerance while repairing
+    // Media RSS player precedence; the canonical parser still validates the feed.
+    reader.config_mut().allow_dangling_amp = true;
+    reader.config_mut().allow_unmatched_ends = true;
+    reader.config_mut().trim_markup_names_in_closing_tags = true;
     let mut writer = Writer::new(Vec::with_capacity(bytes.len()));
     let mut direct_content = Vec::new();
     let mut skip_depth = 0_usize;
@@ -105,6 +110,36 @@ mod tests {
     #[test]
     fn malformed_xml_is_rejected() {
         assert!(preserve_direct_media_urls(b"<rss><channel></rss>").is_err());
+    }
+
+    #[test]
+    fn accepts_feed_parser_tolerance_without_losing_direct_media() {
+        for suffix in ["", "</html>"] {
+            let xml = format!(
+                r#"<rss version="2.0" xmlns:m="http://search.yahoo.com/mrss/"><channel>
+                <title>Arts & Culture</title><link>https://example.com</link><description>A show</description>
+                <item><guid>episode</guid><title>Science and Music</title><category>Arts & Culture</category>
+                <m:content url="https://cdn.example/audio.mp3" type="audio/mpeg"><m:player url="https://example/player"/></m:content>
+                </item></channel></rss>{suffix}"#
+            );
+            assert_eq!(
+                feed_rs::parser::parse(xml.as_bytes())
+                    .unwrap()
+                    .entries
+                    .len(),
+                1
+            );
+            let normalized = preserve_direct_media_urls(xml.as_bytes()).unwrap();
+            let parsed = feed_rs::parser::parse(normalized.as_slice()).unwrap();
+            assert_eq!(
+                parsed.entries[0].title.as_ref().unwrap().content,
+                "Science and Music"
+            );
+            assert_eq!(
+                crate::feed_validation::entry_audio_url(&parsed.entries[0]).as_deref(),
+                Some("https://cdn.example/audio.mp3")
+            );
+        }
     }
 
     #[test]

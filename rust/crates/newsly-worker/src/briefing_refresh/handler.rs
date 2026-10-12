@@ -297,23 +297,16 @@ async fn execute_refresh(
     )
 }
 
-async fn build_publication(
+async fn select_append_units(
     services: &BriefingRefreshWorkerServices,
-    prepared: PreparedBriefingRefresh,
-    fence: &newsly_db::BriefingRefreshClaimFence,
+    prepared: &PreparedBriefingRefresh,
     progressive: bool,
     new_category_keys: &[String],
-) -> Result<BriefingRefreshPublication, BriefingRefreshExecutionError> {
+    context: CompositionContext<'_>,
+) -> Result<(Vec<CompositionUnit>, Vec<BriefingEmbeddingUsage>), BriefingRefreshExecutionError> {
     let mut units = Vec::new();
     let mut embedding_usage = Vec::new();
-    let mut ordinal = 0_usize;
-    let mut compaction_selected = vec![false; prepared.compaction_batches.len()];
-    let context = CompositionContext {
-        pool: &services.pool,
-        task_id: prepared.task_id,
-        user_id: prepared.user_id,
-        fence,
-    };
+    let mut ordinal = 0;
     let mut batches = prepared.append_batches.iter().collect::<Vec<_>>();
     if progressive {
         batches.sort_by_key(|batch| {
@@ -325,7 +318,13 @@ async fn build_publication(
         });
     }
 
-    'append_batches: for batch in batches {
+    let mut news_selected = false;
+    for batch in batches {
+        if progressive && news_selected && batch.lens.tier == "news" {
+            // Publish one News window per initial pass, while allowing the
+            // independent Articles and Podcasts sections to progress.
+            continue;
+        }
         let planned = plan_windows(
             &services.pool,
             &services.gateway,
@@ -393,9 +392,7 @@ async fn build_publication(
                 }
                 units.push(unit);
                 if batch.lens.tier == "news" {
-                    // Do not plan or request embeddings for later categories
-                    // before publishing this complete window.
-                    break 'append_batches;
+                    news_selected = true;
                 }
             } else {
                 units.push(unit);
@@ -403,6 +400,27 @@ async fn build_publication(
             ordinal += 1;
         }
     }
+
+    Ok((units, embedding_usage))
+}
+
+async fn build_publication(
+    services: &BriefingRefreshWorkerServices,
+    prepared: PreparedBriefingRefresh,
+    fence: &newsly_db::BriefingRefreshClaimFence,
+    progressive: bool,
+    new_category_keys: &[String],
+) -> Result<BriefingRefreshPublication, BriefingRefreshExecutionError> {
+    let mut compaction_selected = vec![false; prepared.compaction_batches.len()];
+    let context = CompositionContext {
+        pool: &services.pool,
+        task_id: prepared.task_id,
+        user_id: prepared.user_id,
+        fence,
+    };
+    let (mut units, mut embedding_usage) =
+        select_append_units(services, &prepared, progressive, new_category_keys, context).await?;
+    let mut ordinal = units.len();
 
     for (batch_index, batch) in prepared
         .compaction_batches

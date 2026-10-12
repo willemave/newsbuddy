@@ -21,7 +21,7 @@ from newsly_document_extractor.models import (
 from newsly_document_extractor.pdf import _run_tool
 from newsly_document_extractor.policy import ExtractionPolicy
 from newsly_document_extractor.settings import ExtractorSettings
-from newsly_document_extractor.url_safety import PublicFetch
+from newsly_document_extractor.url_safety import PublicFetch, UrlSafetyError
 
 
 def pdf_fixture(page_count: int, *, scanned_page: int | None = None) -> bytes:
@@ -182,6 +182,25 @@ async def test_local_pdf_timeout_kills_and_reaps_the_parser(
         )
     assert len(spawned) == 1
     assert spawned[0].returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_oversized_image_inventory_requests_provider_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from newsly_document_extractor import pdf
+
+    run_tool = pdf._run_tool
+
+    async def limited_inventory(*args: str, **kwargs: Any) -> bytes:
+        if args[0] == "pdfimages":
+            raise UrlSafetyError("inventory too large", code="response_too_large")
+        return await run_tool(*args, **kwargs)
+
+    monkeypatch.setattr(pdf, "_run_tool", limited_inventory)
+    result = await extract(pdf_fixture(2))
+    assert isinstance(result, ExtractionFallbackRequired)
+    assert "image inventory" in result.reason
 
 
 @pytest.mark.asyncio
