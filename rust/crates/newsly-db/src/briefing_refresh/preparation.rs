@@ -12,7 +12,7 @@ use super::{
     lens_assignment::{assign_pending_ids, next_news_position},
     sources::{
         event_group_count, json_strings, load_eligible_sources_for_keys, news_topic,
-        source_from_content, source_from_news, visible_news_sql,
+        source_from_content, source_from_news, visible_cohort_news_sql, visible_news_sql,
     },
 };
 
@@ -27,6 +27,7 @@ pub async fn prepare_briefing_refresh(
     mode: BriefingRefreshMode,
     config: &BriefingRefreshConfig,
 ) -> Result<PrepareBriefingRefreshOutcome, BriefingRefreshRepositoryError> {
+    let preparation_started = std::time::Instant::now();
     config.validate()?;
     crate::first_edition_progress::expire_runs(transaction, user_id).await?;
     let claim_fence = load_briefing_refresh_claim_fence(transaction, task_id, user_id)
@@ -47,11 +48,33 @@ pub async fn prepare_briefing_refresh(
             .await?;
     }
     let full = mode == BriefingRefreshMode::Full;
-    let pending_added = seed_content_pending(transaction, user_id, full).await?
-        + seed_news_pending(transaction, user_id, full).await?;
+    let content_started = std::time::Instant::now();
+    let content_added = seed_content_pending(transaction, user_id, full).await?;
+    let content_seed_ms = content_started.elapsed().as_millis() as u64;
+    let news_started = std::time::Instant::now();
+    let news_added = seed_news_pending(transaction, user_id, full).await?;
+    let news_seed_ms = news_started.elapsed().as_millis() as u64;
+    let prune_started = std::time::Instant::now();
     prune_ineligible_pending(transaction, user_id).await?;
+    let prune_ms = prune_started.elapsed().as_millis() as u64;
+    let assignment_started = std::time::Instant::now();
     let assigned = assign_nonsemantic_pending_lenses(transaction, user_id, full).await?;
+    let assignment_ms = assignment_started.elapsed().as_millis() as u64;
+    let snapshot_started = std::time::Instant::now();
     let lens_assignment = load_lens_assignment_snapshot(transaction, user_id, full).await?;
+    tracing::info!(
+        task_id,
+        user_id,
+        mode = mode.as_str(),
+        content_seed_ms,
+        news_seed_ms,
+        prune_ms,
+        assignment_ms,
+        snapshot_ms = snapshot_started.elapsed().as_millis() as u64,
+        preparation_ms = preparation_started.elapsed().as_millis() as u64,
+        "Briefing refresh source preparation completed"
+    );
+    let pending_added = content_added + news_added;
     Ok(PrepareBriefingRefreshOutcome::Ready(
         PreparedBriefingRefreshSeed {
             task_id,
@@ -247,7 +270,7 @@ pub(super) async fn seed_content_pending(
                   SELECT 1
                   FROM briefing_segments AS segment,
                        jsonb_array_elements_text(segment.source_keys::jsonb) AS source_key(value)
-                  WHERE segment.user_id::bigint = $1
+                  WHERE segment.user_id = $1::bigint
                     AND segment.status IN ('active', 'degraded')
                     AND source_key.value = 'content:' || content.id::text
               )
@@ -269,6 +292,9 @@ pub(crate) async fn seed_news_pending(
 ) -> Result<usize, sqlx::Error> {
     let active_run = sqlx::query_as::<_, (i64, bool, bool)>("SELECT id::bigint, news_seeded, news_seed_settled FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' ORDER BY id DESC LIMIT 1 FOR UPDATE")
         .bind(user_id).fetch_optional(&mut **transaction).await?;
+    let mut cohort_run_id = active_run
+        .filter(|(_, _, settled)| !settled)
+        .map(|(id, _, _)| id);
     if let Some((run_id, seeded, settled)) = active_run {
         if !seeded {
             sqlx::query(AssertSqlSafe(format!(r#"
@@ -289,17 +315,25 @@ pub(crate) async fn seed_news_pending(
             sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news') WHERE id::bigint=$1")
                 .bind(run_id).execute(&mut **transaction).await?;
         } else if !settled {
-            sqlx::query(AssertSqlSafe(format!(r"WITH visible_news AS ({visible_news})
+            let settled_rows = sqlx::query(AssertSqlSafe(format!(r"WITH visible_news AS ({visible_news})
                 UPDATE onboarding_first_edition_runs r SET news_seed_settled=TRUE WHERE r.id::bigint=$2 AND NOT EXISTS (
                     SELECT 1 FROM onboarding_first_edition_items i JOIN visible_news n ON n.id=i.source_id
                     WHERE i.run_id=r.id AND i.source_kind='news'
                       AND NOT EXISTS(SELECT 1 FROM briefing_segments s WHERE s.user_id=r.user_id AND s.status IN ('active','degraded') AND s.source_keys::jsonb ? ('news:' || n.id::text))
                       AND NOT EXISTS(SELECT 1 FROM news_item_read_status rs JOIN news_items m ON m.id=rs.news_item_id WHERE rs.user_id=r.user_id AND COALESCE(m.representative_news_item_id,m.id)=n.id)
-                )", visible_news=visible_news_sql())))
-                .bind(user_id).bind(run_id).execute(&mut **transaction).await?;
+                )", visible_news=visible_cohort_news_sql("$2"))))
+                .bind(user_id).bind(run_id).execute(&mut **transaction).await?.rows_affected();
+            if settled_rows > 0 {
+                cohort_run_id = None;
+            }
         }
     }
-    Ok(sqlx::query(AssertSqlSafe(format!(
+    let visible_news = if cohort_run_id.is_some() {
+        visible_cohort_news_sql("$4")
+    } else {
+        visible_news_sql()
+    };
+    let query = sqlx::query(AssertSqlSafe(format!(
         r#"
         WITH visible_news AS ({visible_news})
         INSERT INTO briefing_pending_sources (
@@ -308,9 +342,7 @@ pub(crate) async fn seed_news_pending(
         SELECT $1::bigint::integer, NULL, 'news', news.id,
                timezone('UTC', clock_timestamp())
         FROM visible_news AS news
-        WHERE (NOT EXISTS (SELECT 1 FROM onboarding_first_edition_runs r WHERE r.user_id::bigint=$1 AND r.status='active' AND NOT r.news_seed_settled)
-            OR EXISTS (SELECT 1 FROM onboarding_first_edition_items i JOIN onboarding_first_edition_runs r ON r.id=i.run_id WHERE r.user_id::bigint=$1 AND r.status='active' AND i.source_kind='news' AND i.source_id=news.id))
-          AND NOT EXISTS (
+        WHERE NOT EXISTS (
               SELECT 1 FROM briefing_pending_sources p
               WHERE p.user_id::bigint = $1 AND p.source_kind = 'news' AND p.source_id = news.id
           )
@@ -337,15 +369,17 @@ pub(crate) async fn seed_news_pending(
         ), COALESCE(news.published_at,news.ingested_at) DESC, news.id DESC
         LIMIT $3
         ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
-        "#,
-        visible_news = visible_news_sql()
+        "#
     )))
     .bind(user_id)
     .bind(full)
-    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE))
-    .execute(&mut **transaction)
-    .await?
-    .rows_affected() as usize)
+    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE));
+    let query = if let Some(run_id) = cohort_run_id {
+        query.bind(run_id)
+    } else {
+        query
+    };
+    Ok(query.execute(&mut **transaction).await?.rows_affected() as usize)
 }
 
 pub(super) async fn prune_ineligible_pending(

@@ -226,7 +226,7 @@ async fn run_scheduled_feed_cycle(pool: &PgPool, user_id: i64, new_head: bool) {
     )
     .await
     .expect("scheduled feed configs should prepare");
-    let plans = build_source_plans(&request, &prepared).expect("source plans should build");
+    let plans = build_source_plans(&request, &prepared);
     let mut outcomes = Vec::new();
 
     for plan in plans {
@@ -576,4 +576,127 @@ async fn database_failure_preserves_independent_items(pool: PgPool) {
 fn _assert_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Arc<ScrapeRequest>>();
+}
+
+#[test]
+fn every_global_aggregator_plan_ignores_subscriber_configuration_fences() {
+    let prepared = AggregatorKey::ALL
+        .iter()
+        .enumerate()
+        .map(|(index, key)| newsly_db::ScrapeConfigSnapshot {
+            id: i64::try_from(index + 1).unwrap(),
+            user_id: 7,
+            scraper_type: "aggregator".to_owned(),
+            display_name: None,
+            feed_url: Some(format!("aggregator://{}", key.as_str())),
+            config: json!({"key":key.as_str()}),
+            fingerprint: "old-subscriber-config".to_owned(),
+        })
+        .collect::<Vec<_>>();
+    for first_edition_run_id in [None, Some(99)] {
+        let request = ScrapeRequest {
+            sources: AggregatorKey::ALL
+                .into_iter()
+                .map(RequestedSource::Aggregator)
+                .collect(),
+            first_edition_run_id,
+        };
+        let plans = build_source_plans(&request, &prepared);
+        assert_eq!(plans.len(), 9);
+        for (plan, expected) in plans.iter().zip(AggregatorKey::ALL) {
+            let SourcePlanKind::Aggregator {
+                key,
+                required_config_ids,
+                ..
+            } = &plan.kind
+            else {
+                panic!("catalog source must prepare a global aggregator plan")
+            };
+            assert_eq!(*key, expected);
+            assert_eq!(plan.source, expected.as_str());
+            assert!(required_config_ids.is_empty());
+        }
+    }
+}
+
+fn brutalist_news(index: usize, section: &str, topics: &[&str]) -> ScrapedItem {
+    let mut item = scraped_news(&format!("https://example.com/brutalist/{index}"), "global");
+    let ScrapedItem::News(news) = &mut item else {
+        unreachable!()
+    };
+    news.platform = "brutalist".to_owned();
+    news.source_type = "Brutalist".to_owned();
+    news.raw_metadata = json!({"aggregator":{
+        "key":"brutalist", "topic":topics[0], "topics":topics,
+        "metadata":{"source_name":section},
+    }});
+    item
+}
+
+async fn finalize_brutalist_fixture(pool: &PgPool, items: Vec<ScrapedItem>) {
+    let finalizer = ScrapeFinalizer {
+        queue: QueueKernel::new(pool.clone()),
+        request: ScrapeRequest {
+            sources: vec![RequestedSource::Aggregator(AggregatorKey::Brutalist)],
+            first_edition_run_id: None,
+        },
+        prepared: Vec::new(),
+        outcomes: vec![SourceOutcome {
+            source: "brutalist".to_owned(),
+            required_config_ids: Vec::new(),
+            result: Ok(ScrapeProviderOutcome {
+                retryable_failure: false,
+                items,
+                item_errors: Vec::new(),
+            }),
+            discussion_catchup: false,
+        }],
+    };
+    let mut transaction = pool.begin().await.unwrap();
+    let result = finalizer.apply_inner(&mut transaction).await.unwrap();
+    assert!(matches!(result, TaskFinalizerResult::Keep));
+    transaction.commit().await.unwrap();
+}
+
+#[sqlx::test(migrations = false)]
+async fn brutalist_full_section_preserves_existing_updates_but_rejects_thirteenth_item(
+    pool: PgPool,
+) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    finalize_brutalist_fixture(
+        &pool,
+        (0..12)
+            .map(|index| brutalist_news(index, "Section", &["science"]))
+            .collect(),
+    )
+    .await;
+    finalize_brutalist_fixture(
+        &pool,
+        vec![
+            brutalist_news(0, "Section", &["science", "politics"]),
+            brutalist_news(12, "Section", &["science"]),
+            brutalist_news(13, "Other Section", &["science"]),
+        ],
+    )
+    .await;
+    let rows: Vec<(String, Value)> = sqlx::query_as("SELECT canonical_item_url, raw_metadata::jsonb FROM news_items WHERE platform='brutalist' ORDER BY canonical_item_url")
+        .fetch_all(&pool).await.unwrap();
+    assert_eq!(rows.len(), 13);
+    assert!(
+        !rows
+            .iter()
+            .any(|(url, _)| url == "https://example.com/brutalist/12")
+    );
+    let updated = rows
+        .iter()
+        .find(|(url, _)| url == "https://example.com/brutalist/0")
+        .unwrap();
+    assert_eq!(
+        updated.1["aggregator"]["topics"],
+        json!(["politics", "science"])
+    );
+    assert!(
+        rows.iter()
+            .any(|(url, _)| url == "https://example.com/brutalist/13")
+    );
 }

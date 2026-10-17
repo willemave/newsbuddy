@@ -24,6 +24,7 @@ pub(super) struct DiscussionSnapshot {
     pub(super) summary_seen_input_sha256: Option<String>,
     pub(super) summary_incremental_update_count: i32,
     pub(super) summary_generated_at: Option<NaiveDateTime>,
+    pub(super) merge_refresh_deadline: NaiveDateTime,
     pub(super) claim_token: Uuid,
 }
 

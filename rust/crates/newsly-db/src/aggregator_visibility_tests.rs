@@ -354,3 +354,110 @@ async fn read_paths_agree_on_owned_news_and_inactive_subscriptions(pool: PgPool)
         BTreeSet::from([subscribed, owned[0]])
     );
 }
+
+#[sqlx::test(migrations = false)]
+async fn cross_listed_topics_preserve_legacy_and_research_visibility(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let cases = [
+        (
+            json!({"key":"brutalist","topics":["politics"]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science","topics":["science","politics"]}}),
+            true,
+        ),
+        (
+            json!({"key":"brutalist","topics":["sports"]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science","topics":["science","politics"]}}),
+            false,
+        ),
+        (
+            json!({"key":"brutalist","topics":["science"]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science"}}),
+            true,
+        ),
+        (
+            json!({"key":"brutalist","topics":["politics"]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science"}}),
+            false,
+        ),
+        (
+            json!({"key":"brutalist","topics":["science"]}),
+            "brutalist",
+            json!({}),
+            true,
+        ),
+        (
+            json!({"key":"brutalist"}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science"}}),
+            true,
+        ),
+        (
+            json!({"key":"brutalist","topics":[]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science"}}),
+            true,
+        ),
+        (
+            json!({"key":"brutalist","topics":["politics"]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science","topics":"politics"}}),
+            false,
+        ),
+        (
+            json!({"key":"arxiv","topics":["cs.CL"]}),
+            "arxiv",
+            json!({"aggregator":{"topic":"cs.CL"}}),
+            true,
+        ),
+        (
+            json!({"key":"arxiv","topics":["cs.CL"]}),
+            "arxiv",
+            json!({"aggregator":{"topic":"cs.CV"}}),
+            false,
+        ),
+        (
+            json!({"key":"hfpapers","topics":["cs.CL"]}),
+            "hfpapers",
+            json!({"aggregator":{}}),
+            true,
+        ),
+        (
+            json!({"key":"arxiv","topics":["science"]}),
+            "brutalist",
+            json!({"aggregator":{"topic":"science","topics":["science"]}}),
+            false,
+        ),
+    ];
+    for (config, platform, metadata, expected) in cases {
+        let actual: bool = sqlx::query_scalar("SELECT aggregator_config_admits($1, $2, $3::json)")
+            .bind(&config)
+            .bind(platform)
+            .bind(&metadata)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            actual, expected,
+            "config={config}, platform={platform}, metadata={metadata}"
+        );
+    }
+    // Cross-list overlap must reach every existing visible-news read path.
+    let item_id = global_news(&pool, "brutalist", "cross-listed", Some("science")).await;
+    sqlx::query("UPDATE news_items SET raw_metadata = jsonb_set(raw_metadata::jsonb, '{aggregator,topics}', '[\"science\",\"politics\"]')::json WHERE id::bigint=$1")
+        .bind(item_id).execute(&pool).await.unwrap();
+    let subscriber = user(&pool, "cross-list-politics").await;
+    subscribe(
+        &pool,
+        subscriber,
+        json!({"key":"brutalist","topics":["politics"]}),
+    )
+    .await;
+    assert_eq!(
+        visible_ids(&pool, subscriber, &[item_id]).await,
+        BTreeSet::from([item_id])
+    );
+}

@@ -2,8 +2,8 @@ use serde_json::json;
 use sqlx::PgPool;
 
 use super::{
-    ScrapedContentRecord, ScrapedNewsRecord, news_ingest_key, persist_scraped_content,
-    persist_scraped_news,
+    ScrapedContentRecord, ScrapedNewsRecord, due_discussion_refresh_ids, merge_brutalist_topics,
+    news_ingest_key, persist_scraped_content, persist_scraped_news,
 };
 
 fn record() -> ScrapedNewsRecord {
@@ -223,4 +223,245 @@ async fn duplicate_scrape_does_not_reactivate_existing_membership(pool: PgPool) 
     .await
     .expect("membership should exist");
     assert_eq!(status, "archived");
+}
+
+#[test]
+fn brutalist_rescrape_keeps_all_topic_visibility() {
+    let previous = json!({"aggregator":{"topic":"science","topics":["science"]}});
+    let incoming = json!({"aggregator":{"topic":"politics","topics":["politics"]}});
+    let merged = merge_brutalist_topics(&previous, &incoming);
+    assert_eq!(merged["aggregator"]["topic"], "science");
+    assert_eq!(
+        merged["aggregator"]["topics"],
+        json!(["politics", "science"])
+    );
+}
+
+#[sqlx::test(migrations = false)]
+async fn brutalist_rescrape_persists_cross_listed_topics(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let mut story = record();
+    story.platform = "brutalist".to_owned();
+    story.source_type = "Brutalist Report".to_owned();
+    story.source_external_id = None;
+    story.discussion_url = None;
+    story.raw_metadata = json!({"aggregator":{"topic":"science","topics":["science"]}});
+    let mut tx = pool.begin().await.unwrap();
+    let first = persist_scraped_news(&mut tx, &story).await.unwrap();
+    story.raw_metadata = json!({"aggregator":{"topic":"politics","topics":["politics"]}});
+    let second = persist_scraped_news(&mut tx, &story).await.unwrap();
+    assert_eq!(first.news_item_id, second.news_item_id);
+    let metadata: serde_json::Value =
+        sqlx::query_scalar("SELECT raw_metadata::jsonb FROM news_items WHERE id::bigint=$1")
+            .bind(first.news_item_id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(
+        metadata["aggregator"]["topics"],
+        json!(["politics", "science"])
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[sqlx::test(migrations = false)]
+async fn discussion_catch_up_requires_item_demand_and_bounds_merge_refreshes(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let user_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO users (apple_id, email, is_admin, is_active)
+        VALUES ('discussion-demand-test', 'discussion-demand@example.com', false, true)
+        RETURNING id::bigint
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("test user should insert");
+    sqlx::query(
+        r#"
+        INSERT INTO user_scraper_configs (
+            user_id, scraper_type, display_name, feed_url, config, is_active,
+            created_at, updated_at
+        )
+        VALUES ($1::bigint::integer, 'aggregator', 'Hacker News', 'aggregator://hackernews',
+                '{"key":"hackernews"}'::json, true, now(), now())
+        "#,
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .expect("subscription should insert");
+    let news_item_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO news_items (
+            ingest_key, visibility_scope, platform, source_type, source_external_id,
+            canonical_item_url, discussion_url, status, published_at, ingested_at,
+            cluster_size, created_at, updated_at
+        )
+        VALUES (
+            'discussion-demand-item', 'global', 'hackernews', 'Hacker News', '42',
+            'https://news.ycombinator.com/item?id=42',
+            'https://news.ycombinator.com/item?id=42', 'ready',
+            now() - interval '48 hours', now() - interval '48 hours', 1,
+            now() - interval '48 hours', now()
+        )
+        RETURNING id::bigint
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("news item should insert");
+
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    assert!(
+        due_discussion_refresh_ids(&mut transaction, 10)
+            .await
+            .expect("catch-up should succeed")
+            .is_empty()
+    );
+    transaction
+        .commit()
+        .await
+        .expect("transaction should commit");
+
+    sqlx::query(
+        "INSERT INTO briefing_pending_sources (user_id, source_kind, source_id) VALUES ($1, 'news', $2)",
+    )
+    .bind(user_id)
+    .bind(news_item_id)
+    .execute(&pool)
+    .await
+    .expect("pending source should insert");
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    assert_eq!(
+        due_discussion_refresh_ids(&mut transaction, 10)
+            .await
+            .expect("catch-up should succeed"),
+        vec![news_item_id]
+    );
+    transaction
+        .commit()
+        .await
+        .expect("transaction should commit");
+
+    sqlx::query(
+        r#"
+        UPDATE news_item_discussions
+        SET summary = '{"overview":"ready"}'::json,
+            summary_status = 'completed',
+            raw_comments_ref = '{"kind":"storage"}'::json,
+            next_refresh_after = NULL
+        WHERE news_item_id = $1
+        "#,
+    )
+    .bind(news_item_id)
+    .execute(&pool)
+    .await
+    .expect("discussion should update");
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    assert!(
+        due_discussion_refresh_ids(&mut transaction, 10)
+            .await
+            .expect("catch-up should succeed")
+            .is_empty()
+    );
+    transaction
+        .commit()
+        .await
+        .expect("transaction should commit");
+
+    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id = $1 AND source_id = $2")
+        .bind(user_id)
+        .bind(news_item_id)
+        .execute(&pool)
+        .await
+        .expect("pending source should delete");
+    sqlx::query(
+        "INSERT INTO news_item_read_status (user_id, news_item_id, read_at, created_at) VALUES ($1, $2, now(), now())",
+    )
+    .bind(user_id)
+    .bind(news_item_id)
+    .execute(&pool)
+    .await
+    .expect("open should insert");
+    sqlx::query(
+        "UPDATE news_item_discussions SET summary = NULL, summary_status = 'not_ready' WHERE news_item_id = $1",
+    )
+    .bind(news_item_id)
+    .execute(&pool)
+    .await
+    .expect("initial summary state should restore");
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    assert_eq!(
+        due_discussion_refresh_ids(&mut transaction, 10)
+            .await
+            .expect("catch-up should succeed"),
+        vec![news_item_id]
+    );
+    transaction
+        .commit()
+        .await
+        .expect("transaction should commit");
+
+    sqlx::query(
+        "INSERT INTO briefing_pending_sources (user_id, source_kind, source_id) VALUES ($1, 'news', $2)",
+    )
+    .bind(user_id)
+    .bind(news_item_id)
+    .execute(&pool)
+    .await
+    .expect("pending source should reinsert");
+    sqlx::query("UPDATE news_items SET published_at = now(), ingested_at = now() WHERE id = $1")
+        .bind(news_item_id)
+        .execute(&pool)
+        .await
+        .expect("news item should become recent");
+    sqlx::query(
+        r#"
+        UPDATE news_item_discussions
+        SET summary = '{"overview":"ready"}'::json,
+            summary_status = 'completed',
+            raw_comments_ref = '{"kind":"storage"}'::json,
+            next_refresh_after = NULL
+        WHERE news_item_id = $1
+        "#,
+    )
+    .bind(news_item_id)
+    .execute(&pool)
+    .await
+    .expect("recent completed discussion should update");
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    assert!(
+        due_discussion_refresh_ids(&mut transaction, 10)
+            .await
+            .expect("catch-up should succeed")
+            .is_empty()
+    );
+}
+
+#[sqlx::test(migrations = false)]
+async fn cross_listing_reenriches_a_denied_story_for_an_existing_audience(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let user_id:i64=sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('cross-demand','cross-demand@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,config,is_active) VALUES($1,'aggregator',$2,true)").bind(user_id).bind(json!({"key":"brutalist","topics":["politics"]})).execute(&pool).await.unwrap();
+    let mut story = record();
+    story.platform = "brutalist".to_owned();
+    story.source_type = "Brutalist Report".to_owned();
+    story.source_external_id = None;
+    story.discussion_url = None;
+    story.raw_metadata = json!({"aggregator":{"topic":"science","topics":["science"]},"article_extraction":{"error_code":crate::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE}});
+    let mut tx = pool.begin().await.unwrap();
+    let first = persist_scraped_news(&mut tx, &story).await.unwrap();
+    assert!(!first.reenrich_article);
+    story.raw_metadata = json!({"aggregator":{"topic":"politics","topics":["politics"]}});
+    let expanded = persist_scraped_news(&mut tx, &story).await.unwrap();
+    assert_eq!(expanded.news_item_id, first.news_item_id);
+    assert!(!expanded.created);
+    assert!(
+        expanded.reenrich_article,
+        "the newly visible denied story needs a paid-fallback retry"
+    );
+    let unchanged = persist_scraped_news(&mut tx, &story).await.unwrap();
+    assert!(!unchanged.reenrich_article);
+    tx.rollback().await.unwrap();
 }

@@ -68,3 +68,72 @@ async fn activity_collection_counts_preserve_scope_windows_and_unknown_history(p
     assert_eq!(unknown.observed_year_count, None);
     assert!(unknown.latest_collected_at.is_none());
 }
+
+#[sqlx::test(migrations = false)]
+async fn aggregator_due_uses_subscriber_and_source_specific_cadence(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let now = "2026-10-17T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (apple_id, email, is_active, is_admin) VALUES ('cadence', 'cadence@example.com', true, false) RETURNING id::bigint",
+    ).fetch_one(&pool).await.unwrap();
+    for (key, active_interval, inactive_interval) in [
+        ("hackernews", 10, 55),
+        ("techmeme", 10, 55),
+        ("arxiv", 55, 115),
+        ("hfpapers", 55, 115),
+    ] {
+        let mut connection = pool.acquire().await.unwrap();
+        assert!(
+            super::aggregator_due(&mut connection, key, now)
+                .await
+                .unwrap()
+        );
+        drop(connection);
+        let config_id: i64 = sqlx::query_scalar("INSERT INTO user_scraper_configs (user_id, scraper_type, config, is_active) VALUES ($1, 'aggregator', $2, true) RETURNING id::bigint")
+            .bind(user_id).bind(serde_json::json!({"key":key})).fetch_one(&pool).await.unwrap();
+        for (user_active, config_active, interval) in [
+            (true, true, active_interval),
+            (false, true, inactive_interval),
+            (true, false, inactive_interval),
+        ] {
+            sqlx::query("UPDATE users SET is_active=$2 WHERE id::bigint=$1")
+                .bind(user_id)
+                .bind(user_active)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE user_scraper_configs SET is_active=$2 WHERE id::bigint=$1")
+                .bind(config_id)
+                .bind(config_active)
+                .execute(&pool)
+                .await
+                .unwrap();
+            for (age_seconds, expected) in [
+                (interval * 60 - 1, false),
+                (interval * 60, true),
+                (interval * 60 + 1, true),
+            ] {
+                sqlx::query("INSERT INTO source_ingestion_health (source_key, last_attempt_at) VALUES ($1, $2) ON CONFLICT (source_key) DO UPDATE SET last_attempt_at=excluded.last_attempt_at")
+                    .bind(format!("aggregator:{key}")).bind(now - Duration::seconds(age_seconds)).execute(&pool).await.unwrap();
+                let mut connection = pool.acquire().await.unwrap();
+                assert_eq!(
+                    super::aggregator_due(&mut connection, key, now)
+                        .await
+                        .unwrap(),
+                    expected,
+                    "key={key}, user_active={user_active}, config_active={config_active}, age_seconds={age_seconds}"
+                );
+            }
+        }
+        sqlx::query("DELETE FROM user_scraper_configs WHERE id::bigint=$1")
+            .bind(config_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE users SET is_active=true WHERE id::bigint=$1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}

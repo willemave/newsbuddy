@@ -29,6 +29,7 @@ struct NewsItemSource {
     canonical_item_url: Option<String>,
     discussion_url: Option<String>,
     raw_metadata: Value,
+    merge_refresh_deadline: NaiveDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +77,9 @@ pub(super) async fn prepare_discussion(
             source_external_id,
             canonical_item_url,
             discussion_url,
-            COALESCE(raw_metadata, '{}'::json) AS raw_metadata
+            COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
+            COALESCE(published_at, processed_at, ingested_at, created_at)
+                + interval '24 hours' AS merge_refresh_deadline
         FROM news_items
         WHERE id::bigint = $1
         FOR UPDATE
@@ -160,8 +163,48 @@ pub(super) async fn prepare_discussion(
         summary_seen_input_sha256: row.summary_seen_input_sha256,
         summary_incremental_update_count: row.summary_incremental_update_count,
         summary_generated_at: row.summary_generated_at,
+        merge_refresh_deadline: news_item.merge_refresh_deadline,
         claim_token,
     }))
+}
+
+/// Revalidates the discussion generation and paid-work demand without holding a connection
+/// during the provider call. The finalizer independently fences publication afterward.
+pub(super) async fn discussion_summary_call_is_allowed(
+    pool: &sqlx::PgPool,
+    snapshot: &DiscussionSnapshot,
+) -> Result<bool, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let current_claim = sqlx::query_scalar::<_, bool>(
+        r"
+        SELECT EXISTS (
+            SELECT 1 FROM news_item_discussions
+            WHERE id::bigint = $1 AND news_item_id::bigint = $2
+              AND last_refresh_status = 'processing'
+              AND refresh_claim_token = $3
+              AND next_refresh_after > timezone('UTC', now())
+              AND platform = $4 AND external_id = $5 AND discussion_url = $6
+        )
+        ",
+    )
+    .bind(snapshot.discussion_id)
+    .bind(snapshot.news_item_id)
+    .bind(snapshot.claim_token)
+    .bind(&snapshot.platform)
+    .bind(&snapshot.external_id)
+    .bind(&snapshot.discussion_url)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let initial_summary = snapshot.summary.is_none() || snapshot.summary_status != "completed";
+    let demanded = current_claim
+        && newsly_db::discussion_demand::discussion_summary_is_demanded(
+            &mut transaction,
+            snapshot.news_item_id,
+            initial_summary,
+        )
+        .await?;
+    transaction.commit().await?;
+    Ok(demanded)
 }
 
 async fn upsert_and_lock_discussion(
@@ -839,6 +882,7 @@ mod tests {
             canonical_item_url: None,
             discussion_url: url.map(str::to_owned),
             raw_metadata: json!({}),
+            merge_refresh_deadline: Utc::now().naive_utc() + Duration::hours(24),
         }
     }
 
@@ -875,6 +919,51 @@ mod tests {
     fn rejects_unrelated_discussion_source() {
         assert!(
             resolve_identity(&source(None, Some("https://example.com/thread"), None)).is_none()
+        );
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn paid_summary_guard_rejects_replaced_and_expired_claims(pool: sqlx::PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (apple_id, email, is_active, is_admin) VALUES ('discussion-claim', 'discussion-claim@example.com', true, false) RETURNING id::bigint",
+        ).fetch_one(&pool).await.unwrap();
+        let item_id: i64 = sqlx::query_scalar(
+            "INSERT INTO news_items (ingest_key, visibility_scope, owner_user_id, platform, source_external_id, discussion_url, raw_metadata, ingested_at, created_at) VALUES ('discussion-claim', 'user', $1, 'reddit', 'abc123', 'https://www.reddit.com/r/rust/comments/abc123/example', '{}', now(), now()) RETURNING id::bigint",
+        ).bind(user_id).fetch_one(&pool).await.unwrap();
+        sqlx::query("INSERT INTO news_item_read_status (user_id, news_item_id, read_at, created_at) VALUES ($1, $2, now(), now())")
+            .bind(user_id).bind(item_id).execute(&pool).await.unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        let DiscussionPreparation::Ready(snapshot) =
+            prepare_discussion(&mut transaction, item_id).await.unwrap()
+        else {
+            panic!("initial discussion must be claimable")
+        };
+        transaction.commit().await.unwrap();
+        assert!(
+            discussion_summary_call_is_allowed(&pool, &snapshot)
+                .await
+                .unwrap()
+        );
+        let mut transaction = pool.begin().await.unwrap();
+        assert!(matches!(
+            prepare_discussion(&mut transaction, item_id).await.unwrap(),
+            DiscussionPreparation::Deferred(_)
+        ));
+        transaction.commit().await.unwrap();
+        sqlx::query("UPDATE news_item_discussions SET refresh_claim_token = $2 WHERE news_item_id::bigint = $1")
+            .bind(item_id).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
+        assert!(
+            !discussion_summary_call_is_allowed(&pool, &snapshot)
+                .await
+                .unwrap()
+        );
+        sqlx::query("UPDATE news_item_discussions SET refresh_claim_token = $2, next_refresh_after = timezone('UTC', now()) - interval '1 second' WHERE news_item_id::bigint = $1")
+            .bind(item_id).bind(snapshot.claim_token).execute(&pool).await.unwrap();
+        assert!(
+            !discussion_summary_call_is_allowed(&pool, &snapshot)
+                .await
+                .unwrap()
         );
     }
 }

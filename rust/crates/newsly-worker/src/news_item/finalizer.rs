@@ -65,8 +65,8 @@ fn finalizer_result(outcome: NewsApplyOutcome) -> TaskFinalizerResult {
             Some("news item disappeared before finalization".to_owned()),
             false,
         )),
-        NewsApplyOutcome::SourceChanged | NewsApplyOutcome::CandidateChanged => {
-            TaskFinalizerResult::Override(TaskResult::defer(1))
-        }
+        NewsApplyOutcome::SourceChanged
+        | NewsApplyOutcome::CandidateChanged
+        | NewsApplyOutcome::DemandChanged => TaskFinalizerResult::Override(TaskResult::defer(1)),
     }
 }

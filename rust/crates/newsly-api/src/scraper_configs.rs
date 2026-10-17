@@ -224,6 +224,9 @@ async fn create_config(
     );
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
+    let prior_demand = crate::aggregator_demand::snapshot(&mut transaction)
+        .await
+        .map_err(|error| internal_error(error, &request_id))?;
     let record = persist_scraper_config(
         &mut transaction,
         &NewScraperConfig {
@@ -242,6 +245,13 @@ async fn create_config(
         }
         other => internal_error(other, &request_id),
     })?;
+    crate::aggregator_demand::enqueue_new_demand(
+        &mut transaction,
+        &QueueKernel::new(state.database.pool().clone()),
+        &prior_demand,
+    )
+    .await
+    .map_err(|error| internal_error(error, &request_id))?;
     crate::write_support::commit(transaction, &request_id).await?;
     let record_stats = stats_for_record(&state, current_user.id, &record, &request_id).await?;
     Ok((
@@ -331,6 +341,9 @@ async fn subscribe(
     let config_value = Value::Object(config);
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
+    let prior_demand = crate::aggregator_demand::snapshot(&mut transaction)
+        .await
+        .map_err(|error| internal_error(error, &request_id))?;
     let created = persist_scraper_config(
         &mut transaction,
         &NewScraperConfig {
@@ -381,6 +394,13 @@ async fn subscribe(
         &request_id,
     )
     .await?;
+    crate::aggregator_demand::enqueue_new_demand(
+        &mut transaction,
+        &QueueKernel::new(state.database.pool().clone()),
+        &prior_demand,
+    )
+    .await
+    .map_err(|error| internal_error(error, &request_id))?;
     crate::write_support::commit(transaction, &request_id).await?;
     present_subscription(
         &state,
@@ -423,6 +443,9 @@ async fn finalize_existing_subscription(
 ) -> Result<(StatusCode, Json<ScraperConfigResponse>), ApiError> {
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
+    let prior_demand = crate::aggregator_demand::snapshot(&mut transaction)
+        .await
+        .map_err(|error| internal_error(error, request_id))?;
     let locked = persist_scraper_config_update(
         &mut transaction,
         user_id,
@@ -458,6 +481,13 @@ async fn finalize_existing_subscription(
             enqueue_initial_backfill(state, &mut transaction, user_id, &record, request_id).await?;
         (record, FeedSubscriptionOutcome::Reactivated, task_id)
     };
+    crate::aggregator_demand::enqueue_new_demand(
+        &mut transaction,
+        &QueueKernel::new(state.database.pool().clone()),
+        &prior_demand,
+    )
+    .await
+    .map_err(|error| internal_error(error, request_id))?;
     crate::write_support::commit(transaction, request_id).await?;
     present_subscription(
         state,
@@ -654,6 +684,9 @@ async fn update_config(
         .map(canonicalize_feed_url);
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
+    let prior_demand = crate::aggregator_demand::snapshot(&mut transaction)
+        .await
+        .map_err(|error| internal_error(error, &request_id))?;
     let record = persist_scraper_config_update(
         &mut transaction,
         current_user.id,
@@ -683,6 +716,13 @@ async fn update_config(
         .with_retryable(true),
         other => internal_error(other, &request_id),
     })?;
+    crate::aggregator_demand::enqueue_new_demand(
+        &mut transaction,
+        &QueueKernel::new(state.database.pool().clone()),
+        &prior_demand,
+    )
+    .await
+    .map_err(|error| internal_error(error, &request_id))?;
     crate::write_support::commit(transaction, &request_id).await?;
     let record_stats = stats_for_record(&state, current_user.id, &record, &request_id).await?;
     Ok(Json(config_response(record, Some(&record_stats))))

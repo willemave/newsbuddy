@@ -47,22 +47,15 @@ impl BriefingRefreshFinalizer {
         let user_id = self.publication.prepared.user_id;
         let initial: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND news_seeded AND NOT news_seed_settled)")
             .bind(user_id).fetch_one(&mut **transaction).await?;
-        let recover = outcome.stale && self.stale_recoveries < 3;
-        let delay = if self.waiting_for_news && !outcome.stale {
-            30
-        } else if outcome.stale && !recover && initial {
-            60
-        } else if recover || (initial && !outcome.stale && outcome.appended_segments > 0) {
-            outcome.next_sweep_delay_seconds.min(5)
-        } else if initial && !outcome.stale {
-            outcome.next_sweep_delay_seconds.clamp(30, 60)
-        } else {
-            outcome.next_sweep_delay_seconds.max(if outcome.stale {
-                self.config.sweep_seconds
-            } else {
-                0
-            })
-        };
+        let delay = next_sweep_delay(
+            initial,
+            outcome.stale,
+            self.stale_recoveries,
+            outcome.appended_segments,
+            self.waiting_for_news,
+            outcome.next_sweep_delay_seconds,
+            self.config.sweep_seconds,
+        );
         let mut request = sweep_request(user_id, delay);
         if initial {
             request.priority = 10;
@@ -94,6 +87,7 @@ impl BriefingRefreshFinalizer {
             retired_segments = outcome.retired_segments,
             stale = outcome.stale,
             next_sweep_delay_seconds = outcome.next_sweep_delay_seconds,
+            scheduled_sweep_delay_seconds = delay,
             "Briefing refresh finalized behind the exact queue lease"
         );
         Ok(TaskFinalizerResult::Keep)
@@ -122,6 +116,33 @@ impl TaskFinalizer for BriefingRefreshFinalizer {
         } else {
             FinalizerErrorDisposition::Retryable
         }
+    }
+}
+
+fn next_sweep_delay(
+    initial: bool,
+    stale: bool,
+    stale_recoveries: u64,
+    appended_segments: usize,
+    waiting_for_news: bool,
+    repository_delay: i64,
+    sweep_seconds: i64,
+) -> i64 {
+    let recover = stale && stale_recoveries < 3;
+    // A productive first-edition sweep can advance other prepared categories
+    // while embeddings catch up. An unproductive pass still backs off.
+    if initial && !stale && appended_segments > 0 {
+        repository_delay.min(5)
+    } else if waiting_for_news && !stale {
+        30
+    } else if stale && !recover && initial {
+        60
+    } else if recover {
+        repository_delay.min(5)
+    } else if initial && !stale {
+        repository_delay.clamp(30, 60)
+    } else {
+        repository_delay.max(if stale { sweep_seconds } else { 0 })
     }
 }
 
@@ -190,6 +211,38 @@ fn sweep_request(user_id: i64, delay_seconds: i64) -> EnqueueRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn productive_first_edition_advances_without_losing_retry_backoff() {
+        let cases = [
+            (true, false, 0, true, true, 0, 0),
+            (true, false, 0, true, true, 20, 5),
+            (true, false, 0, false, true, 0, 30),
+            (false, false, 0, true, true, 0, 30),
+            (true, true, 2, true, true, 20, 5),
+            (true, true, 3, true, true, 20, 60),
+            (false, true, 3, true, false, 10, 120),
+            (true, false, 0, false, false, 10, 30),
+            (true, false, 0, false, false, 90, 60),
+            (false, true, 2, false, true, 20, 5),
+            (false, false, 0, true, false, 7, 7),
+        ];
+        for (initial, stale, recoveries, appended, waiting, delay, expected) in cases {
+            assert_eq!(
+                next_sweep_delay(
+                    initial,
+                    stale,
+                    recoveries,
+                    usize::from(appended),
+                    waiting,
+                    delay,
+                    120
+                ),
+                expected,
+                "initial={initial} stale={stale} recoveries={recoveries} appended={appended} waiting={waiting} delay={delay}"
+            );
+        }
+    }
 
     #[test]
     fn deterministic_sql_data_and_constraint_errors_are_terminal() {

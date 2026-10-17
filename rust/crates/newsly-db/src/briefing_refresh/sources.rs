@@ -159,6 +159,23 @@ pub(super) fn visible_news_sql() -> String {
     )
 }
 
+// The run parameter is a static SQL placeholder supplied by our query builders.
+// Resolve the frozen cohort by primary key before evaluating subscription visibility.
+pub(super) fn visible_cohort_news_sql(run_parameter: &str) -> String {
+    format!(
+        r#"
+        {SUBSCRIBED_AGGREGATORS_CTE}
+        SELECT news.*
+        FROM onboarding_first_edition_items cohort
+        JOIN news_items news ON news.id = cohort.source_id
+        WHERE cohort.run_id = {run_parameter}::bigint AND cohort.source_kind = 'news'
+          AND news.status = 'ready' AND news.representative_news_item_id IS NULL
+          AND {visibility}
+        "#,
+        visibility = visible_news_predicate("news")
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn source_from_content(
     id: i64,

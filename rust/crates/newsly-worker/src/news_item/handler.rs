@@ -165,6 +165,7 @@ async fn execute_enrichment(
             content_id,
             final_url,
             source_metadata,
+            demand_policy,
             ..
         } => {
             let article_url = super::input::choose_article_url(&snapshot);
@@ -194,7 +195,15 @@ async fn execute_enrichment(
                             Vec::new(),
                         );
                     };
-                    return extract_enrichment(services, plan, snapshot, article_url, lease).await;
+                    return extract_enrichment(
+                        services,
+                        plan,
+                        snapshot,
+                        article_url,
+                        demand_policy,
+                        lease,
+                    )
+                    .await;
                 }
                 BodyRead::LeaseLost => {
                     return plain_failure("queue lease was lost reading news article body", true);
@@ -202,8 +211,13 @@ async fn execute_enrichment(
                 BodyRead::Failed(error) => return plain_failure(error, true),
             }
         }
-        EnrichmentPreparation::Extract { article_url, .. } => {
-            return extract_enrichment(services, plan, snapshot, article_url, lease).await;
+        EnrichmentPreparation::Extract {
+            article_url,
+            demand_policy,
+            ..
+        } => {
+            return extract_enrichment(services, plan, snapshot, article_url, demand_policy, lease)
+                .await;
         }
     };
     soft_enrichment(services, plan, snapshot, mutation, usage)
@@ -214,15 +228,17 @@ async fn extract_enrichment(
     plan: &OwnedWorkPlan,
     snapshot: super::model::NewsSnapshot,
     article_url: String,
+    demand_policy: crate::content::FirecrawlDemandPolicy,
     mut lease: LeaseHealth,
 ) -> HandlerExecution {
     let deadline = Utc::now() + services.extraction_timeout;
     let request_id = format!("news-item-{}-task-{}", snapshot.id, plan.task_id);
     let extraction_url = article_url.clone();
-    let extraction =
-        services
-            .extraction
-            .process_article(&extraction_url, "article", &request_id, deadline);
+    let runtime = services
+        .extraction
+        .clone()
+        .with_demand_policy(demand_policy);
+    let extraction = runtime.process_article(&extraction_url, "article", &request_id, deadline);
     tokio::pin!(extraction);
     let attempt = tokio::select! {
         attempt = &mut extraction => attempt,
@@ -278,6 +294,18 @@ async fn extract_enrichment(
             retryable,
             usage,
         } => {
+            if code == newsly_db::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE {
+                return soft_enrichment(
+                    services,
+                    plan,
+                    snapshot,
+                    EnrichmentMutation::MetadataOnly {
+                        article_url,
+                        reason,
+                    },
+                    usage,
+                );
+            }
             tracing::warn!(
                 news_item_id = snapshot.id,
                 error_code = code,

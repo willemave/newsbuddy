@@ -73,12 +73,14 @@ pub(super) enum EnrichmentPreparation {
     },
     Content {
         snapshot: NewsSnapshot,
+        demand_policy: crate::content::FirecrawlDemandPolicy,
         content_id: i64,
         final_url: Option<String>,
         source_metadata: Option<Value>,
     },
     Extract {
         snapshot: NewsSnapshot,
+        demand_policy: crate::content::FirecrawlDemandPolicy,
         article_url: String,
     },
     Skip {
@@ -124,6 +126,10 @@ pub(super) enum EnrichmentMutation {
     },
     Skipped {
         article_url: Option<String>,
+        reason: String,
+    },
+    MetadataOnly {
+        article_url: String,
         reason: String,
     },
     Failed {
@@ -198,6 +204,7 @@ pub(super) enum NewsApplyOutcome {
     NewsItemMissing,
     SourceChanged,
     CandidateChanged,
+    DemandChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

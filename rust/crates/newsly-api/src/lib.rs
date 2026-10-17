@@ -11,6 +11,7 @@ mod admin_onboarding;
 mod admin_pages;
 mod admin_shell;
 mod agent;
+pub(crate) use newsly_worker::aggregator_demand;
 mod apple_auth;
 mod audio_episode_presentation;
 mod audio_episodes;

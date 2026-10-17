@@ -8,7 +8,7 @@ mod storage;
 use url::Url;
 
 pub use extraction::ContentExtractionRuntime;
-pub(crate) use extraction::ExtractionAttempt;
+pub(crate) use extraction::{ExtractionAttempt, FirecrawlDemandPolicy};
 pub use firecrawl::FirecrawlClient;
 pub use handlers::{AnalyzeUrlHandler, ContentWorkerServices, ProcessContentHandler};
 pub(crate) use model::{FirecrawlUsage, UsageWrite};

@@ -20,6 +20,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
+mod brutalist;
 mod feed;
 mod papers;
 
@@ -160,6 +161,7 @@ impl ScrapeGateway {
     pub async fn fetch_aggregator(
         &self,
         key: AggregatorKey,
+        brutalist_topics: &[String],
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
         match key {
             AggregatorKey::HackerNews => self.fetch_hacker_news().await,
@@ -183,7 +185,7 @@ impl ScrapeGateway {
                 self.fetch_html_grouped(key, "https://finurls.com", 100)
                     .await
             }
-            AggregatorKey::Brutalist => self.fetch_brutalist().await,
+            AggregatorKey::Brutalist => self.fetch_brutalist(brutalist_topics).await,
             AggregatorKey::Arxiv => self.fetch_arxiv().await,
             AggregatorKey::HfPapers => self.fetch_hf_papers().await,
         }
@@ -508,97 +510,6 @@ impl ScrapeGateway {
             )));
         }
         Ok(ScrapeProviderOutcome::new(items, Vec::new()))
-    }
-
-    async fn fetch_brutalist(&self) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-        let topics = AggregatorKey::Brutalist.topics();
-        let mut items = Vec::new();
-        let mut errors = Vec::new();
-        let mut retryable_failure = false;
-        let mut seen = BTreeSet::new();
-        for topic in topics {
-            let topic_url = format!("https://brutalist.report/topic/{topic}?limit=25&hours=24");
-            let bytes = match self
-                .fetch_public_bytes(&topic_url, Some(MAX_SOURCE_RESPONSE_BYTES))
-                .await
-            {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    retryable_failure |= error.retryable();
-                    errors.push(format!("{topic}: {error}"));
-                    continue;
-                }
-            };
-            let html = match std::str::from_utf8(&bytes) {
-                Ok(html) => html,
-                Err(error) => {
-                    errors.push(format!("{topic}: non-UTF-8 HTML: {error}"));
-                    continue;
-                }
-            };
-            let document = Html::parse_document(html);
-            let heading_selector = selector("h3, h4")?;
-            let item_selector = selector("li a[href]")?;
-            for heading in document.select(&heading_selector) {
-                let source_name = clean(Some(heading.text().collect::<Vec<_>>().join(" ")))
-                    .map(|value| value.replace("[rss]", "").trim().to_owned());
-                let Some(list) = next_element_matching(heading, "ul") else {
-                    continue;
-                };
-                for anchor in list.select(&item_selector) {
-                    let Some(href) = anchor.value().attr("href") else {
-                        continue;
-                    };
-                    let Some(article_url) = Url::parse(&topic_url)
-                        .ok()
-                        .and_then(|base| base.join(href).ok())
-                        .and_then(|url| normalize_http_url(url.as_str()))
-                    else {
-                        continue;
-                    };
-                    if host_matches(&article_url, "brutalist.report")
-                        || !seen.insert(article_url.clone())
-                    {
-                        continue;
-                    }
-                    let Some(title) = clean(Some(anchor.text().collect::<Vec<_>>().join(" ")))
-                    else {
-                        continue;
-                    };
-                    let domain = domain_of(&article_url);
-                    let display_source = source_name.clone().or_else(|| domain.clone());
-                    let metadata = json!({
-                        "platform": "brutalist",
-                        "source": display_source,
-                        "article": {"url": article_url, "title": title, "source_domain": domain},
-                        "aggregator": {
-                            "key": "brutalist",
-                            "name": "Brutalist Report",
-                            "topic": topic,
-                            "metadata": {"source_name": source_name, "topic_url": topic_url},
-                        },
-                        "discussion_url": null,
-                        "excerpt": null,
-                        "discovery_time": Utc::now().to_rfc3339(),
-                    });
-                    items.push(ScrapedItem::News(Box::new(news_item(NewsItemInput {
-                        key: AggregatorKey::Brutalist,
-                        article_url,
-                        title: Some(title),
-                        external_id: None,
-                        discussion_url: None,
-                        owner_user_id: None,
-                        published_at: None,
-                        raw_metadata: metadata,
-                    }))));
-                }
-            }
-        }
-        Ok(ScrapeProviderOutcome {
-            items,
-            item_errors: errors,
-            retryable_failure,
-        })
     }
 
     async fn reddit_access_token(&self) -> Result<String, ScrapeGatewayError> {

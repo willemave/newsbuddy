@@ -22,23 +22,23 @@ async fn warm_cadence_uses_active_demand_and_exact_boundaries(pool: PgPool) {
     assert!(aggregator_due(&mut c, "hackernews", now).await.unwrap());
     sqlx::query("INSERT INTO source_ingestion_health(source_key,last_attempt_at) VALUES ('aggregator:hackernews',$1)").bind(now).execute(&mut *c).await.unwrap();
     assert!(
-        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(119))
+        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(54))
             .await
             .unwrap()
     );
     assert!(
-        aggregator_due(&mut c, "hackernews", now + Duration::hours(2))
+        aggregator_due(&mut c, "hackernews", now + Duration::minutes(55))
             .await
             .unwrap()
     );
     sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES ($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true)").bind(id).execute(&mut *c).await.unwrap();
     assert!(
-        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(59))
+        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(9))
             .await
             .unwrap()
     );
     assert!(
-        aggregator_due(&mut c, "hackernews", now + Duration::hours(1))
+        aggregator_due(&mut c, "hackernews", now + Duration::minutes(10))
             .await
             .unwrap()
     );
@@ -48,7 +48,7 @@ async fn warm_cadence_uses_active_demand_and_exact_boundaries(pool: PgPool) {
         .await
         .unwrap();
     assert!(
-        !aggregator_due(&mut c, "hackernews", now + Duration::hours(1))
+        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(10))
             .await
             .unwrap()
     );
@@ -177,6 +177,21 @@ async fn warm_first_batch_is_frozen_and_remaining_news_is_eventually_admitted(po
             .await
             .unwrap(),
         0
+    );
+    tx.commit().await.unwrap();
+    // A full rebuild deletes pending rows before seeding. It must still respect
+    // the frozen cohort, including the nullable limit and fourth SQL parameter.
+    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    assert_eq!(
+        crate::briefing_refresh::preparation::seed_news_pending(&mut tx, id, true)
+            .await
+            .unwrap(),
+        40
     );
     tx.commit().await.unwrap();
     let members:i64=sqlx::query_scalar("SELECT count(*) FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news'").bind(run_id).fetch_one(&pool).await.unwrap();
@@ -340,4 +355,99 @@ async fn embedding_failure_cooldown_uses_exact_input_model_and_terminal_time(poo
             .await
             .unwrap()
     );
+}
+
+#[sqlx::test(migrations = false)]
+async fn warm_attach_waits_for_new_topic_fetch_and_bounds_missing_check(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let id = user(&pool).await;
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,config,is_active) VALUES($1,'aggregator','{\"key\":\"brutalist\",\"topics\":[\"politics\"]}',true)").bind(id).execute(&pool).await.unwrap();
+    let run_id = run(&pool, id).await;
+    sqlx::query("INSERT INTO onboarding_first_edition_sources(run_id,source_key,display_name,source_kind,position,status,processed_item_count) VALUES($1,'scraper:brutalist','Brutalist','aggregator',0,'queued',0)").bind(run_id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO source_ingestion_health(source_key,last_attempt_at,last_success_at) VALUES('aggregator:brutalist',timezone('UTC',now())-interval '70 minutes',timezone('UTC',now())-interval '70 minutes')").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO processing_tasks(task_type,status,queue_name,payload,executor_runtime,executor_version,executor_namespace) VALUES('scrape','pending','content',$1,'rust',1,'scrape')").bind(serde_json::json!({"sources":["brutalist"]})).execute(&pool).await.unwrap();
+    let mut connection = pool.acquire().await.unwrap();
+    crate::first_edition_progress::reconcile_sources(&mut connection, id)
+        .await
+        .unwrap();
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+    )
+    .bind(run_id)
+    .fetch_one(&mut *connection)
+    .await
+    .unwrap();
+    assert_eq!(status, "queued");
+    sqlx::query("UPDATE processing_tasks SET status='completed',completed_at=timezone('UTC',now()) WHERE task_type='scrape'").execute(&mut *connection).await.unwrap();
+    crate::first_edition_progress::reconcile_sources(&mut connection, id)
+        .await
+        .unwrap();
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+    )
+    .bind(run_id)
+    .fetch_one(&mut *connection)
+    .await
+    .unwrap();
+    assert_eq!(status, "processed");
+    sqlx::query("DELETE FROM source_ingestion_health")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE onboarding_first_edition_runs SET started_at=timezone('UTC',now())-interval '46 minutes' WHERE id::bigint=$1").bind(run_id).execute(&mut *connection).await.unwrap();
+    sqlx::query("UPDATE onboarding_first_edition_sources SET status='queued',check_cutoff=NULL,completed_at=NULL WHERE run_id::bigint=$1").bind(run_id).execute(&mut *connection).await.unwrap();
+    crate::first_edition_progress::reconcile_sources(&mut connection, id)
+        .await
+        .unwrap();
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+    )
+    .bind(run_id)
+    .fetch_one(&mut *connection)
+    .await
+    .unwrap();
+    assert_eq!(status, "unavailable");
+}
+
+#[sqlx::test(migrations = false)]
+async fn frozen_first_batch_rechecks_subscription_visibility_before_reseeding(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let id = user(&pool).await;
+    let run_id = run(&pool, id).await;
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES ($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true)").bind(id).execute(&pool).await.unwrap();
+    news(&pool, "subscription-withdrawn").await;
+    let mut tx = pool.begin().await.unwrap();
+    assert_eq!(
+        crate::briefing_refresh::preparation::seed_news_pending(&mut tx, id, false)
+            .await
+            .unwrap(),
+        1
+    );
+    tx.commit().await.unwrap();
+    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id::bigint=$1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    assert_eq!(
+        crate::briefing_refresh::preparation::seed_news_pending(&mut tx, id, false)
+            .await
+            .unwrap(),
+        0
+    );
+    tx.commit().await.unwrap();
+    let settled: bool = sqlx::query_scalar(
+        "SELECT news_seed_settled FROM onboarding_first_edition_runs WHERE id::bigint=$1",
+    )
+    .bind(run_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(settled);
 }

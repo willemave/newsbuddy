@@ -8,10 +8,10 @@ use newsly_agent_runtime::{
 };
 use newsly_contracts::{AssistantFeedOption, FeedType};
 use newsly_db::{
-    ChatContentFilters, ChatTaskSnapshot, apply_aggregator_subscription, canonicalize_feed_url,
-    create_deep_research_handoff, list_unread_chat_news, load_active_feed_urls, mark_content_read,
-    mark_content_unread, prepare_chat_article_conversion, remove_content_from_knowledge,
-    save_content_to_knowledge, search_accessible_content, search_chat_news,
+    ChatContentFilters, ChatTaskSnapshot, canonicalize_feed_url, create_deep_research_handoff,
+    list_unread_chat_news, load_active_feed_urls, mark_content_read, mark_content_unread,
+    prepare_chat_article_conversion, remove_content_from_knowledge, save_content_to_knowledge,
+    search_accessible_content, search_chat_news,
 };
 use newsly_domain::{AGGREGATOR_KEY_NAMES, AggregatorKey};
 use newsly_e2b::{DirectE2bProvider, OutputLimits};
@@ -663,21 +663,15 @@ impl ChatToolExecutor {
             .topics
             .map(|topics| canonical_aggregator_topics(key, &topics))
             .transpose()?;
-        let mut transaction = self
-            .dependencies
-            .pool
-            .begin()
-            .await
-            .map_err(db_tool_error)?;
-        let applied = apply_aggregator_subscription(
-            &mut transaction,
+        let applied = crate::aggregator_demand::subscribe_aggregator(
+            &self.dependencies.pool,
+            &self.dependencies.queue,
             self.snapshot.user_id,
             key,
             topics.as_deref(),
         )
         .await
         .map_err(db_tool_error)?;
-        transaction.commit().await.map_err(db_tool_error)?;
         Ok(success(json!({
             "subscribed": true,
             "aggregator": key.as_str(),

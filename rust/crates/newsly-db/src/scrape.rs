@@ -259,6 +259,7 @@ pub struct ScrapedNewsRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PersistedNewsRecord {
+    pub reenrich_article: bool,
     pub news_item_id: i64,
     pub created: bool,
     pub discussion_refresh_ready: bool,
@@ -286,8 +287,39 @@ pub async fn persist_scraped_news(
             "news status is unsupported",
         ));
     }
+    if record.platform == "brutalist" {
+        crate::aggregator_corpus::lock_aggregator_demand(transaction).await?;
+    }
     let ingest_key = news_ingest_key(record)?;
     let existing_id = find_existing_news(transaction, record, &ingest_key).await?;
+    let mut reenrich_article = false;
+    let raw_metadata = if record.platform == "brutalist" {
+        if let Some(id) = existing_id {
+            let previous: Value = sqlx::query_scalar(
+                "SELECT raw_metadata::jsonb FROM news_items WHERE id::bigint=$1",
+            )
+            .bind(id)
+            .fetch_one(&mut **transaction)
+            .await?;
+            let merged = merge_brutalist_topics(&previous, &record.raw_metadata);
+            if previous["article_extraction"]["error_code"].as_str()
+                == Some(crate::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE)
+                && previous["aggregator"]["topics"] != merged["aggregator"]["topics"]
+            {
+                reenrich_article = crate::aggregator_corpus::visible_active_subscriber(
+                    transaction,
+                    "brutalist",
+                    &merged,
+                )
+                .await?;
+            }
+            merged
+        } else {
+            record.raw_metadata.clone()
+        }
+    } else {
+        record.raw_metadata.clone()
+    };
     let (news_item_id, created) = if let Some(news_item_id) = existing_id {
         sqlx::query(
             r#"
@@ -312,6 +344,10 @@ pub async fn persist_scraped_news(
                 summary_text = COALESCE($16, summary_text),
                 raw_metadata = (
                     COALESCE(raw_metadata, '{}'::json)::jsonb || $17::jsonb
+                    -- Discovery records first observation, not the latest scrape's clock.
+                    || CASE WHEN COALESCE(raw_metadata, '{}'::json)::jsonb ? 'discovery_time'
+                       THEN jsonb_build_object('discovery_time', raw_metadata::jsonb -> 'discovery_time')
+                       ELSE '{}'::jsonb END
                 )::json,
                 status = CASE WHEN status = 'ready' AND $18 <> 'ready' THEN status ELSE $18 END,
                 published_at = COALESCE($19, published_at),
@@ -335,7 +371,7 @@ pub async fn persist_scraped_news(
         .bind(&record.discussion_url)
         .bind(json!(record.summary_key_points))
         .bind(&record.summary_text)
-        .bind(&record.raw_metadata)
+        .bind(&raw_metadata)
         .bind(&record.status)
         .bind(record.published_at.map(|value| value.naive_utc()))
         .execute(&mut **transaction)
@@ -376,7 +412,7 @@ pub async fn persist_scraped_news(
         .bind(&record.discussion_url)
         .bind(json!(record.summary_key_points))
         .bind(&record.summary_text)
-        .bind(&record.raw_metadata)
+        .bind(&raw_metadata)
         .bind(&record.status)
         .bind(record.published_at.map(|value| value.naive_utc()))
         .fetch_one(&mut **transaction)
@@ -385,10 +421,30 @@ pub async fn persist_scraped_news(
     };
     let discussion_refresh_ready = sync_news_discussion(transaction, news_item_id, record).await?;
     Ok(PersistedNewsRecord {
+        reenrich_article,
         news_item_id,
         created,
         discussion_refresh_ready,
     })
+}
+
+fn merge_brutalist_topics(previous: &Value, incoming: &Value) -> Value {
+    let mut merged = incoming.clone();
+    let mut topics = BTreeSet::new();
+    for metadata in [previous, incoming] {
+        if let Some(values) = metadata["aggregator"]["topics"].as_array() {
+            topics.extend(values.iter().filter_map(Value::as_str).map(str::to_owned));
+        } else if let Some(topic) = metadata["aggregator"]["topic"].as_str() {
+            topics.insert(topic.to_owned());
+        }
+    }
+    if let Some(aggregator) = merged["aggregator"].as_object_mut() {
+        aggregator.insert("topics".to_owned(), json!(topics));
+        if let Some(topic) = previous["aggregator"]["topic"].as_str() {
+            aggregator.insert("topic".to_owned(), Value::from(topic));
+        }
+    }
+    merged
 }
 
 async fn find_existing_news(
@@ -529,7 +585,7 @@ pub async fn due_discussion_refresh_ids(
 ) -> Result<Vec<i64>, ScrapeRepositoryError> {
     let limit = limit.clamp(1, 1_000);
     sqlx::query(
-        r#"
+        crate::discussion_demand::candidate_query!(r#"
         INSERT INTO news_item_discussions (
             news_item_id, platform, external_id, discussion_url, title,
             summary_status, summary_incremental_update_count, last_refresh_status,
@@ -542,7 +598,7 @@ pub async fn due_discussion_refresh_ids(
             COALESCE(item.discussion_url, item.canonical_item_url),
             COALESCE(item.raw_metadata #>> '{summary,title}', item.raw_metadata #>> '{article,title}'),
             'not_ready', 0, 'pending', timezone('UTC', now()), timezone('UTC', now())
-        FROM news_items AS item
+        FROM discussion_candidate_items AS item
         WHERE item.status = 'ready'
           AND item.representative_news_item_id IS NULL
           AND item.platform IN ('hackernews', 'hn', 'reddit')
@@ -552,34 +608,19 @@ pub async fn due_discussion_refresh_ids(
               SELECT 1 FROM news_item_discussions AS existing
               WHERE existing.news_item_id = item.id
           )
-          AND (
-              (item.visibility_scope = 'user' AND EXISTS (
-                  SELECT 1 FROM users AS owner
-                  WHERE owner.id = item.owner_user_id AND owner.is_active IS TRUE
-              ))
-              OR
-              (item.visibility_scope = 'global' AND EXISTS (
-                  SELECT 1
-                  FROM user_scraper_configs AS config
-                  JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
-                  WHERE config.is_active IS TRUE
-                    AND config.scraper_type = 'aggregator'
-                    AND aggregator_config_admits(config.config::jsonb, item.platform, item.raw_metadata)
-              ))
-          )
         ORDER BY COALESCE(item.published_at, item.ingested_at, item.created_at) DESC
         LIMIT $1
         ON CONFLICT (news_item_id) DO NOTHING
-        "#,
+        "#),
     )
     .bind(limit.saturating_mul(2))
     .execute(&mut **transaction)
     .await?;
     Ok(sqlx::query_scalar::<_, i64>(
-        r#"
+        crate::discussion_demand::candidate_query!(r#"
         SELECT discussion.news_item_id::bigint
         FROM news_item_discussions AS discussion
-        JOIN news_items AS item ON item.id = discussion.news_item_id
+        JOIN discussion_candidate_items AS item ON item.id = discussion.news_item_id
         WHERE discussion.platform IN ('hackernews', 'reddit')
           AND discussion.external_id IS NOT NULL
           AND discussion.discussion_url IS NOT NULL
@@ -587,21 +628,10 @@ pub async fn due_discussion_refresh_ids(
           AND (discussion.next_refresh_after IS NULL OR discussion.next_refresh_after <= timezone('UTC', now()))
           AND item.status = 'ready'
           AND item.representative_news_item_id IS NULL
-          AND (
-              (item.visibility_scope = 'user' AND EXISTS (
-                  SELECT 1 FROM users AS owner
-                  WHERE owner.id = item.owner_user_id AND owner.is_active IS TRUE
-              ))
-              OR
-              (item.visibility_scope = 'global' AND EXISTS (
-                  SELECT 1
-                  FROM user_scraper_configs AS config
-                  JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
-                  WHERE config.is_active IS TRUE
-                    AND config.scraper_type = 'aggregator'
-                    AND aggregator_config_admits(config.config::jsonb, item.platform, item.raw_metadata)
-              ))
-          )
+          AND (discussion.summary IS NULL OR discussion.summary_status <> 'completed'
+               OR COALESCE(item.published_at,item.processed_at,item.ingested_at,item.created_at) > timezone('UTC',now())-interval '24 hours')
+          AND (discussion.summary IS NULL OR discussion.summary_status <> 'completed'
+               OR item.unread_briefing_demand)
         ORDER BY
             CASE WHEN discussion.summary IS NULL OR discussion.summary_status <> 'completed'
                 OR discussion.raw_comments_ref IS NULL THEN 1 ELSE 0 END DESC,
@@ -610,7 +640,7 @@ pub async fn due_discussion_refresh_ids(
             discussion.next_refresh_after NULLS FIRST,
             discussion.updated_at
         LIMIT $1
-        "#,
+        "#),
     )
     .bind(limit)
     .fetch_all(&mut **transaction)

@@ -331,6 +331,9 @@ async fn complete_onboarding(
         .await
         .map_err(|error| completion_unavailable(error, request_id))?;
     verify_stamp(&mut transaction, stamp, request_id).await?;
+    let prior_demand = crate::aggregator_demand::snapshot(&mut transaction)
+        .await
+        .map_err(|error| completion_unavailable(error, request_id))?;
     let persisted = complete_onboarding_selection(&mut transaction, &input.selection)
         .await
         .map_err(|error| match error {
@@ -344,6 +347,16 @@ async fn complete_onboarding(
             }
             other => completion_unavailable(other, request_id),
         })?;
+    crate::aggregator_demand::enqueue_new_demand(
+        &mut transaction,
+        &QueueKernel::new(state.database.pool().clone()),
+        &prior_demand,
+    )
+    .await
+    .map_err(|error| completion_unavailable(error, request_id))?;
+    newsly_db::first_edition_progress::reconcile_sources(&mut transaction, user_id)
+        .await
+        .map_err(|error| completion_unavailable(error, request_id))?;
     let (requests, primary_index, briefing_index) = completion_tasks(user_id, &persisted);
     let batch = QueueKernel::new(state.database.pool().clone())
         .enqueue_many_in_transaction(&mut transaction, requests)
@@ -546,19 +559,11 @@ fn completion_tasks(
     }
     for source in &persisted.sources_to_scrape {
         primary_index.get_or_insert(requests.len());
-        let global = AggregatorKey::from_key(source).is_some();
         let mut request = EnqueueRequest::new(TaskType::Scrape);
-        request.payload = object(if global {
-            json!({"sources": [source], "due_only": true})
-        } else {
-            json!({"sources": [source], "first_edition_run_id": persisted.first_edition_run_id})
-        });
-        if global {
-            request.dedupe = Some(true);
-            request.dedupe_key = Some(format!("scrape:aggregator:{source}"));
-        } else {
-            request.access_user_id = Some(user_id);
-        }
+        request.payload = object(
+            json!({"sources": [source], "first_edition_run_id": persisted.first_edition_run_id}),
+        );
+        request.access_user_id = Some(user_id);
         requests.push(request);
     }
     if !persisted.has_feed_discovery_task {

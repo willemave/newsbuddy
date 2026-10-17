@@ -25,6 +25,11 @@ use crate::{
 
 const DISCUSSION_REFRESH_LIMIT: i64 = 100;
 
+mod brutalist;
+mod source_plans;
+use brutalist::brutalist_budget_keys;
+use source_plans::build_source_plans;
+
 #[derive(Debug, Clone)]
 pub struct ScrapeWorkerServices {
     pool: PgPool,
@@ -126,12 +131,7 @@ async fn execute_scrape(
     if config_id.is_some() && prepared.is_empty() {
         return HandlerExecution::from_result(TaskResult::ok());
     }
-    let mut source_plans = match build_source_plans(&request, &prepared) {
-        Ok(plans) => plans,
-        Err(error) => {
-            return HandlerExecution::from_result(TaskResult::fail(Some(error), false));
-        }
-    };
+    let mut source_plans = build_source_plans(&request, &prepared);
     if source_plans.is_empty() {
         return HandlerExecution::from_result(TaskResult::ok());
     }
@@ -140,8 +140,7 @@ async fn execute_scrape(
         .payload
         .get("due_only")
         .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || request.first_edition_run_id.is_some();
+        .unwrap_or(false);
     if due_only && task.retry_count == 0 {
         let mut connection = match services.pool.acquire().await {
             Ok(connection) => connection,
@@ -175,6 +174,40 @@ async fn execute_scrape(
             due.push(source);
         }
         source_plans = due;
+    }
+    if source_plans.iter().any(|source| {
+        matches!(
+            source.kind,
+            SourcePlanKind::Aggregator {
+                key: AggregatorKey::Brutalist,
+                ..
+            }
+        )
+    }) {
+        let topics = match services.pool.acquire().await {
+            Ok(mut connection) => newsly_db::brutalist::demanded_topics(&mut connection).await,
+            Err(error) => Err(error),
+        };
+        let topics = match topics {
+            Ok(topics) => topics,
+            Err(error) => {
+                return HandlerExecution::from_result(TaskResult::fail(
+                    Some(error.to_string()),
+                    true,
+                ));
+            }
+        };
+        for source in &mut source_plans {
+            if let SourcePlanKind::Aggregator {
+                key: AggregatorKey::Brutalist,
+                brutalist_topics,
+                ..
+            } = &mut source.kind
+            {
+                brutalist_topics.clone_from(&topics);
+            }
+        }
+        source_plans.retain(|source| !matches!(&source.kind, SourcePlanKind::Aggregator { key: AggregatorKey::Brutalist, brutalist_topics, .. } if brutalist_topics.is_empty()));
     }
     let mut children = isolated_scrape_requests(&source_plans, request.first_edition_run_id);
     if due_only {
@@ -380,6 +413,7 @@ enum SourcePlanKind {
     Aggregator {
         key: AggregatorKey,
         required_config_ids: Vec<i64>,
+        brutalist_topics: Vec<String>,
     },
     Feed(Vec<FeedScrapeTarget>),
     Reddit(Vec<RedditScrapeTarget>),
@@ -390,77 +424,6 @@ enum SourcePlanKind {
 struct SourcePlan {
     source: String,
     kind: SourcePlanKind,
-}
-
-fn build_source_plans(
-    request: &ScrapeRequest,
-    prepared: &[ScrapeConfigSnapshot],
-) -> Result<Vec<SourcePlan>, String> {
-    let mut plans = Vec::new();
-    for source in &request.sources {
-        match *source {
-            RequestedSource::Aggregator(key) => {
-                let required_config_ids = prepared
-                    .iter()
-                    .filter(|config| {
-                        config.scraper_type == "aggregator"
-                            && config
-                                .config
-                                .get("key")
-                                .and_then(Value::as_str)
-                                .is_some_and(|value| AggregatorKey::from_key(value) == Some(key))
-                    })
-                    .map(|config| config.id)
-                    .collect::<Vec<_>>();
-                if request.first_edition_run_id.is_some() && required_config_ids.is_empty() {
-                    return Err(format!(
-                        "first-edition run has no active {} source",
-                        key.as_str()
-                    ));
-                }
-                plans.push(SourcePlan {
-                    source: key.as_str().to_owned(),
-                    kind: SourcePlanKind::Aggregator {
-                        key,
-                        required_config_ids,
-                    },
-                });
-            }
-            RequestedSource::Reddit => {
-                let targets = prepared
-                    .iter()
-                    .filter(|config| config.scraper_type == "reddit")
-                    .filter_map(reddit_target)
-                    .collect::<Vec<_>>();
-                plans.push(SourcePlan {
-                    source: source.canonical_name(),
-                    kind: SourcePlanKind::Reddit(targets),
-                });
-            }
-            RequestedSource::Substack | RequestedSource::Atom | RequestedSource::Podcast => {
-                let scraper_type = match source {
-                    RequestedSource::Substack => "substack",
-                    RequestedSource::Atom => "atom",
-                    RequestedSource::Podcast => "podcast_rss",
-                    _ => unreachable!(),
-                };
-                let targets = prepared
-                    .iter()
-                    .filter(|config| config.scraper_type == scraper_type)
-                    .filter_map(feed_target)
-                    .collect::<Vec<_>>();
-                plans.push(SourcePlan {
-                    source: source.canonical_name(),
-                    kind: SourcePlanKind::Feed(targets),
-                });
-            }
-            RequestedSource::DiscussionComments => plans.push(SourcePlan {
-                source: source.canonical_name(),
-                kind: SourcePlanKind::DiscussionComments,
-            }),
-        }
-    }
-    Ok(plans)
 }
 
 fn feed_target(config: &ScrapeConfigSnapshot) -> Option<FeedScrapeTarget> {
@@ -543,11 +506,12 @@ async fn execute_source(gateway: &ScrapeGateway, plan: SourcePlan) -> SourceOutc
         SourcePlanKind::Aggregator {
             key,
             required_config_ids,
+            brutalist_topics,
         } => SourceOutcome {
             source: plan.source,
             required_config_ids,
             result: gateway
-                .fetch_aggregator(key)
+                .fetch_aggregator(key, &brutalist_topics)
                 .await
                 .map_err(ScrapeFailure::from),
             discussion_catchup: false,
@@ -752,7 +716,48 @@ impl ScrapeFinalizer {
         &self,
         transaction: &mut Transaction<'static, Postgres>,
     ) -> Result<TaskFinalizerResult, Box<dyn Error + Send + Sync>> {
-        let valid_config_ids = matching_scrape_config_ids(transaction, &self.prepared).await?;
+        let required_ids = self
+            .outcomes
+            .iter()
+            .flat_map(|outcome| {
+                outcome.required_config_ids.iter().copied().chain(
+                    outcome
+                        .result
+                        .as_ref()
+                        .ok()
+                        .into_iter()
+                        .flat_map(|result| result.items.iter().filter_map(item_config_id)),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let required_configs = self
+            .prepared
+            .iter()
+            .filter(|config| required_ids.contains(&config.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let valid_config_ids = matching_scrape_config_ids(transaction, &required_configs).await?;
+        let mut brutalist_counts = if self.outcomes.iter().any(|outcome| {
+            outcome.source == "brutalist"
+                && outcome
+                    .result
+                    .as_ref()
+                    .is_ok_and(|result| !result.items.is_empty())
+        }) {
+            // Audience writes and denied fallback publication share this outer lock.
+            newsly_db::aggregator_corpus::lock_aggregator_demand(transaction).await?;
+            // New-demand and scheduled fetches can overlap; one finalizer owns the rolling cap.
+            sqlx::query("SELECT pg_advisory_xact_lock(6284057701001)")
+                .execute(&mut **transaction)
+                .await?;
+            newsly_db::brutalist::recent_section_counts(transaction)
+                .await?
+                .into_iter()
+                .map(|(topic, section, count)| ((topic, section), count))
+                .collect::<BTreeMap<_, _>>()
+        } else {
+            BTreeMap::new()
+        };
         let mut downstream = Vec::new();
         let mut process_content_ids = BTreeSet::new();
         let mut enrich_news_ids = BTreeSet::new();
@@ -795,10 +800,26 @@ impl ScrapeFinalizer {
                             }
                         }
                         Ok(PersistedScrapeItem::News(persisted)) => {
-                            savepoint.commit().await?;
-                            created += i64::from(persisted.created);
+                            let budget_keys = brutalist_budget_keys(item);
                             if persisted.created
-                                && !matches!(item, ScrapedItem::News(item) if item.status == "ready")
+                                && budget_keys.iter().any(|key| {
+                                    brutalist_counts.get(key).copied().unwrap_or(0)
+                                        >= newsly_db::brutalist::DAILY_SECTION_LIMIT
+                                })
+                            {
+                                savepoint.rollback().await?;
+                                continue;
+                            }
+                            savepoint.commit().await?;
+                            if persisted.created {
+                                for key in budget_keys {
+                                    *brutalist_counts.entry(key).or_default() += 1;
+                                }
+                            }
+                            created += i64::from(persisted.created);
+                            if persisted.reenrich_article
+                                || (persisted.created
+                                    && !matches!(item, ScrapedItem::News(item) if item.status == "ready"))
                             {
                                 enrich_news_ids.insert(persisted.news_item_id);
                             }
@@ -903,7 +924,8 @@ impl ScrapeFinalizer {
                 "news_item_id".to_owned(),
                 Value::from(news_item_id),
             )]));
-            request.dedupe = Some(false);
+            request.dedupe = Some(true);
+            request.dedupe_key = Some(format!("enrich-news-demand:{news_item_id}"));
             request
         }));
         downstream.extend(discussion_ids.into_iter().map(|news_item_id| {

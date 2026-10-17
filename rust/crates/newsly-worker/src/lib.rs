@@ -21,6 +21,7 @@
 )]
 
 mod agent_usage;
+pub mod aggregator_demand;
 pub mod audio_episode;
 pub mod briefing_refresh;
 pub mod chat_turn;

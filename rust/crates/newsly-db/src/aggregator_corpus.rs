@@ -78,7 +78,8 @@ pub async fn aggregator_due(
                   SELECT 1 FROM user_scraper_configs c JOIN users u ON u.id = c.user_id
                   WHERE c.is_active AND u.is_active AND c.scraper_type = 'aggregator'
                     AND c.config::jsonb ->> 'key' = $1
-              ) THEN interval '1 hour' ELSE interval '2 hours' END
+              ) THEN CASE WHEN $1 IN ('arxiv','hfpapers') THEN interval '55 minutes' ELSE interval '10 minutes' END
+                ELSE CASE WHEN $1 IN ('arxiv','hfpapers') THEN interval '115 minutes' ELSE interval '55 minutes' END END
         )
     "#,
     )
@@ -86,4 +87,27 @@ pub async fn aggregator_due(
     .bind(now)
     .fetch_one(connection)
     .await
+}
+
+/// The canonical visibility predicate owns both topic selection and cross-listed stories.
+pub async fn visible_active_subscriber(
+    connection: &mut PgConnection,
+    platform: &str,
+    raw_metadata: &serde_json::Value,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM user_scraper_configs config JOIN users subscriber ON subscriber.id=config.user_id AND subscriber.is_active WHERE config.is_active AND config.scraper_type='aggregator' AND aggregator_config_admits(config.config::jsonb,$1,$2::json))"
+    ).bind(platform).bind(raw_metadata).fetch_one(connection).await
+}
+
+/// Shared durable marker for a free extraction whose paid fallback had no audience.
+pub const FIRECRAWL_NO_DEMAND_ERROR_CODE: &str = "fallback_not_permitted";
+
+/// Serializes audience transitions with denied-fallback publication and topic expansion.
+/// Call only in a short transaction and before locking story rows.
+pub async fn lock_aggregator_demand(connection: &mut PgConnection) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('newsly:aggregator-demand', 0))")
+        .execute(connection)
+        .await?;
+    Ok(())
 }

@@ -9,10 +9,18 @@ use super::FirecrawlUsage;
 use super::firecrawl::{FirecrawlClient, FirecrawlError};
 use super::model::{ExtractedArticle, ExtractionUsageBatch, FeedCandidate, UsageWrite};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FirecrawlDemandPolicy {
+    #[default]
+    Allowed,
+    NoSubscriberDemand,
+}
+
 #[derive(Debug, Clone)]
 pub struct ContentExtractionRuntime {
     extractor: DocumentExtractorClient,
     firecrawl: FirecrawlClient,
+    demand_policy: FirecrawlDemandPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +42,13 @@ impl ContentExtractionRuntime {
         Self {
             extractor,
             firecrawl,
+            demand_policy: FirecrawlDemandPolicy::Allowed,
         }
+    }
+
+    pub(crate) fn with_demand_policy(mut self, policy: FirecrawlDemandPolicy) -> Self {
+        self.demand_policy = policy;
+        self
     }
 
     pub(super) async fn analyze(
@@ -226,6 +240,17 @@ impl ContentExtractionRuntime {
             fallback.usage_events,
         ) {
             usage.push(write);
+        }
+        if self.demand_policy == FirecrawlDemandPolicy::NoSubscriberDemand {
+            return ExtractionAttempt::Failure {
+                reason: format!(
+                    "Firecrawl fallback was not permitted because the global aggregator item is not visible to any active subscriber: {}",
+                    fallback.reason
+                ),
+                code: newsly_db::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE.to_owned(),
+                retryable: false,
+                usage,
+            };
         }
         let remaining = match (deadline - Utc::now()).to_std() {
             Ok(remaining) if !remaining.is_zero() => remaining,

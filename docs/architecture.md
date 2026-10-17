@@ -393,14 +393,29 @@ embeddings through the configured hosted adapter. Local SentenceTransformers
 and experimental rerankers belong only to offline evals.
 
 A new summary and its usage first checkpoint under the exact queue lease and source
-fingerprint. Relation retries reuse that checkpoint; source changes invalidate it.
+fingerprint. Relation retries reuse that checkpoint; substantive source changes invalidate it.
+Polling preserves the first discovery timestamp; fingerprints exclude only verified
+non-input engagement counters and scrape clocks. Summary finalization overlays its
+result on the already-fenced current row metadata, preserving refreshed counters.
 Summary, relation/cluster state, relevant links, remaining provider usage, Briefing pending
 sources, Agent Data synchronization, and the queue transition publish
 atomically. News never enters the long-form generated-artwork path.
 
-Shared aggregator checks use `source_ingestion_health` for hourly subscribed and
-two-hour unsubscribed eligibility. Scheduler and onboarding coalesce global
-scrapes by aggregator key; workers recheck eligibility without suppressing retries.
+Shared aggregator checks use `source_ingestion_health`: news sources target 15/60
+minutes for active/no subscribers, and daily research-paper sources retain 60/120
+minutes. Eligibility allows five minutes of tick grace and queue retries keep their
+backoff. Global fetches do not fence against every subscriber configuration. The
+scheduler owns routine fetches; onboarding reuses recent successful shared checks
+and settles a missing check after 45 minutes. Brutalist snapshots the catalog topics
+selected by active subscribers; each serialized new-topic transition queues a fetch without absorbing it into an
+already-running older snapshot, including a topic removed and re-added in flight. First-run
+attachment waits for active Brutalist fetches. Its rolling 12-new-item topic/section
+budget is serialized by a short finalizer advisory lock; capped sections still update
+existing stories. Topic union runs under the existing matching-story row lock, and
+one forward migration extends the inlinable `aggregator_config_admits` predicate for
+cross-listed metadata. HTTP writes and chat aggregator subscriptions share the worker
+audience-transition command. Creation, reactivation and topic changes compare demand
+transactionally and enqueue bounded skipped-fallback re-enrichment for a new audience.
 `newsly-domain::AggregatorKey` is the backend aggregator catalog: keys, display names,
 and offered topics, which config and onboarding normalization validate against. Configs
 store catalog-spelled keys and topics. Which global items a subscription admits is owned
@@ -498,8 +513,13 @@ and narration remain intact. Normal refresh and maintenance defer around each
 other's active external-work phase. This work never owns new story embeddings.
 
 Discussion collection and summary refresh have independent cadences and durable
-claim fences. The first usable summary is immediate; later changes coalesce by
-materiality and age.
+claim fences. Scheduled catch-up materializes active eligible consumer, subscription
+and cluster-read sets once, with the canonical visibility predicate inlined. The
+single-item check immediately before paid work retains its shared database predicate
+and the same 24-hour merge window. Initial summaries
+accept admission, citation, or explicit open; later summaries require unread admitted
+or citing consumers. Workers revalidate the discussion claim immediately before each
+paid attempt, including merge fallback, and retain fetched comments when demand ends.
 
 Scheduled feed selection stops at the persisted known-URL frontier; explicit
 backfill uses a separate skip-known policy. Briefing composition shares one

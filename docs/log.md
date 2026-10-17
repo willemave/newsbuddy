@@ -27,6 +27,26 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-17 — `aggregator-integration` — Reduce first-run refresh delays
+
+- **Status:** Validated locally; merged runtime timing pending.
+- **Scope:** First-edition sweep scheduling, frozen news cohort queries, and preparation timing.
+- **Evidence:** Production-snapshot API baseline: first semantic category 12.573s, first readable news 21.873s, second category 63.548s. A productive publication incorrectly chose the missing-embedding 30s backoff. Read-only query plans show 65k visible rows scanned despite a frozen 40-story cohort; active-cohort comparison took 1214ms versus 3.123ms with primary-key joins and an indexable segment-user predicate (both already-covered result sets empty).
+- **Changes:** Advance productive initial sweeps before missing-embedding backoff; retain idle and stale-recovery limits. Seed/settle from the persisted cohort while rechecking canonical visibility, then resume ordinary admission. Log preparation components and the actual scheduled delay. No change to initial cohort selection, source diversity, or provider models.
+- **Validation:** Explicit Claude Opus 5.5 high planning review completed; final review approved the implementation; isolated database and worker regression tests passed in the complete affected-crate suites. Eleven scheduling states and lost-subscription/full-rebuild cohort coverage added. Segment coverage retains an indexable user predicate.
+- **Remaining:** Rebuild/restart the merged local runtime, compare fresh-user timings, and complete the interactive microphone path when the Mac is unlocked. API timings are not a completed UI test.
+
+
+### 2026-10-17 — `aggregator-integration` — Integrate missing freshness and demand controls
+
+- **Scope:** Port the remaining `willem/aggregator-freshness` behavior onto current main without modifying its original dirty worktree.
+- **Decisions:** Claude Opus 5.5 high planning review confirmed current catalog/visibility ownership and identified first-run/topic, subscription-route, and cap races. News cadence is 15/60 minutes; daily paper sources retain 60/120. Preserve all nine source keys, provider identity helpers, current metadata contracts and observed usage recording. Cross-listed visibility extends the canonical SQL helper through a forward migration. Each serialized new-demand transition queues its own fetch so an in-flight older snapshot, including a remove/re-add gap, cannot absorb new demand. Current identity lookup already locks existing stories; finalizers serialize the rolling section budget separately.
+- **Changes:** Warm attach and bounded missing checks, demand-aware Brutalist collection/cross-list metadata/cap, subscription and onboarding triggers, success-based monitoring, item-level discussion demand and 24-hour merge limits with live claim checks. The original branch's cleanup is preserved at its source; applicable selector and empty-count improvements are ported.
+- **Validation:** Isolated Rust library suites passed: API 84, DB 199, providers 137 (one existing ignored), worker 199; 619 passed total. All-target warning-denied Clippy, formatting, diff checks and module-size guardrails passed. Exact Claude Opus 5.5 high planning and implementation reviews found and corrected visibility-function inlining and first-run error-settlement races; final collective and bounded correction reviews approved the shared HTTP/chat demand hook and set-based discussion selection. The final narrow polling-fingerprint review is recorded in the handoff. Rollback-only PostgreSQL probes confirm the visibility predicate remains inlined. Set-based discussion candidates replace per-item archive predicate scans; read-only production-clone plans took 113.8ms for selection and 89.8ms for backfill selection. The earlier scalar shape took 5.178s; the unbounded prior feature query was canceled after more than 90s (no exact ratio claimed).
+- **Changes continued:** Typed paid-fallback demand policy preserves free extraction; locked denial publication defers if a new audience appeared. Topic expansion retries previously denied stories. Shared dedupe prevents duplicate ingest/replay work; body-backed stories cannot reuse metadata-only target or sibling summaries. Polling retains the first discovery timestamp and excludes only verified non-input engagement counters and scrape clocks from source fingerprints, preserving substantive-input checkpoint invalidation; summary finalization retains the fenced current metadata so refreshed counters survive publication. The separate credit-deferral overlay remains outside this commit.
+- **Remaining:** Merge into the shared local checkout, restore unrelated work, and verify fresh-user runtime timing. No push, deployment, or fresh production intake claim.
+
+
 ### 2026-10-10 — `main` — Correct production podcast snapshot SQL
 
 - **Status:** Complete locally.

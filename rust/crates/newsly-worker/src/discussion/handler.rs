@@ -18,7 +18,7 @@ use super::model::{
     DiscussionFinalizationPlan, DiscussionMutation, DiscussionPreparation, DiscussionSnapshot,
     DiscussionSummaryMode, FetchedDiscussionArtifact, SummaryPublication,
 };
-use super::repository::prepare_discussion;
+use super::repository::{discussion_summary_call_is_allowed, prepare_discussion};
 use super::storage::{DiscussionObjectStore, DiscussionObjectStoreError};
 
 #[derive(Debug, Clone)]
@@ -220,14 +220,19 @@ async fn execute_discussion(
                 services,
                 &prompt,
                 requested_mode == DiscussionSummaryMode::Merge,
-                &snapshot.discussion_url,
+                &snapshot,
                 plan.task_id,
-                snapshot.owner_user_id,
                 &mut lease,
             )
             .await;
             let (generated, effective_mode) = match first {
                 SummaryCall::Generated(generated) => (generated, requested_mode),
+                SummaryCall::Suppressed => {
+                    return preserved_execution(snapshot, fetched_artifact);
+                }
+                SummaryCall::DemandCheckFailed(error) => {
+                    return failed_execution(snapshot, error, true, Some(fetched_artifact));
+                }
                 SummaryCall::LeaseLost => {
                     return plain_failure("queue lease was lost during discussion summary", true);
                 }
@@ -250,15 +255,20 @@ async fn execute_discussion(
                         services,
                         &summary_input.prompt,
                         false,
-                        &snapshot.discussion_url,
+                        &snapshot,
                         plan.task_id,
-                        snapshot.owner_user_id,
                         &mut lease,
                     )
                     .await
                     {
                         SummaryCall::Generated(generated) => {
                             (generated, DiscussionSummaryMode::Full)
+                        }
+                        SummaryCall::Suppressed => {
+                            return preserved_execution(snapshot, fetched_artifact);
+                        }
+                        SummaryCall::DemandCheckFailed(error) => {
+                            return failed_execution(snapshot, error, true, Some(fetched_artifact));
                         }
                         SummaryCall::LeaseLost => {
                             return plain_failure(
@@ -310,17 +320,26 @@ enum SummaryCall {
     Generated(GeneratedDiscussionSummary),
     Failed(ContentMiscGatewayError),
     LeaseLost,
+    Suppressed,
+    DemandCheckFailed(String),
 }
 
 async fn summarize_with_lease(
     services: &DiscussionWorkerServices,
     prompt: &str,
     merge: bool,
-    discussion_url: &str,
+    snapshot: &DiscussionSnapshot,
     task_id: i64,
-    user_id: Option<i64>,
     lease: &mut LeaseHealth,
 ) -> SummaryCall {
+    if lease.ownership_lost() {
+        return SummaryCall::LeaseLost;
+    }
+    match discussion_summary_call_is_allowed(&services.pool, snapshot).await {
+        Ok(true) => {}
+        Ok(false) => return SummaryCall::Suppressed,
+        Err(error) => return SummaryCall::DemandCheckFailed(error.to_string()),
+    }
     if lease.ownership_lost() {
         return SummaryCall::LeaseLost;
     }
@@ -337,13 +356,13 @@ async fn summarize_with_lease(
             content_id: None,
             session_id: None,
             message_id: None,
-            user_id,
+            user_id: snapshot.owner_user_id,
         },
     ));
     let call = services.gateway.summarize_discussion_with_events(
         prompt,
         merge,
-        Some(discussion_url),
+        Some(&snapshot.discussion_url),
         usage_sink.clone(),
     );
     tokio::pin!(call);
@@ -396,6 +415,27 @@ fn raw_payload(result: &DiscussionRefreshResult) -> Value {
             "cap_reached": result.cap_reached,
         },
     })
+}
+
+fn preserved_execution(
+    snapshot: DiscussionSnapshot,
+    fetched: FetchedDiscussionArtifact,
+) -> HandlerExecution {
+    tracing::info!(
+        news_item_id = snapshot.news_item_id,
+        "preserving fetched discussion comments because summary demand or claim ended"
+    );
+    with_finalizer(
+        TaskResult::ok(),
+        DiscussionFinalizationPlan {
+            snapshot,
+            mutation: DiscussionMutation::Completed {
+                fetched,
+                summary: SummaryPublication::Preserve,
+            },
+            finalized_at: Utc::now(),
+        },
+    )
 }
 
 fn terminal_execution(

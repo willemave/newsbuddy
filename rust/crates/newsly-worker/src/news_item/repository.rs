@@ -8,7 +8,6 @@ use newsly_domain::{
     can_bridge_relation_clusters,
 };
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
-use serde::Serialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Postgres, Transaction};
@@ -106,6 +105,7 @@ pub(super) async fn prepare_enrichment(
             reason: "No outbound article URL to enrich".to_owned(),
         });
     };
+    let demand_policy = firecrawl_demand_policy(transaction, &row).await?;
     if let Some(content) = find_existing_content(transaction, &article_url).await? {
         snapshot.body_source = BodySource::Stored(BodyPointer {
             storage_provider: content.storage_provider,
@@ -113,6 +113,7 @@ pub(super) async fn prepare_enrichment(
         });
         return Ok(EnrichmentPreparation::Content {
             snapshot,
+            demand_policy,
             content_id: content.id,
             final_url: normalize_http_url(&content.url)
                 .or_else(|| content.source_url.as_deref().and_then(normalize_http_url)),
@@ -121,8 +122,33 @@ pub(super) async fn prepare_enrichment(
     }
     Ok(EnrichmentPreparation::Extract {
         snapshot,
+        demand_policy,
         article_url,
     })
+}
+
+async fn firecrawl_demand_policy(
+    transaction: &mut Transaction<'_, Postgres>,
+    row: &NewsRow,
+) -> Result<crate::content::FirecrawlDemandPolicy, sqlx::Error> {
+    use crate::content::FirecrawlDemandPolicy;
+    let Some(key) = row.platform.as_deref().and_then(AggregatorKey::from_key) else {
+        return Ok(FirecrawlDemandPolicy::Allowed);
+    };
+    if row.visibility_scope != "global" || row.owner_user_id.is_some() {
+        return Ok(FirecrawlDemandPolicy::Allowed);
+    }
+    if newsly_db::aggregator_corpus::visible_active_subscriber(
+        transaction,
+        key.as_str(),
+        &row.raw_metadata,
+    )
+    .await?
+    {
+        Ok(FirecrawlDemandPolicy::Allowed)
+    } else {
+        Ok(FirecrawlDemandPolicy::NoSubscriberDemand)
+    }
 }
 
 pub(super) async fn prepare_processing(
@@ -263,6 +289,12 @@ pub(super) async fn apply_enrichment(
     queue: &QueueKernel,
     plan: &EnrichmentFinalizationPlan,
 ) -> Result<NewsApplyOutcome, NewsRepositoryError> {
+    // Demand transitions and denial publication share one short transaction lock.
+    // Take it before any source/usage writes; external extraction has already ended.
+    let denied = matches!(plan.mutation, EnrichmentMutation::MetadataOnly { .. });
+    if denied {
+        newsly_db::aggregator_corpus::lock_aggregator_demand(transaction).await?;
+    }
     persist_extraction_usage(
         transaction,
         plan.task_id,
@@ -276,6 +308,14 @@ pub(super) async fn apply_enrichment(
     };
     if source_fingerprint(&row) != plan.snapshot.fingerprint {
         return Ok(NewsApplyOutcome::SourceChanged);
+    }
+    if denied
+        && firecrawl_demand_policy(transaction, &row).await?
+            == crate::content::FirecrawlDemandPolicy::Allowed
+    {
+        // A subscriber arrived while free extraction ran. Re-prepare this same
+        // durable task without publishing a denial or an incomplete summary.
+        return Ok(NewsApplyOutcome::DemandChanged);
     }
     let mut metadata = row.raw_metadata.as_object().cloned().unwrap_or_default();
     let article_extraction = apply_enrichment_metadata(
@@ -365,7 +405,7 @@ pub(super) async fn apply_processing(
         relation_trace = %mutation.relation_trace,
         "publishing processed news item"
     );
-    persist_summary(transaction, plan, mutation).await?;
+    persist_summary(transaction, plan, mutation, &row.raw_metadata).await?;
     let representative_id = reconcile_relation(transaction, plan, mutation).await?;
     if representative_id == plan.snapshot.id {
         if let Some(links) = &mutation.relevant_links
@@ -575,6 +615,16 @@ async fn find_reusable_exact_summary(
         if exact_relation_key(&candidate).as_ref() != Some(&key) {
             continue;
         }
+        // Full-article evidence must not inherit a metadata-only sibling's
+        // summary or representative, including a sibling whose paid replay failed.
+        if !matches!(snapshot.body_source, BodySource::None)
+            && !candidate
+                .raw_metadata
+                .get("article_body_ref")
+                .is_some_and(Value::is_object)
+        {
+            continue;
+        }
         if let Some(summary) = existing_summary(&candidate) {
             return Ok((Some(summary), Some(candidate.id)));
         }
@@ -608,8 +658,26 @@ fn snapshot_from_row(row: &NewsRow, body_source: BodySource) -> NewsSnapshot {
 fn source_fingerprint(row: &NewsRow) -> String {
     let mut raw_metadata = row.raw_metadata.clone();
     if let Some(object) = raw_metadata.as_object_mut() {
-        object.remove("summary_checkpoint");
-        object.remove("processing_error");
+        // Retain preserves key order with serde_json's preserve_order feature;
+        // removing by swap would make polling-only keys perturb the hash.
+        object.retain(|key, _| {
+            ![
+                "summary_checkpoint",
+                "processing_error",
+                "comment_count",
+                "scraped_at",
+            ]
+            .contains(&key.as_str())
+        });
+        if let Some(metrics) = object
+            .get_mut("aggregator")
+            .and_then(|value| value.get_mut("metadata"))
+            .and_then(Value::as_object_mut)
+        {
+            metrics.retain(|key, _| {
+                !["score", "comments_count", "upvote_ratio"].contains(&key.as_str())
+            });
+        }
     }
     stable_sha256(&json!({
         "id": row.id,
@@ -698,201 +766,6 @@ fn exact_url_variant(key: Option<&RelationExactKey>, index: usize) -> String {
         1 => format!("http://{suffix}"),
         2 => suffix.to_owned(),
         _ => format!("//{suffix}"),
-    }
-}
-
-#[derive(Serialize)]
-struct EnrichmentMetadata {
-    status: &'static str,
-    source: Option<&'static str>,
-    article_url: Option<String>,
-    final_url: Option<String>,
-    strategy: Option<String>,
-    error: Option<String>,
-    extracted_chars: i32,
-    updated_at: String,
-}
-
-#[allow(clippy::too_many_lines)]
-fn apply_enrichment_metadata(
-    metadata: &mut Map<String, Value>,
-    snapshot: &NewsSnapshot,
-    mutation: &EnrichmentMutation,
-    finalized_at: chrono::DateTime<Utc>,
-) -> Value {
-    let updated_at = finalized_at.to_rfc3339();
-    let result = match mutation {
-        EnrichmentMutation::Existing => {
-            let url = metadata
-                .get("article_body_ref")
-                .and_then(Value::as_object)
-                .and_then(|reference| {
-                    reference
-                        .get("final_url")
-                        .or_else(|| reference.get("source_url"))
-                })
-                .and_then(Value::as_str)
-                .and_then(normalize_http_url);
-            let article_url = snapshot
-                .article_url
-                .clone()
-                .or_else(|| snapshot.canonical_story_url.clone())
-                .or_else(|| url.clone());
-            EnrichmentMetadata {
-                status: "completed",
-                source: Some("existing"),
-                article_url,
-                final_url: url,
-                strategy: None,
-                error: None,
-                extracted_chars: 0,
-                updated_at,
-            }
-        }
-        EnrichmentMutation::Metadata { text, source_url } => {
-            metadata.insert(
-                "article_body_ref".to_owned(),
-                json!({
-                    "kind": "inline",
-                    "text": text,
-                    "source_url": source_url,
-                    "updated_at": updated_at,
-                }),
-            );
-            EnrichmentMetadata {
-                status: "completed",
-                source: Some("metadata"),
-                article_url: source_url.clone(),
-                final_url: source_url.clone(),
-                strategy: None,
-                error: None,
-                extracted_chars: i32::try_from(text.chars().count()).unwrap_or(i32::MAX),
-                updated_at,
-            }
-        }
-        EnrichmentMutation::Content {
-            content_id,
-            article_url,
-            final_url,
-            extracted_chars,
-            source_metadata,
-        } => {
-            metadata.insert(
-                "article_body_ref".to_owned(),
-                json!({
-                    "kind": "content",
-                    "content_id": content_id,
-                    "variant": "source",
-                    "source_url": article_url,
-                    "updated_at": updated_at,
-                }),
-            );
-            if let Some(source_metadata) =
-                source_metadata.as_ref().filter(|value| value.is_object())
-            {
-                metadata.insert("source_metadata".to_owned(), source_metadata.clone());
-            }
-            EnrichmentMetadata {
-                status: "completed",
-                source: Some("content"),
-                article_url: Some(article_url.clone()),
-                final_url: final_url.clone(),
-                strategy: None,
-                error: None,
-                extracted_chars: *extracted_chars,
-                updated_at,
-            }
-        }
-        EnrichmentMutation::Storage {
-            article_url,
-            final_url,
-            title,
-            extraction_method,
-            body,
-            ..
-        } => {
-            metadata.insert(
-                "article_body_ref".to_owned(),
-                json!({
-                    "kind": "storage",
-                    "storage_provider": body.storage_provider,
-                    "storage_bucket": body.storage_bucket,
-                    "storage_key": body.storage_key,
-                    "content_format": body.content_format,
-                    "sha256": body.sha256,
-                    "byte_size": body.byte_size,
-                    "char_count": body.char_count,
-                    "source_url": article_url,
-                    "final_url": final_url,
-                    "updated_at": updated_at,
-                }),
-            );
-            if let Some(title) = title {
-                let article = metadata
-                    .entry("article".to_owned())
-                    .or_insert_with(|| Value::Object(Map::new()));
-                if let Some(article) = article.as_object_mut()
-                    && !article.get("title").is_some_and(Value::is_string)
-                {
-                    article.insert("title".to_owned(), Value::String(title.clone()));
-                }
-            }
-            EnrichmentMetadata {
-                status: "completed",
-                source: Some("storage"),
-                article_url: Some(article_url.clone()),
-                final_url: Some(final_url.clone()),
-                strategy: Some(extraction_method.clone()),
-                error: None,
-                extracted_chars: body.char_count,
-                updated_at,
-            }
-        }
-        EnrichmentMutation::Skipped {
-            article_url,
-            reason,
-        } => EnrichmentMetadata {
-            status: "skipped",
-            source: None,
-            article_url: article_url.clone(),
-            final_url: article_url.clone(),
-            strategy: None,
-            error: Some(reason.clone()),
-            extracted_chars: 0,
-            updated_at,
-        },
-        EnrichmentMutation::Failed {
-            article_url,
-            final_url,
-            strategy,
-            reason,
-        } => EnrichmentMetadata {
-            status: "failed",
-            source: None,
-            article_url: article_url.clone(),
-            final_url: final_url.clone(),
-            strategy: strategy.clone(),
-            error: Some(reason.clone()),
-            extracted_chars: 0,
-            updated_at,
-        },
-    };
-    let article_extraction = serde_json::to_value(result).expect("enrichment metadata serializes");
-    metadata.insert("article_extraction".to_owned(), article_extraction.clone());
-    article_extraction
-}
-
-fn enrichment_domain(mutation: &EnrichmentMutation) -> Option<&str> {
-    match mutation {
-        EnrichmentMutation::Storage { article_domain, .. } => article_domain.as_deref(),
-        _ => None,
-    }
-}
-
-fn published_final_url(mutation: &EnrichmentMutation) -> Option<&str> {
-    match mutation {
-        EnrichmentMutation::Storage { final_url, .. } => Some(final_url),
-        _ => None,
     }
 }
 
@@ -992,14 +865,11 @@ async fn persist_summary(
     transaction: &mut Transaction<'static, Postgres>,
     plan: &ProcessFinalizationPlan,
     mutation: &ProcessMutation,
+    current_metadata: &Value,
 ) -> Result<(), sqlx::Error> {
     let summary = &mutation.summary;
-    let mut metadata = plan
-        .snapshot
-        .raw_metadata
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+    // Evidence was fenced above; retain fresh polling metadata on publication.
+    let mut metadata = current_metadata.as_object().cloned().unwrap_or_default();
     metadata.insert("summary".to_owned(), summary_json(summary));
     metadata.insert(
         "summary_kind".to_owned(),
@@ -1616,5 +1486,13 @@ pub(super) use error::NewsRepositoryError;
 mod checkpoint_tests;
 
 #[cfg(test)]
+#[path = "demand_tests.rs"]
+mod demand_tests;
+
+#[cfg(test)]
 #[path = "firecrawl_usage_tests.rs"]
 mod firecrawl_usage_tests;
+
+#[path = "enrichment_metadata.rs"]
+mod enrichment_metadata;
+use enrichment_metadata::{apply_enrichment_metadata, enrichment_domain, published_final_url};

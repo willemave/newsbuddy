@@ -76,3 +76,69 @@ async fn firecrawl_billing_survives_empty_body_and_unsafe_final_url() {
         assert!((observed.cost_usd.unwrap() - 0.9472).abs() < 1e-12);
     }
 }
+
+#[tokio::test]
+async fn no_subscriber_demand_skips_paid_dispatch_and_retains_local_usage() {
+    let (runtime, server) = runtime(json!({"success":true})).await;
+    let runtime = runtime.with_demand_policy(FirecrawlDemandPolicy::NoSubscriberDemand);
+    let fallback: ExtractionFallbackRequired = serde_json::from_value(json!({
+        "schema_version":1,"request_id":"denied-fixture","fallback":"firecrawl",
+        "url":"https://8.8.8.8/article","reason":"local_extraction_failed","retryable":false,
+        "usage_events":[{"kind":"downloaded_body","quantity":24,"unit":"byte"}],"timings":[]
+    }))
+    .unwrap();
+    let attempt = runtime
+        .firecrawl_fallback(
+            fallback,
+            ExtractIntent::ExtractArticle,
+            "https://8.8.8.8/article",
+            "denied-fixture",
+            Utc::now() + chrono::Duration::seconds(5),
+            Vec::new(),
+        )
+        .await;
+    let ExtractionAttempt::Failure {
+        code,
+        retryable,
+        usage,
+        ..
+    } = attempt
+    else {
+        panic!("no demand must finish metadata-only");
+    };
+    assert_eq!(code, "fallback_not_permitted");
+    assert!(!retryable);
+    assert_eq!(usage.len(), 1);
+    assert!(matches!(usage[0], UsageWrite::Extraction(_)));
+    assert!(
+        !server.is_finished(),
+        "no provider request may reach the listener"
+    );
+    server.abort();
+}
+#[tokio::test]
+async fn no_subscriber_demand_keeps_free_article_extraction() {
+    let payload = json!({
+        "schema_version":1,"request_id":"free-fixture-article","kind":"success",
+        "final_url":"https://8.8.8.8/article","title":"Free article",
+        "author":null,"published_at":null,"markdown":"Complete free article body",
+        "tables":[],"feed_links":[],"method":"static_readability","warnings":[],
+        "usage_events":[],"timings":[]
+    });
+    let (runtime, server) = runtime(payload).await;
+    let attempt = runtime
+        .with_demand_policy(FirecrawlDemandPolicy::NoSubscriberDemand)
+        .process_article(
+            "https://8.8.8.8/article",
+            "article",
+            "free-fixture",
+            Utc::now() + chrono::Duration::seconds(5),
+        )
+        .await;
+    server.await.unwrap();
+    let ExtractionAttempt::Success { article, .. } = attempt else {
+        panic!("subscriber demand gates only paid fallback");
+    };
+    assert!(!article.used_firecrawl);
+    assert_eq!(article.body, "Complete free article body");
+}
