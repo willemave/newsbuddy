@@ -135,7 +135,8 @@ pub(super) async fn validate_in_browser(
         sandbox,
         workspace_path,
         deadline,
-        cancellation.clone(),
+        // A completed command stream cancels its token when dropped.
+        cancellation.child_token(),
     )
     .await?;
     let absolute_deadline = browser_deadline(deadline, Instant::now())?;

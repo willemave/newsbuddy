@@ -3607,3 +3607,11 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Finding:** The release gate loads the local runtime environment. An exported `ANTHROPIC_API_KEY` caused four offline judge tests to hit the intended subscription-only guard before their fakes ran. Production guard behavior was correct.
 - **Change:** The filter evaluation test module now removes inherited paid-provider credentials in a pytest fixture. Guard tests still explicitly set a key and assert rejection.
 - **Validation:** All 214 eval tests pass with a deliberately exported dummy key (five optional skips); Ruff, formatting and MyPy pass. The first release attempt passed Rust tests, Clippy, architecture/contracts, ingestion regressions and SQLx verification before this test-only failure. No push or production mutation occurred.
+
+### 2026-10-18 — `main` — Live gate finds browser cancellation ownership regression
+
+- **Status:** Minimal correction applied; seven focused browser tests, formatting and diff checks pass. Complete exact-commit gate rerun required.
+- **Evidence:** Live smoke `20261018T231830Z-5a6f9e` passed authentication, direct chat, Share Extension-to-chat and ownership failures, but deck 1 / LLM run 6 / queue task 385 failed after 121.8 seconds with `E2B operation was cancelled`. All deterministic release stages and 777 native tests had passed.
+- **Cause and correction:** Browser validation gave the snapshot-sealing command a clone of the token used by the subsequent Chromium command. Collecting and dropping the seal's process stream cancels that token by design, so Chromium immediately rejected it. The seal now owns a child token; parent cancellation still stops the entire validation. Durable generation, phase, lease and retry budgets are unchanged.
+- **Independent review:** Explicit Claude Opus 5.5 confirmed the source-level cause, minimal correction and absence of adjacent repeated-token misuse. It recommended the existing live matrix as the regression test because a unit test would require a new fake envd server or only mirror cancellation primitives. No new test-only abstraction was introduced.
+- **Remaining:** Commit the correction, rerun the complete gate including the live deck and grounded-chat paths, then push/deploy only the exact passing SHA. No production change has occurred.
