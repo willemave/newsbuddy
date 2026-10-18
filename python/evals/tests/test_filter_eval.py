@@ -38,6 +38,13 @@ from newsly_evals.filtering.references import accepted_references
 from newsly_evals.filtering.transport import OPENROUTER_PROVIDER, OPENROUTER_ROUTE
 
 
+@pytest.fixture(autouse=True)
+def isolated_judge_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Offline judge fakes must not inherit a developer's paid-provider credentials.
+    # Guard tests explicitly set the key when testing rejection.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
 def source(index: int, split: str = "development") -> dict[str, Any]:
     return {
         "news_id": index,

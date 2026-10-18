@@ -3600,3 +3600,10 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Scope:** All 332 reviewed changed/untracked files plus the six local commits already ahead of origin/main. User authorized build-test-deploy and accepts downtime; use the explicit maintenance cutover for the guarded migrations.
 - **Evidence:** Two cleanup/review passes and explicit Claude Opus 5.5 verification are recorded above. The checkout matches the final review hashes, and origin/main remains an ancestor. Canonical release evidence will be stored under `test-results/release-gate/<tested-sha>/`; runtime proof is recorded separately from local validation.
 - **Remaining:** Run the clean-commit gate with the live provider/E2B matrix, push the tested SHA, dispatch maintenance deployment, then verify image, readiness, migration history and worker progress. Apple distribution is outside this release.
+
+### 2026-10-18 — `main` — Release-gate offline judge isolation
+
+- **Status:** Fixed and focused validation passed; complete exact-commit gate rerun required.
+- **Finding:** The release gate loads the local runtime environment. An exported `ANTHROPIC_API_KEY` caused four offline judge tests to hit the intended subscription-only guard before their fakes ran. Production guard behavior was correct.
+- **Change:** The filter evaluation test module now removes inherited paid-provider credentials in a pytest fixture. Guard tests still explicitly set a key and assert rejection.
+- **Validation:** All 214 eval tests pass with a deliberately exported dummy key (five optional skips); Ruff, formatting and MyPy pass. The first release attempt passed Rust tests, Clippy, architecture/contracts, ingestion regressions and SQLx verification before this test-only failure. No push or production mutation occurred.
