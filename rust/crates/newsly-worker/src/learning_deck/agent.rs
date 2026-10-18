@@ -6,7 +6,7 @@ use newsly_agent_runtime::{
     AgentEvent, AgentEventSink, AgentOutcome, AgentRequest, AgentRuntimeError, NewslyTranscript,
     ResponseContract, ToolPolicy,
 };
-use newsly_db::LearningDeckTaskSnapshot;
+use newsly_db::{LearningDeckGenerationClaimFence, LearningDeckTaskSnapshot};
 use newsly_e2b::{DirectE2bProvider, E2bError, OutputLimits, SandboxHandle};
 use newsly_providers::{ProviderCredentials, RigAgentEngine};
 use serde_json::{Map, Value, json};
@@ -23,18 +23,23 @@ use crate::task_sandbox::{
     agent_network_policy, allowed_tools, direct_provider, exa_endpoint,
     run_command as run_sandbox_command, secret_env, secret_env_alias,
 };
-use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
+use crate::task_tools::{ExaSearchClient, TaskFileError, TaskToolExecutor};
 
 use super::artifacts::{
-    LearningDeckArtifactError, LearningDeckArtifactLimits, LearningDeckAsset,
-    OUTPUT_ASSET_DIRECTORY, OUTPUT_INDEX_HTML, OUTPUT_SOURCE_METADATA, OUTPUT_SOURCE_NOTES,
-    guess_content_type, validate_learning_deck_artifact,
+    LearningDeckArtifactError, LearningDeckArtifactLimits, LearningDeckArtifactStore,
+    LearningDeckAsset, OUTPUT_INDEX_HTML, OUTPUT_SOURCE_NOTES,
 };
-use super::browser::{BrowserValidationError, hosted_viewer_html, validate_in_browser};
+use super::browser::BrowserValidationError;
 
 #[path = "agent/policy.rs"]
 mod policy;
 use policy::learning_deck_agent_limits;
+#[path = "agent/candidate.rs"]
+mod candidate;
+#[path = "agent/session.rs"]
+mod session;
+#[path = "agent/validation.rs"]
+mod validation;
 
 const DEFAULT_MODEL_SPEC: &str = "openai:gpt-6-luna";
 const INPUT_SOURCE_TEXT: &str = "input/source.txt";
@@ -53,19 +58,28 @@ const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
 
 const HOUSE_DESIGN_APPENDIX: &str = r#"## House visual system (Daylight)
 
-The hosted viewer injects a warm near-white paper surface, dark ink, restrained emerald accents,
-and the Newsly display/body/mono type system. Do not add a competing theme, gradients, glows,
+Author the complete CSS: a warm near-white paper surface, dark ink, restrained emerald accents,
+and legible display/body/mono typography. The viewer does not inject a theme or house classes. Avoid gradients, glows,
 glassmorphism, emojis, or decorative stock imagery. Use left-aligned, diagram-first teaching
 layouts, crisp panes, hairline rules, and generous negative space. Reveal canvas sizing is injected
 at view time: 720 x 1280 portrait and 1280 x 720 landscape. Every custom diagram must reflow in
 portrait. Use Reveal.js 6.0.1 from https://cdn.jsdelivr.net/npm/reveal.js@6.0.1 and include
 <meta name="newsly-deck-layout" content="responsive-v2">."#;
 
+pub(super) const fn minimum_generation_budget(has_draft: bool) -> Duration {
+    if has_draft {
+        Duration::from_secs(120)
+    } else {
+        Duration::from_secs(195)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct LearningDeckAgentConfig {
     model_spec: String,
     base: ShareActionAgentConfig,
     limits: LearningDeckArtifactLimits,
+    generation_seconds: u64,
 }
 
 impl LearningDeckAgentConfig {
@@ -80,7 +94,23 @@ impl LearningDeckAgentConfig {
                 "LEARNING_DECK_MODEL",
             ));
         }
+        let generation_seconds = env::var("LEARNING_DECK_GENERATION_TIMEOUT_SECONDS")
+            .ok()
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .map_err(|_| {
+                LearningDeckAgentConfigError::InvalidValue(
+                    "LEARNING_DECK_GENERATION_TIMEOUT_SECONDS",
+                )
+            })?
+            .unwrap_or(policy::DEFAULT_GENERATION_SECONDS);
+        if !(300..=3540).contains(&generation_seconds) {
+            return Err(LearningDeckAgentConfigError::InvalidValue(
+                "LEARNING_DECK_GENERATION_TIMEOUT_SECONDS",
+            ));
+        }
         Ok(Self {
+            generation_seconds,
             model_spec,
             base,
             limits: LearningDeckArtifactLimits::from_env()
@@ -126,7 +156,8 @@ impl LearningDeckAgentRuntime {
             TaskSandboxConfig {
                 template_id: config.base.template_id.clone(),
                 template_revision: config.base.template_revision.clone(),
-                sandbox_timeout: config.base.sandbox_timeout,
+                sandbox_timeout: Duration::from_secs(config.generation_seconds)
+                    + policy::SANDBOX_CLEANUP_GRACE,
             },
         )?;
         Ok(Self {
@@ -140,212 +171,13 @@ impl LearningDeckAgentRuntime {
         })
     }
 
-    pub(super) async fn run(
-        &self,
-        task: &LearningDeckTaskSnapshot,
-        source_snapshot: &Map<String, Value>,
-        cancellation: CancellationToken,
-    ) -> Result<LearningDeckAgentRunResult, LearningDeckAgentError> {
-        let deadline = Instant::now()
-            .checked_add(self.config.base.sandbox_timeout)
-            .ok_or(LearningDeckAgentError::Deadline)?;
-        let acquired = self
-            .lifecycle
-            .acquire_for_task(
-                task.user_id,
-                task.id,
-                "learning_deck",
-                deadline,
-                cancellation.child_token(),
-            )
-            .await?;
-        let sandbox_id = acquired.sandbox.sandbox_id.as_str().to_owned();
-        let events = Arc::new(LearningDeckEvents::new(self.pool.clone(), task));
-        let result = self
-            .run_acquired(
-                task,
-                source_snapshot,
-                &acquired,
-                deadline,
-                cancellation,
-                Arc::clone(&events),
-            )
-            .await;
-        events.usage.finish().await;
-        let result = result.map_err(|source| LearningDeckAgentError::SandboxExecution {
-            source: Box::new(source),
-            sandbox_provider: "e2b".to_owned(),
-            sandbox_id,
-            events: events.values(),
-        });
-        if let Err(error) = acquired.release().await {
-            tracing::error!(
-                task_id = task.id,
-                error = %error,
-                "failed to destroy Learning Deck task sandbox"
-            );
-        }
-        result
-    }
-
-    async fn run_acquired(
-        &self,
-        task: &LearningDeckTaskSnapshot,
-        source_snapshot: &Map<String, Value>,
-        acquired: &AcquiredTaskSandbox,
-        deadline: Instant,
-        cancellation: CancellationToken,
-        events: Arc<LearningDeckEvents>,
-    ) -> Result<LearningDeckAgentRunResult, LearningDeckAgentError> {
-        let sandbox = &acquired.sandbox;
-        self.prepare_workspace(sandbox, task, deadline, cancellation.child_token())
-            .await?;
-        let tools = Arc::new(TaskToolExecutor::new(
-            Arc::clone(&self.provider),
-            sandbox.clone(),
-            &task.workspace_path,
-            deadline,
-            cancellation.child_token(),
-            self.config.base.max_output_chars,
-            self.exa.clone(),
-            self.pool.clone(),
-            task.user_id,
-            self.body_store.clone(),
-        )?);
-        self.write_inputs(&tools, task, source_snapshot).await?;
-
-        events.push(
-            "sandbox_started",
-            json!({
-                "provider": "e2b",
-                "sandbox_id": sandbox.sandbox_id.as_str(),
-                "created": true,
-                "template_revision": acquired.template_revision,
-                "capabilities": acquired.capabilities.values(),
-            }),
-        );
-        let definitions = TaskToolExecutor::definitions();
-        let request = self.agent_request(
-            task,
-            NewslyTranscript::default(),
-            build_user_prompt(source_snapshot, task.interests_prompt.as_deref()),
-            definitions.clone(),
-        )?;
-        let policy = agent_network_policy(
-            self.config.base.public_base_url.as_ref(),
-            true,
-            "learning_deck",
-        )
-        .await;
-        self.provider
-            .update_network(&sandbox.sandbox_id, &policy)
-            .await?;
-        let first = tokio::select! {
-            () = cancellation.cancelled() => Err(LearningDeckAgentError::Cancelled),
-            result = self.engine.run(request, tools.clone(), events.clone()) => {
-                result.map_err(LearningDeckAgentError::Agent)
-            }
-        };
-        let first = match (
-            first,
-            self.provider.reset_network(&sandbox.sandbox_id).await,
-        ) {
-            (Ok(outcome), Ok(())) => outcome,
-            (Ok(_), Err(error)) => return Err(error.into()),
-            (Err(error), _) => return Err(error),
-        };
-        events.push(
-            "agent_completed",
-            json!({"output_chars": first.output_text.chars().count()}),
-        );
-
-        let validated = self
-            .read_and_validate(sandbox, &tools, task, deadline, cancellation.child_token())
-            .await;
-        let (index_html, source_notes_md, browser_validation, outcome) = match validated {
-            Ok(validated) => (validated.0, validated.1, validated.2, first),
-            Err(first_error) if first_error.repairable() => {
-                events.push("artifact_validation_failed", first_error.log_payload());
-                let repair_prompt = self
-                    .artifact_repair_prompt(
-                        &first_error,
-                        sandbox,
-                        task,
-                        deadline,
-                        cancellation.child_token(),
-                    )
-                    .await?;
-                self.provider
-                    .update_network(&sandbox.sandbox_id, &policy)
-                    .await?;
-                let repair_request =
-                    self.agent_request(task, first.transcript.clone(), repair_prompt, definitions)?;
-                let repair = tokio::select! {
-                    () = cancellation.cancelled() => Err(LearningDeckAgentError::Cancelled),
-                    result = self.engine.run(repair_request, tools.clone(), events.clone()) => {
-                        result.map_err(LearningDeckAgentError::Agent)
-                    }
-                };
-                let repair = match (
-                    repair,
-                    self.provider.reset_network(&sandbox.sandbox_id).await,
-                ) {
-                    (Ok(outcome), Ok(())) => outcome,
-                    (Ok(_), Err(error)) => return Err(error.into()),
-                    (Err(error), _) => return Err(error),
-                };
-                let mut combined = repair;
-                combined.usage.add_assign(&first.usage);
-                combined.request_count = combined.request_count.saturating_add(first.request_count);
-                combined.tool_call_count = combined
-                    .tool_call_count
-                    .saturating_add(first.tool_call_count);
-                match self
-                    .read_and_validate(sandbox, &tools, task, deadline, cancellation.child_token())
-                    .await
-                {
-                    Ok(validated) => (validated.0, validated.1, validated.2, combined),
-                    Err(error) => {
-                        events.push("artifact_repair_failed", error.log_payload());
-                        return Err(error);
-                    }
-                }
-            }
-            Err(error) => return Err(error),
-        };
-        events.push(
-            "browser_validation_passed",
-            Value::Object(browser_validation.clone()),
-        );
-        let assets = self
-            .collect_assets(sandbox, &tools, task, deadline, cancellation.child_token())
-            .await?;
-        let source_metadata_updates = read_source_metadata(&tools).await;
-        let model_provider = outcome
-            .model_name
-            .split_once(':')
-            .map_or("unknown", |(provider, _)| provider)
-            .to_owned();
-        Ok(LearningDeckAgentRunResult {
-            index_html,
-            source_notes_md,
-            assets,
-            source_metadata_updates,
-            browser_validation,
-            model_provider,
-            sandbox_provider: "e2b".to_owned(),
-            sandbox_id: sandbox.sandbox_id.as_str().to_owned(),
-            outcome,
-            events: events.values(),
-        })
-    }
-
     fn agent_request(
         &self,
         task: &LearningDeckTaskSnapshot,
         transcript: NewslyTranscript,
         user_prompt: String,
         definitions: Vec<newsly_agent_runtime::ToolDefinition>,
+        deadline: Instant,
     ) -> Result<AgentRequest, LearningDeckAgentError> {
         Ok(AgentRequest {
             feature: "learning_deck_generation".to_owned(),
@@ -356,13 +188,17 @@ impl LearningDeckAgentRuntime {
             response_contract: ResponseContract::Text,
             tools: definitions.clone(),
             tool_policy: ToolPolicy {
-                allowed: allowed_tools(&task.tool_policy, &definitions),
+                allowed: {
+                    let mut allowed = allowed_tools(&task.tool_policy, &definitions);
+                    allowed.insert("validate_deck".to_owned());
+                    allowed
+                },
                 require_tool: false,
                 allow_parallel_calls: false,
             },
             limits: learning_deck_agent_limits(
                 self.config.base.tool_call_limit,
-                self.config.base.sandbox_timeout,
+                policy::GenerationBudget::remaining(deadline)?,
             ),
             provider_parameters: Map::new(),
         })
@@ -378,212 +214,32 @@ impl LearningDeckAgentRuntime {
         let body_text = persisted
             .remove("body_text")
             .and_then(|value| value.as_str().map(str::to_owned));
-        match body_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
+        let source_text = match body_text.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
             Some(body) => {
                 persisted.insert("body_text_file".to_owned(), Value::from(INPUT_SOURCE_TEXT));
-                persisted.insert(
-                    "body_text_chars".to_owned(),
-                    Value::from(body.chars().count()),
-                );
-                tools.write_text(INPUT_SOURCE_TEXT, body.to_owned()).await?;
+                persisted.insert("body_text_chars".to_owned(), Value::from(body.chars().count()));
+                body.to_owned()
             }
-            None => {
-                tools
-                    .write_text(
-                        INPUT_SOURCE_TEXT,
-                        "No primary source text was provided. Use input/source-snapshot.json and inspect the source URL when needed."
-                            .to_owned(),
-                    )
-                    .await?;
-            }
-        }
-        tools
-            .write_text(
+            None => "No primary source text was provided. Use input/source-snapshot.json and inspect the source URL when needed.".to_owned(),
+        };
+        for (path, text) in [
+            (INPUT_SOURCE_TEXT, source_text),
+            (
                 INPUT_SOURCE_SNAPSHOT,
                 serde_json::to_string_pretty(&Value::Object(persisted))?,
-            )
-            .await?;
-        tools
-            .write_text(
+            ),
+            (
                 INPUT_INTERESTS,
                 task.interests_prompt.clone().unwrap_or_default(),
-            )
-            .await?;
-        tools
-            .write_text(INPUT_DESIGN_BRIEF, design_brief()?)
-            .await?;
+            ),
+            (INPUT_DESIGN_BRIEF, design_brief()?),
+        ] {
+            tools
+                .write_bytes_typed(path, text.into_bytes())
+                .await
+                .map_err(|error| LearningDeckAgentError::from_file(error, path))?;
+        }
         Ok(())
-    }
-
-    async fn read_and_validate(
-        &self,
-        sandbox: &SandboxHandle,
-        tools: &TaskToolExecutor,
-        task: &LearningDeckTaskSnapshot,
-        deadline: Instant,
-        cancellation: CancellationToken,
-    ) -> Result<(String, String, Map<String, Value>), LearningDeckAgentError> {
-        let index_html = tools
-            .read_text(OUTPUT_INDEX_HTML, self.config.limits.index_html_bytes)
-            .await
-            .map_err(|error| LearningDeckAgentError::Artifact {
-                message: format!("Required output file is missing: {OUTPUT_INDEX_HTML}: {error}"),
-                report: Map::from_iter([("missing".to_owned(), json!([OUTPUT_INDEX_HTML]))]),
-                repairable: true,
-            })?;
-        let source_notes = tools
-            .read_text(OUTPUT_SOURCE_NOTES, self.config.limits.source_notes_bytes)
-            .await
-            .map_err(|error| LearningDeckAgentError::Artifact {
-                message: format!("Required output file is missing: {OUTPUT_SOURCE_NOTES}: {error}"),
-                report: Map::from_iter([("missing".to_owned(), json!([OUTPUT_SOURCE_NOTES]))]),
-                repairable: true,
-            })?;
-        let index_html = hosted_viewer_html(&index_html);
-        validate_learning_deck_artifact(&index_html, &source_notes, &self.config.limits)
-            .map_err(LearningDeckAgentError::from_artifact)?;
-        let policy = agent_network_policy(
-            self.config.base.public_base_url.as_ref(),
-            true,
-            "learning_deck",
-        )
-        .await;
-        self.provider
-            .update_network(&sandbox.sandbox_id, &policy)
-            .await?;
-        let validation = validate_in_browser(
-            &self.provider,
-            sandbox,
-            tools,
-            &task.workspace_path,
-            &index_html,
-            deadline,
-            cancellation,
-        )
-        .await
-        .map_err(LearningDeckAgentError::from_browser);
-        let browser = match (
-            validation,
-            self.provider.reset_network(&sandbox.sandbox_id).await,
-        ) {
-            (Ok(browser), Ok(())) => browser,
-            (Ok(_), Err(error)) => return Err(error.into()),
-            (Err(error), _) => return Err(error),
-        };
-        Ok((index_html, source_notes, browser))
-    }
-
-    async fn artifact_repair_prompt(
-        &self,
-        error: &LearningDeckAgentError,
-        sandbox: &SandboxHandle,
-        task: &LearningDeckTaskSnapshot,
-        deadline: Instant,
-        cancellation: CancellationToken,
-    ) -> Result<String, LearningDeckAgentError> {
-        let files = self
-            .list_output_files(sandbox, task, deadline, cancellation)
-            .await
-            .unwrap_or_default();
-        Ok(format!(
-            "The generated artifact did not satisfy the output contract. Fix only the output files in the existing workspace, then verify them. You must create output/index.html and output/source-notes.md. All paths are relative to the workspace root. Do not restart the research. Validation report: {}. Current output files: {}.",
-            serde_json::to_string(&error.log_payload())?,
-            serde_json::to_string(&files)?,
-        ))
-    }
-
-    async fn collect_assets(
-        &self,
-        sandbox: &SandboxHandle,
-        tools: &TaskToolExecutor,
-        task: &LearningDeckTaskSnapshot,
-        deadline: Instant,
-        cancellation: CancellationToken,
-    ) -> Result<Vec<LearningDeckAsset>, LearningDeckAgentError> {
-        let files = self
-            .run_command(
-                sandbox,
-                "/usr/bin/find",
-                vec![
-                    OUTPUT_ASSET_DIRECTORY.to_owned(),
-                    "-type".to_owned(),
-                    "f".to_owned(),
-                    "-printf".to_owned(),
-                    "%P\\n".to_owned(),
-                ],
-                Some(task.workspace_path.clone()),
-                deadline,
-                cancellation,
-                true,
-            )
-            .await?;
-        let mut paths = files
-            .lines()
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(|path| format!("assets/{path}"))
-            .collect::<Vec<_>>();
-        paths.sort();
-        paths.dedup();
-        if paths.len() > self.config.limits.asset_count {
-            return Err(LearningDeckAgentError::Artifact {
-                message: "artifact bundle has too many local assets".to_owned(),
-                report: Map::from_iter([("asset_count".to_owned(), Value::from(paths.len()))]),
-                repairable: true,
-            });
-        }
-        let mut assets = Vec::with_capacity(paths.len());
-        for relative_path in paths {
-            let bytes = tools
-                .read_bytes(
-                    &format!("output/{relative_path}"),
-                    self.config.limits.asset_bytes,
-                )
-                .await?;
-            assets.push(LearningDeckAsset {
-                content_type: guess_content_type(&relative_path),
-                relative_path,
-                bytes,
-            });
-        }
-        Ok(assets)
-    }
-
-    async fn list_output_files(
-        &self,
-        sandbox: &SandboxHandle,
-        task: &LearningDeckTaskSnapshot,
-        deadline: Instant,
-        cancellation: CancellationToken,
-    ) -> Result<Vec<String>, LearningDeckAgentError> {
-        let output = self
-            .run_command(
-                sandbox,
-                "/usr/bin/find",
-                vec![
-                    "output".to_owned(),
-                    "-type".to_owned(),
-                    "f".to_owned(),
-                    "-printf".to_owned(),
-                    "%p\\n".to_owned(),
-                ],
-                Some(task.workspace_path.clone()),
-                deadline,
-                cancellation,
-                true,
-            )
-            .await?;
-        Ok(output
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .take(50)
-            .map(str::to_owned)
-            .collect())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -658,6 +314,7 @@ impl LearningDeckAgentRuntime {
 
 #[derive(Debug)]
 pub(super) struct LearningDeckAgentRunResult {
+    pub deadline: Instant,
     pub index_html: String,
     pub source_notes_md: String,
     pub assets: Vec<LearningDeckAsset>,
@@ -734,16 +391,6 @@ impl AgentEventSink for LearningDeckEvents {
         );
         Ok(())
     }
-}
-
-async fn read_source_metadata(tools: &TaskToolExecutor) -> Map<String, Value> {
-    let Ok(raw) = tools.read_text(OUTPUT_SOURCE_METADATA, 100_000).await else {
-        return Map::new();
-    };
-    serde_json::from_str::<Value>(&raw)
-        .ok()
-        .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default()
 }
 
 fn system_prompt() -> Result<String, LearningDeckAgentError> {
@@ -888,7 +535,7 @@ pub(super) enum LearningDeckAgentBuildError {
 
 #[derive(Debug, Error)]
 pub(super) enum LearningDeckAgentError {
-    #[error("Learning Deck agent deadline expired")]
+    #[error("Learning Deck generation exceeded its time budget")]
     Deadline,
     #[error("Learning Deck agent was cancelled after losing its queue lease")]
     Cancelled,
@@ -902,6 +549,15 @@ pub(super) enum LearningDeckAgentError {
         report: Map<String, Value>,
         repairable: bool,
     },
+    #[error("Learning Deck validation infrastructure failed: {message}")]
+    Validator {
+        message: String,
+        report: Map<String, Value>,
+    },
+    #[error(transparent)]
+    Storage(#[from] LearningDeckArtifactError),
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
     #[error("{source}")]
     SandboxExecution {
         #[source]
@@ -937,12 +593,36 @@ impl LearningDeckAgentError {
     }
 
     fn from_browser(error: BrowserValidationError) -> Self {
-        let repairable = error.repairable();
-        let report = error.report().cloned().unwrap_or_default();
-        Self::Artifact {
-            message: error.to_string(),
-            report,
-            repairable,
+        match error {
+            BrowserValidationError::Deadline => Self::E2b(E2bError::Deadline),
+            BrowserValidationError::E2b(error) => Self::E2b(error),
+            BrowserValidationError::Io(error) => Self::from_file(error, "validation workspace"),
+            error => {
+                let report = error.report().cloned().unwrap_or_default();
+                if error.repairable() {
+                    Self::Artifact {
+                        message: error.to_string(),
+                        report,
+                        repairable: true,
+                    }
+                } else {
+                    Self::Validator {
+                        message: error.to_string(),
+                        report,
+                    }
+                }
+            }
+        }
+    }
+
+    fn from_file(error: TaskFileError, path: &str) -> Self {
+        match error {
+            TaskFileError::Transport(error) => Self::E2b(error),
+            error => Self::Artifact {
+                message: format!("Invalid output {path}: {error}"),
+                report: Map::from_iter([("invalid_file".to_owned(), json!(path))]),
+                repairable: true,
+            },
         }
     }
 
@@ -967,6 +647,15 @@ impl LearningDeckAgentError {
                 "failure_class": "LearningDeckArtifactError",
                 "report": report,
                 "repairable": repairable,
+            }),
+            Self::Validator { message, report } => json!({
+                "error": message, "report": report, "repairable": false,
+                "failure_class": "LearningDeckValidationInfrastructureError",
+            }),
+            Self::E2b(error) => json!({
+                "error": error.to_string(), "repairable": false,
+                "failure_class": "E2bError",
+                "delivery_state": format!("{:?}", error.delivery_state()),
             }),
             _ => json!({
                 "error": self.to_string(),
@@ -1000,6 +689,9 @@ impl LearningDeckAgentError {
         match self {
             Self::SandboxExecution { source, .. } => source.error_type(),
             Self::Artifact { .. } => "artifact_contract_failed",
+            Self::Deadline => "generation_deadline_exceeded",
+            Self::Validator { .. } => "validation_infrastructure_failed",
+            Self::E2b(_) => "sandbox_execution_failed",
             _ => "agent_execution_failed",
         }
     }

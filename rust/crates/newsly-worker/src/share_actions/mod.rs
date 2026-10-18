@@ -1,6 +1,7 @@
 mod agent;
 mod finalizer;
 mod handler;
+mod immediate;
 pub(crate) mod submission;
 pub(crate) mod workflows;
 
@@ -13,6 +14,7 @@ pub use finalizer::{
     apply_share_action_host_action,
 };
 pub use handler::ShareActionTaskExecutor;
+pub use immediate::save_immediate_bookmark;
 pub use workflows::{
     PreparedHostAction, ShareActionHostInput, ShareActionWorkflowError,
     build_deterministic_chat_action, build_host_action, parse_stored_host_input,

@@ -372,7 +372,7 @@ fn content_search_tail(
     require_completed: bool,
 ) -> String {
     let lifecycle_predicate = if require_completed {
-        "AND content.status = 'completed'\n          AND (content.classification IS NULL OR content.classification <> 'skip')"
+        "AND content.status = 'completed'"
     } else {
         ""
     };

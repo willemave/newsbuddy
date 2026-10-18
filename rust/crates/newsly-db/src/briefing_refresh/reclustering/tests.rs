@@ -55,7 +55,7 @@ async fn snapshot(pool: &PgPool, user: i64) -> NewsCategorySnapshot {
 }
 
 #[sqlx::test(migrations = false)]
-async fn publication_drains_old_lenses_and_moves_only_pending(pool: PgPool) {
+async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: PgPool) {
     let user = fixture(&pool).await;
     let seed = snapshot(&pool, user).await;
     let unfitted_source: i64 = sqlx::query_scalar("INSERT INTO news_items(ingest_key,visibility_scope,platform,status,summary_text,raw_metadata,ingested_at,created_at) VALUES('nightly-unfitted','global','hackernews','ready','Unfitted story summary','{}',timezone('UTC',now())-interval '1 hour',timezone('UTC',now())-interval '1 hour') RETURNING id::bigint")
@@ -80,6 +80,14 @@ async fn publication_drains_old_lenses_and_moves_only_pending(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query("INSERT INTO news_item_read_status(user_id,news_item_id,read_at,created_at) VALUES($1,$2,timezone('UTC',now()),timezone('UTC',now()))")
+        .bind(user).bind(seed.stories[0].source.id).execute(&pool).await.unwrap();
+    let identities_before: Vec<(i64, i64, String, i64, chrono::NaiveDateTime)> = sqlx::query_as(
+        "SELECT id::bigint,user_id::bigint,source_kind,source_id::bigint,enqueued_at FROM briefing_pending_sources ORDER BY id",
+    ).fetch_all(&pool).await.unwrap();
+    let read_before: Vec<(i64, chrono::NaiveDateTime)> = sqlx::query_as(
+        "SELECT news_item_id::bigint,read_at FROM news_item_read_status WHERE user_id::bigint=$1 ORDER BY news_item_id",
+    ).bind(user).fetch_all(&pool).await.unwrap();
     let mut seed = snapshot(&pool, user).await;
     seed.pending.push(NewsCategoryPending {
         id: wrong_owner_pending,
@@ -108,7 +116,18 @@ async fn publication_drains_old_lenses_and_moves_only_pending(pool: PgPool) {
     assert_eq!(old, ("active".into(), false));
     let assigned: i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND lens_key='news-new'")
         .bind(user).fetch_one(&pool).await.unwrap();
-    assert_eq!(assigned, 2);
+    assert_eq!(assigned, 0);
+    let unassigned: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news' AND lens_key IS NULL")
+        .bind(user).fetch_one(&pool).await.unwrap();
+    assert_eq!(unassigned, 3);
+    let identities_after: Vec<(i64, i64, String, i64, chrono::NaiveDateTime)> = sqlx::query_as(
+        "SELECT id::bigint,user_id::bigint,source_kind,source_id::bigint,enqueued_at FROM briefing_pending_sources ORDER BY id",
+    ).fetch_all(&pool).await.unwrap();
+    assert_eq!(identities_after, identities_before);
+    let read_after: Vec<(i64, chrono::NaiveDateTime)> = sqlx::query_as(
+        "SELECT news_item_id::bigint,read_at FROM news_item_read_status WHERE user_id::bigint=$1 ORDER BY news_item_id",
+    ).bind(user).fetch_all(&pool).await.unwrap();
+    assert_eq!(read_after, read_before);
     let preserved: (String, String, serde_json::Value) = sqlx::query_as(
         "SELECT markdown_raw,narration_text,source_keys FROM briefing_segments WHERE id::bigint=$1",
     )
@@ -126,7 +145,7 @@ async fn publication_drains_old_lenses_and_moves_only_pending(pool: PgPool) {
     );
     let mixed:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND lens_key='misc'")
         .bind(user).fetch_one(&pool).await.unwrap();
-    assert_eq!(mixed, 1);
+    assert_eq!(mixed, 0);
     let unfitted_key: Option<String> =
         sqlx::query_scalar("SELECT lens_key FROM briefing_pending_sources WHERE id::bigint=$1")
             .bind(unfitted_pending)
@@ -286,4 +305,69 @@ async fn successful_naming_attempt_is_cacheable(pool: PgPool) {
     .unwrap();
     assert_eq!(attempts, 1);
     assert_eq!(usage_rows, 0);
+}
+
+#[sqlx::test(migrations = false)]
+async fn requeued_fitted_pending_retires_empty_old_category_and_uses_new_snapshot(pool: PgPool) {
+    let user = fixture(&pool).await;
+    let seed = snapshot(&pool, user).await;
+    let mut tx = pool.begin().await.unwrap();
+    let previous =
+        crate::briefing_refresh::preparation::load_lens_assignment_snapshot(&mut tx, user, false)
+            .await
+            .unwrap();
+    tx.commit().await.unwrap();
+    assert!(previous.pending_sources.is_empty());
+    assert_eq!(previous.active_lenses[0].key, "news-old");
+    let new = NewsCategoryPublicationLens {
+        key: "news-new".into(),
+        title: "New topic".into(),
+        deck: "A new recurring subject".into(),
+        routing_rule: "A coherent topic".into(),
+        centroid: vec![1.0; 4096],
+        story_ids: seed
+            .stories
+            .iter()
+            .take(3)
+            .map(|story| story.source.id)
+            .collect(),
+    };
+    let mut tx = pool.begin().await.unwrap();
+    assert!(snapshot_is_current(&mut tx, &seed).await.unwrap());
+    apply_partition(&mut tx, &seed, &[new]).await.unwrap();
+    tx.commit().await.unwrap();
+    let old: (String, bool) = sqlx::query_as(
+        "SELECT status,accepts_news FROM briefing_lenses WHERE user_id::bigint=$1 AND key='news-old'",
+    ).bind(user).fetch_one(&pool).await.unwrap();
+    assert_eq!(old, ("retired".into(), false));
+    let mut tx = pool.begin().await.unwrap();
+    assert!(
+        !crate::briefing_refresh::lens_assignment::lens_snapshot_is_current(
+            &mut tx, user, &previous,
+        )
+        .await
+        .unwrap()
+    );
+    let current =
+        crate::briefing_refresh::preparation::load_lens_assignment_snapshot(&mut tx, user, false)
+            .await
+            .unwrap();
+    assert_eq!(current.pending_sources.len(), 4);
+    let pending_ids: std::collections::HashSet<_> = current
+        .pending_sources
+        .iter()
+        .map(|pending| pending.pending_id)
+        .collect();
+    assert_eq!(
+        pending_ids,
+        seed.pending.iter().map(|pending| pending.id).collect()
+    );
+    assert_eq!(current.active_lenses.len(), 1);
+    assert_eq!(current.active_lenses[0].key, "news-new");
+    assert_eq!(current.active_lenses[0].title, "New topic");
+    assert_eq!(current.active_lenses[0].deck, "A new recurring subject");
+    assert_eq!(
+        current.active_lenses[0].routing_rule.as_deref(),
+        Some("A coherent topic")
+    );
 }

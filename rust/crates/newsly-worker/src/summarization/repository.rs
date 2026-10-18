@@ -94,7 +94,6 @@ struct LockedContent {
     content_type: String,
     title: Option<String>,
     status: String,
-    classification: Option<String>,
     content_metadata: Value,
     error_message: Option<String>,
     processed_at: Option<NaiveDateTime>,
@@ -112,7 +111,6 @@ async fn load_locked_content(
             content.content_type,
             content.title,
             content.status,
-            content.classification,
             COALESCE(content.content_metadata, '{}'::json) AS content_metadata,
             content.error_message,
             content.processed_at,
@@ -294,7 +292,6 @@ fn applied_context(
         content_id: content.id,
         content_type: content.content_type.clone(),
         status: content.status.clone(),
-        classification: content.classification.clone(),
         metadata: content.content_metadata.clone(),
         pending_chat_requests,
     }

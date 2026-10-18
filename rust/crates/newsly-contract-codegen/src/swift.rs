@@ -293,6 +293,10 @@ impl WirePresence {
 }
 
 impl SwiftField {
+    fn omits_nil(&self) -> bool {
+        self.presence == WirePresence::Optional && self.default_expr.as_deref() == Some("nil")
+    }
+
     fn new(
         model: &Model,
         field: &Field,
@@ -302,12 +306,16 @@ impl SwiftField {
         let path = format!("{}.{}", model.name, field.wire_name);
         let decode_type = swift_non_optional_type(&field.type_ref, policy, target)?;
         let presence = WirePresence::new(field.required, field.type_ref.nullable);
-        let type_name = if presence.is_nullable() {
+        let mut default_expr = default_expr(field, &path, &decode_type, policy)?;
+        let omittable = presence == WirePresence::Optional && default_expr.is_none();
+        if omittable {
+            default_expr = Some("nil".to_owned());
+        }
+        let type_name = if presence.is_nullable() || omittable {
             format!("{decode_type}?")
         } else {
             decode_type.clone()
         };
-        let default_expr = default_expr(field, &path, &decode_type, policy)?;
         let lenient = policy.settings.lenient_fields.contains(&path);
         if lenient {
             ensure!(
@@ -367,6 +375,11 @@ fn render_decoder(fields: &[SwiftField]) -> anyhow::Result<Vec<String>> {
                 "        {} = try container.decodeIfPresent({}.self, forKey: .{}) ?? {}",
                 field.name, field.decode_type, field.name, default
             ));
+        } else if field.omits_nil() {
+            lines.push(format!(
+                "        {} = container.contains(.{}) ? try container.decode({}.self, forKey: .{}) : nil",
+                field.name, field.name, field.decode_type, field.name
+            ));
         } else if field.presence.is_nullable() && field.presence.requires_key() {
             lines.push(format!(
                 "        {} = try container.decode({}.self, forKey: .{})",
@@ -412,6 +425,22 @@ fn render_datetime_decode(field: &SwiftField) -> anyhow::Result<Vec<String>> {
             format!("            {} = {parsed}", field.name),
             "        } else {".to_owned(),
             format!("            {} = {default}", field.name),
+            "        }".to_owned(),
+        ]);
+    }
+    if field.omits_nil() {
+        return Ok(vec![
+            format!("        if container.contains(.{}) {{", field.name),
+            format!(
+                "            let {raw} = try container.decode(String.self, forKey: .{})",
+                field.name
+            ),
+            format!("            guard let {parsed} = ServerDate.parse({raw}) else {{"),
+            format!("                throw {error}"),
+            "            }".to_owned(),
+            format!("            {} = {parsed}", field.name),
+            "        } else {".to_owned(),
+            format!("            {} = nil", field.name),
             "        }".to_owned(),
         ]);
     }
@@ -463,37 +492,24 @@ fn render_encoder(fields: &[SwiftField]) -> Vec<String> {
         "        var container = encoder.container(keyedBy: CodingKeys.self)".to_owned(),
     ];
     for field in fields {
-        if field.datetime && field.presence.is_nullable() && field.presence.requires_key() {
-            lines.push(format!(
-                "        try container.encode({}.map(ServerDate.format), forKey: .{})",
-                field.name, field.name
-            ));
-        } else if field.datetime && field.presence.is_nullable() {
-            lines.push(format!(
-                "        try container.encodeIfPresent({}.map(ServerDate.format), forKey: .{})",
-                field.name, field.name
-            ));
-        } else if field.datetime {
-            lines.push(format!(
-                "        try container.encode(ServerDate.format({}), forKey: .{})",
-                field.name, field.name
-            ));
-        } else if field.presence.is_nullable() && field.presence.requires_key() {
-            lines.push(format!(
-                "        try container.encode({}, forKey: .{})",
-                field.name, field.name
-            ));
-        } else if field.presence.is_nullable() {
-            lines.push(format!(
-                "        try container.encodeIfPresent({}, forKey: .{})",
-                field.name, field.name
-            ));
+        let method = if field.omits_nil()
+            || (field.presence.is_nullable() && !field.presence.requires_key())
+        {
+            "encodeIfPresent"
         } else {
-            lines.push(format!(
-                "        try container.encode({}, forKey: .{})",
-                field.name, field.name
-            ));
-        }
+            "encode"
+        };
+        let value = if !field.datetime {
+            field.name.clone()
+        } else if field.omits_nil() || field.presence.is_nullable() {
+            format!("{}.map(ServerDate.format)", field.name)
+        } else {
+            format!("ServerDate.format({})", field.name)
+        };
+        lines.push(format!(
+            "        try container.{method}({value}, forKey: .{})",
+            field.name
+        ));
     }
     lines.push("    }".to_owned());
     lines

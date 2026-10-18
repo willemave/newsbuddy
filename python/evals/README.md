@@ -88,3 +88,35 @@ uv run --project python/evals mypy --config-file python/evals/pyproject.toml \
   python/evals/src python/evals/scripts python/evals/tests
 uv run --project python/evals pytest -q python/evals/tests
 ```
+
+## News preference filtering
+
+The [filter ablation harness](FILTER_EVALS.md) freezes public-news summary/profile pairs,
+compares four filter text structures with Jev, and collects blinded local Opus reference labels.
+Its durable attempt budgets, repeat audit and development-only selection are offline artifacts;
+no production filtering policy is implemented by this package.
+
+
+### Rust adapter canaries and archived comparisons
+
+The manual examples in `rust/crates/newsly-providers/examples/` exercise the
+shipping Rust gateway rather than a second production implementation:
+
+- `briefing_compose_canary.rs`: one captured composition request.
+- `briefing_membership_canary.rs`: two captured category-membership requests.
+- `news_category_canary.rs`: three frozen public-evidence category requests.
+- `news_category_evaluation.rs`: resumable evaluation of the 120 frozen held-out
+  stories through `NewsCategoryGateway`. The Python category runner owns the
+  earlier comparison artifacts; this example verifies the Rust adapter against
+  those same inputs.
+
+These are opt-in paid tools, not local test-gate commands. Consult each example's
+argument validation and obtain authorization for its provider budget before a new
+run. Preserve existing checkpoints and source snapshots.
+
+The historical embedding comparator is described in
+[`2026-10-18-jev-versus-embedding-routing.md`](../../docs/initiatives/2026-10-18-jev-versus-embedding-routing.md).
+[`reports/Low cost Newsly filtering.md`](../../reports/Low%20cost%20Newsly%20filtering.md)
+and its [`research_notes` archive](../../research_notes/Low%20cost%20Newsly%20filtering/)
+retain the original research and independent-review evidence; they are not loaded
+by either Python package or the application runtime.

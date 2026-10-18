@@ -20,6 +20,8 @@ mod feed_validation;
 mod image_generation;
 mod media;
 mod model;
+mod news_categories;
+mod news_filter;
 mod news_item;
 mod object_storage;
 mod onboarding_flow;
@@ -46,11 +48,12 @@ pub use briefing_composition::{
     BRIEFING_LENS_NAMING_MAX_OUTPUT_TOKENS, BRIEFING_LENS_NAMING_MAX_STORIES_PER_CATEGORY,
     BriefingCompositionBlock, BriefingCompositionGateway, BriefingCompositionGatewayError,
     BriefingCompositionLayout, BriefingCompositionRequest, BriefingCompositionSource,
-    BriefingEmbeddingBatch, BriefingFigureAlignment, BriefingFigurePlacement, BriefingLensName,
-    BriefingLensNamingBatch, BriefingLensNamingBatchRequest, BriefingLensNamingCategory,
-    BriefingLensNamingResult, BriefingLensNamingStory, BriefingPassageWeight,
-    BriefingSuggestedQuote, GeneratedBriefingLayout, GeneratedBriefingLensName,
-    GeneratedBriefingLensNamingBatch,
+    BriefingEmbeddingBatch, BriefingFigureAlignment, BriefingFigurePlacement,
+    BriefingLayoutRejection, BriefingLensName, BriefingLensNamingBatch,
+    BriefingLensNamingBatchRequest, BriefingLensNamingCategory, BriefingLensNamingResult,
+    BriefingLensNamingStory, BriefingPassageWeight, BriefingSuggestedQuote,
+    GeneratedBriefingLayout, GeneratedBriefingLensName, GeneratedBriefingLensNamingBatch,
+    briefing_composition_response_contract,
 };
 pub use briefing_dig::{
     BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchOutcome,
@@ -85,9 +88,18 @@ pub use media::{
     YtDlpTarget, is_apple_podcasts_url, is_terminal_ytdlp_error, is_youtube_url,
 };
 pub use model::{ModelProvider, ModelSpec, ModelSpecError, ProviderCredentials};
+pub use news_categories::{
+    NEWS_CATEGORY_REQUEST_MODEL, NEWS_CATEGORY_RESPONSE_MODEL, NewsCategory, NewsCategoryDecision,
+    NewsCategoryGateway, NewsCategoryGatewayError, NewsCategoryInput,
+};
+pub use news_filter::{
+    NEWS_FILTER_REQUEST_MODEL, NEWS_FILTER_RESPONSE_MODEL, NewsFilterAttempt, NewsFilterChoice,
+    NewsFilterDecision, NewsFilterGateway, NewsFilterGatewayError, NewsFilterInput,
+    NewsFilterProbabilities, NewsFilterUsage,
+};
 pub use news_item::{
-    EmbeddingBatch, GeneratedNewsSummary, LinkCandidate, NewsClassification, NewsItemGateway,
-    NewsItemGatewayError, NewsSummary, RelevantLink, RelevantLinkCategory, SelectedRelevantLinks,
+    EmbeddingBatch, GeneratedNewsSummary, LinkCandidate, NewsItemGateway, NewsItemGatewayError,
+    NewsSummary, RelevantLink, RelevantLinkCategory, SelectedRelevantLinks,
 };
 pub use onboarding_flow::{
     OnboardingAudioLane, OnboardingAudioPlan, OnboardingDiscoveryOutcome, OnboardingDiscoverySeeds,

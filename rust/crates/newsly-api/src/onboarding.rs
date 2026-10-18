@@ -116,6 +116,8 @@ pub(super) fn present_discovery_status(
         run_id: status.run_id,
         run_status: status.run_status,
         topic_summary: status.topic_summary,
+        original_input_text: status.original_input_text,
+        original_input_kind: status.original_input_kind,
         inferred_topics: status.inferred_topics,
         lanes: status
             .lanes

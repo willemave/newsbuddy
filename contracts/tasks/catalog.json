@@ -99,7 +99,7 @@
     {
       "dedupe_by_content": true,
       "payload_schema": "tasks/onboarding_discover.schema.json",
-      "payload_schema_sha256": "b062c30ae2e5563de71b851e0918eec510f4d6fcf05303f9205804b868c6ad17",
+      "payload_schema_sha256": "bd2351dae3cca63f4c86b031008142ffb8a375d9565a762c1ab12bf392cca6f1",
       "queue": "onboarding",
       "requires_owner": true,
       "task_type": "onboarding_discover"

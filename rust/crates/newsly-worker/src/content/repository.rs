@@ -1,3 +1,8 @@
+mod canonical;
+use canonical::{
+    duplicate_can_prepare_or_read, find_duplicate_content, relink_canonical_user_state,
+};
+
 use newsly_db::content_metadata::{
     RAW_BODY_KEYS, legacy_root_first_value as runtime_value, remove_field, set_field,
 };
@@ -98,6 +103,14 @@ impl ContentFinalizer {
         }
         if is_terminal_status(&content.status) {
             return Ok(());
+        }
+
+        if !matches!(
+            self.plan.mutation,
+            ContentMutation::ExtractionDeferred { .. }
+        ) && let Some(metadata) = content.content_metadata.as_object_mut()
+        {
+            metadata.remove("extraction_deferred");
         }
 
         match &self.plan.mutation {
@@ -289,13 +302,48 @@ impl ContentFinalizer {
                         &article.final_url,
                     )
                     .await?;
-                    if let Some(duplicate_id) = duplicate_id {
+                    if let Some(duplicate_id) = duplicate_id
+                        && duplicate_can_prepare_or_read(transaction, duplicate_id).await?
+                    {
+                        if *subscribe_to_feed {
+                            apply_feed_subscription(
+                                transaction,
+                                &self.queue,
+                                content,
+                                &mut metadata,
+                                &article.feed_candidates,
+                            )
+                            .await?;
+                        }
+                        let bookmark_bindings = x_bookmark_destination_bindings(
+                            transaction,
+                            content.id,
+                            x_bookmark_fallback_user_id(&metadata, usage_user_id),
+                        )
+                        .await?;
                         set_field(
                             &mut metadata,
                             "canonical_content_id",
                             Value::from(duplicate_id),
                         );
-                    } else {
+                        relink_canonical_user_state(transaction, content.id, duplicate_id).await?;
+                        reconcile_x_bookmark_destination_users(
+                            transaction,
+                            &self.queue,
+                            duplicate_id,
+                            &bookmark_bindings,
+                        )
+                        .await?;
+                        "skipped".clone_into(&mut content.status);
+                        content.error_message =
+                            Some("Canonical URL conflicts with existing content".to_owned());
+                        content.processed_at = Some(Utc::now().naive_utc());
+                        update_content(transaction, content, metadata).await?;
+                        return Ok(());
+                    }
+                    // A failed/skipped destination must not swallow successfully extracted
+                    // source material. Keep processing the submitted URL in that case.
+                    if duplicate_id.is_none() {
                         content.url.clone_from(&article.final_url);
                     }
                 }
@@ -404,6 +452,24 @@ impl ContentFinalizer {
                     metadata_map(&content.content_metadata),
                 )
                 .await?;
+            }
+            ContentMutation::ExtractionDeferred {
+                stage,
+                reason,
+                resume_at,
+            } => {
+                let mut metadata = metadata_map(&content.content_metadata);
+                set_field(
+                    &mut metadata,
+                    "extraction_deferred",
+                    json!({
+                        "stage": stage, "reason": reason, "resume_at": resume_at.to_rfc3339(),
+                    }),
+                );
+                "processing".clone_into(&mut content.status);
+                content.error_message = None;
+                content.processed_at = None;
+                update_content(transaction, content, metadata).await?;
             }
             ContentMutation::ExtractionFailure {
                 stage,
@@ -717,14 +783,13 @@ async fn resolve_instruction_child(
             is_aggregate,
             status,
             retry_count,
-            classification,
             content_metadata,
             created_at,
             updated_at
         )
         VALUES (
             'unknown', $1, $1, NULL, 'self submission', NULL, FALSE,
-            'new', 0, 'to_read', $2, timezone('UTC', now()), timezone('UTC', now())
+            'new', 0, $2, timezone('UTC', now()), timezone('UTC', now())
         )
         ON CONFLICT (url, content_type) DO NOTHING
         RETURNING id::bigint
@@ -877,140 +942,6 @@ async fn reconcile_x_bookmark_destination_users(
             )
             .await?;
     }
-    Ok(())
-}
-
-async fn find_duplicate_content(
-    transaction: &mut Transaction<'static, Postgres>,
-    content_id: i64,
-    content_type: &str,
-    url: &str,
-) -> Result<Option<i64>, sqlx::Error> {
-    sqlx::query_scalar::<_, i64>(
-        r"
-        SELECT id::bigint
-        FROM contents
-        WHERE id::bigint <> $1 AND content_type = $2 AND url = $3
-        ORDER BY id
-        LIMIT 1
-        FOR SHARE
-        ",
-    )
-    .bind(content_id)
-    .bind(content_type)
-    .bind(url)
-    .fetch_optional(&mut **transaction)
-    .await
-}
-
-/// Move all unique-per-user overlays from a classification loser to its canonical winner.
-///
-/// Each insert absorbs a concurrent or pre-existing winner row before the loser is deleted. The
-/// timestamped overlays retain the newer interaction, while independent chat histories only
-/// change their content destination. The relink runs inside the queue/product finalize fence.
-async fn relink_canonical_user_state(
-    transaction: &mut Transaction<'static, Postgres>,
-    loser_content_id: i64,
-    winner_content_id: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r"
-        INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
-        SELECT user_id, $2, status, created_at, updated_at
-        FROM content_status
-        WHERE content_id::bigint = $1
-        ON CONFLICT (user_id, content_id) DO NOTHING
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_status WHERE content_id::bigint = $1")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        INSERT INTO content_read_status (user_id, content_id, read_at, created_at)
-        SELECT user_id, $2, read_at, created_at
-        FROM content_read_status
-        WHERE content_id::bigint = $1
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET read_at = GREATEST(content_read_status.read_at, EXCLUDED.read_at)
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_read_status WHERE content_id::bigint = $1")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        INSERT INTO content_knowledge_saves (user_id, content_id, saved_at, created_at)
-        SELECT user_id, $2, saved_at, created_at
-        FROM content_knowledge_saves
-        WHERE content_id::bigint = $1
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET saved_at = GREATEST(content_knowledge_saves.saved_at, EXCLUDED.saved_at)
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_knowledge_saves WHERE content_id::bigint = $1")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        INSERT INTO content_unlikes (user_id, content_id, unliked_at, created_at)
-        SELECT user_id, $2, unliked_at, created_at
-        FROM content_unlikes
-        WHERE content_id::bigint = $1
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET unliked_at = GREATEST(content_unlikes.unliked_at, EXCLUDED.unliked_at)
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_unlikes WHERE content_id::bigint = $1")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        UPDATE user_integration_synced_items
-        SET content_id = $2, updated_at = timezone('UTC', now())
-        WHERE content_id::bigint = $1
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-
-    sqlx::query(
-        r"
-        UPDATE chat_sessions
-        SET content_id = $2, updated_at = timezone('UTC', now())
-        WHERE content_id::bigint = $1
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
     Ok(())
 }
 
@@ -1686,6 +1617,10 @@ pub(super) enum ContentRepositoryError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "repository/knowledge_tests.rs"]
+mod knowledge_tests;
 
 #[cfg(test)]
 #[path = "repository/firecrawl_usage_tests.rs"]

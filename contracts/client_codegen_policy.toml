@@ -694,3 +694,31 @@ equatable_models = [
 "OnboardingSuggestion.is_default" = "false"
 "LearningDeckRunResponse.timeline" = "[]"
 "BriefingRunDto.bold" = "false"
+
+[[models]]
+schema = "NewsItemSummaryResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "NewsFilterNewsItem"
+targets = ["app_swift"]
+[[models]]
+schema = "NewsFilterNewsResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "NewsFilterPreviewRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "NewsFilterPreviewResponse"
+targets = ["app_swift"]
+
+[[models]]
+schema = "NewsFilterPreference"
+targets = ["app_swift"]
+
+[[models]]
+schema = "UpdateNewsFilterRequest"
+targets = ["app_swift"]
+
+[[models]]
+schema = "OnboardingNewsFilterSeed"
+targets = ["app_swift"]

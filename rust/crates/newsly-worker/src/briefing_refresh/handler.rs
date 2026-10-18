@@ -14,26 +14,34 @@ use newsly_db::{
 };
 use newsly_providers::{
     BriefingCompositionGateway, BriefingCompositionRequest, BriefingCompositionSource,
+    NewsCategoryGateway, NewsFilterGateway,
 };
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::PgPool;
 use thiserror::Error;
 
-use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
+use crate::{HandlerExecution, HandlerFuture, HandlerInterruptionPolicy, LeaseHealth, TaskHandler};
 
 use super::config::BriefingRefreshWorkerConfig;
 use super::finalizer::BriefingRefreshFinalizer;
 use super::normalize::normalize_layout;
+use super::stale_assignment::{defer_after_other_wait, stale_assignment};
+
+mod diagnostics;
+mod semantic_failure;
 use super::planning::{PlannedBriefingWindow, plan_windows};
 use super::semantic_lenses::plan_semantic_lenses;
 use super::{EMBEDDING_PROVIDER, nonempty, split_model_spec};
+use diagnostics::normalization_rejection_code;
 
 #[derive(Debug, Clone)]
 pub struct BriefingRefreshWorkerServices {
     pub(super) pool: PgPool,
     pub(super) queue: QueueKernel,
     pub(super) gateway: BriefingCompositionGateway,
+    pub(super) filter_gateway: NewsFilterGateway,
+    category_gateway: NewsCategoryGateway,
     config: BriefingRefreshWorkerConfig,
 }
 
@@ -42,12 +50,16 @@ impl BriefingRefreshWorkerServices {
         pool: PgPool,
         queue: QueueKernel,
         gateway: BriefingCompositionGateway,
+        filter_gateway: NewsFilterGateway,
+        category_gateway: NewsCategoryGateway,
         config: BriefingRefreshWorkerConfig,
     ) -> Self {
         Self {
             pool,
             queue,
             gateway,
+            filter_gateway,
+            category_gateway,
             config,
         }
     }
@@ -67,6 +79,11 @@ impl BriefingRefreshHandler {
 impl TaskHandler for BriefingRefreshHandler {
     fn task_type(&self) -> TaskType {
         TaskType::BriefingRefresh
+    }
+
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        // Finish bounded filter/naming accounting after cancellation; publish only while owned.
+        HandlerInterruptionPolicy::DrainBounded
     }
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
@@ -109,7 +126,7 @@ async fn execute_refresh(
     // defers behind an already running normal refresh.
     match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE owner_user_id::bigint=$1 AND task_type='recluster_news_lenses' AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()))")
         .bind(user_id).fetch_one(&services.pool).await {
-        Ok(true) => return HandlerExecution::from_result(TaskResult::defer(30)),
+        Ok(true) => return defer_after_other_wait(plan.task_id, 30),
         Ok(false) => {},
         Err(error) => return plain_failure(error.to_string(), true),
     }
@@ -122,6 +139,11 @@ async fn execute_refresh(
     if initial {
         repository_config.pending_max_age_seconds = 0;
     }
+    let filter_pass =
+        match super::filtering::filter_news(services, plan.task_id, user_id, &mut lease).await {
+            Ok(pass) => pass,
+            Err(error) => return plain_failure(error.to_string(), true),
+        };
     let preparation = {
         let mut transaction = match services.pool.begin().await {
             Ok(transaction) => transaction,
@@ -133,10 +155,15 @@ async fn execute_refresh(
             user_id,
             mode,
             &repository_config,
+            &filter_pass,
+            lease.claim().lease_token.get(),
         )
         .await
         {
             Ok(preparation) => preparation,
+            Err(newsly_db::BriefingRefreshRepositoryError::FilterChanged) => {
+                return defer_after_other_wait(plan.task_id, 1);
+            }
             Err(error) => return plain_failure(error.to_string(), true),
         };
         if let Err(error) = transaction.commit().await {
@@ -169,34 +196,112 @@ async fn execute_refresh(
         Ok(readiness) => readiness,
         Err(error) => return plain_failure(error.to_string(), true),
     };
+    tracing::info!(
+        task_id = plan.task_id,
+        user_id,
+        cached_sources = readiness.sources.len(),
+        missing_sources = readiness.requests.len(),
+        failed_sources = readiness.failed.len(),
+        "Briefing shared-vector readiness checked"
+    );
     let mut semantic_seed = seed.clone();
     semantic_seed.lens_assignment.pending_sources = readiness.sources;
-    let cached_vectors = readiness.vectors;
+    let mut cached_vectors = readiness.vectors;
     let failed_sources = readiness.failed;
     let missing = readiness.requests;
-    let waiting_for_news = !missing.is_empty();
+    let waiting_for_embeddings = !missing.is_empty();
+    let mut waiting_for_news = waiting_for_embeddings || filter_pass.more_work;
     let lens_planning_started = std::time::Instant::now();
+    let category_usage = crate::agent_usage::AgentUsageRecorder::new(
+        services.pool.clone(),
+        crate::agent_usage::AgentUsageAttribution {
+            operation: "briefing.route_category".to_owned(),
+            source: "queue".to_owned(),
+            task_id: plan.task_id,
+            content_id: None,
+            session_id: None,
+            message_id: None,
+            user_id: Some(user_id),
+        },
+    );
+    let routes = super::category_routing::route_pending(
+        &services.category_gateway,
+        &semantic_seed,
+        &lease,
+        &category_usage,
+    )
+    .await;
+    // Metering is independent of later naming, snapshot invalidation and publication.
+    category_usage.finish().await;
+    if lease.ownership_lost() {
+        return plain_failure("queue lease was lost during category routing", true);
+    }
+    // A bounded routing pass may leave an undispatched suffix. Keep its source
+    // and vector identities aligned. Full assigns the omitted suffix to general news;
+    // incremental work leaves it pending for the successor.
+    waiting_for_news |= routes.len() < semantic_seed.lens_assignment.pending_sources.len();
+    semantic_seed
+        .lens_assignment
+        .pending_sources
+        .truncate(routes.len());
+    cached_vectors.truncate(routes.len());
     let mut lens_plan = {
-        let lens_planning = plan_semantic_lenses(
+        // Drain bounded naming calls so completed sibling usage reaches accounting.
+        // Every provider attempt checks ownership before dispatching or retrying.
+        let result = plan_semantic_lenses(
             &services.gateway,
             &semantic_seed,
             &repository_config,
-            services.config.embedding_batch_size,
+            &routes,
             cached_vectors,
-            if progressive { 1 } else { usize::MAX },
-        );
-        tokio::pin!(lens_planning);
-        let result = tokio::select! {
-            result = &mut lens_planning => result,
-            () = lease.wait_for_ownership_loss() => {
-                return plain_failure("queue lease was lost during Briefing lens planning", true);
-            }
-        };
+            if progressive {
+                super::semantic_lenses::LENS_NAMING_PARALLELISM
+            } else {
+                usize::MAX
+            },
+            &lease,
+        )
+        .await;
         match result {
             Ok(plan) => plan,
-            Err(error) => return plain_failure(error.to_string(), true),
+            Err(error) => {
+                let mut reason = error.to_string();
+                let usages = error.observed_usage();
+                if let Err(accounting_error) = semantic_failure::persist_observed_usage(
+                    &services.pool,
+                    plan.task_id,
+                    user_id,
+                    usages,
+                )
+                .await
+                {
+                    tracing::error!(
+                        task_id = plan.task_id,
+                        user_id,
+                        usage_count = usages.len(),
+                        error = %accounting_error,
+                        "failed to persist observed semantic planning usage"
+                    );
+                    reason =
+                        format!("{reason}; observed usage persistence failed: {accounting_error}");
+                }
+                return plain_failure(reason, true);
+            }
         }
     };
+    // Completed naming observations survive lease loss and every later database outcome.
+    // Clear the product plan's copy only after the independent ledger commits, so assignment
+    // finalization cannot bill those same calls again.
+    if let Err(error) = semantic_failure::persist_completed_usage(
+        &services.pool,
+        plan.task_id,
+        user_id,
+        &mut lens_plan.usage,
+    )
+    .await
+    {
+        return plain_failure(error.to_string(), true);
+    }
     tracing::info!(
         task_id = plan.task_id,
         user_id,
@@ -208,12 +313,8 @@ async fn execute_refresh(
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost after Briefing lens planning", true);
     }
-    super::semantic_lenses::assign_failed_sources(
-        &mut lens_plan,
-        &seed,
-        &failed_sources,
-        &repository_config,
-    );
+    super::semantic_lenses::assign_failed_sources(&mut lens_plan, &seed, &failed_sources);
+    super::semantic_lenses::complete_full_assignments(&mut lens_plan, &seed);
     let new_category_keys = lens_plan
         .new_lenses
         .iter()
@@ -238,9 +339,17 @@ async fn execute_refresh(
         };
         let prepared = match outcome {
             ApplyBriefingLensAssignmentOutcome::Stale => {
-                return plain_failure(
-                    "Briefing lens assignment snapshot or queue fence became stale",
-                    true,
+                // Drop any partial assignment and its row locks before scheduling a fresh
+                // snapshot. No stale product writes may commit.
+                if let Err(error) = transaction.rollback().await {
+                    return plain_failure(error.to_string(), true);
+                }
+                return stale_assignment(
+                    plan.task_id,
+                    user_id,
+                    plan.retry_count,
+                    &plan.payload,
+                    Utc::now().timestamp(),
                 );
             }
             ApplyBriefingLensAssignmentOutcome::Ready(prepared) => prepared,
@@ -293,6 +402,7 @@ async fn execute_refresh(
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
             waiting_for_news,
+            waiting_for_embeddings,
         ),
     )
 }
@@ -590,7 +700,8 @@ fn composition_fingerprint(
 ) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(format!(
-        "{BRIEFING_COMPOSITION_PROMPT_VERSION}|{model}|{max_figures_deep}|{request:?}"
+        "{BRIEFING_COMPOSITION_PROMPT_VERSION}|{}|{model}|{max_figures_deep}|{request:?}",
+        newsly_providers::briefing_composition_response_contract(&request.tier)
     ));
     digest
         .iter()
@@ -636,11 +747,15 @@ async fn compose_unit(
         let attempt_id = uuid::Uuid::new_v4();
         let provider_started = std::time::Instant::now();
         let generated = gateway.compose(&request, feedback.as_deref()).await;
-        tracing::info!(task_id = context.task_id, user_id = context.user_id, lens_key = %unit.lens.key, attempt, elapsed_ms = provider_started.elapsed().as_millis(), source_count = request.sources.len(), succeeded = generated.is_ok(), "Briefing composition provider attempt completed");
+        tracing::info!(task_id = context.task_id, user_id = context.user_id, lens_key = %unit.lens.key, attempt, elapsed_ms = provider_started.elapsed().as_millis(), source_count = request.sources.len(), provider_succeeded = generated.is_ok(), "Briefing composition provider attempt completed");
         let generated = match generated {
             Ok(generated) => generated,
             Err(error) => {
                 let retryable = error.retryable();
+                tracing::warn!(task_id = context.task_id, user_id = context.user_id,
+                    lens_key = %unit.lens.key, attempt, stage = "provider",
+                    accepted = false, reason_code = error.reason_code(), retryable,
+                    "Briefing composition attempt rejected");
                 let (provider, model) = split_model_spec(gateway.model_spec());
                 let observed = error.observed_usage().map(|usage| BriefingSegmentUsage {
                     provider: provider.to_owned(),
@@ -685,19 +800,38 @@ async fn compose_unit(
             usage: generated.usage,
             operation: "briefing.compose_window.observed".to_owned(),
         };
-        let normalized = generated.layout.and_then(|layout| {
-            normalize_layout(
-                &layout,
-                &unit.window.sources,
-                &unit.lens.tier,
-                if unit.lens.tier == "news" {
-                    0
-                } else {
-                    max_figures_deep
-                },
-            )
-            .map_err(|error| error.to_string())
-        });
+        let mut rejection = None;
+        let normalized = generated
+            .layout
+            .map_err(|error| {
+                rejection = Some(("layout", error.code()));
+                error.to_string()
+            })
+            .and_then(|layout| {
+                normalize_layout(
+                    &layout,
+                    &unit.window.sources,
+                    &unit.lens.tier,
+                    if unit.lens.tier == "news" {
+                        0
+                    } else {
+                        max_figures_deep
+                    },
+                )
+                .map_err(|error| {
+                    rejection = Some(("normalization", normalization_rejection_code(&error)));
+                    error.to_string()
+                })
+            });
+        if let Some((stage, reason_code)) = rejection {
+            tracing::warn!(task_id = context.task_id, user_id = context.user_id,
+                lens_key = %unit.lens.key, attempt, stage, accepted = false, reason_code,
+                "Briefing composition attempt rejected");
+        } else {
+            tracing::info!(task_id = context.task_id, user_id = context.user_id,
+                lens_key = %unit.lens.key, attempt, accepted = true,
+                "Briefing composition layout accepted");
+        }
         newsly_db::briefing_attempts::record_attempt(
             context.pool,
             context.task_id,

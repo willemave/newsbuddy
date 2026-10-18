@@ -49,6 +49,7 @@ struct BriefingFirstRunStrip: View {
     let viewModel: BriefingViewModel
     let onSelectStartHere: () -> Void
     let onSelectLens: (String) -> Void
+    let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -67,7 +68,10 @@ struct BriefingFirstRunStrip: View {
                         title: lens.title,
                         unreadCount: lens.unreadSourceCount,
                         isSelected: lens.key == viewModel.selectedLensKey,
-                        accessibilityId: "briefing.lens.\(lens.key)"
+                        accessibilityId: "briefing.lens.\(lens.key)",
+                        longPressAction: lens.unreadSourceCount > 0
+                            ? { onRequestMarkAllRead(lens) }
+                            : nil
                     ) {
                         onSelectLens(lens.key)
                     }

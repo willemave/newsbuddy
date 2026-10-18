@@ -592,3 +592,28 @@ enum ShareURLRouting {
         return score
     }
 }
+
+/// A durable invalidation token, partitioned by server and account. The app
+/// remembers the token it read; it never clears storage, so a save arriving
+/// during a request cannot be erased by that request's completion.
+struct KnowledgeSaveSignalStore {
+    let defaults: UserDefaults
+    let server: String
+    let userID: Int
+
+    init(defaults: UserDefaults = SharedContainer.userDefaults, server: String, userID: Int) {
+        self.defaults = defaults
+        self.server = server
+        self.userID = userID
+    }
+
+    private var key: String {
+        "knowledge.saveSignal.\(Data(server.utf8).base64EncodedString()).\(userID)"
+    }
+
+    var token: String? { defaults.string(forKey: key) }
+
+    func recordSave() {
+        defaults.set(UUID().uuidString, forKey: key)
+    }
+}

@@ -11,9 +11,9 @@ use super::super::extraction::ExtractionAttempt;
 use super::super::model::{ContentFinalizationPlan, ContentMutation, InstructionLinkPlan};
 use super::ContentWorkerServices;
 use super::support::{
-    classify_known_url, content_id, extraction_deadline, extraction_failure, is_tweet_url,
-    payload_bool, payload_string, request_id, should_run_structured_analysis, storage_failure,
-    with_finalizer,
+    classify_known_url, content_id, extraction_deadline, extraction_deferred, extraction_failure,
+    is_tweet_url, payload_bool, payload_string, request_id, should_run_structured_analysis,
+    storage_failure, with_finalizer,
 };
 use super::tweet::execute_tweet_analysis;
 use crate::content::normalize_external_url;
@@ -77,9 +77,15 @@ pub(super) async fn execute_analyze_url(
 
     let deadline = extraction_deadline(services.extraction_timeout);
     let request_id = request_id(plan);
-    let extraction = services
+    let runtime = services
         .extraction
-        .analyze(&snapshot.url, &request_id, deadline);
+        .for_task(crate::content::FirecrawlAttribution {
+            task: plan.task_id,
+            content: Some(content_id),
+            news_item: None,
+            user: None,
+        });
+    let extraction = runtime.analyze(&snapshot.url, &request_id, deadline);
     tokio::pin!(extraction);
     let attempt = tokio::select! {
         attempt = &mut extraction => attempt,
@@ -189,6 +195,19 @@ pub(super) async fn execute_analyze_url(
             };
             with_finalizer(services, TaskResult::ok(), finalization)
         }
+        ExtractionAttempt::Deferred {
+            reason,
+            resume_at,
+            usage,
+        } => extraction_deferred(
+            services,
+            plan,
+            content_id,
+            "analyze_url",
+            reason,
+            resume_at,
+            usage,
+        ),
         ExtractionAttempt::Failure {
             reason,
             code,

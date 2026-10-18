@@ -18,12 +18,13 @@ use crate::content::{
 
 use super::input::{
     article_title, choose_article_url, exact_relation_key, existing_summary, metadata_tweet_body,
-    normalize_key_points, relation_search_query, relevant_links_json, summary_json, summary_title,
+    normalize_key_points, prefilter_relation_candidates, relation_search_query,
+    relevant_links_json, summary_json, summary_title,
 };
 use super::model::{
     BodyPointer, BodySource, EnrichmentFinalizationPlan, EnrichmentMutation, EnrichmentPreparation,
-    ModelUsageWrite, NewsApplyOutcome, NewsSnapshot, ProcessFinalizationPlan, ProcessMutation,
-    ProcessPreparation, RelationCandidate,
+    NewsApplyOutcome, NewsSnapshot, ProcessFinalizationPlan, ProcessMutation, ProcessPreparation,
+    RelationCandidate,
 };
 
 const RELATED_LOOKBACK_DAYS: i64 = 14;
@@ -173,16 +174,18 @@ pub(super) async fn prepare_processing(
     } else {
         find_reusable_exact_summary(transaction, &snapshot).await?
     };
-    sqlx::query(
-        r#"
+    if row.status != "ready" {
+        sqlx::query(
+            r#"
         UPDATE news_items
         SET status = 'processing', updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id::bigint = $1 AND status <> 'ready'
         "#,
-    )
-    .bind(news_item_id)
-    .execute(&mut **transaction)
-    .await?;
+        )
+        .bind(news_item_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     Ok(Some(ProcessPreparation {
         snapshot,
         reusable_summary,
@@ -276,10 +279,7 @@ pub(super) async fn load_relation_candidates(
         .map(|row| {
             let snapshot = snapshot_from_row(&row, BodySource::None);
             let document = relation_document_from_snapshot(&snapshot);
-            RelationCandidate {
-                fingerprint: relation_fingerprint(&document),
-                document,
-            }
+            RelationCandidate { document }
         })
         .collect())
 }
@@ -295,17 +295,19 @@ pub(super) async fn apply_enrichment(
     if denied {
         newsly_db::aggregator_corpus::lock_aggregator_demand(transaction).await?;
     }
-    persist_extraction_usage(
-        transaction,
-        plan.task_id,
-        plan.snapshot.owner_user_id,
-        plan.snapshot.id,
-        &plan.usage,
-    )
-    .await?;
     let Some(row) = load_news_row(transaction, plan.snapshot.id).await? else {
         return Ok(NewsApplyOutcome::NewsItemMissing);
     };
+    if row.status == "ready"
+        && !newsly_db::news_grouping::try_lock_scope(
+            transaction,
+            &plan.snapshot.visibility_scope,
+            plan.snapshot.owner_user_id,
+        )
+        .await?
+    {
+        return Ok(NewsApplyOutcome::CandidateChanged);
+    }
     if source_fingerprint(&row) != plan.snapshot.fingerprint {
         return Ok(NewsApplyOutcome::SourceChanged);
     }
@@ -342,6 +344,11 @@ pub(super) async fn apply_enrichment(
     .bind(enrichment_domain(&plan.mutation))
     .execute(&mut **transaction)
     .await?;
+    // Keep enrichment pending until the credit prerequisite recovers. A deferred
+    // article must not acquire a metadata-only summary that recovery would reuse.
+    if matches!(plan.mutation, EnrichmentMutation::Deferred { .. }) {
+        return Ok(NewsApplyOutcome::Applied);
+    }
     let mut request = EnqueueRequest::new(TaskType::ProcessNewsItem);
     request.payload = Some(Map::from_iter([(
         "news_item_id".to_owned(),
@@ -364,26 +371,6 @@ pub(super) async fn apply_processing(
     queue: &QueueKernel,
     plan: &ProcessFinalizationPlan,
 ) -> Result<NewsApplyOutcome, NewsRepositoryError> {
-    if let Some(mutation) = &plan.mutation {
-        for usage in &mutation.usage {
-            persist_model_usage(
-                transaction,
-                plan.task_id,
-                plan.snapshot.owner_user_id,
-                usage,
-            )
-            .await?;
-        }
-    }
-    for usage in &plan.failure_usage {
-        persist_model_usage(
-            transaction,
-            plan.task_id,
-            plan.snapshot.owner_user_id,
-            usage,
-        )
-        .await?;
-    }
     let Some(row) = load_news_row(transaction, plan.snapshot.id).await? else {
         return Ok(NewsApplyOutcome::NewsItemMissing);
     };
@@ -395,18 +382,89 @@ pub(super) async fn apply_processing(
         apply_processing_failure(transaction, plan).await?;
         return Ok(NewsApplyOutcome::Applied);
     };
-    if !candidate_fingerprints_match(transaction, &mutation.candidates).await? {
-        reset_processing_status_for_defer(transaction, plan.snapshot.id).await?;
+    if !newsly_db::news_grouping::try_lock_scope(
+        transaction,
+        &plan.snapshot.visibility_scope,
+        plan.snapshot.owner_user_id,
+    )
+    .await?
+    {
         return Ok(NewsApplyOutcome::CandidateChanged);
     }
+    let candidates = prefilter_relation_candidates(
+        &mutation.item_document,
+        load_relation_candidates(transaction, &plan.snapshot, &mutation.item_document).await?,
+    );
+    let documents = candidates
+        .iter()
+        .map(|candidate| candidate.document.clone())
+        .collect::<Vec<_>>();
+    let exact = mutation
+        .item_document
+        .exact_relation_key
+        .as_ref()
+        .is_some_and(|key| {
+            documents
+                .iter()
+                .any(|document| document.exact_relation_key.as_ref() == Some(key))
+        });
+    let texts = if candidates.is_empty() || exact {
+        Vec::new()
+    } else {
+        newsly_domain::prepare_relation_embedding_texts(&mutation.item_document, &documents)
+    };
+    let authorized_sources = std::iter::once(plan.snapshot.id)
+        .chain(documents.iter().map(|document| document.id))
+        .collect::<Vec<_>>();
+    let vectors = super::relation_preparation::load_vectors(
+        transaction,
+        &texts,
+        &authorized_sources,
+        &mutation.relation_model,
+    )
+    .await?;
+    let Some(vectors) = vectors.into_iter().collect::<Option<Vec<_>>>() else {
+        return Ok(NewsApplyOutcome::CandidateChanged);
+    };
+    let store = match super::relation_preparation::vector_store(&texts, vectors) {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(news_item_id=plan.snapshot.id, error=%error, "invalid cached relation input");
+            return Ok(NewsApplyOutcome::CandidateChanged);
+        }
+    };
+    let relation = newsly_domain::related_representatives(
+        &mutation.item_document,
+        &documents,
+        mutation.relation_thresholds,
+        &store,
+    )
+    .map_err(|error| NewsRepositoryError::Relation(error.to_string()))?;
+    if relation.accepted_ids.is_empty() && !mutation.links_prepared {
+        return Ok(NewsApplyOutcome::CandidateChanged);
+    }
+    // The unlocked preflight is preparation only. This guarded decision owns publication.
+    let relation_trace = serde_json::to_value(&relation).unwrap_or_else(|_| json!({}));
     tracing::info!(
         news_item_id = plan.snapshot.id,
         reused_summary = mutation.used_existing_summary,
-        relation_trace = %mutation.relation_trace,
+        relation_trace = %relation_trace,
         "publishing processed news item"
     );
     persist_summary(transaction, plan, mutation, &row.raw_metadata).await?;
-    let representative_id = reconcile_relation(transaction, plan, mutation).await?;
+    let representative_id = reconcile_relation(
+        transaction,
+        plan,
+        mutation,
+        &candidates,
+        &relation.accepted_ids,
+    )
+    .await?;
+    if let Some(previous_root) = row.representative_news_item_id
+        && previous_root != representative_id
+    {
+        recompute_cluster(transaction, previous_root).await?;
+    }
     if representative_id == plan.snapshot.id {
         if let Some(links) = &mutation.relevant_links
             && !links.is_empty()
@@ -741,10 +799,6 @@ fn relation_document_from_snapshot(snapshot: &NewsSnapshot) -> NewsRelationDocum
     }
 }
 
-fn relation_fingerprint(document: &NewsRelationDocument) -> String {
-    stable_sha256(&serde_json::to_value(document).expect("NewsRelationDocument serializes"))
-}
-
 fn stable_sha256(value: &Value) -> String {
     let bytes = serde_json::to_vec(value).expect("JSON value serializes");
     Sha256::digest(bytes)
@@ -799,7 +853,7 @@ async fn apply_processing_failure(
         r#"
         UPDATE news_items
         SET
-            status = $2,
+            status = CASE WHEN status = 'ready' THEN status ELSE $2 END,
             raw_metadata = jsonb_set(
                 COALESCE(raw_metadata, '{}'::json)::jsonb,
                 '{processing_error}', to_jsonb($3::text), true
@@ -816,49 +870,6 @@ async fn apply_processing_failure(
     .execute(&mut **transaction)
     .await?;
     Ok(())
-}
-
-async fn candidate_fingerprints_match(
-    transaction: &mut Transaction<'static, Postgres>,
-    candidates: &[RelationCandidate],
-) -> Result<bool, NewsRepositoryError> {
-    if candidates.is_empty() {
-        return Ok(true);
-    }
-    let ids = candidates
-        .iter()
-        .map(|candidate| candidate.document.id)
-        .collect::<Vec<_>>();
-    let rows = sqlx::query_as::<_, NewsRow>(concat!(
-        r#"
-        SELECT
-        "#,
-        news_row_columns!(),
-        r#"
-        FROM news_items
-        WHERE id::bigint = ANY($1)
-        ORDER BY id
-        FOR UPDATE
-        "#,
-    ))
-    .bind(&ids)
-    .fetch_all(&mut **transaction)
-    .await?;
-    if rows.len() != candidates.len() {
-        return Ok(false);
-    }
-    let expected = candidates
-        .iter()
-        .map(|candidate| (candidate.document.id, candidate.fingerprint.as_str()))
-        .collect::<HashMap<_, _>>();
-    Ok(rows.iter().all(|row| {
-        row.status == "ready"
-            && row.representative_news_item_id.is_none()
-            && expected.get(&row.id).is_some_and(|expected| {
-                let snapshot = snapshot_from_row(row, BodySource::None);
-                relation_fingerprint(&relation_document_from_snapshot(&snapshot)) == **expected
-            })
-    }))
 }
 
 async fn persist_summary(
@@ -914,17 +925,14 @@ async fn reconcile_relation(
     transaction: &mut Transaction<'static, Postgres>,
     plan: &ProcessFinalizationPlan,
     mutation: &ProcessMutation,
+    candidates: &[RelationCandidate],
+    accepted_ids: &[i64],
 ) -> Result<i64, NewsRepositoryError> {
-    let by_id = mutation
-        .candidates
+    let by_id = candidates
         .iter()
         .map(|candidate| (candidate.document.id, &candidate.document))
         .collect::<HashMap<_, _>>();
-    let representative_id = mutation
-        .accepted_ids
-        .first()
-        .copied()
-        .unwrap_or(plan.snapshot.id);
+    let representative_id = accepted_ids.first().copied().unwrap_or(plan.snapshot.id);
     let representative_document = if representative_id == plan.snapshot.id {
         &mutation.item_document
     } else {
@@ -933,7 +941,7 @@ async fn reconcile_relation(
         )?
     };
     let mut merged_representatives = Vec::new();
-    for candidate_id in mutation.accepted_ids.iter().copied().skip(1) {
+    for candidate_id in accepted_ids.iter().copied().skip(1) {
         let candidate = by_id
             .get(&candidate_id)
             .copied()
@@ -961,7 +969,7 @@ async fn reconcile_relation(
         UPDATE news_items
         SET representative_news_item_id = CASE WHEN id::bigint = $2 THEN NULL ELSE $2 END,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id::bigint = $1 OR ($1 <> $2 AND representative_news_item_id::bigint = $1)
         "#,
     )
     .bind(plan.snapshot.id)
@@ -1189,87 +1197,136 @@ async fn enqueue_ready_fanout(
     if visible_users.is_empty() {
         return Ok(());
     }
-    let read_users = sqlx::query_scalar::<_, i64>(
+    let briefing_users = sqlx::query_as::<_, (i64, bool)>(
         r#"
-        SELECT user_id::bigint
-        FROM news_item_read_status
-        WHERE news_item_id::bigint = $1 AND user_id::bigint = ANY($2)
+        SELECT candidate.user_id, COALESCE(preference.enabled, FALSE)
+        FROM unnest($2::bigint[]) AS candidate(user_id)
+        LEFT JOIN LATERAL (
+            SELECT enabled FROM news_filter_preferences
+            WHERE user_id::bigint = candidate.user_id
+            ORDER BY revision DESC LIMIT 1
+        ) AS preference ON TRUE
+        WHERE NOT EXISTS (
+            SELECT 1 FROM news_item_read_status
+            WHERE news_item_id::bigint = $1 AND user_id::bigint = candidate.user_id
+        )
+        ORDER BY candidate.user_id
         "#,
     )
     .bind(plan.snapshot.id)
     .bind(&visible_users)
     .fetch_all(&mut **transaction)
-    .await?
-    .into_iter()
-    .collect::<HashSet<_>>();
-    let briefing_users = visible_users
+    .await?;
+    let filtered_users = briefing_users
         .iter()
-        .copied()
-        .filter(|user_id| !read_users.contains(user_id))
+        .filter_map(|(user_id, enabled)| enabled.then_some(*user_id))
+        .collect::<HashSet<_>>();
+    let unfiltered_users = briefing_users
+        .iter()
+        .filter_map(|(user_id, enabled)| (!enabled).then_some(*user_id))
         .collect::<Vec<_>>();
-    for user_id in &briefing_users {
-        sqlx::query(
-            r#"
-            INSERT INTO briefing_pending_sources (
-                user_id, lens_key, source_kind, source_id, enqueued_at
-            )
-            SELECT $1, NULL, 'news', $2, timezone('UTC', clock_timestamp())
-            WHERE NOT EXISTS (SELECT 1 FROM onboarding_first_edition_runs WHERE user_id=$1 AND status='active' AND NOT news_seed_settled)
-            ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
-            "#,
+    // Enabled filters admit through the refresh's revisioned filter/seed path. An unversioned
+    // row here would be pruned there, so only enqueue their coalesced wake below.
+    sqlx::query(
+        r#"
+        INSERT INTO briefing_pending_sources (
+            user_id, lens_key, source_kind, source_id, enqueued_at
         )
-        .bind(*user_id)
-        .bind(plan.snapshot.id)
-        .execute(&mut **transaction)
-        .await?;
-    }
-    let mut requests = Vec::new();
-    let mut deadlines = Vec::new();
-    for user_id in briefing_users {
-        let pending_count = sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT count(*)::bigint
-            FROM briefing_pending_sources
-            WHERE user_id::bigint = $1 AND lens_key IS NULL
-            "#,
+        SELECT candidate.user_id::integer, NULL, 'news', $2,
+               timezone('UTC', clock_timestamp())
+        FROM unnest($1::bigint[]) AS candidate(user_id)
+        WHERE NOT EXISTS (
+            SELECT 1 FROM onboarding_first_edition_runs
+            WHERE user_id::bigint = candidate.user_id
+              AND status = 'active' AND NOT news_seed_settled
         )
-        .bind(user_id)
-        .fetch_one(&mut **transaction)
-        .await?;
-        let delay = if pending_count >= plan.briefing_batch_minimum.max(1) {
+        ORDER BY candidate.user_id
+        ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+        "#,
+    )
+    .bind(&unfiltered_users)
+    .bind(plan.snapshot.id)
+    .execute(&mut **transaction)
+    .await?;
+    let user_ids = briefing_users.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let pending_counts = sqlx::query_as::<_, (i64, i64, bool)>(
+        r#"
+        SELECT candidate.user_id, count(pending.user_id)::bigint,
+               EXISTS (
+                   SELECT 1 FROM processing_tasks AS task
+                   WHERE task.owner_user_id::bigint = candidate.user_id
+                     AND task.task_type = 'briefing_refresh' AND task.status = 'processing'
+                     AND task.dedupe_key = 'briefing_refresh:' || candidate.user_id::text || ':append'
+               )
+        FROM unnest($1::bigint[]) AS candidate(user_id)
+        LEFT JOIN briefing_pending_sources AS pending
+          ON pending.user_id::bigint = candidate.user_id AND pending.lens_key IS NULL
+        GROUP BY candidate.user_id
+        ORDER BY candidate.user_id
+        "#,
+    )
+    .bind(&user_ids)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut requests = Vec::with_capacity(pending_counts.len());
+    let mut dedupe_keys = Vec::with_capacity(pending_counts.len());
+    let mut deadlines = Vec::with_capacity(pending_counts.len());
+    let now = Utc::now();
+    for (user_id, pending_count, append_running) in pending_counts {
+        // A filtered source has no pending row to trigger the batch threshold yet. Wake
+        // admission immediately; canonical preparation still owns composition batching.
+        let delay = if filtered_users.contains(&user_id)
+            || pending_count >= plan.briefing_batch_minimum.max(1)
+        {
             0
         } else {
             plan.briefing_debounce_seconds.max(0)
         };
-        let available_at = Utc::now() + Duration::seconds(delay);
-        let dedupe_key = format!("briefing_refresh:{user_id}:append");
+        let available_at = now + Duration::seconds(delay);
+        // A running append may have already filtered its snapshot. Preserve the new admission
+        // wake as a pending sweep rather than deduplicating it into that processing row.
+        let mode = if filtered_users.contains(&user_id) && append_running {
+            "sweep"
+        } else {
+            "append"
+        };
+        let dedupe_key = format!("briefing_refresh:{user_id}:{mode}");
         let mut request = EnqueueRequest::new(TaskType::BriefingRefresh);
         request.payload = Some(Map::from_iter([
             ("user_id".to_owned(), Value::from(user_id)),
-            ("mode".to_owned(), Value::String("append".to_owned())),
+            ("mode".to_owned(), Value::String(mode.to_owned())),
         ]));
         request.owner_user_id = Some(user_id);
         request.dedupe = Some(true);
         request.dedupe_key = Some(dedupe_key.clone());
         request.available_at = Some(available_at);
-        deadlines.push((dedupe_key, available_at));
+        dedupe_keys.push(dedupe_key);
+        deadlines.push(available_at.naive_utc());
         requests.push(request);
     }
     if !requests.is_empty() {
         queue
             .enqueue_many_in_transaction(transaction, requests)
             .await?;
-    }
-    for (dedupe_key, available_at) in deadlines {
         sqlx::query(
             r#"
-            UPDATE processing_tasks
-            SET available_at = LEAST(available_at, $2)
-            WHERE dedupe_key = $1 AND status = 'pending'
+            WITH locked AS MATERIALIZED (
+                SELECT task.id, wake.available_at
+                FROM processing_tasks AS task
+                JOIN unnest($1::text[], $2::timestamp[]) AS wake(dedupe_key, available_at)
+                  ON task.dedupe_key = wake.dedupe_key
+                WHERE task.status = 'pending' AND task.retry_count = 0
+                ORDER BY task.id
+                FOR UPDATE OF task
+            )
+            UPDATE processing_tasks AS task
+            SET available_at = LEAST(task.available_at, locked.available_at)
+            FROM locked
+            WHERE task.id = locked.id
             "#,
         )
-        .bind(dedupe_key)
-        .bind(available_at.naive_utc())
+        .bind(&dedupe_keys)
+        .bind(&deadlines)
         .execute(&mut **transaction)
         .await?;
     }
@@ -1338,57 +1395,21 @@ async fn visible_user_ids(
     .await
 }
 
-async fn persist_model_usage(
-    transaction: &mut Transaction<'static, Postgres>,
-    task_id: i64,
-    owner_user_id: Option<i64>,
-    write: &ModelUsageWrite,
-) -> Result<(), sqlx::Error> {
-    let total = write
-        .usage
-        .input_tokens
-        .saturating_add(write.usage.output_tokens);
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id, task_id, user_id,
-            input_tokens, cache_read_tokens, cache_write_tokens, output_tokens,
-            total_tokens, request_count, currency, metadata, created_at
-        )
-        VALUES (
-            $1, $2, $3, $4, 'queue', $5, $6,
-            (SELECT id FROM users WHERE id::bigint = $7 AND is_active IS TRUE),
-            $8, $9, $10, $11, $12, $13, 'USD', $14,
-            timezone('UTC', clock_timestamp())
-        )
-        "#,
-    )
-    .bind(&write.provider)
-    .bind(&write.model)
-    .bind(write.feature)
-    .bind(write.operation)
-    .bind(&write.provider_response_id)
-    .bind(task_id)
-    .bind(owner_user_id)
-    .bind(saturating_i32(write.usage.input_tokens))
-    .bind(saturating_i32(write.usage.cached_input_tokens))
-    .bind(saturating_i32(write.usage.cache_write_tokens))
-    .bind(saturating_i32(write.usage.output_tokens))
-    .bind(saturating_i32(total))
-    .bind(saturating_i32(write.usage.request_count))
-    .bind(&write.metadata)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-async fn persist_extraction_usage(
+pub(super) async fn persist_extraction_usage(
     transaction: &mut Transaction<'static, Postgres>,
     task_id: i64,
     user_id: Option<i64>,
     news_item_id: i64,
     writes: &[UsageWrite],
 ) -> Result<(), NewsRepositoryError> {
+    let user_id = if let Some(user_id) = user_id {
+        sqlx::query_scalar("SELECT id::bigint FROM users WHERE id::bigint=$1 AND is_active IS TRUE")
+            .bind(user_id)
+            .fetch_optional(&mut **transaction)
+            .await?
+    } else {
+        None
+    };
     for write in writes {
         match write {
             UsageWrite::Extraction(batch) => {
@@ -1474,10 +1495,6 @@ fn extraction_method_name(method: Option<newsly_extraction::ExtractionMethod>) -
     }
 }
 
-fn saturating_i32(value: u64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
-}
-
 mod error;
 pub(super) use error::NewsRepositoryError;
 
@@ -1486,13 +1503,25 @@ pub(super) use error::NewsRepositoryError;
 mod checkpoint_tests;
 
 #[cfg(test)]
-#[path = "demand_tests.rs"]
-mod demand_tests;
-
-#[cfg(test)]
 #[path = "firecrawl_usage_tests.rs"]
 mod firecrawl_usage_tests;
 
 #[path = "enrichment_metadata.rs"]
 mod enrichment_metadata;
 use enrichment_metadata::{apply_enrichment_metadata, enrichment_domain, published_final_url};
+
+#[cfg(test)]
+#[path = "credit_deferral_tests.rs"]
+mod credit_deferral_tests;
+
+#[cfg(test)]
+#[path = "demand_tests.rs"]
+mod demand_tests;
+
+#[cfg(test)]
+#[path = "fanout_tests.rs"]
+mod fanout_tests;
+
+#[cfg(test)]
+#[path = "grouping_tests.rs"]
+mod grouping_tests;

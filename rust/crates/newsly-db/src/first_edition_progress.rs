@@ -34,7 +34,7 @@ pub async fn tiers(pool: &PgPool, run_id: i64) -> Result<Vec<FirstRunTierProject
             SELECT CASE WHEN c.content_type='podcast' THEN 'audio' ELSE 'longform' END AS tier,
                 CASE
                     WHEN c.status IN ('failed','skipped') THEN c.status
-                    WHEN cs.status <> 'inbox' OR c.classification='skip' THEN 'skipped'
+                    WHEN cs.status <> 'inbox' THEN 'skipped'
                     WHEN NOT EXISTS(SELECT 1 FROM processing_tasks t WHERE t.content_id=c.id AND t.status IN ('pending','processing'))
                       AND (c.status <> 'completed'
                         OR COALESCE(c.content_metadata::jsonb #>> '{domain,artwork_status}',c.content_metadata::jsonb->>'artwork_status')='failed'

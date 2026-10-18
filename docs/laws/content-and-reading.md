@@ -39,3 +39,7 @@ C19. Typed article and podcast detail exposes one complete canonical artifact, w
 C20. Dedicated source-body responses preserve the complete stored article or transcript, including its ending. Full-content sharing must not silently substitute a rendering excerpt for that source.
 
 C21. X Note Tweet links use the provider's expanded entity destination when available. A lone trusted `t.co` link in Note Tweet text may be resolved to its final non-X HTTP(S) destination; ambiguous or still-X links remain part of the post instead of being promoted as an article target.
+
+C22. Article, podcast, and news detail offer one reading entry point, which opens a single reading surface. When stored article or transcript text exists, the surface opens on that text, and its top trailing control switches in place between the text and the original page, preserving each one's position. When no text exists, it opens on the original page. Learning Deck creation for the item is available from the surface in either mode. An original-page loading failure remains visible with an in-place retry action. Detail shows no separate Safari or web action. Article and podcast detail also offer Learning Deck creation directly from the action bar.
+
+C23. Editorial classification does not restrict otherwise authorized source access, search, Knowledge, or image readiness. Personal News exclusion affects upcoming Briefing admission only. Installed clients continue receiving the legacy nullable classification key as null until their decoding requirement is retired.

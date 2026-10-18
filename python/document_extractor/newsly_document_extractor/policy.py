@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -183,6 +184,45 @@ DIRECT_STATIC_HOST_SUFFIXES = (
     "zdnet.com",
 )
 MAX_TABLES_TOTAL_BYTES = 400_000
+logger = logging.getLogger(__name__)
+
+
+def _local_failure(stage: str, reason: str) -> UsageEvent:
+    """Keep local diagnostics low-cardinality and independent of provider cost units."""
+    logger.info(
+        "Local extraction failed: %s:%s",
+        stage,
+        reason,
+        extra={"local_stage": stage, "local_reason": reason},
+    )
+    return UsageEvent(kind=f"local_failure:{stage}:{reason}", quantity=1, unit="event")
+
+
+def _fetch_failure_reason(error: Exception) -> str:
+    if isinstance(error, UrlSafetyError):
+        if error.http_status is not None:
+            return f"http_{error.http_status}"
+        return (
+            error.code
+            if error.code in {"fetch_failed", "invalid_url", "response_too_large"}
+            else "exception"
+        )
+    return "timeout" if isinstance(error, TimeoutError) else "exception"
+
+
+def _pdf_failure_reason(message: str) -> str:
+    for marker, reason in (
+        ("unavailable", "tools_unavailable"),
+        ("scanned/image", "ocr_required"),
+        ("every reported page", "incomplete_pages"),
+        ("page count", "missing_page_count"),
+        ("no readable pages", "missing_pages"),
+        ("insufficient readable text", "insufficient_text"),
+        ("inventory", "image_inventory_limit"),
+    ):
+        if marker in message:
+            return reason
+    return "parser_failed"
 
 
 class Crawler(Protocol):
@@ -503,6 +543,7 @@ class ExtractionPolicy:
                         return await self._resolve_pubmed(request, started_at)
                     return await self._extract_document(request, started_at)
         except TimeoutError:
+            _local_failure("deadline", "timeout")
             return self._failure(
                 request,
                 ExtractionFailureCode.DEADLINE_EXCEEDED,
@@ -521,6 +562,7 @@ class ExtractionPolicy:
                 started_at=started_at,
             )
         except Exception as exc:  # noqa: BLE001
+            _local_failure("extraction", "exception")
             return self._failure(
                 request,
                 ExtractionFailureCode.INTERNAL_ERROR,
@@ -614,20 +656,27 @@ class ExtractionPolicy:
     async def _extract_document(self, request: ExtractRequest, started_at: float) -> ExtractResult:
         static_document: StaticDocument | None = None
         static_error: UrlSafetyError | None = None
+        diagnostics: list[UsageEvent] = []
         try:
             static_document = await self._fetch_static(request)
         except UrlSafetyError as exc:
             if exc.code in {"invalid_url", "response_too_large"}:
+                _local_failure("static_fetch", _fetch_failure_reason(exc))
                 raise
             static_error = exc
+            diagnostics.append(_local_failure("static_fetch", _fetch_failure_reason(exc)))
 
+        static_usage = self._static_usage_events(static_document)
         if static_document is not None and static_document.pdf_pages is not None:
             if static_document.issue:
+                diagnostics.append(
+                    _local_failure("pdf_extract", _pdf_failure_reason(static_document.issue))
+                )
                 return self._fallback(
                     request,
                     static_document.issue,
                     started_at,
-                    usage_events=self._static_usage_events(static_document),
+                    usage_events=[*static_usage, *diagnostics],
                 )
             return self._success_from_static(request, static_document, started_at)
 
@@ -644,16 +693,22 @@ class ExtractionPolicy:
                 )
             return self._success_from_static(request, static_document, started_at)
 
+        if static_document is not None and not self._usable_static(request, static_document):
+            diagnostics.append(
+                _local_failure("static_quality", static_document.issue or "body_too_short")
+            )
+
         if static_document is not None and self._prefer_static(request, static_document):
             return self._success_from_static(request, static_document, started_at)
 
         if not request.options.allow_browser_fallback:
+            diagnostics.append(_local_failure("browser_fetch", "disabled"))
             reason = static_document.issue if static_document is not None else static_error
             return self._fallback(
                 request,
                 reason or "Static extraction returned no usable body",
                 started_at,
-                usage_events=self._static_usage_events(static_document),
+                usage_events=[*static_usage, *diagnostics],
             )
 
         profile = _profile_for_url(str(request.url), request.options.profile)
@@ -668,40 +723,56 @@ class ExtractionPolicy:
                 timeout_seconds=browser_timeout,
             )
         except Exception as exc:  # noqa: BLE001
+            diagnostics.append(_local_failure("browser_fetch", _fetch_failure_reason(exc)))
             if static_document is not None and self._usable_static(request, static_document):
                 return self._success_from_static(
                     request,
                     static_document,
                     started_at,
                     warning="Crawl4AI failed; used bounded static extraction",
-                    additional_usage_events=[self._browser_usage_event()],
+                    additional_usage_events=[
+                        *diagnostics,
+                        self._browser_usage_event(),
+                    ],
                 )
             return self._fallback(
                 request,
                 exc,
                 started_at,
                 usage_events=[
-                    *self._static_usage_events(static_document),
+                    *static_usage,
+                    *diagnostics,
                     self._browser_usage_event(),
                 ],
             )
 
         if result is None or not getattr(result, "success", False):
             reason = getattr(result, "error_message", None) or "Crawl4AI returned no usable result"
+            status = getattr(result, "status_code", None)
+            failure_reason = (
+                f"http_{status}"
+                if isinstance(status, int) and 400 <= status <= 599
+                else "failed_result"
+            )
+            diagnostics.append(_local_failure("browser_fetch", failure_reason))
             if static_document is not None and self._usable_static(request, static_document):
                 return self._success_from_static(
                     request,
                     static_document,
                     started_at,
                     warning="Crawl4AI returned a failure; used bounded static extraction",
-                    additional_usage_events=[self._browser_usage_event()],
+                    additional_usage_events=[
+                        *diagnostics,
+                        self._browser_usage_event(),
+                    ],
                 )
             return self._fallback(
                 request,
                 reason,
                 started_at,
                 usage_events=[
-                    *self._static_usage_events(static_document),
+                    *static_usage,
+                    *diagnostics,
                     self._browser_usage_event(),
                 ],
             )
@@ -724,20 +795,25 @@ class ExtractionPolicy:
         )
 
         if issue or not markdown:
+            diagnostics.append(_local_failure("browser_quality", issue or "missing_body"))
             if static_document is not None and self._usable_static(request, static_document):
                 return self._success_from_static(
                     request,
                     static_document,
                     started_at,
                     warning=f"Crawl4AI output was rejected ({issue or 'missing_body'})",
-                    additional_usage_events=[self._browser_usage_event()],
+                    additional_usage_events=[
+                        *diagnostics,
+                        self._browser_usage_event(),
+                    ],
                 )
             return self._fallback(
                 request,
                 issue or "Crawl4AI returned an empty body",
                 started_at,
                 usage_events=[
-                    *self._static_usage_events(static_document),
+                    *static_usage,
+                    *diagnostics,
                     self._browser_usage_event(),
                 ],
             )
@@ -747,12 +823,16 @@ class ExtractionPolicy:
             and self._usable_static(request, static_document)
             and self._prefer_static_over_browser(static_document.markdown, markdown)
         ):
+            diagnostics.append(_local_failure("browser_quality", "chrome_heavy"))
             return self._success_from_static(
                 request,
                 static_document,
                 started_at,
                 warning="Crawl4AI output was chrome-heavy; used bounded static extraction",
-                additional_usage_events=[self._browser_usage_event()],
+                additional_usage_events=[
+                    *diagnostics,
+                    self._browser_usage_event(),
+                ],
             )
 
         if len(markdown.encode("utf-8")) > request.options.max_markdown_bytes:
@@ -798,7 +878,8 @@ class ExtractionPolicy:
             method=ExtractionMethod.CRAWL4AI,
             warnings=warnings,
             usage_events=[
-                *self._static_usage_events(static_document),
+                *static_usage,
+                *diagnostics,
                 self._browser_usage_event(),
             ],
             timings=self._timings(started_at),
@@ -964,6 +1045,13 @@ class ExtractionPolicy:
             token in message.lower()
             for token in ("timeout", "tempor", "connection", "network", "unavailable")
         )
+        diagnostics = [
+            event.kind.removeprefix("local_failure:")
+            for event in usage_events
+            if event.kind.startswith("local_failure:")
+        ]
+        retryable = retryable or any(reason.endswith(":timeout") for reason in diagnostics)
+        message = "local_extraction_failed; " + "; ".join(diagnostics)
         return ExtractionFallbackRequired(
             schema_version=SCHEMA_VERSION,
             request_id=request.request_id,

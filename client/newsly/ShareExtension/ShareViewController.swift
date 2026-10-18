@@ -554,11 +554,17 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
                 : nil
         )
         let requestBody = try JSONEncoder().encode(payload)
+        let sharingUserID = KeychainCredentialStorage(keychain: KeychainManager.shared).confirmedUserID()
+        let sharingServer = ServerConfigurationDefaults.baseURL(in: SharedContainer.userDefaults)?.absoluteString
 
         do {
             let response = try await ShareExtensionTransport.shared.submitShareAction(body: requestBody)
             guard response.map({ $0.taskId > 0 && $0.mode == payload.mode }) != false else {
                 throw ShareError.invalidResponse
+            }
+            if payload.mode == .bookmark_only,
+               let sharingUserID, let sharingServer {
+                KnowledgeSaveSignalStore(server: sharingServer, userID: sharingUserID).recordSave()
             }
         } catch {
             switch ClientFailure.classify(error) {

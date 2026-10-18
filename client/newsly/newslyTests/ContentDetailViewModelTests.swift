@@ -3,6 +3,17 @@ import XCTest
 
 @MainActor
 final class ContentDetailViewModelTests: XCTestCase {
+    func testNewsOpenNeverUsesContentInteractionNamespace() async throws {
+        let detail = try Self.articleDetail(id: 42, contentType: .news)
+        let service = NewsNamespaceContentDetailService(detail: detail)
+        let model = makeViewModel(contentService: service)
+        model.updateContentId(42, contentType: .news)
+        await model.loadContent()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(model.content?.contentType, .news)
+        XCTAssertEqual(service.trackOpenedCount, 0)
+    }
+
     func testInitialTransportCancellationIsSilentAndNextLoadSucceeds() async throws {
         let detail = try Self.articleDetail(id: 42)
         let service = CancelledThenSuccessfulContentDetailService(detail: detail)
@@ -527,7 +538,8 @@ final class ContentDetailViewModelTests: XCTestCase {
 
     private static func articleDetail(
         id: Int,
-        includesDetectedFeed: Bool = false
+        includesDetectedFeed: Bool = false,
+        contentType: APIContentType = .article
     ) throws -> ContentDetail {
         let detectedFeed = includesDetectedFeed
             ? #"{"url":"https://example.com/feed.xml","type":"rss","title":"Example Feed","format":"rss"}"#
@@ -536,7 +548,7 @@ final class ContentDetailViewModelTests: XCTestCase {
             from: """
             {
               "id": \(id),
-              "content_type": "article",
+              "content_type": "\(contentType.rawValue)",
               "url": "https://example.com/article-\(id)",
               "title": "Article \(id)",
               "display_title": "Article \(id)",
@@ -984,4 +996,10 @@ private final class StubToastPresenter: ToastPresenting {
     func show(_ message: String, type: ToastType, duration: TimeInterval) {}
     func showError(_ message: String) {}
     func showSuccess(_ message: String) {}
+}
+
+private final class NewsNamespaceContentDetailService: RecordingContentDetailService {
+    private let detail: ContentDetail
+    init(detail: ContentDetail) { self.detail = detail }
+    override func fetchNewsItemDetail(id: Int) async throws -> ContentDetail { detail }
 }

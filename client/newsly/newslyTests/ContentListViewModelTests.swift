@@ -99,6 +99,122 @@ final class ContentListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contents.first?.isSavedToKnowledge, true)
     }
 
+    func testAcceptedSaveAndRemovalFenceBufferedRefreshPages() async {
+        for initiallySaved in [false, true] {
+            let first = makeReadSummary(id: 42, isSavedToKnowledge: initiallySaved,
+                                       knowledgeSavedAt: "2026-10-18T12:00:00Z")
+            let last = makeReadSummary(id: 41, isSavedToKnowledge: true,
+                                      knowledgeSavedAt: "2026-10-17T12:00:00Z")
+            let service = KnowledgeRemovalReconciliationService(contents: [first, last])
+            let model = ContentListViewModel(contentService: service, readStateCache: makeTestReadStateCache())
+            await model.loadKnowledgeLibrary()
+
+            var pendingPage: CheckedContinuation<ContentListResponse, Never>?
+            service.pageLoader = { cursor in
+                if cursor == nil { return self.page([first], nextCursor: "tail") }
+                // Deliberately ignore cancellation to exercise the generation fence.
+                return await withCheckedContinuation { pendingPage = $0 }
+            }
+            service.mutationHandler = { id, saved in
+                KnowledgeMutationResponse(status: .success, contentId: id,
+                                          isSavedToKnowledge: saved, message: "Updated")
+            }
+            let refresh = Task { await model.revalidateKnowledgeLibrary(preservingLoadedPages: true) }
+            await waitUntil { pendingPage != nil }
+
+            await model.toggleKnowledgeSave(42)
+            XCTAssertFalse(model.isReadInFlight)
+            XCTAssertEqual(model.contents.first?.isSavedToKnowledge, !initiallySaved)
+            pendingPage?.resume(returning: page([last]))
+            let refreshed = await refresh.value
+
+            XCTAssertFalse(refreshed)
+            XCTAssertEqual(model.contents.map(\.id), [42, 41])
+            XCTAssertEqual(model.contents.first?.isSavedToKnowledge, !initiallySaved)
+            XCTAssertFalse(model.isLoading)
+            XCTAssertNil(model.initialLoadErrorMessage)
+        }
+    }
+
+    func testFailedRemovalFencesRefreshStartedDuringOptimisticMutation() async {
+        let first = makeReadSummary(id: 42, isSavedToKnowledge: true,
+                                   knowledgeSavedAt: "2026-10-18T12:00:00Z")
+        let last = makeReadSummary(id: 41, isSavedToKnowledge: true,
+                                  knowledgeSavedAt: "2026-10-17T12:00:00Z")
+        let service = KnowledgeRemovalReconciliationService(contents: [first, last])
+        let model = ContentListViewModel(contentService: service, readStateCache: makeTestReadStateCache())
+        await model.loadKnowledgeLibrary()
+
+        var pendingMutation: CheckedContinuation<KnowledgeMutationResponse, Error>?
+        service.mutationHandler = { _, _ in
+            try await withCheckedThrowingContinuation { pendingMutation = $0 }
+        }
+        let removal = Task { await model.toggleKnowledgeSave(42) }
+        await waitUntil { pendingMutation != nil }
+        XCTAssertEqual(model.contents.first?.isSavedToKnowledge, false)
+
+        var pendingPage: CheckedContinuation<ContentListResponse, Never>?
+        service.pageLoader = { cursor in
+            if cursor == nil { return self.page([first], nextCursor: "tail") }
+            return await withCheckedContinuation { pendingPage = $0 }
+        }
+        let refresh = Task { await model.revalidateKnowledgeLibrary(preservingLoadedPages: true) }
+        await waitUntil { pendingPage != nil }
+        pendingMutation?.resume(throwing: RecentlyReadContentServiceError.unexpectedCall)
+        await removal.value
+        XCTAssertFalse(model.isReadInFlight)
+
+        pendingPage?.resume(returning: page([last]))
+        let refreshed = await refresh.value
+        XCTAssertFalse(refreshed)
+        XCTAssertEqual(model.contents.first?.isSavedToKnowledge, true)
+        XCTAssertEqual(model.contents.map(\.id), [42, 41])
+        XCTAssertFalse(model.isLoading)
+        XCTAssertNotNil(model.actionErrorMessage)
+        XCTAssertNil(model.initialLoadErrorMessage)
+    }
+
+    func testAcceptedSaveDoesNotCancelReplacementInitialLoad() async {
+        let first = makeReadSummary(id: 42)
+        let service = KnowledgeRemovalReconciliationService(contents: [first])
+        let model = ContentListViewModel(contentService: service, readStateCache: makeTestReadStateCache())
+        await model.loadKnowledgeLibrary()
+
+        var pendingMutation: CheckedContinuation<KnowledgeMutationResponse, Error>?
+        service.mutationHandler = { _, _ in
+            try await withCheckedThrowingContinuation { pendingMutation = $0 }
+        }
+        let save = Task { await model.toggleKnowledgeSave(42) }
+        await waitUntil { pendingMutation != nil }
+
+        var pendingPage: CheckedContinuation<ContentListResponse, Never>?
+        service.pageLoader = { _ in
+            await withCheckedContinuation { pendingPage = $0 }
+        }
+        let replacement = Task { await model.loadKnowledgeLibrary(query: "new search") }
+        await waitUntil { pendingPage != nil }
+        XCTAssertTrue(model.contents.isEmpty)
+
+        pendingMutation?.resume(returning: KnowledgeMutationResponse(
+            status: .success, contentId: 42, isSavedToKnowledge: true, message: "Saved"
+        ))
+        await save.value
+        XCTAssertTrue(model.isReadInFlight)
+        XCTAssertTrue(model.isLoading)
+
+        pendingPage?.resume(returning: page([first]))
+        await replacement.value
+        XCTAssertEqual(model.contents.first?.isSavedToKnowledge, true)
+        XCTAssertFalse(model.isLoading)
+        XCTAssertNil(model.initialLoadErrorMessage)
+    }
+
+    private func page(_ contents: [ContentSummary], nextCursor: String? = nil) -> ContentListResponse {
+        ContentListResponse(contents: contents, availableDates: [], contentTypes: [],
+                            meta: PaginationMetadata(nextCursor: nextCursor, hasMore: nextCursor != nil,
+                                                     pageSize: contents.count, total: nil))
+    }
+
     func testReprocessingUnavailableSaveReloadsItsPreparingState() async {
         let service = KnowledgeRemovalReconciliationService(
             contents: [makeReadSummary(id: 42, status: .failed, isSavedToKnowledge: true)]
@@ -129,10 +245,32 @@ final class ContentListViewModelTests: XCTestCase {
         XCTFail("Condition was not satisfied before timeout")
     }
 
+    func testKnowledgeRefreshDoesNotUseIDsToOrderRoundedTimestampTies() async {
+        let boundary = makeReadSummary(id: 99, knowledgeSavedAt: "2026-10-18T12:00:00.123Z")
+        let newer = makeReadSummary(id: 1, knowledgeSavedAt: "2026-10-18T12:00:00.123Z")
+        let older = makeReadSummary(id: 100, knowledgeSavedAt: "2026-10-18T12:00:00.122Z")
+        for boundaryExists in [true, false] {
+            let service = RecentlyReadContentService(contents: [])
+            service.knowledgePages = [
+                "": ContentListResponse(contents: [newer], availableDates: [], contentTypes: [],
+                    meta: PaginationMetadata(nextCursor: "tail", hasMore: true, pageSize: 1, total: nil)),
+                "tail": ContentListResponse(contents: boundaryExists ? [boundary] : [older],
+                    availableDates: [], contentTypes: [],
+                    meta: PaginationMetadata(nextCursor: "older", hasMore: true, pageSize: 1, total: nil))
+            ]
+            let model = ContentListViewModel(contentService: service, readStateCache: makeTestReadStateCache())
+            model.contents = [boundary]
+            let refreshed = await model.revalidateKnowledgeLibrary(preservingLoadedPages: true)
+            XCTAssertTrue(refreshed)
+            XCTAssertEqual(model.contents.map(\.id), boundaryExists ? [1, 99] : [1, 100])
+        }
+    }
+
     private func makeReadSummary(
         id: Int,
         status: APIContentStatus = .completed,
-        isSavedToKnowledge: Bool = false
+        isSavedToKnowledge: Bool = false,
+        knowledgeSavedAt: String? = nil
     ) -> ContentSummary {
         ContentSummary(
             id: id,
@@ -147,6 +285,7 @@ final class ContentListViewModelTests: XCTestCase {
             processedAt: "2026-07-12T12:01:00Z",
             isRead: true,
             isSavedToKnowledge: isSavedToKnowledge,
+            knowledgeSavedAt: knowledgeSavedAt,
             imageUrl: nil,
             thumbnailUrl: nil,
         )
@@ -156,6 +295,8 @@ final class ContentListViewModelTests: XCTestCase {
 private final class KnowledgeRemovalReconciliationService: ContentSummaryListServicing {
     var contents: [ContentSummary]
     var reprocessedContent: ContentSummary?
+    var pageLoader: ((String?) async -> ContentListResponse)?
+    var mutationHandler: ((Int, Bool) async throws -> KnowledgeMutationResponse)?
     private(set) var reprocessedIDs: [Int] = []
 
     init(contents: [ContentSummary]) {
@@ -167,6 +308,7 @@ private final class KnowledgeRemovalReconciliationService: ContentSummaryListSer
         cursor: String?,
         limit: Int
     ) async throws -> ContentListResponse {
+        if let pageLoader { return await pageLoader(cursor) }
         _ = (query, cursor, limit)
         return ContentListResponse(
             contents: contents,
@@ -191,11 +333,13 @@ private final class KnowledgeRemovalReconciliationService: ContentSummaryListSer
     }
 
     func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        if let mutationHandler { return try await mutationHandler(id, true) }
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
-        KnowledgeMutationResponse(
+        if let mutationHandler { return try await mutationHandler(id, false) }
+        return KnowledgeMutationResponse(
             status: .success,
             contentId: id,
             isSavedToKnowledge: false,
@@ -394,6 +538,7 @@ private enum RecentlyReadContentServiceError: Error {
 
 private final class RecentlyReadContentService: ContentSummaryListServicing {
     let contents: [ContentSummary]
+    var knowledgePages: [String: ContentListResponse] = [:]
 
     init(contents: [ContentSummary]) {
         self.contents = contents
@@ -423,7 +568,10 @@ private final class RecentlyReadContentService: ContentSummaryListServicing {
         cursor: String?,
         limit: Int
     ) async throws -> ContentListResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
+        guard let page = knowledgePages[cursor ?? ""] else {
+            throw RecentlyReadContentServiceError.unexpectedCall
+        }
+        return page
     }
 
     func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse {

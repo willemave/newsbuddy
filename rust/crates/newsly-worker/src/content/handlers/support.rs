@@ -26,6 +26,32 @@ pub(super) fn with_finalizer(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn extraction_deferred(
+    services: &ContentWorkerServices,
+    plan: &OwnedWorkPlan,
+    content_id: i64,
+    stage: &'static str,
+    reason: String,
+    resume_at: chrono::DateTime<Utc>,
+    usage: Vec<UsageWrite>,
+) -> HandlerExecution {
+    with_finalizer(
+        services,
+        TaskResult::defer((resume_at - Utc::now()).num_seconds().max(1)),
+        ContentFinalizationPlan {
+            task_id: plan.task_id,
+            content_id,
+            mutation: ContentMutation::ExtractionDeferred {
+                stage,
+                reason,
+                resume_at,
+            },
+            usage,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn extraction_failure(
     services: &ContentWorkerServices,
     plan: &OwnedWorkPlan,

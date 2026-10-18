@@ -1,10 +1,7 @@
 use chrono::{DateTime, Utc};
-use newsly_agent_runtime::ProviderUsage;
 use newsly_domain::NewsRelationDocument;
 use newsly_providers::{LinkCandidate, NewsSummary, RelevantLink};
 use serde_json::Value;
-
-use crate::content::UsageWrite;
 
 use super::storage::StagedNewsBody;
 
@@ -128,6 +125,11 @@ pub(super) enum EnrichmentMutation {
         article_url: Option<String>,
         reason: String,
     },
+    Deferred {
+        article_url: Option<String>,
+        reason: String,
+        resume_at: DateTime<Utc>,
+    },
     MetadataOnly {
         article_url: String,
         reason: String,
@@ -145,7 +147,6 @@ pub(super) struct EnrichmentFinalizationPlan {
     pub(super) task_id: i64,
     pub(super) snapshot: NewsSnapshot,
     pub(super) mutation: EnrichmentMutation,
-    pub(super) usage: Vec<UsageWrite>,
     pub(super) finalized_at: DateTime<Utc>,
 }
 
@@ -159,30 +160,17 @@ pub(super) struct ProcessPreparation {
 #[derive(Debug, Clone)]
 pub(super) struct RelationCandidate {
     pub(super) document: NewsRelationDocument,
-    pub(super) fingerprint: String,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ModelUsageWrite {
-    pub(super) provider: String,
-    pub(super) model: String,
-    pub(super) feature: &'static str,
-    pub(super) operation: &'static str,
-    pub(super) provider_response_id: Option<String>,
-    pub(super) usage: ProviderUsage,
-    pub(super) metadata: Value,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct ProcessMutation {
     pub(super) summary: NewsSummary,
+    pub(super) relation_model: String,
+    pub(super) relation_thresholds: newsly_domain::RelationThresholds,
+    pub(super) links_prepared: bool,
     pub(super) used_existing_summary: bool,
     pub(super) item_document: NewsRelationDocument,
-    pub(super) candidates: Vec<RelationCandidate>,
-    pub(super) accepted_ids: Vec<i64>,
     pub(super) relevant_links: Option<Vec<RelevantLink>>,
-    pub(super) relation_trace: Value,
-    pub(super) usage: Vec<ModelUsageWrite>,
 }
 
 #[derive(Debug, Clone)]
@@ -191,7 +179,6 @@ pub(super) struct ProcessFinalizationPlan {
     pub(super) snapshot: NewsSnapshot,
     pub(super) mutation: Option<ProcessMutation>,
     pub(super) failure: Option<String>,
-    pub(super) failure_usage: Vec<ModelUsageWrite>,
     pub(super) terminal_failure: bool,
     pub(super) finalized_at: DateTime<Utc>,
     pub(super) briefing_debounce_seconds: i64,

@@ -66,7 +66,10 @@ async fn firecrawl_news_persistence_distinguishes_requests_credits_and_unknown_u
             assert_eq!(credits, Some(if request == "cached" { 0 } else { 296 }));
             assert_eq!(cost, Some(if request == "cached" { 0.0 } else { 0.9472 }));
             assert_eq!(basis.as_deref(), Some("configured_rate"));
-            assert_eq!(version.as_deref(), Some("configured-per-credit-v2"));
+            assert_eq!(
+                version.as_deref(),
+                Some("configured-marginal-per-credit-v3")
+            );
         }
     }
 }

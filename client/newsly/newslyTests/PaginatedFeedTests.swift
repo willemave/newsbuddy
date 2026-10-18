@@ -3,6 +3,72 @@ import XCTest
 
 @MainActor
 final class PaginatedFeedTests: XCTestCase {
+    func testCancelledRefreshCannotPublishNonCooperativeLateSuccess() async {
+        let loader = ControlledPageLoader()
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [TestFeedItem(id: 1)], phase: .loaded, nextCursor: "next", hasMore: true,
+            loadPage: loader.loadPage
+        )
+        let refresh = Task { await feed.refreshLoadedPages { $0.id < $1.id } }
+        await loader.waitForPendingRequestCount(1)
+        refresh.cancel()
+        loader.resolveRequest(at: 0, with: Page(
+            items: [TestFeedItem(id: 2)], nextCursor: nil, hasMore: false
+        ))
+        let result = await refresh.value
+        XCTAssertEqual(result, .cancelled)
+        XCTAssertEqual(feed.items.map(\.id), [1])
+        XCTAssertEqual(feed.nextCursor, "next")
+        XCTAssertTrue(feed.hasMore)
+    }
+
+    func testRefreshLoadedPagesPreservesDepthAndPagination() async {
+        let loader = SequencePageLoader([
+            Page(items: [TestFeedItem(id: 1)], nextCursor: "next", hasMore: true),
+            Page(items: [TestFeedItem(id: 2)], nextCursor: "third", hasMore: true),
+            Page(items: [TestFeedItem(id: 1)], nextCursor: "next", hasMore: true),
+            Page(items: [TestFeedItem(id: 2)], nextCursor: "third", hasMore: true),
+        ])
+        let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)
+        await feed.loadInitial()
+        await feed.loadNextPage()
+        await feed.refreshLoadedPages { $0.id < $1.id }
+        XCTAssertEqual(feed.items.map(\.id), [1, 2])
+        XCTAssertEqual(feed.nextCursor, "third")
+        XCTAssertTrue(feed.hasMore)
+    }
+
+    func testLoadedBoundarySurvivesInsertionsAndDeletionOfLastRow() async {
+        for lastPage in [[2, 1], [1, 0]] {
+            let loader = SequencePageLoader([
+                Page(items: [6, 5].map(TestFeedItem.init), nextCursor: "second", hasMore: true),
+                Page(items: [4, 3].map(TestFeedItem.init), nextCursor: "third", hasMore: true),
+                Page(items: lastPage.map(TestFeedItem.init), nextCursor: "fourth", hasMore: true),
+            ])
+            let feed = PaginatedFeed<TestFeedItem>(
+                items: [5, 4, 3, 2].map(TestFeedItem.init), phase: .loaded,
+                nextCursor: "old", hasMore: true, loadPage: loader.loadPage
+            )
+            let result = await feed.refreshLoadedPages { $0.id > $1.id }
+            XCTAssertEqual(result, .succeeded)
+            XCTAssertEqual(feed.items.map(\.id), [6, 5, 4, 3] + lastPage)
+            XCTAssertEqual(feed.nextCursor, "fourth")
+        }
+    }
+
+    func testBrokenCursorBeforeLoadedBoundaryRetainsExistingRows() async {
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [5, 4, 3, 2].map(TestFeedItem.init), phase: .loaded,
+            nextCursor: "old", hasMore: true
+        ) { _ in
+            Page(items: [6, 5].map(TestFeedItem.init), nextCursor: "repeated", hasMore: true)
+        }
+        let result = await feed.refreshLoadedPages { $0.id > $1.id }
+        guard case .failed = result else { return XCTFail("Expected invalid pagination") }
+        XCTAssertEqual(feed.items.map(\.id), [5, 4, 3, 2])
+        XCTAssertEqual(feed.nextCursor, "old")
+    }
+
     func testLoadInitialStoresItemsAndPagination() async {
         let feed = PaginatedFeed<TestFeedItem> { cursor in
             XCTAssertNil(cursor)
@@ -195,13 +261,15 @@ final class PaginatedFeedTests: XCTestCase {
             at: 1,
             with: Page(items: [TestFeedItem(id: 2)], nextCursor: nil, hasMore: false)
         )
-        await replacement.value
+        let replacementResult = await replacement.value
+        XCTAssertEqual(replacementResult, .succeeded)
 
         loader.resolveRequest(
             at: 0,
             with: Page(items: [TestFeedItem(id: 3)], nextCursor: nil, hasMore: false)
         )
-        await obsolete.value
+        let obsoleteResult = await obsolete.value
+        XCTAssertEqual(obsoleteResult, .cancelled)
 
         XCTAssertEqual(feed.items.map(\.id), [2])
         XCTAssertEqual(feed.phase, .loaded)

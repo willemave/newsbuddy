@@ -52,6 +52,13 @@ P23. Each route group, task type, and state writer has one active runtime owner.
 
 P24. Production document extraction is a versioned, bounded, database-free Python boundary. It revalidates the public network for the initial URL, redirects, and browser requests, accepts no arbitrary crawler configuration, and fails closed without its private service credential. Its runtime receives no application database configuration and returns only typed extraction, delegation, fallback, or failure results. Rust alone owns durable state, retries, Firecrawl credentials and calls, usage persistence, and downstream enqueueing.
 
+Firecrawl credit exhaustion is a shared recoverable prerequisite, not a terminal
+article failure. Paid fallback pauses durably across workers while free extraction
+continues. Deferred work retains its retry budget and article coverage; one bounded
+queued request checks recovery at a time, and stale recovery results cannot clear a
+newer pause. Exhaustion and recovery alerts survive process restarts. New schema or
+credit replenishment does not authorize replaying historical terminal work.
+
 P25. Generated long-form artwork is derived from one immutable summary fingerprint. Provider and image-transform work runs without a database connection and writes only attempt-scoped staging files; the exact live lease must revalidate the current summary and lifecycle before publishing pointers to an immutable image and thumbnail pair, UTC cache version, and usage record. A failed or superseded attempt cannot overwrite published artwork. Unpublished artifacts are durably registered for bounded cleanup after a grace period, and referenced artifacts are retained. News rows never enter this artwork path.
 
 P26. Discussion summaries and news key points expose their persisted character limits to generation and bounded validation correction. Invalid output never publishes. Exhausted discussion validation does not restart the same durable task; transient provider failures remain retryable, and later scheduled refreshes remain possible.
@@ -63,6 +70,13 @@ P27. Usage reports distinguish unknown cost from a known zero charge. Any aggreg
 New usage may carry a public list-price estimate only when its billable unit, exact model or resource size, and applicable service tier are known. Reports identify estimated portions separately from provider-reported charges. A known absence of an external provider charge is a zero charge; self-hosted infrastructure and fixed subscription fees remain separate. Mixed resource units must not be presented as one homogeneous quantity. A running E2B sandbox remains visible with unknown final cost; confirmed cleanup records its measured lifetime once, while a missing sandbox with an unknown stop time stays unpriced. Repeated cleanup or product finalization must not double-count one sandbox.
 
 Observed Briefing usage is recorded independently of successful edition publication, including rejected output and accepted sibling units. Re-recording an observed attempt does not double-count it. Provider failures without observable usage remain explicitly unknown; absent token counts and historical responses are not reconstructed as facts.
+
+Firecrawl invocations are recorded before dispatch and observed usage is retained
+independently of content rejection, cancellation, or product finalization. Missing
+provider credit quantities and absent account-specific marginal prices remain
+unknown; configured marginal top-up estimates are distinguished from invoices and
+fixed subscription fees. Local failure counters keep diagnostic event units
+separate from provider credit units, and contain no article text or raw exceptions.
 
 Each observed agent model response, generated-image response, audio-episode script-model response and synthesis chunk is recorded when its complete provider response is observed, independently of later decoding, validation, sibling request, stitching, storage, lease, or product-finalization outcomes. Stable request identity makes repeated observation idempotent. Cache reads and writes use exclusive input-token categories, and long-context multipliers apply to the full qualifying request. Failed requests without a successful response are not assigned inferred usage.
 
@@ -82,3 +96,17 @@ P29. Routine OpenAI text generation defaults to GPT-6 Luna, including content an
 P30. Nightly category maintenance has at most one durable run per user and local date. It starts and publishes only within that date's local night window, honors timezone revisions and a minimum twelve-hour interval between publications, and skips missed windows rather than catching up during the day. Disabled accounts and unsettled onboarding are ineligible. Duplicate scheduling, expired leases, stale source snapshots, or timezone changes cannot publish.
 
 Reclustering reuses exact input/model/version embeddings and does not trigger archive re-embedding. Naming has a bounded batch, a maximum of two reserved attempts per run, and a shared daily token reservation limit. A superseded execution cannot adopt a replacement execution's claim or reserve naming work. Cancellation stops new naming attempts; an already-started call may finish recording its observed result and usage without publishing. Observed results and usage are recorded independently of publication; retries can reuse an exact-input successful result. No usable fit, provider failure, or exhausted budget preserves the current edition.
+
+P31. Personal News inference uses bounded per-user requests, concurrency, and deadlines with no database connection held during provider work. Only an exact live queue claim can make its results durable. Decisions are reusable only for the same user, preference revision, canonical source, evidence, and evaluator. Retries cannot overwrite a successful decision with an outage, and all known charges and unpriced attempted requests remain distinguishable in usage accounting.
+
+
+P32. Concurrent short-form preparation cannot publish a relation decision against
+stale candidates. All candidate-affecting writers coordinate at publication;
+representative merges preserve complete membership within the same visibility
+scope. Reprocessing keeps the last usable story available. Contention and missing
+preparation have bounded, observable recovery without spending provider failure
+retries, and unchanged paid preparation is reused.
+
+A request waiting for a shared browser cannot close or recycle a browser owned by
+another request. Admission waiting and owned execution share one total deadline;
+only the request holding that browser may recycle it after failure or cancellation.

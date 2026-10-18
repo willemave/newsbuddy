@@ -8,7 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
-pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v9-headlines";
+pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v11-news-citations";
 const FIXED_LENSES: [(&str, &str, &str, &str, i32); 2] = [
     (
         "podcasts",
@@ -66,9 +66,7 @@ pub struct BriefingRefreshConfig {
     pub new_lens_min_items: usize,
     pub pending_max_age_seconds: i64,
     pub max_news_lenses: usize,
-    pub category_similarity: f64,
     pub category_cluster_similarity: f64,
-    pub category_absorb_similarity: f64,
     pub centroid_max_weight: i32,
     pub sweep_seconds: i64,
     pub lens_idle_days: i64,
@@ -82,13 +80,9 @@ impl BriefingRefreshConfig {
             || !(2..=4).contains(&self.news_window_max)
             || !(2..=20).contains(&self.new_lens_min_items)
             || !(0..=86_400).contains(&self.pending_max_age_seconds)
-            || !(3..=30).contains(&self.max_news_lenses)
-            || !(0.0..=1.0).contains(&self.category_similarity)
+            || !(3..=10).contains(&self.max_news_lenses)
             || !(0.0..=1.0).contains(&self.category_cluster_similarity)
-            || !(0.0..=1.0).contains(&self.category_absorb_similarity)
-            || !self.category_similarity.is_finite()
             || !self.category_cluster_similarity.is_finite()
-            || !self.category_absorb_similarity.is_finite()
             || !(4..=500).contains(&self.centroid_max_weight)
             || !(60..=86_400).contains(&self.sweep_seconds)
             || !(1..=90).contains(&self.lens_idle_days)
@@ -486,6 +480,8 @@ struct SemanticLensRow {
 
 #[derive(Debug, Error)]
 pub enum BriefingRefreshRepositoryError {
+    #[error("news filter changed during preparation")]
+    FilterChanged,
     #[error("unsupported Briefing refresh mode {0:?}")]
     InvalidMode(String),
     #[error("Briefing refresh configuration is invalid")]

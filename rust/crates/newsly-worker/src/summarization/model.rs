@@ -82,7 +82,6 @@ pub(super) struct AppliedSummarization {
     pub(super) content_id: i64,
     pub(super) content_type: String,
     pub(super) status: String,
-    pub(super) classification: Option<String>,
     pub(super) metadata: Value,
     pub(super) pending_chat_requests: Vec<PendingChatRequest>,
 }

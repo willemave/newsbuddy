@@ -211,3 +211,35 @@ fn unreviewed_arbitrary_json_fails_closed() {
             .contains("untyped JSON requires an explicit allowlist entry")
     );
 }
+
+#[test]
+fn optional_nonnullable_values_without_defaults_are_omitted_and_reject_null() {
+    let api = OPENAPI.replace(
+        "\"send_email\": {\"type\": \"boolean\"},",
+        r##""send_email": {"type": "boolean"},
+        "optional_status": {"$ref": "#/components/schemas/Status"},
+        "optional_result": {"$ref": "#/components/schemas/ContentResult"},
+        "optional_at": {"type":"string", "format":"date-time"},"##,
+    );
+    let generated = generate_clients(&api, POLICY).expect("generate optional nonnullable fixture");
+    for swift in [&generated.app_swift_models, &generated.share_swift_models] {
+        assert!(swift.contains("optionalStatus: APIStatus? = nil"));
+        assert!(swift.contains("optionalResult: APIContentResult? = nil"));
+        assert!(swift.contains("optionalAt: Date? = nil"));
+        assert!(swift.contains("optionalStatus = container.contains(.optionalStatus) ? try container.decode(APIStatus.self, forKey: .optionalStatus) : nil"));
+        assert!(
+            swift
+                .contains("try container.encodeIfPresent(optionalResult, forKey: .optionalResult)")
+        );
+        assert!(swift.contains("if container.contains(.optionalAt)"));
+        assert!(swift.contains(
+            "let optionalAtRaw = try container.decode(String.self, forKey: .optionalAt)"
+        ));
+        assert!(swift.contains(
+            "try container.encodeIfPresent(optionalAt.map(ServerDate.format), forKey: .optionalAt)"
+        ));
+        // Existing defaulted primitive inputs retain their reviewed defaults.
+        assert!(swift.contains("sendEmail: Bool = false"));
+        assert!(!swift.contains("sendEmail: Bool?"));
+    }
+}

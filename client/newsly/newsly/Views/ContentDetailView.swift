@@ -348,6 +348,7 @@ private struct ContentDetailContentView: View {
                 articleBody: viewModel.readerBody,
                 isLoading: viewModel.isLoadingReaderBody,
                 errorMessage: viewModel.readerErrorMessage,
+                showsReaderText: viewModel.canShowReader(for: content),
                 onRetry: {
                     Task { await viewModel.loadReaderBody(for: content, force: true) }
                 },
@@ -549,7 +550,6 @@ private struct ContentDetailContentView: View {
             isPodcastAudioLoading: podcastAudioController.isLoading(for: content),
             isPodcastAudioActive: podcastAudioController.isActive(for: content),
             podcastAudioAccessibilityLabel: podcastAudioController.accessibilityLabel(for: content),
-            onOpenExternal: openInAppBrowser,
             onShare: { activeSheet = .share },
             readerTransitionNamespace: readerTransitionNamespace,
             onOpenReader: { activeReaderContent = content },
@@ -564,6 +564,7 @@ private struct ContentDetailContentView: View {
             onToggleKnowledgeSave: {
                 Task { await viewModel.toggleKnowledgeSave() }
             },
+            onCreateDeck: { activeSheet = .learningDeckCreate },
             onPodcastAudio: {
                 Task { await handlePodcastAudio(for: content) }
             },

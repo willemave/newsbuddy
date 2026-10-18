@@ -22,7 +22,21 @@ private enum BriefingViewAlert: Identifiable {
     }
 }
 
+private struct BriefingDeckSource: Identifiable {
+    let source: APIBriefingSource
+    var id: String { source.sourceKey }
+}
+
+private struct BriefingSourceCommand: Identifiable {
+    let id = UUID()
+    let source: KnowledgeSource
+    let action: BriefingSourceAction
+}
+
 struct BriefingView: View {
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
+    @Environment(ChatNavigationCoordinator.self) private var chatNavigation
+
     let viewModel: BriefingViewModel
     let scrollToTopRequest: Int
     let contentTextSize: DynamicTypeSize
@@ -30,7 +44,14 @@ struct BriefingView: View {
     /// Sources push onto the tab's navigation stack rather than opening a sheet,
     /// so the reader gets the standard back stack and edge-swipe.
     private let onOpenContent: (ContentDetailRoute) -> Void
+    private let onSourceMutation: () -> Void
 
+    @State private var sourceActions: BriefingSourceActionViewModel?
+    @State private var pendingSourceCommand: BriefingSourceCommand?
+    @State private var pendingDeckSource: BriefingDeckSource?
+    @State private var deckSource: BriefingDeckSource?
+    @State private var pendingDeckReader: LearningDeckReaderDestination?
+    @State private var deckReader: LearningDeckReaderDestination?
     @State private var digViewModel: BriefingDigViewModel
     @State private var playbackService: NarrationPlaybackService
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
@@ -51,13 +72,15 @@ struct BriefingView: View {
         playbackService: NarrationPlaybackService,
         scrollToTopRequest: Int = 0,
         contentTextSize: DynamicTypeSize,
-        onOpenContent: @escaping (ContentDetailRoute) -> Void
+        onOpenContent: @escaping (ContentDetailRoute) -> Void,
+        onSourceMutation: @escaping () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.scrollToTopRequest = scrollToTopRequest
         self.contentTextSize = contentTextSize
         self.narrationController = viewModel.narrationController
         self.onOpenContent = onOpenContent
+        self.onSourceMutation = onSourceMutation
         self._digViewModel = State(
             initialValue: BriefingDigViewModel(service: viewModel.service)
         )
@@ -82,10 +105,10 @@ struct BriefingView: View {
         )
     }
 
-    /// The category strip only exists while a news category is selected; it
-    /// stays pinned beneath the tier strip while reading.
+    /// First-run navigation already includes every category. The separate
+    /// category strip belongs only beneath the normal tier strip.
     private var showsCategoryStrip: Bool {
-        viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
+        viewModel.firstRun == nil && viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
     }
 
     /// Only the masthead collapses; the tier and category strips stay pinned.
@@ -141,6 +164,14 @@ struct BriefingView: View {
         .screenContainer()
         .topScreenEdgeFade()
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink("All News") {
+                    NewsFilterNewsView(service: dependencyFactory.newsFilterService, filtered: false)
+                }
+                .accessibilityIdentifier("briefing.all_news")
+            }
+        }
         .overlay {
             if let markingCategoryTitle {
                 Color.black.opacity(0.15)
@@ -178,6 +209,34 @@ struct BriefingView: View {
             }
         }
         .sensoryFeedback(.success, trigger: markAllReadFeedbackTrigger)
+        .task(id: pendingSourceCommand?.id) {
+            await performPendingSourceCommand()
+        }
+        .sheet(item: $deckSource, onDismiss: {
+            deckReader = pendingDeckReader
+            pendingDeckReader = nil
+        }) { item in
+            if let sourceActions {
+                BriefingSourceDeckCreateSheet(
+                    source: item.source,
+                    viewModel: sourceActions,
+                    focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
+                    onCreated: { deck in
+                        onSourceMutation()
+                        pendingDeckReader = LearningDeckReaderDestination(deck: deck, url: nil)
+                    }
+                )
+            }
+        }
+        .fullScreenCover(item: $deckReader) { destination in
+            LearningDeckReaderView(
+                deck: destination.deck,
+                viewerURL: destination.url,
+                onClose: { deckReader = nil }
+            )
+            .dynamicTypeSize(contentTextSize)
+            .ignoresSafeArea(.container)
+        }
         .sheet(item: $activeNarrationChapters) { item in
             if let narration = narrationController.narration(for: item.lensKey) {
                 BriefingNarrationChapterSheet(
@@ -240,6 +299,7 @@ struct BriefingView: View {
                             collapsibleChromeHeight: collapsibleChromeHeight,
                             topContentInset: expandedChromeHeight,
                             onOpenSource: openSource,
+                            onSourceAction: handleSourceAction,
                             onOpenDiscussion: openDiscussion,
                             onDig: startDig,
                             onRefresh: { await viewModel.pullToRefresh() },
@@ -322,7 +382,8 @@ struct BriefingView: View {
                     BriefingFirstRunStrip(
                         viewModel: viewModel,
                         onSelectStartHere: viewModel.selectStartHere,
-                        onSelectLens: viewModel.selectLens
+                        onSelectLens: viewModel.selectLens,
+                        onRequestMarkAllRead: presentMarkAllReadPrompt
                     )
                 } else {
                     BriefingTierStrip(
@@ -482,6 +543,57 @@ struct BriefingView: View {
             refreshPhase: viewModel.refreshPhase,
             onRefresh: viewModel.pullToRefresh
         )
+    }
+
+    private func handleSourceAction(_ sourceKey: String, action: BriefingSourceAction) {
+        guard pendingSourceCommand == nil, deckSource == nil,
+              let source = viewModel.source(for: sourceKey),
+              let identity = BriefingSourceActionViewModel.knowledgeSource(for: source)
+        else { return }
+        if sourceActions == nil {
+            sourceActions = dependencyFactory.makeBriefingSourceActionViewModel()
+        }
+        pendingSourceCommand = BriefingSourceCommand(source: identity, action: action)
+        // Capture the form source now; presenting it waits for the existing-deck lookup.
+        if action == .createDeck {
+            pendingDeckReader = nil
+            pendingDeckSource = BriefingDeckSource(source: source)
+        }
+    }
+
+    private func performPendingSourceCommand() async {
+        guard let command = pendingSourceCommand, let sourceActions else { return }
+        defer {
+            if pendingSourceCommand?.id == command.id {
+                pendingSourceCommand = nil
+                pendingDeckSource = nil
+            }
+        }
+        switch command.action {
+        case .addToKnowledge:
+            if let message = await sourceActions.save(source: command.source), !Task.isCancelled {
+                dependencyFactory.toastService.showSuccess(message)
+                onSourceMutation()
+            }
+        case .chat:
+            if let route = await sourceActions.startChat(source: command.source), !Task.isCancelled {
+                onSourceMutation()
+                chatNavigation.openReplacingCurrentNavigation(route)
+            }
+        case .createDeck:
+            let existing = await sourceActions.existingDeck(
+                source: command.source, sourceURL: pendingDeckSource?.source.url
+            )
+            guard !Task.isCancelled else { return }
+            if let existing {
+                deckReader = LearningDeckReaderDestination(deck: existing, url: nil)
+            } else if sourceActions.errorMessage == nil {
+                deckSource = pendingDeckSource
+            }
+        }
+        if !Task.isCancelled, let message = sourceActions.errorMessage {
+            dependencyFactory.toastService.showError(message)
+        }
     }
 
     private func openSource(_ sourceKey: String) {

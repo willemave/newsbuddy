@@ -28,8 +28,9 @@ impl TaskHandler for PreparedScrapeHandler {
     fn task_type(&self) -> TaskType {
         TaskType::Scrape
     }
-    fn execute(&self, _plan: Arc<OwnedWorkPlan>, _lease: LeaseHealth) -> HandlerFuture<'_> {
-        let finalizer = self.0.lock().unwrap().take().unwrap();
+    fn execute(&self, plan: Arc<OwnedWorkPlan>, _lease: LeaseHealth) -> HandlerFuture<'_> {
+        let mut finalizer = self.0.lock().unwrap().take().unwrap();
+        finalizer.task_id = plan.task_id;
         Box::pin(async move { HandlerExecution::with_finalizer(TaskResult::ok(), finalizer) })
     }
 }
@@ -268,6 +269,7 @@ async fn run_scheduled_feed_cycle(pool: &PgPool, user_id: i64, new_head: bool) {
     }
 
     let finalizer = ScrapeFinalizer {
+        task_id: 0,
         queue: QueueKernel::new(pool.clone()),
         request,
         prepared,
@@ -490,6 +492,7 @@ async fn database_failure_preserves_independent_items(pool: PgPool) {
     let news_url = "https://example.com/news";
     let rejected_url = "https://example.com/rejected";
     let finalizer = ScrapeFinalizer {
+        task_id: 0,
         queue: QueueKernel::new(pool.clone()),
         request: ScrapeRequest {
             sources: vec![RequestedSource::Aggregator(AggregatorKey::SciUrls)],
@@ -635,6 +638,7 @@ fn brutalist_news(index: usize, section: &str, topics: &[&str]) -> ScrapedItem {
 
 async fn finalize_brutalist_fixture(pool: &PgPool, items: Vec<ScrapedItem>) {
     let finalizer = ScrapeFinalizer {
+        task_id: 0,
         queue: QueueKernel::new(pool.clone()),
         request: ScrapeRequest {
             sources: vec![RequestedSource::Aggregator(AggregatorKey::Brutalist)],
@@ -699,4 +703,154 @@ async fn brutalist_full_section_preserves_existing_updates_but_rejects_thirteent
         rows.iter()
             .any(|(url, _)| url == "https://example.com/brutalist/13")
     );
+}
+
+fn grouping_scrape_finalizer(pool: &PgPool) -> ScrapeFinalizer {
+    let mut private = scraped_news("https://example.com/guard-private", "user");
+    let ScrapedItem::News(item) = &mut private else {
+        unreachable!()
+    };
+    item.owner_user_id = Some(7);
+    let outcome = |source: &str, items| SourceOutcome {
+        source: source.to_owned(),
+        required_config_ids: Vec::new(),
+        result: Ok(ScrapeProviderOutcome {
+            retryable_failure: false,
+            items,
+            item_errors: Vec::new(),
+        }),
+        discussion_catchup: false,
+    };
+    ScrapeFinalizer {
+        task_id: 0, // The fixture handler fills this from the exact claimed task.
+        queue: QueueKernel::new(pool.clone()),
+        request: ScrapeRequest {
+            sources: vec![RequestedSource::Aggregator(AggregatorKey::SciUrls)],
+            first_edition_run_id: None,
+        },
+        prepared: Vec::new(),
+        // The first outcome writes an independent item AND source progress before contention.
+        outcomes: vec![
+            outcome("sciurls", vec![private]),
+            outcome(
+                "hackernews",
+                vec![scraped_news("https://example.com/guard-global", "global")],
+            ),
+        ],
+    }
+}
+
+async fn run_grouping_scrape(pool: &PgPool, task_id: i64) -> WorkerAttempt {
+    let scope =
+        ClaimRuntimeScope::namespaces(RuntimeOwner::Rust, [ResourceKey::new("scrape").unwrap()])
+            .unwrap();
+    let mut claim = ClaimRequest::for_queue("grouping-scrape-test", TaskQueue::Content, scope);
+    claim.task_type = Some(TaskType::Scrape);
+    let mut finalizer = grouping_scrape_finalizer(pool);
+    finalizer.task_id = task_id;
+    let mut handlers = HandlerRegistry::new();
+    handlers
+        .register(PreparedScrapeHandler(Mutex::new(Some(finalizer))))
+        .unwrap();
+    WorkerKernel::new(
+        QueueKernel::new(pool.clone()),
+        handlers,
+        WorkerConfig::new(claim),
+        None,
+    )
+    .unwrap()
+    .run_once()
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrations = false)]
+async fn grouping_contention_rolls_back_all_scrape_items_and_progress_without_provider_retry(
+    pool: PgPool,
+) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let task_id = QueueKernel::new(pool.clone())
+        .enqueue(EnqueueRequest::new(TaskType::Scrape))
+        .await
+        .unwrap();
+    let mut guard = pool.begin().await.unwrap();
+    assert!(
+        newsly_db::news_grouping::try_lock_scope(&mut guard, "global", None)
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        run_grouping_scrape(&pool, task_id).await,
+        WorkerAttempt::Deferred(_)
+    ));
+    let (news, observations, retries, deferrals): (i64, i64, i32, i32) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM news_items),(SELECT count(*) FROM source_ingestion_observations),retry_count,(SELECT deferral_count FROM news_grouping_deferrals WHERE task_id=$1) FROM processing_tasks WHERE id=$1"
+    ).bind(task_id).fetch_one(&pool).await.unwrap();
+    assert_eq!((news, observations, retries, deferrals), (0, 0, 0, 1));
+    guard.rollback().await.unwrap();
+    sqlx::query("UPDATE processing_tasks SET available_at=now()-interval '1 second' WHERE id=$1")
+        .bind(task_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        run_grouping_scrape(&pool, task_id).await,
+        WorkerAttempt::Completed(_)
+    ));
+    let retained: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM news_grouping_deferrals WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        retained, 0,
+        "successful scrape ends the grouping conflict episode"
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM news_items")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 2,
+        "both original outcomes remain publishable after recovery"
+    );
+}
+
+#[sqlx::test(migrations = false)]
+async fn grouping_contention_has_a_durable_bounded_scrape_budget(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let task_id = QueueKernel::new(pool.clone())
+        .enqueue(EnqueueRequest::new(TaskType::Scrape))
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO news_grouping_deferrals(task_id,deferral_count) VALUES($1,$2)")
+        .bind(task_id)
+        .bind(newsly_db::news_grouping::MAX_DEFERRALS - 1)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut guard = pool.begin().await.unwrap();
+    assert!(
+        newsly_db::news_grouping::try_lock_scope(&mut guard, "global", None)
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        run_grouping_scrape(&pool, task_id).await,
+        WorkerAttempt::Failed(_)
+    ));
+    let (retry_count, error): (i32, Option<String>) =
+        sqlx::query_as("SELECT retry_count,error_message FROM processing_tasks WHERE id=$1")
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(retry_count, 0);
+    assert_eq!(error.as_deref(), Some("news_grouping_budget_exhausted"));
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM news_items")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
 }

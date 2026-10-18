@@ -68,6 +68,8 @@ final class ContentListViewModel {
         feed.phase == .initialLoading
     }
 
+    var isReadInFlight: Bool { feed.isRequestInFlight }
+
     var isLoadingMore: Bool {
         feed.phase == .loadingMore
     }
@@ -222,14 +224,34 @@ final class ContentListViewModel {
     }
 
     /// Revalidates the first Knowledge page while preserving the current list.
-    func revalidateKnowledgeLibrary() async {
-        initialLoadErrorMessage = nil
-        loadMoreErrorMessage = nil
+    @discardableResult
+    func revalidateKnowledgeLibrary(preservingLoadedPages: Bool = false) async -> Bool {
+        if !preservingLoadedPages {
+            initialLoadErrorMessage = nil
+            loadMoreErrorMessage = nil
+        }
         mode = .knowledgeLibrary
         knowledgeQuery = nil
-        await feed.refresh()
-        initialLoadErrorMessage = currentFeedErrorMessage
+        let result: PageReadResult
+        if preservingLoadedPages {
+            result = await feed.refreshLoadedPages { item, boundary in
+                // Wire formatting rounds timestamps to milliseconds. Keep equal-time
+                // rows until the old identity or a strictly older timestamp is reached.
+                item.id != boundary.id && item.knowledgeActivityDate >= boundary.knowledgeActivityDate
+            }
+        } else {
+            result = await feed.refresh()
+        }
+        switch result {
+        case .succeeded:
+            initialLoadErrorMessage = nil
+        case .failed(let message):
+            initialLoadErrorMessage = message
+        case .cancelled:
+            break
+        }
         refreshReadyContentIDs()
+        return result == .succeeded
     }
 
     func cancelAutomaticRead() {
@@ -356,6 +378,11 @@ final class ContentListViewModel {
     }
 
     private func recordContentMutation(_ mutation: ContentMutation, for contentID: Int) {
+        // Retained-row reads may hold pages reconciled before this mutation.
+        // An empty initial load reconciles immediately before its only publication.
+        if !feed.items.isEmpty {
+            feed.cancelRequestRetainingState()
+        }
         contentMutationVersion += 1
         contentMutations[contentID] = VersionedContentMutation(
             version: contentMutationVersion,

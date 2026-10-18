@@ -33,6 +33,7 @@ struct BriefingTab: View {
     let readStateCache: ReadStateCache
     let contentTextSize: DynamicTypeSize
     let dependencyFactory: RootDependencyFactory
+    var onSourceMutation: () -> Void = {}
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -41,7 +42,8 @@ struct BriefingTab: View {
                 playbackService: dependencyFactory.narrationPlaybackService,
                 scrollToTopRequest: scrollToTopRequest,
                 contentTextSize: contentTextSize,
-                onOpenContent: pushDetail
+                onOpenContent: pushDetail,
+                onSourceMutation: onSourceMutation
             )
                 .withContentRoutes(
                     path: $path,
@@ -121,7 +123,24 @@ struct RootCompactTabBarInset: View {
                 selection: selectedTab,
                 onSelect: onSelect
             )
+            .background { bottomEdgeFade }
         }
+    }
+
+    /// Fades scrolled rows out from just above the floating bar down to the
+    /// screen edge, so content never runs hard into the home-indicator area.
+    private var bottomEdgeFade: some View {
+        LinearGradient(
+            stops: [
+                .init(color: Color.surfacePrimary.opacity(0), location: 0),
+                .init(color: Color.surfacePrimary, location: 0.5),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .padding(.top, -24)
+        .ignoresSafeArea(edges: .bottom)
+        .allowsHitTesting(false)
     }
 
     private static let items: [CompactTabBar.Item] = [

@@ -2,9 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::LazyLock;
 
 use newsly_domain::RelationExactKey;
-use newsly_providers::{
-    LinkCandidate, NewsClassification, NewsSummary, RelevantLink, RelevantLinkCategory,
-};
+use newsly_providers::{LinkCandidate, NewsSummary, RelevantLink, RelevantLinkCategory};
 use regex::Regex;
 use serde_json::{Map, Value};
 use url::{Url, form_urlencoded};
@@ -105,16 +103,6 @@ pub(super) fn existing_summary(snapshot: &NewsSnapshot) -> Option<NewsSummary> {
                 .and_then(clean_title)
         })
         .or_else(|| summary_text.as_deref().and_then(summary_title_fallback))?;
-    let classification = summary_value
-        .and_then(|summary| summary.get("classification"))
-        .and_then(Value::as_str)
-        .map_or(NewsClassification::ToRead, |classification| {
-            if classification == "skip" {
-                NewsClassification::Skip
-            } else {
-                NewsClassification::ToRead
-            }
-        });
     let summarization_date = summary_value
         .and_then(|summary| summary.get("summarization_date"))
         .and_then(Value::as_str)
@@ -129,7 +117,6 @@ pub(super) fn existing_summary(snapshot: &NewsSnapshot) -> Option<NewsSummary> {
             .or_else(|| snapshot.article_url.clone()),
         key_points,
         summary: summary_text.or_else(|| snapshot.summary_key_points.first().cloned())?,
-        classification,
         summarization_date,
     })
 }
@@ -457,16 +444,6 @@ pub(super) fn summary_json(summary: &NewsSummary) -> Value {
             serde_json::to_value(&summary.key_points).unwrap_or_else(|_| Value::Array(Vec::new())),
         ),
         ("summary".to_owned(), Value::String(summary.summary.clone())),
-        (
-            "classification".to_owned(),
-            Value::String(
-                match summary.classification {
-                    NewsClassification::ToRead => "to_read",
-                    NewsClassification::Skip => "skip",
-                }
-                .to_owned(),
-            ),
-        ),
         (
             "summarization_date".to_owned(),
             Value::String(summary.summarization_date.to_rfc3339()),
@@ -814,6 +791,17 @@ const fn link_category(category: RelevantLinkCategory) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_skip_summary_remains_reusable_and_new_storage_omits_editorial_field() {
+        let summary: NewsSummary = serde_json::from_value(serde_json::json!({
+            "title":"Factual headline", "article_url":null, "key_points":["Evidence"],
+            "summary":"Saved evidence", "classification":"skip", "summarization_date": chrono::Utc::now()
+        })).unwrap();
+        let stored = summary_json(&summary);
+        assert!(stored.get("classification").is_none());
+        assert_eq!(stored["summary"], "Saved evidence");
+    }
 
     #[test]
     fn article_body_bound_preserves_three_quarters_head_and_tail() {

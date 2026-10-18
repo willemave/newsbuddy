@@ -60,6 +60,8 @@ pub struct OnboardingDiscoveryLaneStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct OnboardingDiscoveryStatusResponse {
+    pub original_input_text: Option<String>,
+    pub original_input_kind: Option<String>,
     pub run_id: i64,
     pub run_status: String,
     pub topic_summary: Option<String>,

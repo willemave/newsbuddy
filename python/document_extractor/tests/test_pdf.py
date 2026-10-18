@@ -144,7 +144,7 @@ async def test_text_pdf_retains_all_296_pages_without_browser_or_firecrawl(media
 async def test_scanned_or_mixed_pdf_explicitly_requests_ocr_fallback(pages: int) -> None:
     result = await extract(pdf_fixture(pages, scanned_page=pages))
     assert isinstance(result, ExtractionFallbackRequired)
-    assert "OCR" in result.reason
+    assert "pdf_extract:ocr_required" in result.reason
     assert result.usage_events[0].kind == "downloaded_body"
 
 
@@ -152,7 +152,7 @@ async def test_scanned_or_mixed_pdf_explicitly_requests_ocr_fallback(pages: int)
 async def test_malformed_pdf_uses_fallback_even_for_static_analysis() -> None:
     result = await extract(b"%PDF-1.4\nbroken", intent=ExtractIntent.STATIC_ANALYZE)
     assert isinstance(result, ExtractionFallbackRequired)
-    assert "could not read" in result.reason
+    assert "pdf_extract:parser_failed" in result.reason
 
 
 @pytest.mark.asyncio
@@ -200,7 +200,7 @@ async def test_oversized_image_inventory_requests_provider_fallback(
     monkeypatch.setattr(pdf, "_run_tool", limited_inventory)
     result = await extract(pdf_fixture(2))
     assert isinstance(result, ExtractionFallbackRequired)
-    assert "image inventory" in result.reason
+    assert "pdf_extract:image_inventory_limit" in result.reason
 
 
 @pytest.mark.asyncio

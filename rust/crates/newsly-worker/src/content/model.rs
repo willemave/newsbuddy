@@ -90,7 +90,7 @@ impl FirecrawlUsage {
 
     pub(crate) const fn pricing_version(&self) -> Option<&'static str> {
         if self.cost_usd.is_some() {
-            Some("configured-per-credit-v2")
+            Some("configured-marginal-per-credit-v3")
         } else {
             None
         }
@@ -104,6 +104,7 @@ impl FirecrawlUsage {
             "quantity": self.credits_used,
             "credits_used": self.credits_used,
             "configured_credit_cost_usd": self.credit_cost_usd,
+            "cost_estimate_type": "marginal_topup_estimate",
             "num_pages": self.num_pages,
             "total_pages": self.total_pages,
             "provider_scrape_id": self.scrape_id,
@@ -196,6 +197,11 @@ pub(super) enum ContentMutation {
         subscribe_to_feed: bool,
     },
     PodcastHandoff,
+    ExtractionDeferred {
+        stage: &'static str,
+        reason: String,
+        resume_at: DateTime<Utc>,
+    },
     ExtractionFailure {
         stage: &'static str,
         reason: String,

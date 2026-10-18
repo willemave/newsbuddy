@@ -1779,6 +1779,295 @@
         ]
       }
     },
+    "/api/briefing/filter": {
+      "get": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "getNewsFilter",
+        "responses": {
+          "200": {
+            "description": "Current News filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsFilterPreference"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "updateNewsFilter",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNewsFilterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved News filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsFilterPreference"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/briefing/filter/news": {
+      "get": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "listFilterNews",
+        "parameters": [
+          {
+            "name": "filtered",
+            "in": "query",
+            "description": "Only filtered-out items when true; all News otherwise",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque pagination cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 through 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "News with filter status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsFilterNewsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/briefing/filter/preview": {
+      "post": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "previewNewsFilter",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsFilterPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded preview without changing saved preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsFilterPreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ownership changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Preview busy or daily budget exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/briefing/lenses/{lens_key}": {
       "get": {
         "tags": [
@@ -16283,6 +16572,89 @@
           "content"
         ]
       },
+      "NewsFilterNewsItem": {
+        "type": "object",
+        "required": [
+          "news",
+          "filter_status"
+        ],
+        "properties": {
+          "news": {
+            "$ref": "#/components/schemas/NewsItemSummaryResponse"
+          },
+          "filter_status": {
+            "type": "string",
+            "description": "Open status: matched, `filtered_out`, uncertain, unavailable, pending,\n`outside_window`, deferred, or off."
+          }
+        }
+      },
+      "NewsFilterNewsResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewsFilterNewsItem"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "NewsFilterPreference": {
+        "type": "object",
+        "required": [
+          "revision",
+          "text",
+          "enabled"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "text": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "NewsFilterPreviewRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 8000
+          }
+        }
+      },
+      "NewsFilterPreviewResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewsFilterNewsItem"
+            }
+          }
+        }
+      },
       "NewsItemDetailResponse": {
         "type": "object",
         "description": "Canonical short-form News detail data.\n\nThe constant compatibility fields keep already-installed Content-detail decoders working while\nthe response omits Content-only processing, artwork, feed, and long-form summary state.",
@@ -16654,6 +17026,13 @@
             "maxLength": 8000,
             "minLength": 3
           },
+          "input_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "typed or `speech_transcript`; omitted clients use `speech_transcript`."
+          },
           "locale": {
             "type": [
               "string",
@@ -16782,6 +17161,9 @@
       "OnboardingCompleteRequest": {
         "type": "object",
         "properties": {
+          "news_filter_seed": {
+            "$ref": "#/components/schemas/OnboardingNewsFilterSeed"
+          },
           "discovery_run_id": {
             "type": [
               "integer",
@@ -16882,6 +17264,8 @@
       "OnboardingDiscoveryStatusResponse": {
         "type": "object",
         "required": [
+          "original_input_text",
+          "original_input_kind",
           "run_id",
           "run_status",
           "topic_summary",
@@ -16891,6 +17275,18 @@
           "error_message"
         ],
         "properties": {
+          "original_input_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "original_input_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "run_id": {
             "type": "integer",
             "format": "int64"
@@ -16959,6 +17355,21 @@
             "items": {
               "$ref": "#/components/schemas/OnboardingSuggestion"
             }
+          }
+        }
+      },
+      "OnboardingNewsFilterSeed": {
+        "type": "object",
+        "required": [
+          "text",
+          "enabled"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -18427,6 +18838,27 @@
               "null"
             ],
             "maxLength": 100
+          }
+        }
+      },
+      "UpdateNewsFilterRequest": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "text",
+          "enabled"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       },

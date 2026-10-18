@@ -1814,12 +1814,12 @@ struct APISendMessageResponse: Codable {
 struct APIAssistantTurnRequest: Codable {
     let message: String
     let sessionId: Int?
-    let screenContext: APIAssistantScreenContext
+    let screenContext: APIAssistantScreenContext?
 
     init(
         message: String,
         sessionId: Int? = nil,
-        screenContext: APIAssistantScreenContext
+        screenContext: APIAssistantScreenContext? = nil
     ) {
         self.message = message
         self.sessionId = sessionId
@@ -1836,14 +1836,14 @@ struct APIAssistantTurnRequest: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         message = try container.decode(String.self, forKey: .message)
         sessionId = try container.decodeIfPresent(Int.self, forKey: .sessionId)
-        screenContext = try container.decode(APIAssistantScreenContext.self, forKey: .screenContext)
+        screenContext = container.contains(.screenContext) ? try container.decode(APIAssistantScreenContext.self, forKey: .screenContext) : nil
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(sessionId, forKey: .sessionId)
-        try container.encode(screenContext, forKey: .screenContext)
+        try container.encodeIfPresent(screenContext, forKey: .screenContext)
     }
 }
 
@@ -3594,30 +3594,36 @@ struct APIIntegrationDisconnectResponse: Codable {
 
 struct APIOnboardingAudioDiscoverRequest: Codable {
     let transcript: String
+    let inputKind: String?
     let locale: String?
 
     init(
         transcript: String,
+        inputKind: String? = nil,
         locale: String? = nil
     ) {
         self.transcript = transcript
+        self.inputKind = inputKind
         self.locale = locale
     }
 
     enum CodingKeys: String, CodingKey {
         case transcript = "transcript"
+        case inputKind = "input_kind"
         case locale = "locale"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         transcript = try container.decode(String.self, forKey: .transcript)
+        inputKind = try container.decodeIfPresent(String.self, forKey: .inputKind)
         locale = try container.decodeIfPresent(String.self, forKey: .locale)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(transcript, forKey: .transcript)
+        try container.encodeIfPresent(inputKind, forKey: .inputKind)
         try container.encodeIfPresent(locale, forKey: .locale)
     }
 }
@@ -3671,6 +3677,8 @@ struct APIOnboardingAudioDiscoverResponse: Codable {
 }
 
 struct APIOnboardingDiscoveryStatusResponse: Codable {
+    let originalInputText: String?
+    let originalInputKind: String?
     let runId: Int
     let runStatus: String
     let topicSummary: String?
@@ -3680,6 +3688,8 @@ struct APIOnboardingDiscoveryStatusResponse: Codable {
     let errorMessage: String?
 
     init(
+        originalInputText: String?,
+        originalInputKind: String?,
         runId: Int,
         runStatus: String,
         topicSummary: String?,
@@ -3688,6 +3698,8 @@ struct APIOnboardingDiscoveryStatusResponse: Codable {
         suggestions: APIOnboardingFastDiscoverResponse?,
         errorMessage: String?
     ) {
+        self.originalInputText = originalInputText
+        self.originalInputKind = originalInputKind
         self.runId = runId
         self.runStatus = runStatus
         self.topicSummary = topicSummary
@@ -3698,6 +3710,8 @@ struct APIOnboardingDiscoveryStatusResponse: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case originalInputText = "original_input_text"
+        case originalInputKind = "original_input_kind"
         case runId = "run_id"
         case runStatus = "run_status"
         case topicSummary = "topic_summary"
@@ -3709,6 +3723,8 @@ struct APIOnboardingDiscoveryStatusResponse: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        originalInputText = try container.decode(String?.self, forKey: .originalInputText)
+        originalInputKind = try container.decode(String?.self, forKey: .originalInputKind)
         runId = try container.decode(Int.self, forKey: .runId)
         runStatus = try container.decode(String.self, forKey: .runStatus)
         topicSummary = try container.decode(String?.self, forKey: .topicSummary)
@@ -3720,6 +3736,8 @@ struct APIOnboardingDiscoveryStatusResponse: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(originalInputText, forKey: .originalInputText)
+        try container.encode(originalInputKind, forKey: .originalInputKind)
         try container.encode(runId, forKey: .runId)
         try container.encode(runStatus, forKey: .runStatus)
         try container.encode(topicSummary, forKey: .topicSummary)
@@ -3731,17 +3749,20 @@ struct APIOnboardingDiscoveryStatusResponse: Codable {
 }
 
 struct APIOnboardingCompleteRequest: Codable {
+    let newsFilterSeed: APIOnboardingNewsFilterSeed?
     let discoveryRunId: Int?
     let selectedSuggestionIds: [Int]
     let selectedAggregators: [APIOnboardingSelectedAggregator]
     let twitterUsername: String?
 
     init(
+        newsFilterSeed: APIOnboardingNewsFilterSeed? = nil,
         discoveryRunId: Int? = nil,
         selectedSuggestionIds: [Int] = [],
         selectedAggregators: [APIOnboardingSelectedAggregator] = [],
         twitterUsername: String? = nil
     ) {
+        self.newsFilterSeed = newsFilterSeed
         self.discoveryRunId = discoveryRunId
         self.selectedSuggestionIds = selectedSuggestionIds
         self.selectedAggregators = selectedAggregators
@@ -3749,6 +3770,7 @@ struct APIOnboardingCompleteRequest: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case newsFilterSeed = "news_filter_seed"
         case discoveryRunId = "discovery_run_id"
         case selectedSuggestionIds = "selected_suggestion_ids"
         case selectedAggregators = "selected_aggregators"
@@ -3757,6 +3779,7 @@ struct APIOnboardingCompleteRequest: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        newsFilterSeed = container.contains(.newsFilterSeed) ? try container.decode(APIOnboardingNewsFilterSeed.self, forKey: .newsFilterSeed) : nil
         discoveryRunId = try container.decodeIfPresent(Int.self, forKey: .discoveryRunId)
         selectedSuggestionIds = try container.decode([Int].self, forKey: .selectedSuggestionIds)
         selectedAggregators = try container.decode([APIOnboardingSelectedAggregator].self, forKey: .selectedAggregators)
@@ -3765,6 +3788,7 @@ struct APIOnboardingCompleteRequest: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(newsFilterSeed, forKey: .newsFilterSeed)
         try container.encodeIfPresent(discoveryRunId, forKey: .discoveryRunId)
         try container.encode(selectedSuggestionIds, forKey: .selectedSuggestionIds)
         try container.encode(selectedAggregators, forKey: .selectedAggregators)
@@ -4783,6 +4807,384 @@ struct APIConvertNewsItemResponse: Codable {
     }
 }
 
+struct APINewsItemSummaryResponse: Codable {
+    let id: Int
+    let contentType: APIContentType
+    let url: String
+    let sourceUrl: String?
+    let discussionUrl: String?
+    let title: String
+    let source: String?
+    let platform: String?
+    let status: APIContentStatus
+    let shortSummary: String?
+    let createdAt: Date
+    let processedAt: Date?
+    let classification: APIContentClassification?
+    let publicationDate: Date?
+    let isRead: Bool
+    let isSavedToKnowledge: Bool
+    let newsArticleUrl: String?
+    let newsDiscussionUrl: String?
+    let newsKeyPoints: [String]?
+    let newsSummary: String?
+    let topComment: [String: String]?
+    let commentCount: Int?
+
+    init(
+        id: Int,
+        contentType: APIContentType,
+        url: String,
+        sourceUrl: String?,
+        discussionUrl: String?,
+        title: String,
+        source: String?,
+        platform: String?,
+        status: APIContentStatus,
+        shortSummary: String?,
+        createdAt: Date,
+        processedAt: Date?,
+        classification: APIContentClassification?,
+        publicationDate: Date?,
+        isRead: Bool,
+        isSavedToKnowledge: Bool,
+        newsArticleUrl: String?,
+        newsDiscussionUrl: String?,
+        newsKeyPoints: [String]?,
+        newsSummary: String?,
+        topComment: [String: String]?,
+        commentCount: Int?
+    ) {
+        self.id = id
+        self.contentType = contentType
+        self.url = url
+        self.sourceUrl = sourceUrl
+        self.discussionUrl = discussionUrl
+        self.title = title
+        self.source = source
+        self.platform = platform
+        self.status = status
+        self.shortSummary = shortSummary
+        self.createdAt = createdAt
+        self.processedAt = processedAt
+        self.classification = classification
+        self.publicationDate = publicationDate
+        self.isRead = isRead
+        self.isSavedToKnowledge = isSavedToKnowledge
+        self.newsArticleUrl = newsArticleUrl
+        self.newsDiscussionUrl = newsDiscussionUrl
+        self.newsKeyPoints = newsKeyPoints
+        self.newsSummary = newsSummary
+        self.topComment = topComment
+        self.commentCount = commentCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case contentType = "content_type"
+        case url = "url"
+        case sourceUrl = "source_url"
+        case discussionUrl = "discussion_url"
+        case title = "title"
+        case source = "source"
+        case platform = "platform"
+        case status = "status"
+        case shortSummary = "short_summary"
+        case createdAt = "created_at"
+        case processedAt = "processed_at"
+        case classification = "classification"
+        case publicationDate = "publication_date"
+        case isRead = "is_read"
+        case isSavedToKnowledge = "is_saved_to_knowledge"
+        case newsArticleUrl = "news_article_url"
+        case newsDiscussionUrl = "news_discussion_url"
+        case newsKeyPoints = "news_key_points"
+        case newsSummary = "news_summary"
+        case topComment = "top_comment"
+        case commentCount = "comment_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        contentType = try container.decode(APIContentType.self, forKey: .contentType)
+        url = try container.decode(String.self, forKey: .url)
+        sourceUrl = try container.decode(String?.self, forKey: .sourceUrl)
+        discussionUrl = try container.decode(String?.self, forKey: .discussionUrl)
+        title = try container.decode(String.self, forKey: .title)
+        source = try container.decode(String?.self, forKey: .source)
+        platform = try container.decode(String?.self, forKey: .platform)
+        status = try container.decode(APIContentStatus.self, forKey: .status)
+        shortSummary = try container.decode(String?.self, forKey: .shortSummary)
+        let createdAtRaw = try container.decode(String.self, forKey: .createdAt)
+        guard let createdAtParsed = ServerDate.parse(createdAtRaw) else {
+            throw DecodingError.dataCorruptedError(forKey: .createdAt, in: container, debugDescription: "Unparseable date for createdAt")
+        }
+        createdAt = createdAtParsed
+        if let processedAtRaw = try container.decode(String?.self, forKey: .processedAt) {
+            guard let processedAtParsed = ServerDate.parse(processedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .processedAt, in: container, debugDescription: "Unparseable date for processedAt")
+            }
+            processedAt = processedAtParsed
+        } else {
+            processedAt = nil
+        }
+        classification = try container.decode(APIContentClassification?.self, forKey: .classification)
+        if let publicationDateRaw = try container.decode(String?.self, forKey: .publicationDate) {
+            guard let publicationDateParsed = ServerDate.parse(publicationDateRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .publicationDate, in: container, debugDescription: "Unparseable date for publicationDate")
+            }
+            publicationDate = publicationDateParsed
+        } else {
+            publicationDate = nil
+        }
+        isRead = try container.decode(Bool.self, forKey: .isRead)
+        isSavedToKnowledge = try container.decode(Bool.self, forKey: .isSavedToKnowledge)
+        newsArticleUrl = try container.decode(String?.self, forKey: .newsArticleUrl)
+        newsDiscussionUrl = try container.decode(String?.self, forKey: .newsDiscussionUrl)
+        newsKeyPoints = try container.decode([String]?.self, forKey: .newsKeyPoints)
+        newsSummary = try container.decode(String?.self, forKey: .newsSummary)
+        topComment = try container.decode([String: String]?.self, forKey: .topComment)
+        commentCount = try container.decode(Int?.self, forKey: .commentCount)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(contentType, forKey: .contentType)
+        try container.encode(url, forKey: .url)
+        try container.encode(sourceUrl, forKey: .sourceUrl)
+        try container.encode(discussionUrl, forKey: .discussionUrl)
+        try container.encode(title, forKey: .title)
+        try container.encode(source, forKey: .source)
+        try container.encode(platform, forKey: .platform)
+        try container.encode(status, forKey: .status)
+        try container.encode(shortSummary, forKey: .shortSummary)
+        try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
+        try container.encode(processedAt.map(ServerDate.format), forKey: .processedAt)
+        try container.encode(classification, forKey: .classification)
+        try container.encode(publicationDate.map(ServerDate.format), forKey: .publicationDate)
+        try container.encode(isRead, forKey: .isRead)
+        try container.encode(isSavedToKnowledge, forKey: .isSavedToKnowledge)
+        try container.encode(newsArticleUrl, forKey: .newsArticleUrl)
+        try container.encode(newsDiscussionUrl, forKey: .newsDiscussionUrl)
+        try container.encode(newsKeyPoints, forKey: .newsKeyPoints)
+        try container.encode(newsSummary, forKey: .newsSummary)
+        try container.encode(topComment, forKey: .topComment)
+        try container.encode(commentCount, forKey: .commentCount)
+    }
+}
+
+struct APINewsFilterNewsItem: Codable {
+    let news: APINewsItemSummaryResponse
+    let filterStatus: String
+
+    init(
+        news: APINewsItemSummaryResponse,
+        filterStatus: String
+    ) {
+        self.news = news
+        self.filterStatus = filterStatus
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case news = "news"
+        case filterStatus = "filter_status"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        news = try container.decode(APINewsItemSummaryResponse.self, forKey: .news)
+        filterStatus = try container.decode(String.self, forKey: .filterStatus)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(news, forKey: .news)
+        try container.encode(filterStatus, forKey: .filterStatus)
+    }
+}
+
+struct APINewsFilterNewsResponse: Codable {
+    let items: [APINewsFilterNewsItem]
+    let nextCursor: String?
+
+    init(
+        items: [APINewsFilterNewsItem],
+        nextCursor: String?
+    ) {
+        self.items = items
+        self.nextCursor = nextCursor
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decode([APINewsFilterNewsItem].self, forKey: .items)
+        nextCursor = try container.decode(String?.self, forKey: .nextCursor)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+struct APINewsFilterPreviewRequest: Codable {
+    let text: String
+
+    init(
+        text: String
+    ) {
+        self.text = text
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case text = "text"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+    }
+}
+
+struct APINewsFilterPreviewResponse: Codable {
+    let items: [APINewsFilterNewsItem]
+
+    init(
+        items: [APINewsFilterNewsItem]
+    ) {
+        self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decode([APINewsFilterNewsItem].self, forKey: .items)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+struct APINewsFilterPreference: Codable {
+    let revision: Int
+    let text: String
+    let enabled: Bool
+
+    init(
+        revision: Int,
+        text: String,
+        enabled: Bool
+    ) {
+        self.revision = revision
+        self.text = text
+        self.enabled = enabled
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case revision = "revision"
+        case text = "text"
+        case enabled = "enabled"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try container.decode(Int.self, forKey: .revision)
+        text = try container.decode(String.self, forKey: .text)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(text, forKey: .text)
+        try container.encode(enabled, forKey: .enabled)
+    }
+}
+
+struct APIUpdateNewsFilterRequest: Codable {
+    let expectedRevision: Int
+    let text: String
+    let enabled: Bool
+
+    init(
+        expectedRevision: Int,
+        text: String,
+        enabled: Bool
+    ) {
+        self.expectedRevision = expectedRevision
+        self.text = text
+        self.enabled = enabled
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case expectedRevision = "expected_revision"
+        case text = "text"
+        case enabled = "enabled"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        expectedRevision = try container.decode(Int.self, forKey: .expectedRevision)
+        text = try container.decode(String.self, forKey: .text)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(expectedRevision, forKey: .expectedRevision)
+        try container.encode(text, forKey: .text)
+        try container.encode(enabled, forKey: .enabled)
+    }
+}
+
+struct APIOnboardingNewsFilterSeed: Codable {
+    let text: String
+    let enabled: Bool
+
+    init(
+        text: String,
+        enabled: Bool
+    ) {
+        self.text = text
+        self.enabled = enabled
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case text = "text"
+        case enabled = "enabled"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(enabled, forKey: .enabled)
+    }
+}
+
 struct APISubmissionContentResult: Codable {
     let outcome: APISubmissionOutcome
 
@@ -5279,174 +5681,6 @@ struct APIDetectedFeed: Codable {
         try container.encode(type, forKey: .type)
         try container.encode(title, forKey: .title)
         try container.encode(format, forKey: .format)
-    }
-}
-
-struct APINewsItemSummaryResponse: Codable {
-    let id: Int
-    let contentType: APIContentType
-    let url: String
-    let sourceUrl: String?
-    let discussionUrl: String?
-    let title: String
-    let source: String?
-    let platform: String?
-    let status: APIContentStatus
-    let shortSummary: String?
-    let createdAt: Date
-    let processedAt: Date?
-    let classification: APIContentClassification?
-    let publicationDate: Date?
-    let isRead: Bool
-    let isSavedToKnowledge: Bool
-    let newsArticleUrl: String?
-    let newsDiscussionUrl: String?
-    let newsKeyPoints: [String]?
-    let newsSummary: String?
-    let topComment: [String: String]?
-    let commentCount: Int?
-
-    init(
-        id: Int,
-        contentType: APIContentType,
-        url: String,
-        sourceUrl: String?,
-        discussionUrl: String?,
-        title: String,
-        source: String?,
-        platform: String?,
-        status: APIContentStatus,
-        shortSummary: String?,
-        createdAt: Date,
-        processedAt: Date?,
-        classification: APIContentClassification?,
-        publicationDate: Date?,
-        isRead: Bool,
-        isSavedToKnowledge: Bool,
-        newsArticleUrl: String?,
-        newsDiscussionUrl: String?,
-        newsKeyPoints: [String]?,
-        newsSummary: String?,
-        topComment: [String: String]?,
-        commentCount: Int?
-    ) {
-        self.id = id
-        self.contentType = contentType
-        self.url = url
-        self.sourceUrl = sourceUrl
-        self.discussionUrl = discussionUrl
-        self.title = title
-        self.source = source
-        self.platform = platform
-        self.status = status
-        self.shortSummary = shortSummary
-        self.createdAt = createdAt
-        self.processedAt = processedAt
-        self.classification = classification
-        self.publicationDate = publicationDate
-        self.isRead = isRead
-        self.isSavedToKnowledge = isSavedToKnowledge
-        self.newsArticleUrl = newsArticleUrl
-        self.newsDiscussionUrl = newsDiscussionUrl
-        self.newsKeyPoints = newsKeyPoints
-        self.newsSummary = newsSummary
-        self.topComment = topComment
-        self.commentCount = commentCount
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id = "id"
-        case contentType = "content_type"
-        case url = "url"
-        case sourceUrl = "source_url"
-        case discussionUrl = "discussion_url"
-        case title = "title"
-        case source = "source"
-        case platform = "platform"
-        case status = "status"
-        case shortSummary = "short_summary"
-        case createdAt = "created_at"
-        case processedAt = "processed_at"
-        case classification = "classification"
-        case publicationDate = "publication_date"
-        case isRead = "is_read"
-        case isSavedToKnowledge = "is_saved_to_knowledge"
-        case newsArticleUrl = "news_article_url"
-        case newsDiscussionUrl = "news_discussion_url"
-        case newsKeyPoints = "news_key_points"
-        case newsSummary = "news_summary"
-        case topComment = "top_comment"
-        case commentCount = "comment_count"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        contentType = try container.decode(APIContentType.self, forKey: .contentType)
-        url = try container.decode(String.self, forKey: .url)
-        sourceUrl = try container.decode(String?.self, forKey: .sourceUrl)
-        discussionUrl = try container.decode(String?.self, forKey: .discussionUrl)
-        title = try container.decode(String.self, forKey: .title)
-        source = try container.decode(String?.self, forKey: .source)
-        platform = try container.decode(String?.self, forKey: .platform)
-        status = try container.decode(APIContentStatus.self, forKey: .status)
-        shortSummary = try container.decode(String?.self, forKey: .shortSummary)
-        let createdAtRaw = try container.decode(String.self, forKey: .createdAt)
-        guard let createdAtParsed = ServerDate.parse(createdAtRaw) else {
-            throw DecodingError.dataCorruptedError(forKey: .createdAt, in: container, debugDescription: "Unparseable date for createdAt")
-        }
-        createdAt = createdAtParsed
-        if let processedAtRaw = try container.decode(String?.self, forKey: .processedAt) {
-            guard let processedAtParsed = ServerDate.parse(processedAtRaw) else {
-                throw DecodingError.dataCorruptedError(forKey: .processedAt, in: container, debugDescription: "Unparseable date for processedAt")
-            }
-            processedAt = processedAtParsed
-        } else {
-            processedAt = nil
-        }
-        classification = try container.decode(APIContentClassification?.self, forKey: .classification)
-        if let publicationDateRaw = try container.decode(String?.self, forKey: .publicationDate) {
-            guard let publicationDateParsed = ServerDate.parse(publicationDateRaw) else {
-                throw DecodingError.dataCorruptedError(forKey: .publicationDate, in: container, debugDescription: "Unparseable date for publicationDate")
-            }
-            publicationDate = publicationDateParsed
-        } else {
-            publicationDate = nil
-        }
-        isRead = try container.decode(Bool.self, forKey: .isRead)
-        isSavedToKnowledge = try container.decode(Bool.self, forKey: .isSavedToKnowledge)
-        newsArticleUrl = try container.decode(String?.self, forKey: .newsArticleUrl)
-        newsDiscussionUrl = try container.decode(String?.self, forKey: .newsDiscussionUrl)
-        newsKeyPoints = try container.decode([String]?.self, forKey: .newsKeyPoints)
-        newsSummary = try container.decode(String?.self, forKey: .newsSummary)
-        topComment = try container.decode([String: String]?.self, forKey: .topComment)
-        commentCount = try container.decode(Int?.self, forKey: .commentCount)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(contentType, forKey: .contentType)
-        try container.encode(url, forKey: .url)
-        try container.encode(sourceUrl, forKey: .sourceUrl)
-        try container.encode(discussionUrl, forKey: .discussionUrl)
-        try container.encode(title, forKey: .title)
-        try container.encode(source, forKey: .source)
-        try container.encode(platform, forKey: .platform)
-        try container.encode(status, forKey: .status)
-        try container.encode(shortSummary, forKey: .shortSummary)
-        try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
-        try container.encode(processedAt.map(ServerDate.format), forKey: .processedAt)
-        try container.encode(classification, forKey: .classification)
-        try container.encode(publicationDate.map(ServerDate.format), forKey: .publicationDate)
-        try container.encode(isRead, forKey: .isRead)
-        try container.encode(isSavedToKnowledge, forKey: .isSavedToKnowledge)
-        try container.encode(newsArticleUrl, forKey: .newsArticleUrl)
-        try container.encode(newsDiscussionUrl, forKey: .newsDiscussionUrl)
-        try container.encode(newsKeyPoints, forKey: .newsKeyPoints)
-        try container.encode(newsSummary, forKey: .newsSummary)
-        try container.encode(topComment, forKey: .topComment)
-        try container.encode(commentCount, forKey: .commentCount)
     }
 }
 

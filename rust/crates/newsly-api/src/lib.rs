@@ -42,6 +42,8 @@ mod llm_tasks;
 mod model_usage;
 mod mutations;
 mod news_actions;
+mod news_filter_preferences;
+mod news_filter_results;
 mod observability;
 mod onboarding;
 mod onboarding_flow;
@@ -67,8 +69,8 @@ use axum::Router;
 use axum::http::{HeaderMap, HeaderName};
 use newsly_db::{Database, OwnershipRepository};
 use newsly_providers::{
-    BriefingDigGateway, ContentMiscGateway, IntegrationTokenCipher, OnboardingGateway,
-    OpenAiTranscriptionGateway, ScrapeGateway, XOAuthGateway,
+    BriefingDigGateway, ContentMiscGateway, IntegrationTokenCipher, NewsFilterGateway,
+    OnboardingGateway, OpenAiTranscriptionGateway, ScrapeGateway, XOAuthGateway,
 };
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
@@ -95,6 +97,7 @@ pub struct AppState {
     content_body_store: Arc<content_body_storage::ContentBodyStore>,
     content_misc: Arc<ContentMiscGateway>,
     briefing_dig: Arc<BriefingDigGateway>,
+    news_filter: Arc<NewsFilterGateway>,
     scrape: Arc<ScrapeGateway>,
     feed_validator: newsly_providers::FeedValidator,
     onboarding: Arc<OnboardingGateway>,
@@ -110,6 +113,34 @@ pub struct AppState {
 struct XOAuthServices {
     gateway: Arc<XOAuthGateway>,
     token_cipher: IntegrationTokenCipher,
+}
+
+fn x_oauth_services(
+    config: &ServerConfig,
+    token_cipher: Option<IntegrationTokenCipher>,
+) -> anyhow::Result<Option<XOAuthServices>> {
+    match (
+        config.x_client_id.clone(),
+        config.x_oauth_redirect_uri.clone(),
+    ) {
+        (Some(client_id), Some(redirect_uri)) => {
+            let token_cipher = token_cipher.ok_or_else(|| {
+                anyhow::anyhow!("X_TOKEN_ENCRYPTION_KEY is required when X OAuth is configured")
+            })?;
+            Ok(Some(XOAuthServices {
+                gateway: Arc::new(XOAuthGateway::new(
+                    &client_id,
+                    config.x_client_secret.clone(),
+                    &redirect_uri,
+                    config.x_oauth_authorize_url.clone(),
+                    config.x_oauth_token_url.clone(),
+                    config.x_api_base_url.clone(),
+                )?),
+                token_cipher,
+            }))
+        }
+        _ => Ok(None),
+    }
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -143,6 +174,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(news_actions::router())
         .merge(onboarding::router())
         .merge(onboarding_flow::router())
+        .merge(news_filter_preferences::router())
+        .merge(news_filter_results::router())
         .merge(openai::router())
         .merge(public_pages::router())
         .merge(refresh::router())
@@ -201,6 +234,9 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
     let content_body_store = Arc::new(content_body_storage::ContentBodyStore::from_environment()?);
     let content_misc = Arc::new(ContentMiscGateway::from_env()?);
     let briefing_dig = Arc::new(BriefingDigGateway::from_env()?);
+    let news_filter = Arc::new(NewsFilterGateway::new(
+        newsly_providers::ProviderCredentials::from_env().openrouter,
+    )?);
     let scrape = Arc::new(ScrapeGateway::from_env()?);
     let onboarding = Arc::new(OnboardingGateway::from_env()?);
     let audio_storage = Arc::new(audio_storage::AudioStorage::from_environment()?);
@@ -210,28 +246,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         .as_ref()
         .map(IntegrationTokenCipher::new)
         .transpose()?;
-    let x_oauth = match (
-        config.x_client_id.clone(),
-        config.x_oauth_redirect_uri.clone(),
-    ) {
-        (Some(client_id), Some(redirect_uri)) => {
-            let token_cipher = integration_token_cipher.clone().ok_or_else(|| {
-                anyhow::anyhow!("X_TOKEN_ENCRYPTION_KEY is required when X OAuth is configured")
-            })?;
-            Some(XOAuthServices {
-                gateway: Arc::new(XOAuthGateway::new(
-                    &client_id,
-                    config.x_client_secret.clone(),
-                    &redirect_uri,
-                    config.x_oauth_authorize_url.clone(),
-                    config.x_oauth_token_url.clone(),
-                    config.x_api_base_url.clone(),
-                )?),
-                token_cipher,
-            })
-        }
-        _ => None,
-    };
+    let x_oauth = x_oauth_services(&config, integration_token_cipher.clone())?;
     let application_sha = config.application_sha.clone();
     let gateway = gateway::Gateway::new(
         OwnershipRepository::new(database.pool().clone()),
@@ -253,6 +268,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         content_body_store,
         content_misc,
         briefing_dig,
+        news_filter,
         scrape,
         feed_validator,
         onboarding,

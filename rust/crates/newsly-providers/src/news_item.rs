@@ -31,9 +31,8 @@ const NEWS_SYSTEM_PROMPT: &str = r"Create a compact short-form news summary grou
 
 Return a factual headline of 5-95 characters, two to four concrete key points of at most 220
 characters each, and a two-to-three sentence overview of at most 500 characters. Preserve names,
-numbers, dates, and uncertainty. Do not add facts that are absent from the evidence. Classify the
-item as `to_read` when it contains substantive reader value and `skip` only when it is duplicative,
-empty, promotional, or otherwise low-signal. Return only JSON matching the supplied schema.";
+numbers, dates, and uncertainty. Do not add facts that are absent from the evidence.
+Return only JSON matching the supplied schema.";
 
 const LINKS_SYSTEM_PROMPT: &str = r"Select useful outbound links from an article.
 
@@ -42,13 +41,6 @@ documentation, tools, source repositories, company or product pages, and importa
 context. Exclude navigation, homepages, share links, login or subscription pages, ads, generic
 social links, and weak citations. Prefer fewer high-signal links. Never invent or alter a URL.
 Return only JSON matching the supplied schema.";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum NewsClassification {
-    ToRead,
-    Skip,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +53,6 @@ struct NewsSummaryOutput {
     key_points: Vec<String>,
     #[schemars(length(min = 1, max = 500))]
     summary: String,
-    classification: NewsClassification,
 }
 
 fn key_point_constraints(schema: &mut schemars::Schema) {
@@ -77,7 +68,6 @@ pub struct NewsSummary {
     pub article_url: Option<String>,
     pub key_points: Vec<String>,
     pub summary: String,
-    pub classification: NewsClassification,
     pub summarization_date: DateTime<Utc>,
 }
 
@@ -123,7 +113,6 @@ impl NewsSummaryOutput {
             article_url,
             key_points,
             summary,
-            classification: self.classification,
             summarization_date: Utc::now(),
         })
     }
@@ -244,6 +233,10 @@ impl NewsItemGateway {
 
     pub fn summary_model(&self) -> &str {
         &self.summary_model
+    }
+
+    pub fn link_model(&self) -> &str {
+        &self.link_model
     }
 
     pub fn embedding_model(&self) -> &str {
@@ -603,7 +596,6 @@ mod tests {
             article_url: Some("http://example.com/story#part".to_owned()),
             key_points: vec![" First point. ".to_owned(), "Second point.".to_owned()],
             summary: " A compact factual overview. ".to_owned(),
-            classification: NewsClassification::ToRead,
         }
         .normalize()
         .expect("valid summary");
@@ -624,8 +616,7 @@ mod tests {
                 "title": "A factual headline",
                 "article_url": null,
                 "key_points": ["界".repeat(length), "Another point"],
-                "summary": "A factual overview.",
-                "classification": "to_read"
+                "summary": "A factual overview."
             });
             assert_eq!(validator.is_valid(&value), accepted, "length {length}");
             assert_eq!(

@@ -56,6 +56,25 @@ pub async fn delete_learning_deck(
     .bind(ACTIVE_ATTEMPT_STATUSES)
     .execute(&mut **transaction)
     .await?;
+    let private_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT candidate.object_key FROM artifact_cleanup_candidates AS candidate
+         JOIN llm_tasks AS task ON task.id::bigint = candidate.llm_task_id
+         WHERE task.task_kind = 'learning_deck' AND task.subject_id::bigint = $1
+           AND task.user_id::bigint = $2",
+    )
+    .bind(deck_id)
+    .bind(user_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "DELETE FROM learning_deck_generation_state WHERE llm_task_id IN
+         (SELECT id FROM llm_tasks WHERE task_kind = 'learning_deck'
+          AND subject_id::bigint = $1 AND user_id::bigint = $2)",
+    )
+    .bind(deck_id)
+    .bind(user_id)
+    .execute(&mut **transaction)
+    .await?;
     let run_entry = json!({
         "status": "cancelled",
         "note": "Learning Deck was deleted",
@@ -91,6 +110,7 @@ pub async fn delete_learning_deck(
     .await?;
     let mut keys = BTreeSet::new();
     collect_string_values(&deck_keys, &mut keys);
+    keys.extend(private_keys);
     for value in run_keys {
         collect_string_values(&value, &mut keys);
     }

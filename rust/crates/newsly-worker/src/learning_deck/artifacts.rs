@@ -20,7 +20,6 @@ use uuid::Uuid;
 pub(super) const OUTPUT_INDEX_HTML: &str = "output/index.html";
 pub(super) const OUTPUT_SOURCE_NOTES: &str = "output/source-notes.md";
 pub(super) const OUTPUT_SOURCE_METADATA: &str = "output/source-metadata.json";
-pub(super) const OUTPUT_ASSET_DIRECTORY: &str = "output/assets";
 
 const REVEAL_VERSION: &str = "6.0.1";
 const RESPONSIVE_LAYOUT_VERSION: &str = "responsive-v2";
@@ -31,6 +30,7 @@ const JSONL_CONTENT_TYPE: &str = "application/x-ndjson; charset=utf-8";
 const ALLOWED_SCRIPT_PACKAGES: [&str; 5] = ["reveal.js", "react", "react-dom", "d3", "mermaid"];
 const ALLOWED_SCRIPT_HOSTS: [&str; 2] = ["cdn.jsdelivr.net", "unpkg.com"];
 
+pub(super) mod drafts;
 mod limits;
 pub(super) use limits::LearningDeckArtifactLimits;
 

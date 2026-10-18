@@ -1254,3 +1254,35 @@ payload_schema = "tasks/recluster_news_lenses.schema.json"
 current_owner = "rust"
 database_writer = "rust"
 e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/briefing/filter/news"
+operation_id = "listFilterNews"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/filter/preview"
+operation_id = "previewNewsFilter"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/briefing/filter"
+operation_id = "getNewsFilter"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "PUT"
+path = "/api/briefing/filter"
+operation_id = "updateNewsFilter"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"

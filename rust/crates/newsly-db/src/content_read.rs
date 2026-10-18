@@ -137,8 +137,7 @@ pub async fn find_visible_content_detail(
                     AND knowledge_save.content_id = content.id
               )
               OR (
-                  (content.classification IS NULL OR content.classification <> 'skip')
-                  AND EXISTS (
+                  EXISTS (
                       SELECT 1
                       FROM content_status AS user_status
                       WHERE user_status.user_id::bigint = $1::bigint
@@ -453,6 +452,57 @@ pub async fn list_visible_news_items(
     })
 }
 
+/// Load a bounded batch through the same visibility predicate as canonical News detail.
+///
+/// # Errors
+/// Returns an error when the read-model query fails.
+pub async fn find_visible_news_items_by_ids(
+    pool: &PgPool,
+    user_id: i64,
+    news_item_ids: &[i64],
+) -> Result<Vec<NewsItemProjection>, ContentReadRepositoryError> {
+    if news_item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut query = visible_news_items_query(false);
+    query.push_str(" AND news.id::bigint = ANY($2::bigint[]) ORDER BY news.id DESC LIMIT 101");
+    let rows = sqlx::query_as::<_, NewsItemRow>(AssertSqlSafe(query))
+        .bind(user_id)
+        .bind(news_item_ids)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Read preview evidence identity and the canonical visible projection in one snapshot.
+///
+/// # Errors
+/// Returns an error when the read-model query fails.
+pub async fn find_visible_news_items_for_filter_preview(
+    pool: &PgPool,
+    user_id: i64,
+    evidence: &[(i64, String)],
+) -> Result<Vec<NewsItemProjection>, ContentReadRepositoryError> {
+    if evidence.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (ids, hashes): (Vec<_>, Vec<_>) = evidence
+        .iter()
+        .map(|(id, hash)| (*id, hash.as_str()))
+        .unzip();
+    let mut query = visible_news_items_query(false);
+    query.push_str(
+        " AND (news.id::bigint, news_filter_input_hash(news)) IN (SELECT * FROM unnest($2::bigint[], $3::text[])) ORDER BY news.id DESC LIMIT 20",
+    );
+    let rows = sqlx::query_as::<_, NewsItemRow>(AssertSqlSafe(query))
+        .bind(user_id)
+        .bind(ids)
+        .bind(hashes)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 pub async fn list_active_feed_urls(
     pool: &PgPool,
     user_id: i64,
@@ -482,6 +532,37 @@ pub enum ContentReadRepositoryError {
 
 #[cfg(test)]
 mod visibility_query_plan_tests {
+    #[sqlx::test(migrations = false)]
+    async fn batch_news_summary_load_preserves_visibility_and_canonical_status(pool: sqlx::PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES ('batch-news-owner','batch-news-owner@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+        let other_user_id: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES ('batch-news-other','batch-news-other@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+        let mut ids = Vec::new();
+        for (key, owner, status) in [
+            ("batch-owned", user_id, "ready"),
+            ("batch-foreign", other_user_id, "ready"),
+            ("batch-unready", user_id, "new"),
+        ] {
+            let id: i64 = sqlx::query_scalar("INSERT INTO news_items(ingest_key,visibility_scope,owner_user_id,platform,status,summary_text,raw_metadata,ingested_at,created_at) VALUES($1,'user',$2::bigint::integer,'reddit',$3,'Summary','{}',now(),now()) RETURNING id::bigint").bind(key).bind(owner).bind(status).fetch_one(&pool).await.unwrap();
+            ids.push(id);
+        }
+        let member_id: i64 = sqlx::query_scalar("INSERT INTO news_items(ingest_key,visibility_scope,owner_user_id,platform,status,representative_news_item_id,summary_text,raw_metadata,ingested_at,created_at) VALUES('batch-member','user',$1::bigint::integer,'reddit','ready',$2::bigint::integer,'Summary','{}',now(),now()) RETURNING id::bigint").bind(user_id).bind(ids[0]).fetch_one(&pool).await.unwrap();
+        ids.push(member_id);
+        let visible = super::find_visible_news_items_by_ids(&pool, user_id, &ids)
+            .await
+            .unwrap();
+        assert_eq!(
+            visible.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![ids[0]]
+        );
+        assert!(
+            super::find_visible_news_items_by_ids(&pool, user_id, &[])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[sqlx::test(migrations = false)]
     async fn shared_visibility_list_query_remains_inlinable(pool: sqlx::PgPool) {
         crate::run_migrations(&pool).await.unwrap();

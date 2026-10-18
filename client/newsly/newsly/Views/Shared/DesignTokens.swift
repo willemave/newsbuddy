@@ -512,21 +512,6 @@ extension View {
         }
     }
 
-    /// Keeps the fade low at the viewport edge, behind the floating bottom chrome.
-    /// Briefing and Knowledge share the same height and placement.
-    func bottomScreenEdgeFade() -> some View {
-        overlay(alignment: .bottom) {
-            LinearGradient(
-                colors: [Color.surfacePrimary.opacity(0), Color.surfacePrimary],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 28)
-            .offset(y: 24)
-            .allowsHitTesting(false)
-        }
-    }
-
     /// Uses the app's serif title treatment even when SwiftUI's navigation-bar
     /// appearance proxy has not yet been applied to a newly-created stack.
     func appNavigationTitle(

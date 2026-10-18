@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "ai_systems",
+      "name": "AI research and systems",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "AI model research, evaluations, capabilities, and limitations",
+          "engineering methods for training, inference, and deploying AI systems"
+        ],
+        "exclusions": [
+          "funding or valuation announcements without research or engineering results",
+          "product launch marketing without concrete technical detail"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about AI model research, evaluations, capabilities, and limitations, and about engineering methods for training, inference, and deploying AI systems. I don't want funding or valuation announcements without research or engineering results, or product launch marketing without concrete technical detail. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- AI model research, evaluations, capabilities, and limitations\n- engineering methods for training, inference, and deploying AI systems\nExclude:\n- funding or valuation announcements without research or engineering results\n- product launch marketing without concrete technical detail\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"AI model research, evaluations, capabilities, and limitations\",\n    \"engineering methods for training, inference, and deploying AI systems\"\n  ],\n  \"exclusions\": [\n    \"funding or valuation announcements without research or engineering results\",\n    \"product launch marketing without concrete technical detail\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: funding or valuation announcements without research or engineering results; product launch marketing without concrete technical detail. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: AI model research, evaluations, capabilities, and limitations; engineering methods for training, inference, and deploying AI systems. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "software_security",
+      "name": "Software engineering and security",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "software engineering, programming languages, databases, and distributed systems",
+          "cybersecurity vulnerabilities, defenses, incidents, and practical security research"
+        ],
+        "exclusions": [
+          "generic career advice or hiring announcements",
+          "routine gadget launches without software or security substance"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about software engineering, programming languages, databases, and distributed systems, and about cybersecurity vulnerabilities, defenses, incidents, and practical security research. I don't want generic career advice or hiring announcements, or routine gadget launches without software or security substance. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- software engineering, programming languages, databases, and distributed systems\n- cybersecurity vulnerabilities, defenses, incidents, and practical security research\nExclude:\n- generic career advice or hiring announcements\n- routine gadget launches without software or security substance\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"software engineering, programming languages, databases, and distributed systems\",\n    \"cybersecurity vulnerabilities, defenses, incidents, and practical security research\"\n  ],\n  \"exclusions\": [\n    \"generic career advice or hiring announcements\",\n    \"routine gadget launches without software or security substance\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: generic career advice or hiring announcements; routine gadget launches without software or security substance. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: software engineering, programming languages, databases, and distributed systems; cybersecurity vulnerabilities, defenses, incidents, and practical security research. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "science_health",
+      "name": "Science and health research",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "new scientific findings in biology, medicine, psychology, physics, astronomy, or chemistry",
+          "research methods, replication results, and study limitations in those same scientific fields; not AI or computer-science methods alone"
+        ],
+        "exclusions": [
+          "personal wellness anecdotes or unsupported health claims",
+          "commercial treatment promotions without research evidence"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about new scientific findings in biology, medicine, psychology, physics, astronomy, or chemistry, and about research methods, replication results, and study limitations in those same scientific fields; not AI or computer-science methods alone. I don't want personal wellness anecdotes or unsupported health claims, or commercial treatment promotions without research evidence. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- new scientific findings in biology, medicine, psychology, physics, astronomy, or chemistry\n- research methods, replication results, and study limitations in those same scientific fields; not AI or computer-science methods alone\nExclude:\n- personal wellness anecdotes or unsupported health claims\n- commercial treatment promotions without research evidence\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"new scientific findings in biology, medicine, psychology, physics, astronomy, or chemistry\",\n    \"research methods, replication results, and study limitations in those same scientific fields; not AI or computer-science methods alone\"\n  ],\n  \"exclusions\": [\n    \"personal wellness anecdotes or unsupported health claims\",\n    \"commercial treatment promotions without research evidence\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: personal wellness anecdotes or unsupported health claims; commercial treatment promotions without research evidence. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: new scientific findings in biology, medicine, psychology, physics, astronomy, or chemistry; research methods, replication results, and study limitations in those same scientific fields; not AI or computer-science methods alone. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "climate_energy",
+      "name": "Climate and energy",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "climate science, environmental change, and biodiversity",
+          "energy generation, storage, electricity grids, and policies materially affecting them"
+        ],
+        "exclusions": [
+          "short-term energy stock price predictions",
+          "routine local weather forecasts without climate or energy implications"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about climate science, environmental change, and biodiversity, and about energy generation, storage, electricity grids, and policies materially affecting them. I don't want short-term energy stock price predictions, or routine local weather forecasts without climate or energy implications. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- climate science, environmental change, and biodiversity\n- energy generation, storage, electricity grids, and policies materially affecting them\nExclude:\n- short-term energy stock price predictions\n- routine local weather forecasts without climate or energy implications\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"climate science, environmental change, and biodiversity\",\n    \"energy generation, storage, electricity grids, and policies materially affecting them\"\n  ],\n  \"exclusions\": [\n    \"short-term energy stock price predictions\",\n    \"routine local weather forecasts without climate or energy implications\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: short-term energy stock price predictions; routine local weather forecasts without climate or energy implications. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: climate science, environmental change, and biodiversity; energy generation, storage, electricity grids, and policies materially affecting them. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "economy_business",
+      "name": "Economy and business",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "macroeconomics, trade, labor markets, central banks, and economic policy",
+          "company operating results, competition, supply chains, and changes in industries"
+        ],
+        "exclusions": [
+          "funding-round or valuation-only announcements",
+          "short-term stock or cryptocurrency price predictions"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about macroeconomics, trade, labor markets, central banks, and economic policy, and about company operating results, competition, supply chains, and changes in industries. I don't want funding-round or valuation-only announcements, or short-term stock or cryptocurrency price predictions. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- macroeconomics, trade, labor markets, central banks, and economic policy\n- company operating results, competition, supply chains, and changes in industries\nExclude:\n- funding-round or valuation-only announcements\n- short-term stock or cryptocurrency price predictions\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"macroeconomics, trade, labor markets, central banks, and economic policy\",\n    \"company operating results, competition, supply chains, and changes in industries\"\n  ],\n  \"exclusions\": [\n    \"funding-round or valuation-only announcements\",\n    \"short-term stock or cryptocurrency price predictions\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: funding-round or valuation-only announcements; short-term stock or cryptocurrency price predictions. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: macroeconomics, trade, labor markets, central banks, and economic policy; company operating results, competition, supply chains, and changes in industries. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "public_affairs",
+      "name": "Public affairs",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "government policy, legislation, court decisions, civil rights, and public institutions",
+          "international relations, armed conflicts, diplomacy, and their civilian consequences"
+        ],
+        "exclusions": [
+          "election polling or campaign horse-race coverage without policy substance",
+          "personal political gossip without consequences for public policy or institutions"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about government policy, legislation, court decisions, civil rights, and public institutions, and about international relations, armed conflicts, diplomacy, and their civilian consequences. I don't want election polling or campaign horse-race coverage without policy substance, or personal political gossip without consequences for public policy or institutions. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- government policy, legislation, court decisions, civil rights, and public institutions\n- international relations, armed conflicts, diplomacy, and their civilian consequences\nExclude:\n- election polling or campaign horse-race coverage without policy substance\n- personal political gossip without consequences for public policy or institutions\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"government policy, legislation, court decisions, civil rights, and public institutions\",\n    \"international relations, armed conflicts, diplomacy, and their civilian consequences\"\n  ],\n  \"exclusions\": [\n    \"election polling or campaign horse-race coverage without policy substance\",\n    \"personal political gossip without consequences for public policy or institutions\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: election polling or campaign horse-race coverage without policy substance; personal political gossip without consequences for public policy or institutions. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: government policy, legislation, court decisions, civil rights, and public institutions; international relations, armed conflicts, diplomacy, and their civilian consequences. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "media_culture",
+      "name": "Media and culture",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "journalism, media organizations, publishing, and the business or policy of media",
+          "film, television, music, and cultural institutions, including substantive analysis of creative work"
+        ],
+        "exclusions": [
+          "celebrity relationships or lifestyle gossip",
+          "routine release calendars without substantive analysis"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about journalism, media organizations, publishing, and the business or policy of media, and about film, television, music, and cultural institutions, including substantive analysis of creative work. I don't want celebrity relationships or lifestyle gossip, or routine release calendars without substantive analysis. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- journalism, media organizations, publishing, and the business or policy of media\n- film, television, music, and cultural institutions, including substantive analysis of creative work\nExclude:\n- celebrity relationships or lifestyle gossip\n- routine release calendars without substantive analysis\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"journalism, media organizations, publishing, and the business or policy of media\",\n    \"film, television, music, and cultural institutions, including substantive analysis of creative work\"\n  ],\n  \"exclusions\": [\n    \"celebrity relationships or lifestyle gossip\",\n    \"routine release calendars without substantive analysis\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: celebrity relationships or lifestyle gossip; routine release calendars without substantive analysis. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: journalism, media organizations, publishing, and the business or policy of media; film, television, music, and cultural institutions, including substantive analysis of creative work. Any one interest is sufficient."
+      }
+    },
+    {
+      "id": "sports",
+      "name": "Sports",
+      "origin": "synthetic_research_profile",
+      "canonical": {
+        "interests": [
+          "major sporting competitions, results, rules, tactics, and performance analysis",
+          "sports governance, team management, and the economics of sport"
+        ],
+        "exclusions": [
+          "athlete celebrity lifestyles or relationships unrelated to sport",
+          "betting tips or odds-only coverage"
+        ],
+        "match_rule": "any_interest_unless_excluded"
+      },
+      "variants": {
+        "prose": "I'm interested in news about major sporting competitions, results, rules, tactics, and performance analysis, and about sports governance, team management, and the economics of sport. I don't want athlete celebrity lifestyles or relationships unrelated to sport, or betting tips or odds-only coverage. Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "bullets": "Interests:\n- major sporting competitions, results, rules, tactics, and performance analysis\n- sports governance, team management, and the economics of sport\nExclude:\n- athlete celebrity lifestyles or relationships unrelated to sport\n- betting tips or odds-only coverage\nRule: Any one listed interest is sufficient. Explicit exclusions take precedence over interests.",
+        "structured": "{\n  \"interests\": [\n    \"major sporting competitions, results, rules, tactics, and performance analysis\",\n    \"sports governance, team management, and the economics of sport\"\n  ],\n  \"exclusions\": [\n    \"athlete celebrity lifestyles or relationships unrelated to sport\",\n    \"betting tips or odds-only coverage\"\n  ],\n  \"rule\": \"Any one listed interest is sufficient. Explicit exclusions take precedence over interests.\"\n}",
+        "checklist": "Use this decision checklist:\n1. Check whether the item falls under either exclusion: athlete celebrity lifestyles or relationships unrelated to sport; betting tips or odds-only coverage. Exclusions take precedence.\n2. Otherwise, check whether the item is about either interest: major sporting competitions, results, rules, tactics, and performance analysis; sports governance, team management, and the economics of sport. Any one interest is sufficient."
+      }
+    }
+  ]
+}

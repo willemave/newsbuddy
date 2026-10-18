@@ -132,7 +132,7 @@ fn extract_key_takeaway(metadata: &Map<String, Value>) -> Option<String> {
     None
 }
 
-pub(super) fn present_news_summary(item: &NewsItemProjection) -> NewsItemSummaryResponse {
+pub(crate) fn present_news_summary(item: &NewsItemProjection) -> NewsItemSummaryResponse {
     let metadata = value_object(&item.raw_metadata);
     let cluster = object_field(&metadata, "cluster");
     let mut top_comment = news_top_comment(item, &metadata);
@@ -967,15 +967,9 @@ fn news_content_status(status: &str) -> ContentStatus {
     }
 }
 
-fn news_classification(metadata: &Map<String, Value>) -> Option<ContentClassification> {
-    match object_field(metadata, "summary")
-        .and_then(|summary| summary.get("classification"))
-        .and_then(Value::as_str)
-    {
-        Some("to_read") => Some(ContentClassification::ToRead),
-        Some("skip") => Some(ContentClassification::Skip),
-        _ => None,
-    }
+// Installed clients still require this nullable key during the compatibility window.
+fn news_classification(_metadata: &Map<String, Value>) -> Option<ContentClassification> {
+    None
 }
 
 fn news_top_comment(
@@ -1384,7 +1378,7 @@ mod tests {
         assert_eq!(summary.content_type, ContentType::News);
         assert_eq!(summary.title, "Canonical News title");
         assert_eq!(summary.status, ContentStatus::Completed);
-        assert_eq!(summary.classification, Some(ContentClassification::ToRead));
+        assert_eq!(summary.classification, None);
         assert_eq!(summary.comment_count, Some(12));
         assert_eq!(
             summary

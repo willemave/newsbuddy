@@ -7,6 +7,8 @@ import SwiftUI
 
 struct OnboardingAudioStep: View {
     let viewModel: OnboardingViewModel
+    @State private var typedInterests = ""
+    @State private var isTyping = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,11 +20,29 @@ struct OnboardingAudioStep: View {
             )
             .padding(.top, 16)
 
+            if isTyping {
+                ScrollView {
+                    TextEditor(text: $typedInterests)
+                        .font(.modalBody)
+                        .foregroundStyle(Color.onSurface)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 160)
+                        .accessibilityLabel("Your interests")
+                        .accessibilityIdentifier("onboarding.typed_interests")
+                    Button("Use these interests") {
+                        Task { await viewModel.discoverTypedInterests(typedInterests) }
+                    }
+                    .disabled(typedInterests.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isLoading)
+                    .accessibilityIdentifier("onboarding.typed_interests.submit")
+                }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+            }
+
             Spacer()
 
             if viewModel.audioState == .transcribing {
                 audioProcessingView
-            } else {
+            } else if !isTyping {
                 OnboardingMicButton(
                     audioState: viewModel.audioState,
                     durationSeconds: viewModel.audioDurationSeconds,
@@ -34,6 +54,14 @@ struct OnboardingAudioStep: View {
             Spacer()
 
             if viewModel.audioState != .transcribing {
+                Button(isTyping ? "Use voice instead" : "Type instead") {
+                    isTyping.toggle()
+                    if isTyping { viewModel.resetAudioState() }
+                }
+                .font(.appCallout)
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .accessibilityIdentifier("onboarding.type_instead")
+
                 Button("Skip") {
                     viewModel.chooseDefaults()
                 }

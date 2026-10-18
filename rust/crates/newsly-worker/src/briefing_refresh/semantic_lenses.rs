@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use chrono::Utc;
-use futures_util::future::join_all;
 use newsly_db::{
     BriefingLensAssignmentPlan, BriefingLensAssignmentUsage, BriefingLensCentroidMutation,
     BriefingPendingLensAssignment, BriefingPlannedLens, BriefingRefreshConfig,
@@ -12,31 +11,38 @@ use newsly_providers::{
 };
 use thiserror::Error;
 
+mod naming;
 mod vectors;
+
+use naming::{name_cluster, name_clusters, naming_usage};
 
 use vectors::{cosine, mean_vector};
 
-use super::{EMBEDDING_PROVIDER, centroid_model, nonempty, split_model_spec};
+use super::category_routing::CategoryRoute;
+use super::{centroid_model, nonempty, split_model_spec};
 
 const LENS_NAMING_ATTEMPTS: usize = 2;
-const LENS_NAMING_PARALLELISM: usize = 4;
+pub(super) const LENS_NAMING_PARALLELISM: usize = 4;
 
 pub(super) async fn plan_semantic_lenses(
     gateway: &BriefingCompositionGateway,
     seed: &PreparedBriefingRefreshSeed,
     config: &BriefingRefreshConfig,
-    embedding_batch_size: usize,
+    routes: &[CategoryRoute],
     source_vectors: Vec<Vec<f64>>,
     new_category_budget: usize,
+    lease: &crate::LeaseHealth,
 ) -> Result<BriefingLensAssignmentPlan, SemanticLensPlanningError> {
     plan_semantic_lenses_with_namer(
         gateway,
         seed,
         config,
-        embedding_batch_size,
+        routes,
         source_vectors,
         new_category_budget,
-        |candidates| async move { name_cluster(gateway, &candidates).await },
+        |candidates| async move {
+            name_cluster(gateway, &candidates, config.new_lens_min_items, lease).await
+        },
     )
     .await
 }
@@ -45,7 +51,7 @@ async fn plan_semantic_lenses_with_namer<F, Fut>(
     gateway: &BriefingCompositionGateway,
     seed: &PreparedBriefingRefreshSeed,
     config: &BriefingRefreshConfig,
-    embedding_batch_size: usize,
+    routes: &[CategoryRoute],
     source_vectors: Vec<Vec<f64>>,
     new_category_budget: usize,
     namer: F,
@@ -56,440 +62,269 @@ where
             Output = Result<newsly_providers::GeneratedBriefingLensName, SemanticLensPlanningError>,
         >,
 {
-    let snapshot = &seed.lens_assignment;
-    if snapshot.pending_sources.is_empty() {
-        return Ok(empty_plan(seed));
-    }
-    let vector_size = source_vectors.first().map_or(0, Vec::len);
-    let centroid_model = centroid_model(gateway.embedding_model());
-    // A compatible durable centroid already is the routing vector. Embedding its
-    // display profile on every arrival wastes provider work and is never used.
-    let mut vectors: Vec<Option<Vec<f64>>> = snapshot
-        .active_lenses
-        .iter()
-        .map(|lens| compatible_centroid(lens, &centroid_model, vector_size).cloned())
-        .collect();
-    let missing: Vec<usize> = vectors
-        .iter()
-        .enumerate()
-        .filter_map(|(index, vector)| vector.is_none().then_some(index))
-        .collect();
     let mut usage = Vec::new();
-    for indices in missing.chunks(embedding_batch_size.clamp(1, 128)) {
-        let texts: Vec<String> = indices
-            .iter()
-            .map(|index| snapshot.active_lenses[*index].profile_text())
-            .collect();
-        match gateway.embed(&texts).await {
-            Ok(batch) => {
-                if batch.vectors.len() != indices.len() {
-                    return Err(SemanticLensPlanningError::EmbeddingShape {
-                        expected: indices.len(),
-                        actual: batch.vectors.len(),
-                    });
-                }
-                usage.push(BriefingLensAssignmentUsage {
-                    provider: EMBEDDING_PROVIDER.to_owned(),
-                    model: batch.model,
-                    provider_response_id: batch.provider_response_id,
-                    usage: batch.usage,
-                    feature: "briefing_category_assignment".to_owned(),
-                    operation: "briefing.embed_categories".to_owned(),
-                });
-                for (index, vector) in indices.iter().zip(batch.vectors) {
-                    vectors[*index] = Some(vector);
-                }
-            }
-            Err(error) => {
-                tracing::warn!(task_id=seed.task_id, user_id=seed.user_id, error=%error,
-                    "Briefing category fallback embedding failed");
-                return plan_nonsemantic_lenses(gateway, seed, config, usage).await;
-            }
+    let result = async {
+        let snapshot = &seed.lens_assignment;
+        if snapshot.pending_sources.is_empty() {
+            return Ok(empty_plan(seed));
         }
-    }
-    let vectors: Vec<Vec<f64>> = vectors.into_iter().flatten().collect();
-    if source_vectors.len() != snapshot.pending_sources.len() {
-        return Err(SemanticLensPlanningError::EmbeddingShape {
-            expected: snapshot.pending_sources.len(),
-            actual: source_vectors.len(),
-        });
-    }
-    let profile_vectors = &vectors;
-    if vector_size == 0
-        || source_vectors
-            .iter()
-            .any(|vector| vector.len() != vector_size)
-        || profile_vectors
-            .iter()
-            .any(|vector| vector.len() != vector_size)
-    {
-        return Err(SemanticLensPlanningError::InconsistentEmbeddingWidth);
-    }
-    let mut lenses = snapshot
-        .active_lenses
-        .iter()
-        .zip(profile_vectors)
-        .map(|(lens, profile)| WorkingLens::existing(lens, profile, &centroid_model, vector_size))
-        .collect::<Vec<_>>();
-    let mut assignments = Vec::new();
-    let mut remaining = Vec::new();
-    for (pending, vector) in snapshot.pending_sources.iter().cloned().zip(source_vectors) {
-        let Some((lens_index, score)) = best_lens(&vector, &lenses) else {
-            remaining.push(Candidate { pending, vector });
-            continue;
-        };
-        if score < config.category_similarity {
-            remaining.push(Candidate { pending, vector });
-            continue;
+        let vector_size = source_vectors.first().map_or(0, Vec::len);
+        let centroid_model = centroid_model(gateway.embedding_model());
+        if source_vectors.len() != snapshot.pending_sources.len() {
+            return Err(SemanticLensPlanningError::EmbeddingShape {
+                expected: snapshot.pending_sources.len(),
+                actual: source_vectors.len(),
+            });
         }
-        let lens_key = lenses[lens_index].key.clone();
-        lenses[lens_index].update_centroid(&vector, config.centroid_max_weight, &centroid_model);
-        assignments.push(assignment(&pending, lens_key));
-    }
-
-    let mut used_keys = snapshot
-        .all_lens_keys
-        .iter()
-        .cloned()
-        .collect::<HashSet<_>>();
-    let mut active_count = snapshot
-        .active_news_lens_keys
-        .iter()
-        .filter(|key| *key != "misc")
-        .count();
-    let starting_active_count = active_count;
-    let mut next_position = snapshot.next_news_position;
-    let mut misc_plan = None;
-    if active_count >= config.max_news_lenses {
-        assign_capped_remaining(
-            &mut assignments,
-            &remaining,
-            &mut lenses,
-            snapshot
-                .active_news_lens_keys
+        if vector_size == 0
+            || source_vectors
                 .iter()
-                .any(|key| key == "misc"),
-            config,
-            &centroid_model,
-        );
-        remaining.clear();
-    } else {
-        let clusters = cluster_candidates(remaining, config.category_cluster_similarity);
-        let (mut ready, small) = split_ready_clusters(clusters, config.new_lens_min_items);
-        if small
-            .iter()
-            .map(|cluster| cluster.candidates.len())
-            .sum::<usize>()
-            >= config.new_lens_min_items
+                .any(|vector| vector.len() != vector_size)
         {
-            ready.extend(pack_small_clusters(
-                small,
-                config.new_lens_min_items,
-                config.news_window_max,
-            ));
+            return Err(SemanticLensPlanningError::InconsistentEmbeddingWidth);
         }
-        ready.sort_by(|left, right| {
-            right
-                .candidates
-                .len()
-                .cmp(&left.candidates.len())
-                .then_with(|| oldest(left).cmp(&oldest(right)))
-        });
-        // A first edition can name and publish one coherent category while
-        // other clusters remain in the durable, frozen onboarding cohort.
-        ready.truncate(new_category_budget);
-        let mut names = name_clusters(
-            &ready,
-            config.max_news_lenses.saturating_sub(active_count),
-            config.news_window_max,
-            |candidates| namer(candidates.to_vec()),
-        )
-        .await?
-        .into_iter();
-        for cluster in ready {
-            if active_count < config.max_news_lenses {
-                let generated = names.next().expect("each new lens has a planned name");
-                let (provider, fallback_model) = split_model_spec(gateway.naming_model_spec());
-                usage.push(BriefingLensAssignmentUsage {
-                    provider: provider.to_owned(),
-                    model: nonempty(&generated.model)
-                        .unwrap_or(fallback_model)
-                        .to_owned(),
-                    provider_response_id: generated.provider_response_id,
-                    usage: generated.usage,
-                    feature: "briefing_lens_naming".to_owned(),
-                    operation: "briefing.name_lens".to_owned(),
+        let mut lenses = snapshot
+            .active_lenses
+            .iter()
+            .map(|lens| WorkingLens::existing(lens, &centroid_model, vector_size))
+            .collect::<Vec<_>>();
+        let mut assignments = Vec::new();
+        let mut remaining = Vec::new();
+        if routes.len() != snapshot.pending_sources.len() {
+            return Err(SemanticLensPlanningError::InvalidRoutes);
+        }
+        for ((pending, vector), route) in snapshot
+            .pending_sources
+            .iter()
+            .cloned()
+            .zip(source_vectors)
+            .zip(routes)
+        {
+            match route {
+                CategoryRoute::Existing(key) => {
+                    let Some(lens) = lenses.iter_mut().find(|lens| &lens.key == key) else {
+                        return Err(SemanticLensPlanningError::InvalidRoutes);
+                    };
+                    lens.update_centroid(&vector, config.centroid_max_weight, &centroid_model);
+                    assignments.push(assignment(&pending, key.clone()));
+                }
+                CategoryRoute::Discover => remaining.push(Candidate { pending, vector }),
+                CategoryRoute::General => assignments.push(assignment(&pending, "misc".to_owned())),
+            }
+        }
+        let mut deferred_ids = HashSet::new();
+
+        let mut used_keys = snapshot
+            .all_lens_keys
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let mut active_count = snapshot
+            .active_news_lens_keys
+            .iter()
+            .filter(|key| *key != "misc")
+            .count();
+        let mut next_position = snapshot.next_news_position;
+        if active_count >= config.max_news_lenses {
+            assignments.extend(
+                remaining
+                    .iter()
+                    .map(|candidate| assignment(&candidate.pending, "misc".to_owned())),
+            );
+            remaining.clear();
+        } else {
+            let clusters = cluster_candidates(remaining, config.category_cluster_similarity);
+            let (mut ready, small) = split_ready_clusters(clusters, config.new_lens_min_items);
+            rank_clusters(&mut ready);
+            let mut packed =
+                pack_small_clusters(small, config.new_lens_min_items, config.news_window_max);
+            rank_clusters(&mut packed);
+            ready.extend(packed);
+            // Only the central bounded sample is shown to the naming/membership model.
+            for cluster in &mut ready {
+                cluster.candidates.sort_by(|left, right| {
+                    cosine(&right.vector, &cluster.centroid)
+                        .total_cmp(&cosine(&left.vector, &cluster.centroid))
                 });
+            }
+            // First editions review one parallel batch before publishing one window;
+            // other proposals remain in the durable frozen cohort.
+            ready.truncate(new_category_budget);
+            let names = name_clusters(
+                &ready,
+                config.max_news_lenses.saturating_sub(active_count),
+                config.news_window_max,
+                |candidates| namer(candidates.to_vec()),
+            )
+            .await?;
+            usage.extend(
+                names
+                    .names
+                    .iter()
+                    .flatten()
+                    .map(|name| naming_usage(name, gateway.naming_model_spec())),
+            );
+            usage.extend(names.failed_usage);
+            let mut names = names.names.into_iter();
+            for cluster in ready {
+                let Some(generated) = names.next() else {
+                    // No further naming call is allowed this sweep. At the category
+                    // cap, retain coverage without inventing an unrelated match.
+                    if active_count >= config.max_news_lenses {
+                        assignments.extend(
+                            cluster
+                                .candidates
+                                .iter()
+                                .map(|candidate| assignment(&candidate.pending, "misc".to_owned())),
+                        );
+                    }
+                    continue;
+                };
+                let Some(generated) = generated else {
+                    // An exhausted naming call cannot justify a category or a
+                    // general assignment. Retry its sources in a later task.
+                    continue;
+                };
+                let shown =
+                    &cluster.candidates[..cluster.candidates.len().min(config.news_window_max)];
+                generated
+                    .name
+                    .validate_membership(
+                        &shown
+                            .iter()
+                            .map(|candidate| composition_source(&candidate.pending))
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(SemanticLensPlanningError::InvalidMembership)?;
+                let members = shown
+                    .iter()
+                    .filter(|candidate| {
+                        generated
+                            .name
+                            .member_source_keys
+                            .contains(&candidate.pending.source.source_key)
+                    })
+                    .collect::<Vec<_>>();
+                if members.len() < config.new_lens_min_items {
+                    assignments.extend(
+                        shown
+                            .iter()
+                            .map(|candidate| assignment(&candidate.pending, "misc".to_owned())),
+                    );
+                    continue;
+                }
+                let accepted_centroid = mean_vector(
+                    &members
+                        .iter()
+                        .map(|candidate| candidate.vector.clone())
+                        .collect::<Vec<_>>(),
+                );
                 let key = unique_lens_key(&generated.name.key, &mut used_keys);
-                let mut lens = WorkingLens::new(
+                let lens = WorkingLens::new(
                     key.clone(),
                     generated.name.title,
                     generated.name.deck,
                     next_position,
-                    cluster.centroid.clone(),
-                    cluster.candidates.len(),
+                    accepted_centroid,
+                    members.len(),
                     &centroid_model,
                 );
                 next_position = next_position.saturating_add(1);
                 active_count += 1;
-                for candidate in &cluster.candidates {
-                    assignments.push(assignment(&candidate.pending, key.clone()));
+                for candidate in shown {
+                    let target = if generated
+                        .name
+                        .member_source_keys
+                        .contains(&candidate.pending.source.source_key)
+                    {
+                        key.clone()
+                    } else {
+                        "misc".to_owned()
+                    };
+                    assignments.push(assignment(&candidate.pending, target));
                 }
-                lens.changed = false;
+                // A new category is not part of this task's frozen Jev choices. Its
+                // unshown sources wait for the next task, including during onboarding.
+                for candidate in &cluster.candidates[shown.len()..] {
+                    if seed.mode == newsly_db::BriefingRefreshMode::Full {
+                        // A full rebuild replaces the old edition atomically. Preserve
+                        // unreviewed coverage in general news instead of hiding it.
+                        assignments.push(assignment(&candidate.pending, "misc".to_owned()));
+                    } else {
+                        deferred_ids.insert(candidate.pending.pending_id);
+                    }
+                }
                 lenses.push(lens);
-                continue;
-            }
-            let Some((lens_index, score)) = best_lens(&cluster.centroid, &lenses) else {
-                continue;
-            };
-            if score >= config.category_absorb_similarity {
-                let key = lenses[lens_index].key.clone();
-                for candidate in &cluster.candidates {
-                    lenses[lens_index].update_centroid(
-                        &candidate.vector,
-                        config.centroid_max_weight,
-                        &centroid_model,
-                    );
-                    assignments.push(assignment(&candidate.pending, key.clone()));
-                }
-                continue;
-            }
-            let fallback_key = if snapshot
-                .active_news_lens_keys
-                .iter()
-                .any(|key| key == "misc")
-            {
-                "misc".to_owned()
-            } else {
-                lenses[lens_index].key.clone()
-            };
-            for candidate in &cluster.candidates {
-                if fallback_key == lenses[lens_index].key {
-                    lenses[lens_index].update_centroid(
-                        &candidate.vector,
-                        config.centroid_max_weight,
-                        &centroid_model,
-                    );
-                }
-                assignments.push(assignment(&candidate.pending, fallback_key.clone()));
             }
         }
-    }
 
-    let assigned_ids = assignments
-        .iter()
-        .map(|assignment| assignment.pending_id)
-        .collect::<HashSet<_>>();
-    let stale = snapshot
-        .pending_sources
-        .iter()
-        .filter(|pending| !assigned_ids.contains(&pending.pending_id))
-        .collect::<Vec<_>>();
-    if !stale.is_empty()
-        && stale.len() < config.new_lens_min_items
-        && stale
+        let assigned_ids = assignments
             .iter()
-            .map(|pending| pending.enqueued_at)
-            .min()
-            .is_some_and(|oldest| {
-                (Utc::now() - oldest).num_seconds() >= config.pending_max_age_seconds
+            .map(|assignment| assignment.pending_id)
+            .collect::<HashSet<_>>();
+        let stale = snapshot
+            .pending_sources
+            .iter()
+            .filter(|pending| {
+                !assigned_ids.contains(&pending.pending_id)
+                    && !deferred_ids.contains(&pending.pending_id)
             })
-    {
-        let misc_active = snapshot
-            .active_news_lens_keys
-            .iter()
-            .any(|key| key == "misc");
-        if misc_active
-            || (active_count < config.max_news_lenses
-                && active_count.saturating_sub(starting_active_count) < new_category_budget)
+            .collect::<Vec<_>>();
+        if !stale.is_empty()
+            && stale.len() < config.new_lens_min_items
+            && stale
+                .iter()
+                .map(|pending| pending.enqueued_at)
+                .min()
+                .is_some_and(|oldest| {
+                    (Utc::now() - oldest).num_seconds() >= config.pending_max_age_seconds
+                })
         {
-            if !misc_active {
-                misc_plan = Some(misc_lens(next_position));
-            }
             assignments.extend(
                 stale
                     .into_iter()
                     .map(|pending| assignment(pending, "misc".to_owned())),
             );
         }
-    }
 
-    let mut new_lenses = lenses
-        .iter()
-        .filter(|lens| lens.id.is_none())
-        .map(WorkingLens::planned_lens)
-        .collect::<Vec<_>>();
-    if let Some(misc) = misc_plan {
-        new_lenses.push(misc);
-    }
-    let centroid_mutations = lenses
-        .iter()
-        .filter_map(WorkingLens::centroid_mutation)
-        .collect();
-    Ok(BriefingLensAssignmentPlan {
-        task_id: seed.task_id,
-        user_id: seed.user_id,
-        starting_version: seed.starting_version,
-        assignments,
-        centroid_mutations,
-        new_lenses,
-        usage,
-    })
-}
-
-pub(super) async fn plan_nonsemantic_lenses(
-    gateway: &BriefingCompositionGateway,
-    seed: &PreparedBriefingRefreshSeed,
-    config: &BriefingRefreshConfig,
-    mut usage: Vec<BriefingLensAssignmentUsage>,
-) -> Result<BriefingLensAssignmentPlan, SemanticLensPlanningError> {
-    let snapshot = &seed.lens_assignment;
-    let pending = &snapshot.pending_sources;
-    let oldest_is_stale = pending
-        .iter()
-        .map(|source| source.enqueued_at)
-        .min()
-        .is_some_and(|oldest| {
-            (Utc::now() - oldest).num_seconds() >= config.pending_max_age_seconds
-        });
-    let should_assign = pending.len() >= config.new_lens_min_items || oldest_is_stale;
-    if !should_assign {
-        return Ok(BriefingLensAssignmentPlan {
-            usage,
-            ..empty_plan(seed)
-        });
-    }
-    let mut new_lenses = Vec::new();
-    let target = if pending.len() >= config.new_lens_min_items
-        && snapshot.active_news_lens_keys.len() < config.max_news_lenses
-    {
-        let generated = name_cluster(
-            gateway,
-            &pending
+        let mut new_lenses = lenses
+            .iter()
+            .filter(|lens| lens.id.is_none())
+            .map(WorkingLens::planned_lens)
+            .collect::<Vec<_>>();
+        if assignments
+            .iter()
+            .any(|assignment| assignment.lens_key == "misc")
+            && !snapshot
+                .active_news_lens_keys
                 .iter()
-                .take(config.news_window_max)
-                .cloned()
-                .map(|pending| Candidate {
-                    pending,
-                    vector: Vec::new(),
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await?;
-        let (provider, fallback_model) = split_model_spec(gateway.naming_model_spec());
-        usage.push(BriefingLensAssignmentUsage {
-            provider: provider.to_owned(),
-            model: nonempty(&generated.model)
-                .unwrap_or(fallback_model)
-                .to_owned(),
-            provider_response_id: generated.provider_response_id,
-            usage: generated.usage,
-            feature: "briefing_lens_naming".to_owned(),
-            operation: "briefing.name_lens".to_owned(),
-        });
-        let mut used = snapshot
-            .all_lens_keys
-            .iter()
-            .cloned()
-            .collect::<HashSet<_>>();
-        let key = unique_lens_key(&generated.name.key, &mut used);
-        new_lenses.push(BriefingPlannedLens {
-            key: key.clone(),
-            title: generated.name.title,
-            deck: generated.name.deck,
-            position: snapshot.next_news_position,
-            centroid: None,
-            centroid_weight: 0,
-            centroid_model: None,
-        });
-        Some(key)
-    } else if snapshot
-        .active_news_lens_keys
-        .iter()
-        .any(|key| key == "misc")
-    {
-        Some("misc".to_owned())
-    } else if snapshot.active_news_lens_keys.len() < config.max_news_lenses {
-        new_lenses.push(misc_lens(snapshot.next_news_position));
-        Some("misc".to_owned())
-    } else {
-        None
-    };
-    let assignments = if let Some(target) = target {
-        pending
-            .iter()
-            .map(|pending| assignment(pending, target.clone()))
-            .collect()
-    } else {
-        pending
-            .iter()
-            .zip(snapshot.active_news_lens_keys.iter().cycle())
-            .map(|(pending, key)| assignment(pending, key.clone()))
-            .collect()
-    };
-    Ok(BriefingLensAssignmentPlan {
-        task_id: seed.task_id,
-        user_id: seed.user_id,
-        starting_version: seed.starting_version,
-        assignments,
-        centroid_mutations: Vec::new(),
-        new_lenses,
-        usage,
-    })
-}
-
-// Only provider work overlaps. Batches retain cluster order and a failed batch
-// prevents further requests; keys, positions, and assignments remain sequential.
-async fn name_clusters<'a, F, Fut>(
-    clusters: &'a [Cluster],
-    available_slots: usize,
-    source_limit: usize,
-    name: F,
-) -> Result<Vec<newsly_providers::GeneratedBriefingLensName>, SemanticLensPlanningError>
-where
-    F: Fn(&'a [Candidate]) -> Fut,
-    Fut: std::future::Future<
-            Output = Result<newsly_providers::GeneratedBriefingLensName, SemanticLensPlanningError>,
-        >,
-{
-    let mut names = Vec::new();
-    for batch in clusters[..clusters.len().min(available_slots)].chunks(LENS_NAMING_PARALLELISM) {
-        let results = join_all(batch.iter().map(|cluster| {
-            name(&cluster.candidates[..cluster.candidates.len().min(source_limit)])
-        }))
-        .await;
-        names.extend(results.into_iter().collect::<Result<Vec<_>, _>>()?);
-    }
-    Ok(names)
-}
-
-async fn name_cluster(
-    gateway: &BriefingCompositionGateway,
-    candidates: &[Candidate],
-) -> Result<newsly_providers::GeneratedBriefingLensName, SemanticLensPlanningError> {
-    let sources = candidates
-        .iter()
-        .map(|candidate| composition_source(&candidate.pending))
-        .collect::<Vec<_>>();
-    let mut last_error = None;
-    for attempt in 1..=LENS_NAMING_ATTEMPTS {
-        match gateway.name_lens(&sources).await {
-            Ok(name) => return Ok(name),
-            Err(error) => {
-                tracing::warn!(
-                    source_count = sources.len(),
-                    attempt,
-                    max_attempts = LENS_NAMING_ATTEMPTS,
-                    error = %error,
-                    "Briefing semantic lens naming failed"
-                );
-                last_error = Some(error);
-            }
+                .any(|key| key == "misc")
+        {
+            new_lenses.push(misc_lens(next_position));
         }
+
+        let centroid_mutations = lenses
+            .iter()
+            .filter_map(WorkingLens::centroid_mutation)
+            .collect();
+        Ok(BriefingLensAssignmentPlan {
+            task_id: seed.task_id,
+            user_id: seed.user_id,
+            starting_version: seed.starting_version,
+            assignments,
+            centroid_mutations,
+            new_lenses,
+            usage: Vec::new(),
+        })
     }
-    Err(SemanticLensPlanningError::Provider(
-        last_error.expect("at least one lens naming attempt must run"),
-    ))
+    .await;
+    match result {
+        Ok(mut plan) => {
+            plan.usage = usage;
+            Ok(plan)
+        }
+        Err(error) => Err(error.with_usage(usage)),
+    }
 }
 
 fn composition_source(pending: &BriefingUnassignedSource) -> BriefingCompositionSource {
@@ -515,36 +350,48 @@ pub(super) fn assign_failed_sources(
     plan: &mut BriefingLensAssignmentPlan,
     seed: &PreparedBriefingRefreshSeed,
     failed: &[BriefingUnassignedSource],
-    config: &BriefingRefreshConfig,
 ) {
     if failed.is_empty() {
         return;
     }
     let active = &seed.lens_assignment.active_news_lens_keys;
-    let target = if active.iter().any(|key| key == "misc")
-        || plan.new_lenses.iter().any(|lens| lens.key == "misc")
+    if !active.iter().any(|key| key == "misc")
+        && !plan.new_lenses.iter().any(|lens| lens.key == "misc")
     {
-        "misc".to_owned()
-    } else if active.len() + plan.new_lenses.len() < config.max_news_lenses {
         plan.new_lenses.push(misc_lens(
             seed.lens_assignment.next_news_position
                 + i32::try_from(plan.new_lenses.len()).unwrap_or(0),
         ));
-        "misc".to_owned()
-    } else if let Some(key) = active
-        .first()
-        .cloned()
-        .or_else(|| plan.new_lenses.first().map(|lens| lens.key.clone()))
-    {
-        key
-    } else {
-        return;
-    };
+    }
     plan.assignments.extend(
         failed
             .iter()
-            .map(|source| assignment(source, target.clone())),
+            .map(|source| assignment(source, "misc".to_owned())),
     );
+}
+
+/// Full replaces the entire edition, so every source needs an assignment even
+/// when bounded routing, vector readiness, or naming left it unreviewed.
+pub(super) fn complete_full_assignments(
+    plan: &mut BriefingLensAssignmentPlan,
+    seed: &PreparedBriefingRefreshSeed,
+) {
+    if seed.mode != newsly_db::BriefingRefreshMode::Full {
+        return;
+    }
+    let assigned = plan
+        .assignments
+        .iter()
+        .map(|row| row.pending_id)
+        .collect::<HashSet<_>>();
+    let remaining = seed
+        .lens_assignment
+        .pending_sources
+        .iter()
+        .filter(|source| !assigned.contains(&source.pending_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    assign_failed_sources(plan, seed, &remaining);
 }
 
 fn empty_plan(seed: &PreparedBriefingRefreshSeed) -> BriefingLensAssignmentPlan {
@@ -659,21 +506,22 @@ fn pack_small_clusters(
             };
             group = group.merge(remaining.remove(index));
         }
-        if group.candidates.len() < minimum && !packed.is_empty() {
-            let target = nearest_cluster_index(&group, &packed, Some(maximum))
-                .or_else(|| nearest_cluster_index(&group, &packed, None));
-            if let Some(index) = target {
-                let merged = packed.remove(index).merge(group);
-                packed.insert(index, merged);
-                continue;
-            }
-        }
         packed.push(group);
     }
     packed
         .into_iter()
         .filter(|cluster| cluster.candidates.len() >= minimum)
         .collect()
+}
+
+fn rank_clusters(clusters: &mut [Cluster]) {
+    clusters.sort_by(|left, right| {
+        right
+            .candidates
+            .len()
+            .cmp(&left.candidates.len())
+            .then_with(|| oldest(left).cmp(&oldest(right)))
+    });
 }
 
 fn most_connected_cluster_index(clusters: &[Cluster]) -> usize {
@@ -750,7 +598,6 @@ struct WorkingLens {
     title: String,
     deck: String,
     position: i32,
-    similarity_vector: Vec<f64>,
     centroid: Option<Vec<f64>>,
     centroid_weight: i32,
     centroid_model: String,
@@ -758,12 +605,7 @@ struct WorkingLens {
 }
 
 impl WorkingLens {
-    fn existing(
-        lens: &BriefingSemanticLens,
-        profile: &[f64],
-        model: &str,
-        vector_size: usize,
-    ) -> Self {
+    fn existing(lens: &BriefingSemanticLens, model: &str, vector_size: usize) -> Self {
         let valid_centroid = compatible_centroid(lens, model, vector_size);
         Self {
             id: Some(lens.id),
@@ -771,7 +613,6 @@ impl WorkingLens {
             title: lens.title.clone(),
             deck: lens.deck.clone(),
             position: lens.position,
-            similarity_vector: valid_centroid.cloned().unwrap_or_else(|| profile.to_vec()),
             centroid: valid_centroid.cloned(),
             centroid_weight: valid_centroid.map_or(0, |_| lens.centroid_weight.max(1)),
             centroid_model: model.to_owned(),
@@ -795,7 +636,6 @@ impl WorkingLens {
             title,
             deck,
             position,
-            similarity_vector: centroid.clone(),
             centroid: Some(centroid),
             centroid_weight: i32::try_from(weight).unwrap_or(i32::MAX),
             centroid_model: model.to_owned(),
@@ -823,7 +663,7 @@ impl WorkingLens {
             .zip(vector)
             .map(|(current, next)| ((*current * f64::from(capped)) + next) / denominator)
             .collect::<Vec<_>>();
-        self.centroid = Some(updated.clone());
+        self.centroid = Some(updated);
         self.centroid_weight = (weight + 1).min(max_weight);
         self.changed = true;
     }
@@ -851,10 +691,6 @@ impl WorkingLens {
     }
 }
 
-fn best_lens(vector: &[f64], lenses: &[WorkingLens]) -> Option<(usize, f64)> {
-    best_similarity_index(vector, lenses, |lens| lens.similarity_vector.as_slice())
-}
-
 fn best_similarity_index<T>(
     vector: &[f64],
     candidates: &[T],
@@ -870,35 +706,6 @@ fn best_similarity_index<T>(
         }
     }
     best
-}
-
-fn assign_capped_remaining(
-    assignments: &mut Vec<BriefingPendingLensAssignment>,
-    remaining: &[Candidate],
-    lenses: &mut [WorkingLens],
-    misc_active: bool,
-    config: &BriefingRefreshConfig,
-    centroid_model: &str,
-) {
-    for candidate in remaining {
-        let Some((index, score)) = best_lens(&candidate.vector, lenses) else {
-            if misc_active {
-                assignments.push(assignment(&candidate.pending, "misc".to_owned()));
-            }
-            continue;
-        };
-        if score >= config.category_absorb_similarity || !misc_active {
-            let key = lenses[index].key.clone();
-            lenses[index].update_centroid(
-                &candidate.vector,
-                config.centroid_max_weight,
-                centroid_model,
-            );
-            assignments.push(assignment(&candidate.pending, key));
-        } else {
-            assignments.push(assignment(&candidate.pending, "misc".to_owned()));
-        }
-    }
 }
 
 fn unique_lens_key(raw: &str, used: &mut HashSet<String>) -> String {
@@ -955,12 +762,61 @@ fn unique_lens_key(raw: &str, used: &mut HashSet<String>) -> String {
 
 #[derive(Debug, Error)]
 pub(super) enum SemanticLensPlanningError {
+    #[error("queue ownership was lost during category naming")]
+    OwnershipLost,
+    #[error("category decisions do not match the prepared sources and categories")]
+    InvalidRoutes,
     #[error("Briefing semantic embedding shape mismatch: expected {expected}, got {actual}")]
     EmbeddingShape { expected: usize, actual: usize },
     #[error("Briefing semantic embeddings have inconsistent dimensions")]
     InconsistentEmbeddingWidth,
+    #[error("invalid Briefing category membership: {0}")]
+    InvalidMembership(String),
+    #[error("{cause}")]
+    Observed {
+        #[source]
+        cause: Box<Self>,
+        usage: Vec<BriefingLensAssignmentUsage>,
+    },
     #[error(transparent)]
     Provider(#[from] BriefingCompositionGatewayError),
+}
+
+impl SemanticLensPlanningError {
+    pub(super) fn observed_usage(&self) -> &[BriefingLensAssignmentUsage] {
+        match self {
+            Self::Observed { usage, .. } => usage,
+            _ => &[],
+        }
+    }
+
+    #[cfg(test)]
+    fn cause(&self) -> &Self {
+        match self {
+            Self::Observed { cause, .. } => cause.cause(),
+            other => other,
+        }
+    }
+
+    fn into_observed(self) -> (Self, Vec<BriefingLensAssignmentUsage>) {
+        match self {
+            Self::Observed { cause, usage } => (*cause, usage),
+            other => (other, Vec::new()),
+        }
+    }
+
+    fn with_usage(self, mut extra: Vec<BriefingLensAssignmentUsage>) -> Self {
+        let (cause, mut observed) = self.into_observed();
+        extra.append(&mut observed);
+        if extra.is_empty() {
+            cause
+        } else {
+            Self::Observed {
+                cause: Box::new(cause),
+                usage: extra,
+            }
+        }
+    }
 }
 
 #[cfg(test)]

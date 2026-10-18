@@ -32,6 +32,11 @@ case "${NEWSLY_RUNTIME_MODE}" in
     exec /usr/local/bin/newsly-api
     ;;
   workers)
+    export NEWSLY_BRIEFING_REFRESH_CONSUMERS="${NEWSLY_BRIEFING_REFRESH_CONSUMERS:-2}"
+    case "${NEWSLY_BRIEFING_REFRESH_CONSUMERS}" in
+      1|2) ;;
+      *) echo "NEWSLY_BRIEFING_REFRESH_CONSUMERS must be 1 or 2" >&2; exit 2 ;;
+    esac
     exec /usr/bin/supervisord -c /app/docker/supervisord.workers.conf
     ;;
   scheduler)

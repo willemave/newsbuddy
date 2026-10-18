@@ -241,7 +241,16 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
 
     func testViewerPollingWindowDoesNotTurnActiveGenerationIntoFailure() async {
         let active = makeLearningDeck(runStatus: .generating)
-        let service = MockLearningDeckService(fetchResults: [.success(active)])
+        let ready = makeLearningDeck(
+            viewerAvailable: true,
+            latestSuccessfulRunId: 1,
+            runStatus: .completed
+        )
+        let expectedURL = URL(string: "https://example.com/completed-deck")!
+        let service = MockLearningDeckService(
+            fetchResults: [.success(active), .success(ready)],
+            viewerURLs: [expectedURL]
+        )
         let viewModel = LearningDeckReaderViewModel(
             lifecycle: makeActiveLearningDeckLifecycle(),
             deck: active,
@@ -260,7 +269,20 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         let stoppedPolling = await waitUntil { !viewModel.isResolvingViewer }
         XCTAssertTrue(stoppedPolling)
         XCTAssertFalse(viewModel.viewerResolutionFailed)
-        XCTAssertEqual(viewModel.generationStatusLabel, "Taking longer than expected")
+        XCTAssertTrue(viewModel.isStatusObservationPaused)
+        XCTAssertEqual(viewModel.generationStatusLabel, "Status updates paused")
+        XCTAssertEqual(service.fetchCallCount, 1)
+
+        viewModel.retryViewerResolution()
+
+        XCTAssertTrue(viewModel.isResolvingViewer)
+        XCTAssertFalse(viewModel.isStatusObservationPaused)
+        let resolved = await waitUntil { viewModel.resolvedViewerURL == expectedURL }
+        XCTAssertTrue(resolved)
+        XCTAssertFalse(viewModel.isResolvingViewer)
+        XCTAssertEqual(service.fetchCallCount, 2)
+        XCTAssertEqual(service.retryCallCount, 0)
+        XCTAssertTrue(service.createRequests.isEmpty)
     }
 
     func testViewerResolutionStopsRetryingTerminalURLFailure() async {

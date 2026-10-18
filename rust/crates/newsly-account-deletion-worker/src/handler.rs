@@ -8,7 +8,8 @@ use tracing::{info, warn};
 
 use crate::external::{AccountExternalServices, remove_local_files};
 use crate::repository::{
-    AccountCleanupPlan, AccountDeletionFinalizer, AccountRepositoryError, prepare_cleanup_plan,
+    AccountCleanupPlan, AccountDeletionFinalizer, AccountDeletionWaitFinalizer,
+    AccountRepositoryError, prepare_cleanup_plan,
 };
 
 const ACTIVE_WORK_DEFER_SECONDS: i64 = 30;
@@ -90,7 +91,12 @@ async fn execute_account_deletion(
                 task_id = task.task_id,
                 user_id, "account deletion deferred until active account-owned work finishes"
             );
-            return HandlerExecution::from_result(TaskResult::defer(ACTIVE_WORK_DEFER_SECONDS));
+            return HandlerExecution::with_finalizer(
+                TaskResult::defer(ACTIVE_WORK_DEFER_SECONDS),
+                AccountDeletionWaitFinalizer {
+                    task_id: task.task_id,
+                },
+            );
         }
         Err(error) => return retryable_failure(&error.to_string()),
     }

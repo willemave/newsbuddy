@@ -93,7 +93,6 @@ struct KnowledgeView: View {
             }
             .refreshable { await viewModel.forceReload() }
             .topScreenEdgeFade()
-            .bottomScreenEdgeFade()
             .scrollsToTopOnRequest(
                 scrollToTopRequest,
                 anchor: Self.topAnchor,
@@ -123,13 +122,17 @@ struct KnowledgeView: View {
         }
         .task(id: activationTaskID) {
             guard isVisible,
-                  lifecycle.phase == .active,
+                  lifecycle.phase != .background,
                   let activation = lifecycle.activation else {
                 return
             }
             async let screenLoad: Void = viewModel.activate(activation)
             async let voiceRefresh: Void = viewModel.chats.checkAndRefreshVoiceDictation()
             _ = await (screenLoad, voiceRefresh)
+        }
+        .task(id: savedObservationTaskID) {
+            guard savedObservationTaskID.shouldObserve else { return }
+            await viewModel.observeSavedKnowledge()
         }
         .task(id: isWaitingForInitialTimeline) {
             await updateInitialLoadingIndicator()
@@ -168,6 +171,22 @@ struct KnowledgeView: View {
         ActivationTaskID(
             generation: lifecycle.activation?.generation,
             isVisible: isVisible
+        )
+    }
+
+    private struct SavedObservationTaskID: Hashable {
+        let isVisible: Bool
+        let isActive: Bool
+        let automaticReadsEnabled: Bool
+
+        var shouldObserve: Bool { isVisible && isActive && automaticReadsEnabled }
+    }
+
+    private var savedObservationTaskID: SavedObservationTaskID {
+        SavedObservationTaskID(
+            isVisible: isVisible,
+            isActive: lifecycle.phase == .active,
+            automaticReadsEnabled: viewModel.automaticReadsEnabled
         )
     }
 
@@ -357,7 +376,8 @@ struct KnowledgeView: View {
                 onRefresh: { Task { await viewModel.savedContent.loadKnowledgeLibrary() } },
                 onReprocess: { await viewModel.savedContent.reprocessKnowledgeItem(content.id) },
                 onRemove: { removeSaved(content) },
-                derivatives: viewModel.sourceDerivatives[KnowledgeSource(content)] ?? []
+                derivatives: viewModel.sourceDerivatives[KnowledgeSource(content)] ?? [],
+                onShortcut: { perform($0, for: content) }
             )
             .contextMenu {
                 KnowledgeSourceActivityMenu(

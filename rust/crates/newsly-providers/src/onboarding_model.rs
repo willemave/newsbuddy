@@ -8,6 +8,8 @@ pub(super) const AUDIO_PLAN_SYSTEM_PROMPT: &str = concat!(
     "(feeds, podcasts, reddit), and 2-4 web search queries. Queries must be varied and specific: ",
     "each query should be a compact search phrase (5-10 words) with concrete keywords tied to the ",
     "lane goal, and avoid repeating the same wording pattern. Include at least one reddit lane. ",
+    "Preserve explicit language and format preferences in topic_summary and search queries. If no ",
+    "language is requested, prefer the narration language; locale alone does not override it. ",
     "Return structured output only. Infer only topics directly supported by the narration, plus at ",
     "most 1-2 clearly adjacent concepts; do not add unsupported niches. Feed queries must seek ",
     "durable, recurring sources such as RSS feeds, newsletters, publications, journals, research ",

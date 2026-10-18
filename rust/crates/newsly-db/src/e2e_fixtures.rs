@@ -351,12 +351,12 @@ async fn upsert_completed_content(
         r#"
         INSERT INTO contents (
             content_type, url, source_url, title, source, status, retry_count,
-            classification, content_metadata, created_at, updated_at, processed_at,
+            content_metadata, created_at, updated_at, processed_at,
             publication_date, platform, is_aggregate, search_text
         )
         VALUES (
             'article', $1, $1, $2, $3, 'completed', 0,
-            'to_read', $4, timezone('UTC', now()), timezone('UTC', now()),
+            $4, timezone('UTC', now()), timezone('UTC', now()),
             timezone('UTC', now()), $5, 'web', FALSE, $6
         )
         ON CONFLICT (url, content_type) DO UPDATE SET
@@ -366,7 +366,6 @@ async fn upsert_completed_content(
             status = 'completed',
             error_message = NULL,
             retry_count = 0,
-            classification = 'to_read',
             content_metadata = EXCLUDED.content_metadata,
             updated_at = timezone('UTC', now()),
             processed_at = timezone('UTC', now()),
@@ -397,12 +396,12 @@ async fn upsert_processing_content(
         r#"
         INSERT INTO contents (
             content_type, url, source_url, title, source, status, retry_count,
-            classification, content_metadata, created_at, updated_at, platform,
+            content_metadata, created_at, updated_at, platform,
             is_aggregate, search_text
         )
         VALUES (
             'article', $1, $1, $2, 'Newsly E2E', 'pending', 0,
-            'to_read', $3, timezone('UTC', now()), timezone('UTC', now()), 'web',
+            $3, timezone('UTC', now()), timezone('UTC', now()), 'web',
             FALSE, $2
         )
         ON CONFLICT (url, content_type) DO UPDATE SET

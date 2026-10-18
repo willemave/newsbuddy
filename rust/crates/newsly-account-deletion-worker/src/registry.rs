@@ -167,6 +167,21 @@ pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
         "DELETE FROM news_item_read_status WHERE user_id::bigint = $1",
     ),
     owned_relation(
+        "news_filter_decisions",
+        "user_id",
+        "DELETE FROM news_filter_decisions WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
+        "news_filter_daily_usage",
+        "user_id",
+        "DELETE FROM news_filter_daily_usage WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
+        "news_filter_preferences",
+        "user_id",
+        "DELETE FROM news_filter_preferences WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
         "news_items",
         "owner_user_id",
         "DELETE FROM news_items WHERE owner_user_id::bigint = $1",

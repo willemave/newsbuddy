@@ -87,7 +87,7 @@ impl TaskHandler for AnalyzeUrlHandler {
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
         let services = Arc::clone(&self.services);
-        Box::pin(async move { execute_analyze_url(&services, &plan, lease).await })
+        Box::pin(async move { Box::pin(execute_analyze_url(&services, &plan, lease)).await })
     }
 }
 

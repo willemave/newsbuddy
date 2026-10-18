@@ -21,6 +21,8 @@ struct OnboardingProgressSnapshot: Codable {
     var hasReachedPollingLimit: Bool
     var topicSummary: String?
     var inferredTopics: [String]
+    var newsFilterText: String? = nil
+    var newsFilterEnabled: Bool? = nil
 }
 
 // Backwards-compatible decoder: snapshots written before fast-news landed have
@@ -37,6 +39,8 @@ extension OnboardingProgressSnapshot {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        newsFilterText = try container.decodeIfPresent(String.self, forKey: .newsFilterText)
+        newsFilterEnabled = try container.decodeIfPresent(Bool.self, forKey: .newsFilterEnabled)
         step = try container.decode(OnboardingStep.self, forKey: .step)
         isPersonalized = try container.decode(Bool.self, forKey: .isPersonalized)
         suggestions = try container.decodeIfPresent(

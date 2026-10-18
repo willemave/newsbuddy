@@ -1,4 +1,7 @@
-use super::{EnqueueRequest, Map, SourcePlan, SourcePlanKind, TaskType, Value};
+use newsly_queue::{EnqueueRequest, TaskType};
+use serde_json::{Map, Value};
+
+use super::{SourcePlan, SourcePlanKind};
 
 // All entrypoints converge here after aggregate payloads expand into concrete sources.
 pub(super) fn isolated_scrape_requests(

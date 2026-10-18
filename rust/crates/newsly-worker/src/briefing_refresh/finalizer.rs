@@ -13,6 +13,10 @@ use crate::{
     FinalizerErrorDisposition, HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult,
 };
 
+#[cfg(test)]
+#[path = "full_finalizer_tests.rs"]
+mod full_finalizer_tests;
+
 #[derive(Debug, Clone)]
 pub(super) struct BriefingRefreshFinalizer {
     queue: QueueKernel,
@@ -20,6 +24,7 @@ pub(super) struct BriefingRefreshFinalizer {
     config: BriefingRefreshConfig,
     stale_recoveries: u64,
     waiting_for_news: bool,
+    waiting_for_embeddings: bool,
 }
 
 impl BriefingRefreshFinalizer {
@@ -29,6 +34,7 @@ impl BriefingRefreshFinalizer {
         config: BriefingRefreshConfig,
         stale_recoveries: u64,
         waiting_for_news: bool,
+        waiting_for_embeddings: bool,
     ) -> Self {
         Self {
             queue,
@@ -36,6 +42,7 @@ impl BriefingRefreshFinalizer {
             config,
             stale_recoveries,
             waiting_for_news,
+            waiting_for_embeddings,
         }
     }
 
@@ -45,6 +52,24 @@ impl BriefingRefreshFinalizer {
     ) -> Result<TaskFinalizerResult, Box<dyn Error + Send + Sync>> {
         let outcome = apply_briefing_refresh(transaction, &self.publication, &self.config).await?;
         let user_id = self.publication.prepared.user_id;
+        if outcome.stale && self.publication.prepared.mode == newsly_db::BriefingRefreshMode::Full {
+            // Retry the original Full intent under this exact lease, with the same
+            // bounded neutral-conflict budget used by assignment preparation.
+            let (retry_count, payload): (i32, Value) = sqlx::query_as(
+                "SELECT retry_count,COALESCE(payload,'{}'::json) FROM processing_tasks WHERE id::bigint=$1",
+            ).bind(self.publication.prepared.task_id).fetch_one(&mut **transaction).await?;
+            let execution = super::stale_assignment::stale_assignment(
+                self.publication.prepared.task_id,
+                user_id,
+                retry_count,
+                payload.as_object().unwrap_or(&Map::new()),
+                Utc::now().timestamp(),
+            );
+            if let Some(finalizer) = execution.finalizer {
+                finalizer.apply(transaction).await?;
+            }
+            return Ok(TaskFinalizerResult::Override(execution.task_result));
+        }
         let initial: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND news_seeded AND NOT news_seed_settled)")
             .bind(user_id).fetch_one(&mut **transaction).await?;
         let delay = next_sweep_delay(
@@ -57,6 +82,13 @@ impl BriefingRefreshFinalizer {
             self.config.sweep_seconds,
         );
         let mut request = sweep_request(user_id, delay);
+        if self.waiting_for_embeddings {
+            request
+                .payload
+                .as_mut()
+                .expect("sweep payload")
+                .insert("waiting_for_news_embeddings".to_owned(), Value::Bool(true));
+        }
         if initial {
             request.priority = 10;
         }
@@ -134,7 +166,9 @@ fn next_sweep_delay(
     if initial && !stale && appended_segments > 0 {
         repository_delay.min(5)
     } else if waiting_for_news && !stale {
-        30
+        // Vector completion normally wakes this task. A short recovery poll also
+        // covers completion just before the successor becomes visible.
+        5
     } else if stale && !recover && initial {
         60
     } else if recover {
@@ -186,11 +220,12 @@ async fn advance_pending_sweep(
         0
     };
     // A coalesced future sweep must not swallow this earlier recovery obligation.
-    sqlx::query("UPDATE processing_tasks SET available_at=LEAST(available_at,$2), payload=(COALESCE(payload,'{}'::json)::jsonb || jsonb_build_object('stale_recoveries',$4::bigint))::json WHERE owner_user_id::bigint=$1 AND task_type='briefing_refresh' AND status='pending' AND dedupe_key=$3")
+    sqlx::query("UPDATE processing_tasks SET available_at=CASE WHEN retry_count=0 THEN LEAST(available_at,$2) ELSE available_at END, payload=(COALESCE(payload,'{}'::json)::jsonb || jsonb_build_object('stale_recoveries',$4::bigint,'waiting_for_news_embeddings',COALESCE((payload->>'waiting_for_news_embeddings')::boolean,false) OR $5))::json WHERE owner_user_id::bigint=$1 AND task_type='briefing_refresh' AND status='pending' AND dedupe_key=$3")
         .bind(request.owner_user_id)
         .bind(request.available_at.map(|value| value.naive_utc()))
         .bind(&request.dedupe_key)
         .bind(i64::try_from(recoveries).unwrap_or(3))
+        .bind(request.payload.as_ref().and_then(|p| p.get("waiting_for_news_embeddings")).and_then(Value::as_bool).unwrap_or(false))
         .execute(&mut **transaction).await?;
     Ok(())
 }
@@ -217,8 +252,8 @@ mod tests {
         let cases = [
             (true, false, 0, true, true, 0, 0),
             (true, false, 0, true, true, 20, 5),
-            (true, false, 0, false, true, 0, 30),
-            (false, false, 0, true, true, 0, 30),
+            (true, false, 0, false, true, 0, 5),
+            (false, false, 0, true, true, 0, 5),
             (true, true, 2, true, true, 20, 5),
             (true, true, 3, true, true, 20, 60),
             (false, true, 3, true, false, 10, 120),
@@ -320,6 +355,44 @@ mod tests {
         .await
         .unwrap();
         assert_ne!(current, next);
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn readiness_marker_survives_coalescing_without_shortening_provider_backoff(
+        pool: sqlx::PgPool,
+    ) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user_id:i64=sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES ('readiness-sweep','readiness-sweep@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+        let queue = QueueKernel::new(pool.clone());
+        let task_id = queue.enqueue(sweep_request(user_id, 600)).await.unwrap();
+        sqlx::query("UPDATE processing_tasks SET retry_count=1 WHERE id::bigint=$1")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let before: chrono::NaiveDateTime =
+            sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+                .bind(task_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let mut request = sweep_request(user_id, 5);
+        request
+            .payload
+            .as_mut()
+            .unwrap()
+            .insert("waiting_for_news_embeddings".into(), Value::Bool(true));
+        let mut tx = pool.begin().await.unwrap();
+        advance_pending_sweep(&mut tx, &request, 0, false)
+            .await
+            .unwrap();
+        advance_pending_sweep(&mut tx, &sweep_request(user_id, 0), 0, false)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let (after,marker):(chrono::NaiveDateTime,bool)=sqlx::query_as("SELECT available_at,(payload->>'waiting_for_news_embeddings')::boolean FROM processing_tasks WHERE id::bigint=$1").bind(task_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(after, before);
+        assert!(marker);
     }
 
     #[test]

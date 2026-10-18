@@ -10,9 +10,10 @@ import Foundation
 struct OnboardingAudioDiscoverRequest: Codable {
     let transcript: String
     let locale: String?
+    var inputKind: String? = nil
 
     var api: APIOnboardingAudioDiscoverRequest {
-        APIOnboardingAudioDiscoverRequest(transcript: transcript, locale: locale)
+        APIOnboardingAudioDiscoverRequest(transcript: transcript, inputKind: inputKind, locale: locale)
     }
 }
 
@@ -225,6 +226,8 @@ struct OnboardingFastDiscoverResponse: Codable {
 struct OnboardingDiscoveryStatusResponse: Codable {
     let runId: Int
     let runStatus: String
+    let originalInputText: String?
+    let originalInputKind: String?
     let topicSummary: String?
     let inferredTopics: [String]
     let lanes: [OnboardingDiscoveryLaneStatus]
@@ -238,8 +241,12 @@ struct OnboardingDiscoveryStatusResponse: Codable {
         inferredTopics: [String],
         lanes: [OnboardingDiscoveryLaneStatus],
         suggestions: OnboardingFastDiscoverResponse?,
-        errorMessage: String?
+        errorMessage: String?,
+        originalInputText: String? = nil,
+        originalInputKind: String? = nil
     ) {
+        self.originalInputText = originalInputText
+        self.originalInputKind = originalInputKind
         self.runId = runId
         self.runStatus = runStatus
         self.topicSummary = topicSummary
@@ -250,6 +257,8 @@ struct OnboardingDiscoveryStatusResponse: Codable {
     }
 
     init(api response: APIOnboardingDiscoveryStatusResponse) {
+        originalInputText = response.originalInputText
+        originalInputKind = response.originalInputKind
         runId = response.runId
         runStatus = response.runStatus
         topicSummary = response.topicSummary
@@ -260,6 +269,8 @@ struct OnboardingDiscoveryStatusResponse: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case originalInputText = "original_input_text"
+        case originalInputKind = "original_input_kind"
         case runId = "run_id"
         case runStatus = "run_status"
         case topicSummary = "topic_summary"
@@ -287,6 +298,7 @@ struct OnboardingSelectedAggregator: Codable, Hashable {
 }
 
 struct OnboardingCompleteRequest: Codable {
+    let newsFilterSeed: APIOnboardingNewsFilterSeed?
     let discoveryRunId: Int?
     let selectedSuggestionIds: [Int]
     let selectedAggregators: [OnboardingSelectedAggregator]
@@ -296,8 +308,10 @@ struct OnboardingCompleteRequest: Codable {
         discoveryRunId: Int?,
         selectedSuggestionIds: [Int],
         selectedAggregators: [OnboardingSelectedAggregator] = [],
-        twitterUsername: String?
+        twitterUsername: String?,
+        newsFilterSeed: APIOnboardingNewsFilterSeed? = nil
     ) {
+        self.newsFilterSeed = newsFilterSeed
         self.discoveryRunId = discoveryRunId
         self.selectedSuggestionIds = selectedSuggestionIds
         self.selectedAggregators = selectedAggregators
@@ -306,6 +320,7 @@ struct OnboardingCompleteRequest: Codable {
 
     var api: APIOnboardingCompleteRequest {
         APIOnboardingCompleteRequest(
+            newsFilterSeed: newsFilterSeed,
             discoveryRunId: discoveryRunId,
             selectedSuggestionIds: selectedSuggestionIds,
             selectedAggregators: selectedAggregators.map(\.api),
@@ -314,6 +329,7 @@ struct OnboardingCompleteRequest: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case newsFilterSeed = "news_filter_seed"
         case discoveryRunId = "discovery_run_id"
         case selectedSuggestionIds = "selected_suggestion_ids"
         case selectedAggregators = "selected_aggregators"

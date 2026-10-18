@@ -18,6 +18,7 @@ struct ContentView: View {
     private let chatNavigation: ChatNavigationCoordinator
     private let dependencyFactory: RootDependencyFactory
 
+    @State private var briefingSourceMutation = 0
     @State private var settings: AppSettings
     @State private var e2eRouteInjector = E2ERouteInjector()
     @State private var briefingPath = NavigationPath()
@@ -49,7 +50,8 @@ struct ContentView: View {
                     viewModel: tabCoordinator.briefingVM,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
-                    dependencyFactory: dependencyFactory
+                    dependencyFactory: dependencyFactory,
+                    onSourceMutation: { briefingSourceMutation += 1 }
                 )
             }
 
@@ -104,6 +106,10 @@ struct ContentView: View {
             .onAppear {
                 isSettingsSheetActive = true
             }
+        }
+        .task(id: briefingSourceMutation) {
+            guard briefingSourceMutation > 0 else { return }
+            await session.knowledgeViewModel.forceReload()
         }
         .tint(Color.appChromeAccent)
         .font(.appBody)

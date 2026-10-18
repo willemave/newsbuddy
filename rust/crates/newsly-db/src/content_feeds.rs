@@ -192,7 +192,6 @@ pub async fn list_content_feed(
         &mut query,
         r#"
 WHERE content.status = 'completed'
-  AND (content.classification IS NULL OR content.classification <> 'skip')
   AND (content.content_type = 'news' OR user_status.id IS NOT NULL)
   AND (cardinality($2::text[]) = 0 OR content.content_type = ANY($2::text[]))
   AND ($3::date IS NULL OR ({sort})::date = $3::date)
@@ -254,7 +253,6 @@ async fn list_inbox_dates(
          AND user_status.user_id::bigint = $1::bigint
          AND user_status.status = 'inbox'
         WHERE content.status = 'completed'
-          AND (content.classification IS NULL OR content.classification <> 'skip')
           AND (content.content_type = 'news' OR user_status.id IS NOT NULL)
           AND (cardinality($2::text[]) = 0 OR content.content_type = ANY($2::text[]))
           AND (
@@ -290,7 +288,6 @@ pub async fn list_recently_read_content(
         &mut query,
         r#"
 WHERE content.status = 'completed'
-  AND (content.classification IS NULL OR content.classification <> 'skip')
   AND read_status.id IS NOT NULL
   AND (cardinality($2::text[]) = 0 OR content.content_type = ANY($2::text[]))
   AND ($3::date IS NULL OR read_status.read_at::date = $3::date)
@@ -321,7 +318,6 @@ LIMIT $6::bigint
         JOIN contents AS content ON content.id = read_status.content_id
         WHERE read_status.user_id::bigint = $1::bigint
           AND content.status = 'completed'
-          AND (content.classification IS NULL OR content.classification <> 'skip')
           AND (cardinality($2::text[]) = 0 OR content.content_type = ANY($2::text[]))
           AND read_status.read_at >= statement_timestamp() - ($3::bigint * interval '1 day')
         ORDER BY value DESC
@@ -418,7 +414,6 @@ pub async fn search_visible_content(
         &mut query,
         r#"
 WHERE content.status = 'completed'
-  AND (content.classification IS NULL OR content.classification <> 'skip')
   AND (content.content_type = 'news' OR user_status.id IS NOT NULL)
   AND ($3::text IS NULL OR content.content_type = $3::text)
   AND {matches}
@@ -525,6 +520,30 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("test content should insert");
+        sqlx::query("UPDATE contents SET classification = 'skip' WHERE id::bigint = $1")
+            .bind(content_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO content_status(user_id, content_id, status, created_at, updated_at) VALUES ($1,$2,'inbox',now(),now())")
+            .bind(user_id).bind(content_id).execute(&pool).await.unwrap();
+        let inbox = super::list_content_feed(
+            &pool,
+            user_id,
+            &[],
+            None,
+            super::ContentFeedReadFilter::All,
+            None,
+            25,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inbox.items.len(),
+            1,
+            "legacy editorial skip cannot hide owned completed content"
+        );
         let expected = DateTime::parse_from_rfc3339("2026-08-31T12:34:56.123456Z")
             .expect("test timestamp should parse")
             .with_timezone(&Utc);

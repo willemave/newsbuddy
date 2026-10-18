@@ -54,25 +54,50 @@ class WarmCrawler:
     ) -> Any:
         """Run one bounded crawl, including the wait for single-flight admission."""
 
+        started_at = time.monotonic()
+        acquired_at: float | None = None
+        outcome = "error"
         try:
             async with asyncio.timeout(timeout_seconds):
                 async with self._lock:
-                    crawler = await self._get_crawler_unlocked()
+                    acquired_at = time.monotonic()
                     try:
+                        crawler = await self._get_crawler_unlocked()
                         result = await crawler.arun(
                             url=url,
                             config=self._run_config(profile, timeout_seconds, url),
                         )
                     except BaseException:
+                        # Only the request holding the browser lock may recycle it. A waiter
+                        # timing out or being cancelled must leave the active crawl alone.
                         await self._close_unlocked()
                         raise
                     self._crawl_count += 1
+                    outcome = "completed"
                     return result
         except TimeoutError:
-            # A timed-out browser may still be carrying a page or context. Discard it before the
-            # next caller so a late result cannot leak across requests.
-            await self.close()
+            outcome = "timeout"
             raise
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        finally:
+            finished_at = time.monotonic()
+            # Owned run time includes browser setup and bounded cleanup, if needed.
+            wait_finished_at = finished_at if acquired_at is None else acquired_at
+            wait_ms = (wait_finished_at - started_at) * 1_000
+            run_ms = 0.0 if acquired_at is None else (finished_at - acquired_at) * 1_000
+            logger.info(
+                "Browser crawl outcome=%s browser_wait_ms=%.1f browser_run_ms=%.1f",
+                outcome,
+                wait_ms,
+                run_ms,
+                extra={
+                    "browser_outcome": outcome,
+                    "browser_wait_ms": wait_ms,
+                    "browser_run_ms": run_ms,
+                },
+            )
 
     async def _get_crawler_unlocked(self) -> Any:
         now = time.monotonic()

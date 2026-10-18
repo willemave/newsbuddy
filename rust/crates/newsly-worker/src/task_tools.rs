@@ -26,7 +26,9 @@ use crate::knowledge_tools::{
     read_authorized_knowledge_item, sha256_hex,
 };
 
+mod files;
 mod schema;
+pub(crate) use files::TaskFileError;
 use schema::{
     EditFileInput, ExecuteBashInput, ListFilesInput, ReadFileInput, SearchKnowledgeInput,
     WebSearchInput, WriteFileInput, WriteKnowledgeInput, tool_definition,
@@ -636,28 +638,9 @@ impl TaskToolExecutor {
         relative: &str,
         maximum: usize,
     ) -> Result<Vec<u8>, AgentRuntimeError> {
-        let path = self.readable_file(relative)?;
-        let download = self.provider.file_client().download_sandbox_path(
-            &self.sandbox,
-            &path,
-            self.sandbox_user.as_str(),
-            self.remaining()?,
-        );
-        let mut stream = tokio::select! {
-            () = self.cancellation.cancelled() => return Err(AgentRuntimeError::Tool("task sandbox operation was cancelled".to_owned())),
-            result = download => result.map_err(tool_error)?,
-        };
-        let mut bytes = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(tool_error)?;
-            if bytes.len().saturating_add(chunk.len()) > maximum {
-                return Err(AgentRuntimeError::Tool(format!(
-                    "file exceeds the {maximum}-byte read limit"
-                )));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        Ok(bytes)
+        self.read_bytes_typed(relative, maximum)
+            .await
+            .map_err(tool_error)
     }
 
     fn workspace_file(&self, relative: &str) -> Result<SandboxPath, AgentRuntimeError> {

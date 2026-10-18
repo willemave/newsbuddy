@@ -1,0 +1,9 @@
+{
+  "id" : "52b3a887-d32c-4b35-b074-8c6d3fe54852",
+  "targets" : [
+    {
+      "id" : "0FC2DCA8-21E8-4FC1-83C5-5D64560E9C59",
+      "name" : "newsly"
+    }
+  ]
+}

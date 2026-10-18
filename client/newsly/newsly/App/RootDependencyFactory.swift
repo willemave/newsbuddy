@@ -43,6 +43,8 @@ final class RootDependencyFactory {
         self.dependencies = dependencies
     }
 
+    var newsFilterService: NewsFilterService { NewsFilterService(client: dependencies.apiClient) }
+
     var authenticationService: AuthenticationService { dependencies.authenticationService }
     var onboardingStateStore: OnboardingStateStore { dependencies.onboardingStateStore }
     var contentService: ContentService { dependencies.contentService }
@@ -105,6 +107,7 @@ final class RootDependencyFactory {
             readStateCache: readStateCache,
             tabCoordinator: makeTabCoordinator(userID: user.id),
             knowledgeViewModel: makeKnowledgeTimelineViewModel(
+                userID: user.id,
                 readStateCache: readStateCache,
                 badgeStatsStore: badgeStatsStore
             ),
@@ -156,6 +159,48 @@ final class RootDependencyFactory {
 
     func makeDiscussionSummaryCoordinator() -> DiscussionSummaryCoordinator {
         DiscussionSummaryCoordinator(contentService: dependencies.contentService)
+    }
+
+    func makeBriefingSourceActionViewModel() -> BriefingSourceActionViewModel {
+        BriefingSourceActionViewModel(
+            saveSource: { [contentService = dependencies.contentService] source in
+                switch source {
+                case .news(let id):
+                    _ = try await contentService.convertNewsItemToArticle(id: id)
+                    return "Saved to Knowledge"
+                case .content(let id):
+                    let response = try await contentService.saveToKnowledge(id: id)
+                    return response.message
+                }
+            },
+            startSourceChat: { [chatService = dependencies.chatService] source in
+                let existing = try await chatService.existingSourceChat(for: source)
+                try Task.checkCancellation()
+                let session: ChatSessionSummary
+                if let existing {
+                    session = existing
+                } else {
+                    session = try await chatService.startSourceChat(for: source)
+                }
+                return ChatSessionRoute(
+                    sessionId: session.id, session: session,
+                    contentId: source.contentId, newsItemId: source.newsItemId,
+                    focusComposerOnAppear: existing == nil
+                )
+            },
+            findSourceDeck: { [deckService = dependencies.learningDeckService] source, sourceURL in
+                let decks = try await deckService.listDecks().decks
+                return BriefingSourceDeckLookup.find(source: source, sourceURL: sourceURL, decks: decks)
+            },
+            createSourceDeck: { [deckService = dependencies.learningDeckService] source, focus in
+                try await deckService.createDeck(
+                    contentId: source.contentId,
+                    newsItemId: source.newsItemId,
+                    url: nil,
+                    interestsPrompt: focus
+                )
+            }
+        )
     }
 
     func makePodcastAudioController() -> PodcastAudioController {
@@ -275,6 +320,7 @@ final class RootDependencyFactory {
     }
 
     private func makeKnowledgeTimelineViewModel(
+        userID: Int,
         readStateCache: ReadStateCache,
         badgeStatsStore: BadgeStatsStore
     ) -> KnowledgeTimelineViewModel {
@@ -297,7 +343,11 @@ final class RootDependencyFactory {
                 audioService: dependencies.audioEpisodeService,
                 badgeStatsStore: badgeStatsStore,
                 readStateCache: readStateCache
-            )
+            ),
+            saveSignalToken: {
+                guard let server = ServerConfigurationDefaults.baseURL(in: SharedContainer.userDefaults) else { return nil }
+                return KnowledgeSaveSignalStore(server: server.absoluteString, userID: userID).token
+            }
         )
     }
 }

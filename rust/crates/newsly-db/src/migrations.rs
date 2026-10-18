@@ -1,5 +1,5 @@
 use sqlx::migrate::{MigrateError, Migrator};
-use sqlx::{PgPool, query_scalar};
+use sqlx::{PgConnection, PgPool, query_scalar};
 use thiserror::Error;
 
 use crate::adoption::{
@@ -46,6 +46,39 @@ pub async fn run_migrations_with_barrier(
         .execute(&mut *connection)
         .await?;
 
+    let fresh_database = verify_history_prefix(&mut connection).await?;
+    // Attestation belongs to this invocation, never to a previous use of a pooled connection.
+    sqlx::query("SELECT set_config('newsly.maintenance_barrier_confirmed', $1, false)")
+        .bind(if fresh_database || maintenance_barrier_confirmed {
+            "on"
+        } else {
+            "off"
+        })
+        .execute(&mut *connection)
+        .await?;
+
+    MIGRATOR.run(&mut *connection).await?;
+    let history = load_history(&mut connection).await?;
+    validate_complete_history(&history)?;
+    verify_post_migration_catalog(&mut connection).await?;
+    Ok(())
+}
+
+/// Checks the ordered migration checksums before deployment stops any writers.
+///
+/// # Errors
+/// Rejects dirty, divergent, or legacy unadopted history. An empty database is valid.
+pub async fn verify_migration_history(pool: &PgPool) -> Result<(), MigrationError> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *transaction)
+        .await?;
+    verify_history_prefix(&mut transaction).await?;
+    transaction.rollback().await?;
+    Ok(())
+}
+
+async fn verify_history_prefix(connection: &mut PgConnection) -> Result<bool, MigrationError> {
     let alembic_exists: bool =
         query_scalar("SELECT pg_catalog.to_regclass('public.alembic_version') IS NOT NULL")
             .fetch_one(&mut *connection)
@@ -59,10 +92,10 @@ pub async fn run_migrations_with_barrier(
         if !sqlx_exists {
             return Err(MigrationError::AdoptionRequired);
         }
-        let history = load_history(&mut connection).await?;
+        let history = load_history(connection).await?;
         validate_runtime_history_prefix(&history)?;
     } else if sqlx_exists {
-        let history = load_history(&mut connection).await?;
+        let history = load_history(connection).await?;
         if history.is_empty() {
             fresh_database = true;
         } else {
@@ -70,18 +103,11 @@ pub async fn run_migrations_with_barrier(
         }
     }
 
-    if fresh_database || maintenance_barrier_confirmed {
-        sqlx::query("SET newsly.maintenance_barrier_confirmed = 'on'")
-            .execute(&mut *connection)
-            .await?;
-    }
-
-    MIGRATOR.run(&mut *connection).await?;
-    let history = load_history(&mut connection).await?;
-    validate_complete_history(&history)?;
-    verify_post_migration_catalog(&mut connection).await?;
-    Ok(())
+    Ok(fresh_database)
 }
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Error)]
 pub enum MigrationError {

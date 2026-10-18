@@ -272,3 +272,43 @@ struct BriefingNarrationChapterSheet: View {
         return "Chapter \(index + 1) of \(narration.chapters.count), \(chapter.title)\(detailSuffix)"
     }
 }
+
+/// Keeps deck creation and errors in the briefing's existing creation form.
+struct BriefingSourceDeckCreateSheet: View {
+    let source: APIBriefingSource
+    let viewModel: BriefingSourceActionViewModel
+    let focusRecorder: LearningDeckFocusRecorder
+    let onCreated: (LearningDeck) -> Void
+
+    @State private var errorMessage: String?
+
+    var body: some View {
+        LearningDeckCreateSheet(
+            sourceTitle: source.title,
+            isSubmitting: viewModel.isCreatingDeck,
+            focusRecorder: focusRecorder,
+            onCreate: createDeck
+        )
+        .alert("Couldn’t create deck", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .interactiveDismissDisabled(viewModel.isCreatingDeck)
+    }
+
+    private func createDeck(focus: String?) async -> Bool {
+        guard let identity = BriefingSourceActionViewModel.knowledgeSource(for: source) else {
+            return false
+        }
+        if let deck = await viewModel.createDeck(source: identity, focus: focus), !Task.isCancelled {
+            onCreated(deck)
+            return true
+        }
+        errorMessage = viewModel.errorMessage
+        return false
+    }
+}

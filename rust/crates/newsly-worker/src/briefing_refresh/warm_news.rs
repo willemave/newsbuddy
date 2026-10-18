@@ -28,13 +28,9 @@ impl TaskHandler for PrepareNewsLensHandler {
                 () = lease.wait_for_ownership_loss() => return HandlerExecution::from_result(TaskResult::fail(Some("news embedding lease lost".into()), true)),
             };
             match result {
-                Ok(Preparation::Ready(embedding, usage)) => HandlerExecution::with_finalizer(
+                Ok(Preparation::Ready(embedding)) => HandlerExecution::with_finalizer(
                     TaskResult::ok(),
-                    EmbeddingFinalizer {
-                        embedding,
-                        usage,
-                        task_id: plan.task_id,
-                    },
+                    EmbeddingFinalizer { embedding },
                 ),
                 Ok(Preparation::Checkpoint { model, input_hash }) => {
                     HandlerExecution::with_finalizer(
@@ -61,14 +57,8 @@ impl TaskHandler for PrepareNewsLensHandler {
 
 enum Preparation {
     Absent,
-    Checkpoint {
-        model: String,
-        input_hash: String,
-    },
-    Ready(
-        PreparedNewsEmbedding,
-        Option<newsly_db::BriefingLensAssignmentUsage>,
-    ),
+    Checkpoint { model: String, input_hash: String },
+    Ready(PreparedNewsEmbedding),
 }
 
 #[derive(Debug)]
@@ -108,15 +98,12 @@ async fn prepare(
         let text = source.embedding_text();
         if let Some(vector) = news_lens_embeddings::load(&mut connection, id, &model, &text).await?
         {
-            return Ok(Preparation::Ready(
-                PreparedNewsEmbedding {
-                    news_item_id: id,
-                    model,
-                    input_hash: news_lens_embeddings::input_hash(&text),
-                    vector,
-                },
-                None,
-            ));
+            return Ok(Preparation::Ready(PreparedNewsEmbedding {
+                news_item_id: id,
+                model,
+                input_hash: news_lens_embeddings::input_hash(&text),
+                vector,
+            }));
         }
         if news_lens_embeddings::preparation_failed(&mut connection, id, &model, &text).await? {
             return Ok(Preparation::Absent);
@@ -146,6 +133,35 @@ async fn prepare(
         text
     };
     let mut batch = services.gateway.embed(std::slice::from_ref(&text)).await?;
+    // Billing observations are independent of source freshness and queue ownership.
+    let recorder = crate::agent_usage::AgentUsageRecorder::new(
+        services.pool.clone(),
+        crate::agent_usage::AgentUsageAttribution {
+            operation: "news.prepare_lens_embedding".into(),
+            source: "queue".into(),
+            task_id: plan.task_id,
+            content_id: None,
+            session_id: None,
+            message_id: None,
+            user_id: None,
+        },
+    );
+    recorder.record(newsly_agent_runtime::AgentModelUsageObservation {
+        run_id: uuid::Uuid::new_v4(),
+        sequence: 1,
+        feature: "news_lens_preparation".into(),
+        provider: super::EMBEDDING_PROVIDER.into(),
+        model: batch.model,
+        endpoint: "embeddings".into(),
+        response_id: batch.provider_response_id,
+        provider_request_id: None,
+        requested_service_tier: None,
+        processing_tier: None,
+        usage_is_observed: true,
+        provider_reported_cost_usd: None,
+        usage: batch.usage,
+    })?;
+    recorder.finish().await;
     if batch.vectors.len() != 1 {
         return Err("news embedding response count mismatch".into());
     }
@@ -166,29 +182,17 @@ async fn prepare(
     {
         return Err("news embedding dimensions changed for the configured model".into());
     }
-    Ok(Preparation::Ready(
-        PreparedNewsEmbedding {
-            news_item_id: id,
-            model,
-            input_hash: news_lens_embeddings::input_hash(&text),
-            vector,
-        },
-        Some(newsly_db::BriefingLensAssignmentUsage {
-            provider: super::EMBEDDING_PROVIDER.into(),
-            model: batch.model,
-            provider_response_id: batch.provider_response_id,
-            usage: batch.usage,
-            feature: "news_lens_preparation".into(),
-            operation: "news.prepare_lens_embedding".into(),
-        }),
-    ))
+    Ok(Preparation::Ready(PreparedNewsEmbedding {
+        news_item_id: id,
+        model,
+        input_hash: news_lens_embeddings::input_hash(&text),
+        vector,
+    }))
 }
 
 #[derive(Debug)]
 struct EmbeddingFinalizer {
     embedding: PreparedNewsEmbedding,
-    usage: Option<newsly_db::BriefingLensAssignmentUsage>,
-    task_id: i64,
 }
 impl TaskFinalizer for EmbeddingFinalizer {
     fn apply<'a>(
@@ -202,9 +206,8 @@ impl TaskFinalizer for EmbeddingFinalizer {
                 .execute(&mut **tx)
                 .await?;
             let saved = news_lens_embeddings::save(tx, &self.embedding).await?;
-            if let Some(usage) = &self.usage {
-                newsly_db::news_lens_embeddings::record_usage(&mut **tx, self.task_id, None, usage)
-                    .await?;
+            if saved {
+                expedite_waiting_refreshes(tx, self.embedding.news_item_id).await?;
             }
             Ok(if saved {
                 TaskFinalizerResult::Keep
@@ -213,6 +216,41 @@ impl TaskFinalizer for EmbeddingFinalizer {
             })
         })
     }
+}
+
+/// Wake the coalesced task already waiting on this source, preserving provider retry backoff.
+/// This grants no admission or publication authority; preparation rechecks current visibility.
+async fn expedite_waiting_refreshes(
+    tx: &mut Transaction<'static, Postgres>,
+    news_item_id: i64,
+) -> Result<(), sqlx::Error> {
+    let updated = sqlx::query(
+        r"WITH waiting AS MATERIALIZED (
+            SELECT task.id FROM processing_tasks AS task
+            WHERE task.task_type = 'briefing_refresh' AND task.status = 'pending'
+              AND task.retry_count = 0
+              AND task.payload->>'waiting_for_news_embeddings' = 'true'
+              AND task.available_at > timezone('UTC', now())
+              AND EXISTS (
+                  SELECT 1 FROM briefing_pending_sources AS pending
+                  WHERE pending.user_id = task.owner_user_id
+                    AND pending.source_kind = 'news' AND pending.source_id::bigint = $1
+              )
+            ORDER BY task.id FOR UPDATE OF task
+          )
+          UPDATE processing_tasks AS task SET available_at = timezone('UTC', now())
+          FROM waiting WHERE task.id = waiting.id",
+    )
+    .bind(news_item_id)
+    .execute(&mut **tx)
+    .await?;
+    if updated.rows_affected() > 0 {
+        sqlx::query("SELECT pg_notify('processing_tasks', $1)")
+            .bind(serde_json::json!({"reason": "news_embeddings_ready"}).to_string())
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -391,18 +429,157 @@ mod readiness_tests {
             new_lenses: vec![],
             usage: vec![],
         };
-        let config = crate::briefing_refresh::BriefingRefreshWorkerConfig::from_env()
-            .unwrap()
-            .repository;
         crate::briefing_refresh::semantic_lenses::assign_failed_sources(
             &mut plan,
             &seed,
             &ready.failed,
-            &config,
         );
         assert_eq!(plan.assignments[0], healthy);
         assert_eq!(plan.assignments[1].source_id, pending[2].source_id);
         assert_eq!(plan.assignments[1].lens_key, "misc");
         assert_eq!(plan.assignments.len(), 2); // Missing story remains pending; it is not assigned or marked read.
+    }
+}
+
+#[cfg(test)]
+mod wakeup_tests {
+    use super::*;
+
+    async fn source(pool: &sqlx::PgPool) -> PreparedNewsEmbedding {
+        let id: i64 = sqlx::query_scalar("INSERT INTO news_items(ingest_key,visibility_scope,platform,status,summary_text,raw_metadata,ingested_at,created_at) VALUES('wakeup','global','hackernews','ready','Original summary','{}',now(),now()) RETURNING id::bigint")
+            .fetch_one(pool).await.unwrap();
+        let mut connection = pool.acquire().await.unwrap();
+        let source = news_lens_embeddings::source(&mut connection, id)
+            .await
+            .unwrap()
+            .unwrap();
+        PreparedNewsEmbedding {
+            news_item_id: id,
+            model: "test-model".into(),
+            input_hash: news_lens_embeddings::input_hash(&source.embedding_text()),
+            vector: vec![0.2, 0.8],
+        }
+    }
+
+    async fn waiting_task(
+        pool: &sqlx::PgPool,
+        news_id: i64,
+        name: &str,
+        marked: bool,
+        retries: i32,
+        status: &str,
+    ) -> i64 {
+        let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES($1,$2,true,false) RETURNING id::bigint")
+            .bind(name).bind(format!("{name}@example.com")).fetch_one(pool).await.unwrap();
+        sqlx::query("INSERT INTO briefing_pending_sources(user_id,source_kind,source_id) VALUES($1::bigint::integer,'news',$2::bigint::integer)")
+            .bind(user).bind(news_id).execute(pool).await.unwrap();
+        sqlx::query_scalar("INSERT INTO processing_tasks(task_type,status,queue_name,owner_user_id,payload,retry_count,available_at,executor_runtime,executor_version,executor_namespace) VALUES('briefing_refresh',$1,'llm',$2::bigint::integer,$3,$4,timezone('UTC',now())+interval '1 hour','rust',1,'briefing_refresh') RETURNING id::bigint")
+            .bind(status).bind(user).bind(serde_json::json!({"user_id":user,"waiting_for_news_embeddings":marked})).bind(retries).fetch_one(pool).await.unwrap()
+    }
+
+    async fn available(pool: &sqlx::PgPool, task: i64) -> chrono::NaiveDateTime {
+        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+            .bind(task)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn successful_vectors_wake_only_relevant_waiting_tasks_without_new_fanout(
+        pool: sqlx::PgPool,
+    ) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let embedding = source(&pool).await;
+        let needed =
+            waiting_task(&pool, embedding.news_item_id, "needed", true, 0, "pending").await;
+        let other = waiting_task(
+            &pool,
+            embedding.news_item_id + 1,
+            "other",
+            true,
+            0,
+            "pending",
+        )
+        .await;
+        let backoff =
+            waiting_task(&pool, embedding.news_item_id, "backoff", true, 1, "pending").await;
+        let editorial = waiting_task(
+            &pool,
+            embedding.news_item_id,
+            "editorial",
+            false,
+            0,
+            "pending",
+        )
+        .await;
+        let running = waiting_task(
+            &pool,
+            embedding.news_item_id,
+            "running",
+            true,
+            0,
+            "processing",
+        )
+        .await;
+        let protected = [other, backoff, editorial, running];
+        let mut before = Vec::new();
+        for task in protected {
+            before.push(available(&pool, task).await);
+        }
+        let finalizer = EmbeddingFinalizer { embedding };
+        let mut tx = pool.begin().await.unwrap();
+        assert!(matches!(
+            finalizer.apply(&mut tx).await.unwrap(),
+            TaskFinalizerResult::Keep
+        ));
+        tx.commit().await.unwrap();
+        assert!(available(&pool, needed).await <= chrono::Utc::now().naive_utc());
+        for (index, task) in protected.into_iter().enumerate() {
+            assert_eq!(available(&pool, task).await, before[index]);
+        }
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM processing_tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 5);
+        // Another vector completion coalesces into the same now-eligible task.
+        let first = available(&pool, needed).await;
+        let mut tx = pool.begin().await.unwrap();
+        finalizer.apply(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(available(&pool, needed).await, first);
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn stale_vectors_cannot_publish_or_wake_and_rolled_back_finalization_is_atomic(
+        pool: sqlx::PgPool,
+    ) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let embedding = source(&pool).await;
+        let task = waiting_task(&pool, embedding.news_item_id, "stale", true, 0, "pending").await;
+        let before = available(&pool, task).await;
+        let finalizer = EmbeddingFinalizer { embedding };
+        let mut tx = pool.begin().await.unwrap();
+        finalizer.apply(&mut tx).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(available(&pool, task).await, before);
+        sqlx::query("UPDATE news_items SET summary_text='Changed summary' WHERE id::bigint=$1")
+            .bind(finalizer.embedding.news_item_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        assert!(matches!(
+            finalizer.apply(&mut tx).await.unwrap(),
+            TaskFinalizerResult::Override(_)
+        ));
+        tx.commit().await.unwrap();
+        assert_eq!(available(&pool, task).await, before);
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM news_lens_embeddings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

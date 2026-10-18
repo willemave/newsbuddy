@@ -6,16 +6,31 @@
 import SwiftUI
 import UIKit
 
+/// One reading surface for an item: stored text in the reader, or the original
+/// page in place. The top trailing button flips between them; Deck works in both.
 struct ArticleReaderView: View {
+    enum Mode {
+        case text
+        case web
+    }
+
     let content: ContentDetail
     let articleBody: ContentBody?
     let isLoading: Bool
     let errorMessage: String?
+    let showsReaderText: Bool
     let onRetry: () -> Void
     let onDigDeeper: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
+    @State private var mode: Mode
+    @State private var hasOpenedWeb: Bool
+    @State private var webState: ArticleWebView.LoadState = .loading
+    @State private var webReloadID = 0
+    @State private var showsDeckCreate = false
+    @State private var deckReaderDestination: LearningDeckReaderDestination?
+    @State private var deckNotice: ViewAlert?
     @AppStorage("articleReaderBodyFontSize", store: SharedContainer.userDefaults)
     private var storedBodyFontSize: Double = 18
 
@@ -23,41 +38,134 @@ struct ArticleReaderView: View {
     private let maxBodyFontSize: CGFloat = 24
     private var bodyFontSize: CGFloat { CGFloat(storedBodyFontSize).clamped(to: minBodyFontSize...maxBodyFontSize) }
 
+    init(
+        content: ContentDetail,
+        articleBody: ContentBody?,
+        isLoading: Bool,
+        errorMessage: String?,
+        showsReaderText: Bool,
+        onRetry: @escaping () -> Void,
+        onDigDeeper: @escaping (String) -> Void
+    ) {
+        self.content = content
+        self.articleBody = articleBody
+        self.isLoading = isLoading
+        self.errorMessage = errorMessage
+        self.showsReaderText = showsReaderText
+        self.onRetry = onRetry
+        self.onDigDeeper = onDigDeeper
+        _mode = State(initialValue: showsReaderText ? .text : .web)
+        _hasOpenedWeb = State(initialValue: !showsReaderText)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             readerToolbar
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    readerHeader
-
-                    Group {
-                        if let text = articleBody?.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                           !text.isEmpty {
-                            SelectableMarkdownView(
-                                markdown: text,
-                                textColor: .appReaderBodyText,
-                                baseFont: readerUIFont,
-                                adjustsFontForContentSizeCategory: true,
-                                onDigDeeper: onDigDeeper
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("article.reader.body")
-                        } else if isLoading || errorMessage == nil {
-                            readerLoadingState
-                        } else if let errorMessage {
-                            readerErrorState(errorMessage)
-                        }
-                    }
+            // Both surfaces stay alive once opened so flipping keeps scroll and page state.
+            ZStack {
+                if showsReaderText {
+                    readerText
+                        .opacity(mode == .text ? 1 : 0)
+                        .allowsHitTesting(mode == .text)
+                        .accessibilityHidden(mode != .text)
                 }
-                .frame(maxWidth: 720, alignment: .leading)
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-                .padding(.top, 30)
-                .padding(.bottom, 56)
-                .frame(maxWidth: .infinity)
+                if hasOpenedWeb, let originalURL {
+                    ArticleWebView(url: originalURL, state: $webState, reloadID: webReloadID)
+                        .overlay {
+                            if webState == .loading {
+                                ProgressView()
+                                    .controlSize(.large)
+                                    .tint(Color.onSurfaceSecondary)
+                            } else if case .failed(let message) = webState {
+                                ContentUnavailableView {
+                                    Label("Couldn't load page", systemImage: "wifi.exclamationmark")
+                                } description: {
+                                    Text(message)
+                                } actions: {
+                                    Button("Try Again") { webReloadID += 1 }
+                                        .accessibilityIdentifier("article.reader.web.retry")
+                                }
+                                .background(Color.surfacePrimary)
+                            }
+                        }
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .opacity(mode == .web ? 1 : 0)
+                        .allowsHitTesting(mode == .web)
+                        .accessibilityHidden(mode != .web)
+                }
             }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
+        .sheet(isPresented: $showsDeckCreate) {
+            LearningDeckContentCreateSheet(
+                content: content,
+                focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
+                learningDeckService: dependencyFactory.learningDeckService,
+                onOpenDeck: { deck, url in
+                    showsDeckCreate = false
+                    deckReaderDestination = LearningDeckReaderDestination(deck: deck, url: url)
+                },
+                onNotice: { title, message in
+                    deckNotice = ViewAlert(title: title, message: message)
+                }
+            )
+        }
+        .fullScreenCover(item: $deckReaderDestination) { destination in
+            LearningDeckReaderView(
+                deck: destination.deck,
+                viewerURL: destination.url,
+                onClose: { deckReaderDestination = nil }
+            )
+            .ignoresSafeArea(.container)
+        }
+        .alert(item: $deckNotice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .cancel(Text("OK"))
+            )
+        }
+    }
+
+    private var readerText: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                readerHeader
+
+                Group {
+                    if let text = articleBody?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !text.isEmpty {
+                        SelectableMarkdownView(
+                            markdown: text,
+                            textColor: .appReaderBodyText,
+                            baseFont: readerUIFont,
+                            adjustsFontForContentSizeCategory: true,
+                            onDigDeeper: onDigDeeper
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("article.reader.body")
+                    } else if isLoading || errorMessage == nil {
+                        readerLoadingState
+                    } else if let errorMessage {
+                        readerErrorState(errorMessage)
+                    }
+                }
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.top, 30)
+            .padding(.bottom, 56)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var originalURL: URL? {
+        guard let url = URL(string: content.url),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return url.newslyBrowserCompatibleLocalURL(serverHost: dependencyFactory.appSettings.serverHost)
     }
 
     private var readerToolbar: some View {
@@ -65,77 +173,41 @@ struct ArticleReaderView: View {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "xmark")
-                    .font(.appSymbol(size: 15, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
-                    .contentShape(Rectangle())
+                toolbarIcon("xmark", size: 15, weight: .semibold)
             }
             .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Close reader")
             .accessibilityIdentifier("article.reader.close")
 
             Spacer()
 
-            if let url = URL(string: content.url) {
-                Button {
-                    openURL(url)
-                } label: {
-                    Image(systemName: "safari")
-                        .font(.appSymbol(size: 17, weight: .regular))
-                        .frame(width: 44, height: 44)
-                        .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Open original article")
-                .accessibilityIdentifier("article.reader.open_original")
+            if mode == .text {
+                textSizeControl
             }
 
-            HStack(spacing: 2) {
-                Button {
-                    updateBodyFontSize(by: -1)
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.appSymbol(size: 14, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(bodyFontSize <= minBodyFontSize)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Decrease text size")
-                .accessibilityIdentifier("article.reader.text_size.decrease")
-
-                Text("Aa")
-                    .font(.readerControlLabel)
-                    .foregroundStyle(Color.onSurface)
-                    .frame(width: 34, height: 34)
-                    .accessibilityHidden(true)
-
-                Button {
-                    updateBodyFontSize(by: 1)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.appSymbol(size: 14, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(bodyFontSize >= maxBodyFontSize)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Increase text size")
-                .accessibilityIdentifier("article.reader.text_size.increase")
+            Button {
+                showsDeckCreate = true
+            } label: {
+                toolbarIcon("rectangle.on.rectangle")
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.onSurface)
-            .padding(3)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(Color.outlineVariant.opacity(0.25), lineWidth: 0.5)
+            .accessibilityLabel("Create Learning Deck")
+            .accessibilityIdentifier("article.reader.create_deck")
+
+            if showsReaderText, originalURL != nil {
+                Button {
+                    hasOpenedWeb = true
+                    mode = mode == .text ? .web : .text
+                } label: {
+                    toolbarIcon(mode == .text ? "safari" : "doc.richtext")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(mode == .text ? "Show original page" : "Show reader")
+                .accessibilityIdentifier("article.reader.toggle_mode")
             }
         }
+        // Matches the text-size capsule so the bar keeps its height in web mode.
+        .frame(minHeight: 50)
         .foregroundStyle(Color.onSurface)
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 12)
@@ -145,6 +217,56 @@ struct ArticleReaderView: View {
             Rectangle()
                 .fill(Color.outlineVariant.opacity(0.28))
                 .frame(height: 0.5)
+        }
+    }
+
+    private func toolbarIcon(_ name: String, size: CGFloat = 17, weight: Font.Weight = .regular) -> some View {
+        Image(systemName: name)
+            .font(.appSymbol(size: size, weight: weight))
+            .frame(width: 44, height: 44)
+            .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
+            .contentShape(Rectangle())
+    }
+
+    private var textSizeControl: some View {
+        HStack(spacing: 2) {
+            Button {
+                updateBodyFontSize(by: -1)
+            } label: {
+                Image(systemName: "minus")
+                    .font(.appSymbol(size: 14, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(bodyFontSize <= minBodyFontSize)
+            .accessibilityLabel("Decrease text size")
+            .accessibilityIdentifier("article.reader.text_size.decrease")
+
+            Text("Aa")
+                .font(.readerControlLabel)
+                .foregroundStyle(Color.onSurface)
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
+
+            Button {
+                updateBodyFontSize(by: 1)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.appSymbol(size: 14, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(bodyFontSize >= maxBodyFontSize)
+            .accessibilityLabel("Increase text size")
+            .accessibilityIdentifier("article.reader.text_size.increase")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.onSurface)
+        .padding(3)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.outlineVariant.opacity(0.25), lineWidth: 0.5)
         }
     }
 

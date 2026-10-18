@@ -2,9 +2,9 @@
 
 S1. The Share Extension exposes four outcomes named Add to Briefing, Add to Knowledge, Create Deck, and Chat.
 
-S2. Share acceptance records durable queued work, while final visibility follows completion.
+S2. A successful Add to Knowledge share already has a durable saved item and any required preparation queued atomically. It is visible before preparation finishes; acceptance never waits for extraction, summarization, or an agent. Other share outcomes record durable queued work, while their final results follow completion.
 
-S3. Every shared URL is canonicalized before its outcome runs, and retrying the same outcome cannot create duplicate content or work.
+S3. Every shared URL is validated and normalized at intake. Network-dependent canonical URL resolution happens during preparation and preserves the user's save and source provenance when reconciling duplicates. Retrying the same outcome cannot create duplicate content or active preparation work.
 
 S4. Add to Briefing resolves a continuing publication to a supported feed and an individual article or episode to direct content. Directly verified feeds and items resolve through host actions before model-backed discovery. A valid item may replace failed feed discovery, while an arbitrary homepage cannot.
 
@@ -20,7 +20,7 @@ S9. Source subscriptions and aggregator selections belong to one user and contro
 
 S10. Global aggregator items appear only for users who selected that aggregator, and user-scoped sources never enter the global pool. Aggregators that offer topics (Brutalist Report beats, arXiv categories) show a subscriber only the topics they selected, or every offered topic when none are selected; topics outside an aggregator's offered set are rejected rather than silently hiding its items.
 
-S11. X connections belong to one user, sync incrementally, preserve provenance, and retain bounded-page continuations across retries, and advance their checkpoint only after the complete range through the previous checkpoint has been ingested.
+S11. X connections belong to one user, sync incrementally, preserve provenance, and retain bounded-page continuations across retries, and advance their checkpoint only after the complete range through the previous checkpoint has been ingested. Each imported bookmark is saved to Knowledge in the sync transaction before content preparation completes. Its saved item reflects subsequent processing and canonical resolution; observing Knowledge never triggers an X fetch or changes the bookmark sync cadence.
 
 S12. Disconnecting or invalidating an integration removes usable credentials and reports when reauthorization is required. An integration that needs reauthorization stays visibly flagged at the app's Settings entry point until it is fixed; a user-initiated disconnect is not flagged.
 

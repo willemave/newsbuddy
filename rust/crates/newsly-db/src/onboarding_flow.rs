@@ -9,6 +9,9 @@ use crate::{
     OnboardingDiscoveryLaneProjection, OnboardingDiscoveryStatusProjection, canonicalize_feed_url,
 };
 
+mod first_edition;
+use first_edition::start_first_edition;
+
 const NEWS_SEED_LIMIT: i64 = 100;
 const FEED_CONTENT_SEED_LIMIT: i64 = 30;
 
@@ -24,6 +27,8 @@ pub struct OnboardingAudioLaneInput {
 pub struct OnboardingAudioRunInput {
     pub user_id: i64,
     pub topic_summary: String,
+    pub original_input_text: String,
+    pub original_input_kind: String,
     pub inferred_topics: Vec<String>,
     pub lanes: Vec<OnboardingAudioLaneInput>,
 }
@@ -66,6 +71,7 @@ pub struct OnboardingCompletionInput {
     pub user_id: i64,
     pub discovery_run_id: Option<i64>,
     pub selected_suggestion_ids: Vec<i64>,
+    pub news_filter_seed: Option<(String, bool)>,
     pub sources: Vec<OnboardingCompletionSource>,
     pub subreddits: Vec<String>,
     pub aggregators: Vec<OnboardingCompletionAggregator>,
@@ -106,6 +112,8 @@ pub async fn create_onboarding_audio_run(
             user_id,
             status,
             topic_summary,
+            original_input_text,
+            original_input_kind,
             inferred_topics,
             created_at
         )
@@ -114,6 +122,8 @@ pub async fn create_onboarding_audio_run(
             'pending',
             $2,
             $3,
+            $4,
+            $5,
             timezone('UTC', now())
         )
         RETURNING id::bigint
@@ -121,6 +131,8 @@ pub async fn create_onboarding_audio_run(
     )
     .bind(input.user_id)
     .bind(&input.topic_summary)
+    .bind(&input.original_input_text)
+    .bind(&input.original_input_kind)
     .bind(serde_json::to_value(&input.inferred_topics)?)
     .fetch_one(&mut **transaction)
     .await?;
@@ -176,6 +188,8 @@ pub async fn create_onboarding_audio_run(
         run_id,
         run_status: "pending".to_owned(),
         topic_summary: Some(input.topic_summary.clone()),
+        original_input_text: Some(input.original_input_text.clone()),
+        original_input_kind: Some(input.original_input_kind.clone()),
         inferred_topics: input.inferred_topics.clone(),
         lanes,
         suggestions: None,
@@ -302,6 +316,7 @@ pub async fn complete_onboarding_selection(
 ) -> Result<OnboardingCompletionProjection, OnboardingFlowRepositoryError> {
     let tutorial_complete = lock_active_user(transaction, input.user_id).await?;
     validate_completion_selection(transaction, input).await?;
+    initialize_news_filter(transaction, input).await?;
     let mut configured_source_count = 0_i64;
     let mut feed_config_ids = Vec::new();
     let mut source_names = HashSet::new();
@@ -412,6 +427,40 @@ pub async fn complete_onboarding_selection(
     })
 }
 
+async fn initialize_news_filter(
+    transaction: &mut Transaction<'_, Postgres>,
+    input: &OnboardingCompletionInput,
+) -> Result<(), OnboardingFlowRepositoryError> {
+    let Some(run_id) = input.discovery_run_id else {
+        return Ok(());
+    };
+    let (original, kind) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT original_input_text, original_input_kind FROM onboarding_discovery_runs WHERE id = $1::bigint::integer AND user_id = $2::bigint::integer"
+    ).bind(run_id).bind(input.user_id).fetch_one(&mut **transaction).await?;
+    let seed = input
+        .news_filter_seed
+        .clone()
+        .or_else(|| original.map(|text| (text, false)));
+    if let Some((text, enabled)) = seed {
+        crate::news_filter_preferences::initialize(
+            transaction,
+            input.user_id,
+            &text,
+            enabled,
+            kind.as_deref(),
+            run_id,
+        )
+        .await
+        .map_err(|error| match error {
+            crate::news_filter_preferences::NewsFilterPreferenceError::Database(error) => {
+                OnboardingFlowRepositoryError::Sqlx(error)
+            }
+            _ => OnboardingFlowRepositoryError::InvalidSuggestionSelection,
+        })?;
+    }
+    Ok(())
+}
+
 async fn complete_user_onboarding(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
@@ -440,7 +489,7 @@ async fn validate_completion_selection(
     input: &OnboardingCompletionInput,
 ) -> Result<(), OnboardingFlowRepositoryError> {
     let Some(run_id) = input.discovery_run_id else {
-        return if input.selected_suggestion_ids.is_empty() {
+        return if input.selected_suggestion_ids.is_empty() && input.news_filter_seed.is_none() {
             Ok(())
         } else {
             Err(OnboardingFlowRepositoryError::InvalidSuggestionSelection)
@@ -617,7 +666,6 @@ async fn seed_recent_news(
             FROM contents AS content
             WHERE content.content_type = 'news'
               AND content.status = 'completed'
-              AND (content.classification IS NULL OR content.classification <> 'skip')
               AND NOT EXISTS (
                   SELECT 1
                   FROM content_status AS status
@@ -661,7 +709,6 @@ async fn seed_selected_feed_content(
             WHERE content.content_metadata::jsonb ->> 'feed_url' = ANY($2::text[])
               AND content.status = 'completed'
               AND content.content_type IN ('article', 'podcast')
-              AND (content.classification IS NULL OR content.classification <> 'skip')
               AND NOT EXISTS (
                   SELECT 1
                   FROM content_status AS status
@@ -690,163 +737,6 @@ async fn seed_selected_feed_content(
     .bind(FEED_CONTENT_SEED_LIMIT)
     .fetch_all(&mut **transaction)
     .await
-}
-
-async fn start_first_edition(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-) -> Result<i64, OnboardingFlowRepositoryError> {
-    sqlx::query(
-        r#"
-        UPDATE onboarding_first_edition_runs
-        SET status = 'expired',
-            completed_at = timezone('UTC', now())
-        WHERE user_id::bigint = $1::bigint AND status = 'active'
-        "#,
-    )
-    .bind(user_id)
-    .execute(&mut **transaction)
-    .await?;
-    let run_id = sqlx::query_scalar::<_, i64>(
-        r#"
-        INSERT INTO onboarding_first_edition_runs (
-            user_id,
-            status,
-            revision,
-            started_at,
-            completed_at
-        )
-        VALUES (
-            $1::bigint::integer,
-            'active',
-            1,
-            timezone('UTC', now()),
-            NULL
-        )
-        RETURNING id::bigint
-        "#,
-    )
-    .bind(user_id)
-    .fetch_one(&mut **transaction)
-    .await?;
-    let configs = sqlx::query_as::<_, FirstEditionConfigRow>(
-        r#"
-        SELECT
-            id::bigint AS id,
-            scraper_type,
-            display_name,
-            COALESCE(config, '{}'::json) AS config
-        FROM user_scraper_configs
-        WHERE user_id::bigint = $1::bigint AND is_active = TRUE
-        ORDER BY created_at ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(&mut **transaction)
-    .await?;
-    for (position, config) in configs.iter().filter_map(first_edition_spec).enumerate() {
-        sqlx::query(
-            r#"
-            INSERT INTO onboarding_first_edition_sources (
-                run_id,
-                source_key,
-                display_name,
-                source_kind,
-                "position",
-                status,
-                processed_item_count,
-                completed_at
-            )
-            VALUES (
-                $1::bigint::integer,
-                $2,
-                $3,
-                $4,
-                $5,
-                'queued',
-                0,
-                NULL
-            )
-            "#,
-        )
-        .bind(run_id)
-        .bind(config.source_key)
-        .bind(config.display_name)
-        .bind(config.source_kind)
-        .bind(i32::try_from(position).unwrap_or(i32::MAX))
-        .execute(&mut **transaction)
-        .await?;
-    }
-    Ok(run_id)
-}
-
-#[derive(Debug, FromRow)]
-struct FirstEditionConfigRow {
-    id: i64,
-    scraper_type: String,
-    display_name: Option<String>,
-    config: Value,
-}
-
-struct FirstEditionSpec {
-    source_key: String,
-    display_name: String,
-    source_kind: &'static str,
-}
-
-fn first_edition_spec(config: &FirstEditionConfigRow) -> Option<FirstEditionSpec> {
-    let config_name = config.config.get("name").and_then(Value::as_str);
-    let display_name = config
-        .display_name
-        .as_deref()
-        .or(config_name)
-        .unwrap_or(&config.scraper_type)
-        .to_owned();
-    match config.scraper_type.as_str() {
-        "substack" | "atom" | "podcast_rss" => Some(FirstEditionSpec {
-            source_key: format!("feed:{}", config.id),
-            display_name,
-            source_kind: "feed",
-        }),
-        "aggregator" => {
-            let key = config
-                .config
-                .get("key")
-                .and_then(Value::as_str)
-                .unwrap_or(&display_name)
-                .trim()
-                .to_lowercase();
-            Some(FirstEditionSpec {
-                source_key: format!("scraper:{key}"),
-                display_name,
-                source_kind: "aggregator",
-            })
-        }
-        "reddit" => {
-            let subreddit = config
-                .config
-                .get("subreddit")
-                .and_then(Value::as_str)
-                .unwrap_or(&display_name)
-                .trim()
-                .strip_prefix("r/")
-                .unwrap_or_else(|| {
-                    config
-                        .config
-                        .get("subreddit")
-                        .and_then(Value::as_str)
-                        .unwrap_or(&display_name)
-                        .trim()
-                })
-                .trim_matches('/');
-            Some(FirstEditionSpec {
-                source_key: format!("reddit:{}", config.id),
-                display_name: format!("r/{subreddit}"),
-                source_kind: "reddit",
-            })
-        }
-        _ => None,
-    }
 }
 
 async fn has_feed_discovery_task(
@@ -878,7 +768,6 @@ async fn count_unread_inbox(
         SELECT count(*)::bigint
         FROM contents AS content
         WHERE content.status = 'completed'
-          AND (content.classification IS NULL OR content.classification <> 'skip')
           AND EXISTS (
               SELECT 1
               FROM content_status AS status
@@ -923,7 +812,6 @@ async fn eligible_image_content_ids(
         WHERE content.id::bigint = ANY($1::bigint[])
           AND content.content_type IN ('article', 'podcast')
           AND content.status IN ('awaiting_image', 'completed')
-          AND (content.classification IS NULL OR content.classification <> 'skip')
           AND NOT EXISTS (
               SELECT 1
               FROM processing_tasks AS task

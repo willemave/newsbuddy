@@ -28,11 +28,10 @@ pub(crate) async fn load_eligible_sources_for_keys(
                    content.publication_date
             FROM contents AS content
             JOIN content_status AS membership ON membership.content_id = content.id
-            WHERE content.id::bigint = ANY($2::bigint[])
-              AND membership.user_id::bigint = $1 AND membership.status = 'inbox'
+            WHERE content.id = ANY($2::bigint[])
+              AND membership.user_id = $1::bigint AND membership.status = 'inbox'
               AND content.status = 'completed'
               AND content.content_type IN ('article', 'podcast')
-              AND (content.classification IS NULL OR content.classification <> 'skip')
               AND NULLIF(COALESCE(
                   content.content_metadata::jsonb #> '{domain,image_generated_at}',
                   content.content_metadata::jsonb -> 'image_generated_at'
@@ -45,7 +44,7 @@ pub(crate) async fn load_eligible_sources_for_keys(
               ), 'null'::jsonb) IS NOT NULL
               AND NOT EXISTS (
                   SELECT 1 FROM content_read_status AS read_status
-                  WHERE read_status.user_id::bigint = $1
+                  WHERE read_status.user_id = $1::bigint
                     AND read_status.content_id = content.id
               )
             "#,
@@ -79,11 +78,11 @@ pub(crate) async fn load_eligible_sources_for_keys(
                    news.canonical_story_url, news.canonical_item_url,
                    news.published_at, news.processed_at, news.ingested_at, news.created_at
             FROM visible_news AS news
-            WHERE news.id::bigint = ANY($2::bigint[])
+            WHERE news.id = ANY($2::bigint[])
               AND NOT EXISTS (
                   SELECT 1 FROM news_items AS member
                   JOIN news_item_read_status AS read_status ON read_status.news_item_id = member.id
-                  WHERE read_status.user_id::bigint = $1
+                  WHERE read_status.user_id = $1::bigint
                     AND coalesce(member.representative_news_item_id, member.id) = news.id
               )
             "#,
@@ -110,7 +109,7 @@ pub(super) async fn load_read_source_keys(
     let mut read = HashSet::new();
     if !content_ids.is_empty() {
         for id in sqlx::query_scalar::<_, i64>(
-            "SELECT DISTINCT content_id::bigint FROM content_read_status WHERE user_id::bigint = $1 AND content_id::bigint = ANY($2::bigint[])",
+            "SELECT DISTINCT content_id::bigint FROM content_read_status WHERE user_id = $1::bigint AND content_id = ANY($2::bigint[])",
         )
         .bind(user_id)
         .bind(&content_ids)
@@ -125,11 +124,11 @@ pub(super) async fn load_read_source_keys(
             r#"
             SELECT requested.id::bigint
             FROM unnest($2::bigint[]) AS requested(id)
-            JOIN news_items AS requested_news ON requested_news.id::bigint = requested.id
+            JOIN news_items AS requested_news ON requested_news.id = requested.id
             WHERE EXISTS (
                 SELECT 1 FROM news_items AS member
                 JOIN news_item_read_status AS read_status ON read_status.news_item_id = member.id
-                WHERE read_status.user_id::bigint = $1
+                WHERE read_status.user_id = $1::bigint
                   AND coalesce(member.representative_news_item_id, member.id) =
                       coalesce(requested_news.representative_news_item_id, requested_news.id)
             )
@@ -155,6 +154,22 @@ pub(super) fn visible_news_sql() -> String {
     WHERE news.status = 'ready' AND news.representative_news_item_id IS NULL
       AND {visibility}
     "#,
+        visibility = visible_news_predicate("news")
+    )
+}
+
+// Restrict visibility checks to the exact pending news identities for this user.
+pub(super) fn visible_pending_news_sql() -> String {
+    format!(
+        r#"
+        {SUBSCRIBED_AGGREGATORS_CTE}
+        SELECT news.id
+        FROM briefing_pending_sources AS pending
+        JOIN news_items AS news ON news.id = pending.source_id
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'news'
+          AND news.status = 'ready' AND news.representative_news_item_id IS NULL
+          AND {visibility}
+        "#,
         visibility = visible_news_predicate("news")
     )
 }
@@ -693,53 +708,6 @@ pub(super) fn percent_encode(value: &str) -> String {
             }
         })
         .collect()
-}
-
-pub(super) fn news_topic(metadata: &Value) -> (Option<String>, Option<String>) {
-    let aggregator = metadata.get("aggregator").and_then(Value::as_object);
-    let topic = aggregator
-        .and_then(|value| value.get("topic"))
-        .and_then(Value::as_str)
-        .and_then(|value| clean_text(Some(value)));
-    let slug = topic
-        .as_deref()
-        .map(slugify)
-        .filter(|value| !value.is_empty());
-    let title = aggregator
-        .and_then(|value| value.get("topic_title"))
-        .and_then(Value::as_str)
-        .and_then(|value| clean_text(Some(value)))
-        .or_else(|| slug.as_deref().map(title_case_slug));
-    (slug, title)
-}
-
-pub(super) fn slugify(value: &str) -> String {
-    let mut output = String::new();
-    let mut dash = false;
-    for character in value.trim().to_ascii_lowercase().chars() {
-        if character.is_ascii_alphanumeric() {
-            output.push(character);
-            dash = false;
-        } else if !dash && !output.is_empty() {
-            output.push('-');
-            dash = true;
-        }
-    }
-    output.trim_matches('-').chars().take(48).collect()
-}
-
-pub(super) fn title_case_slug(value: &str) -> String {
-    value
-        .split('-')
-        .filter(|word| !word.is_empty())
-        .map(|word| {
-            let mut chars = word.chars();
-            chars.next().map_or_else(String::new, |first| {
-                first.to_uppercase().collect::<String>() + chars.as_str()
-            })
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub(super) fn u64_to_i32(value: u64) -> i32 {

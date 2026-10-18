@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use newsly_db::{
@@ -10,6 +10,7 @@ use newsly_db::{
 use newsly_providers::{
     FeedPublishingActivity, FeedValidationError, FeedValidator, OnboardingAudioLane,
     OnboardingDiscoverySeeds, OnboardingGateway, OnboardingLaneTarget, OnboardingSuggestionSeed,
+    ValidatedFeed,
 };
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
@@ -73,13 +74,22 @@ impl TaskHandler for OnboardingDiscoverHandler {
                     return HandlerExecution::from_result(TaskResult::fail(Some(error), false));
                 }
             };
-            execute_audio_discovery(&services, &plan, &lease, request.user_id, request.run_id).await
+            execute_audio_discovery(
+                &services,
+                &plan,
+                &lease,
+                request.user_id,
+                request.run_id,
+                &request.narration,
+            )
+            .await
         })
     }
 }
 
 #[derive(Debug, Clone)]
 struct OnboardingRequest {
+    narration: String,
     user_id: i64,
     run_id: i64,
 }
@@ -90,6 +100,7 @@ async fn execute_audio_discovery(
     lease: &LeaseHealth,
     user_id: i64,
     run_id: i64,
+    narration: &str,
 ) -> HandlerExecution {
     let snapshot = match prepare_onboarding_discovery_task(
         &services.pool,
@@ -146,6 +157,7 @@ async fn execute_audio_discovery(
         .provider
         .discover_from_lanes(
             &snapshot.topic_summary,
+            narration,
             &snapshot.inferred_topics,
             &lanes,
             events,
@@ -172,15 +184,19 @@ async fn execute_audio_discovery(
             true,
         ));
     }
-    let suggestions = match normalize_seeds(
+    let suggestions = match normalize_seeds_with_cached_feeds(
         &services.feed_validator,
         outcome.seeds,
         &snapshot.topic_summary,
         &snapshot.inferred_topics,
+        outcome.validated_feeds,
     )
     .await
     {
-        Ok(suggestions) => suggestions,
+        Ok(suggestions) => suggestions
+            .into_iter()
+            .map(|(suggestion, _)| suggestion)
+            .collect(),
         Err(error) => {
             return audio_failure(services, task, snapshot, error.to_string(), true);
         }
@@ -236,7 +252,19 @@ fn parse_request(task: &OwnedWorkPlan) -> Result<OnboardingRequest, String> {
         .and_then(Value::as_i64)
         .filter(|value| *value > 0)
         .ok_or_else(|| "onboarding_discover requires a positive run_id".to_owned())?;
-    Ok(OnboardingRequest { user_id, run_id })
+    let narration = task
+        .payload
+        .get("narration")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .chars()
+        .take(8_000)
+        .collect();
+    Ok(OnboardingRequest {
+        narration,
+        user_id,
+        run_id,
+    })
 }
 
 fn provider_lanes(snapshot: &OnboardingTaskSnapshot) -> Result<Vec<OnboardingAudioLane>, String> {
@@ -281,26 +309,66 @@ pub(crate) async fn normalize_seeds_with_activity(
     profile_summary: &str,
     inferred_topics: &[String],
 ) -> Result<Vec<(NewOnboardingSuggestion, Option<FeedPublishingActivity>)>, FeedValidationError> {
-    let mut output = Vec::new();
-    let mut validation_failures = normalize_feed_seeds(
+    normalize_seeds_with_cached_feeds(
         validator,
+        seeds,
+        profile_summary,
+        inferred_topics,
+        HashMap::new(),
+    )
+    .await
+}
+
+async fn normalize_seeds_with_cached_feeds(
+    validator: &FeedValidator,
+    seeds: OnboardingDiscoverySeeds,
+    profile_summary: &str,
+    inferred_topics: &[String],
+    cached_feeds: HashMap<String, ValidatedFeed>,
+) -> Result<Vec<(NewOnboardingSuggestion, Option<FeedPublishingActivity>)>, FeedValidationError> {
+    let mut seen = HashSet::new();
+    let urls = seeds
+        .substacks
+        .iter()
+        .map(|seed| (seed, "substack"))
+        .chain(seeds.podcasts.iter().map(|seed| (seed, "podcast_rss")))
+        .filter_map(|(seed, kind)| feed_seed_candidate_url(seed, kind))
+        .filter(|url| !cached_feeds.contains_key(url) && seen.insert(url.clone()))
+        .collect::<Vec<_>>();
+    // Both kinds share the validator's eight-request limit; slow newsletter hosts no longer
+    // postpone every podcast request, and same-attempt evidence is never fetched twice.
+    let validations = validator.validate_feeds(&urls).await;
+    let mut validated = cached_feeds
+        .into_iter()
+        .map(|(url, feed)| (url, Some(feed)))
+        .collect::<HashMap<_, _>>();
+    let mut failures = Vec::new();
+    for (url, result) in urls.into_iter().zip(validations) {
+        match result {
+            Ok(feed) => {
+                validated.insert(url, feed);
+            }
+            Err(error) => {
+                failures.push(error);
+            }
+        }
+    }
+    let mut output = Vec::new();
+    normalize_feed_seeds(
+        &validated,
         seeds.substacks,
         "substack",
         profile_summary,
         inferred_topics,
         &mut output,
-    )
-    .await;
-    validation_failures.extend(
-        normalize_feed_seeds(
-            validator,
-            seeds.podcasts,
-            "podcast_rss",
-            profile_summary,
-            inferred_topics,
-            &mut output,
-        )
-        .await,
+    );
+    normalize_feed_seeds(
+        &validated,
+        seeds.podcasts,
+        "podcast_rss",
+        profile_summary,
+        inferred_topics,
+        &mut output,
     );
     let validated_feed_count = output.len();
     let mut subreddits = Vec::new();
@@ -312,61 +380,63 @@ pub(crate) async fn normalize_seeds_with_activity(
     );
     output.extend(subreddits.into_iter().map(|suggestion| (suggestion, None)));
     if validated_feed_count == 0
-        && let Some(error) = validation_failures.into_iter().next()
+        && let Some(error) = failures.into_iter().next()
     {
         return Err(error);
     }
     Ok(output)
 }
 
-async fn normalize_feed_seeds(
-    validator: &FeedValidator,
+fn feed_seed_candidate_url(
+    seed: &OnboardingSuggestionSeed,
+    suggestion_type: &str,
+) -> Option<String> {
+    let site_url = clean_optional(seed.site_url.clone(), 2_048);
+    clean_optional(seed.feed_url.clone(), 2_048)
+        .or_else(|| clean_optional(seed.candidate_feed_url.clone(), 2_048))
+        .or_else(|| {
+            (suggestion_type == "substack")
+                .then(|| {
+                    site_url
+                        .as_deref()
+                        .map(|url| format!("{}/feed", url.trim_end_matches('/')))
+                })
+                .flatten()
+        })
+        .or_else(|| {
+            (seed.is_likely_feed == Some(true))
+                .then(|| site_url.as_deref().and_then(infer_feed_url))
+                .flatten()
+        })
+}
+
+fn normalize_feed_seeds(
+    validations: &HashMap<String, Option<ValidatedFeed>>,
     seeds: Vec<OnboardingSuggestionSeed>,
     suggestion_type: &str,
     profile_summary: &str,
     inferred_topics: &[String],
     output: &mut Vec<(NewOnboardingSuggestion, Option<FeedPublishingActivity>)>,
-) -> Vec<FeedValidationError> {
+) {
     let mut seen = HashSet::new();
-    let mut requested = HashSet::new();
-    let mut candidates = Vec::new();
     let proposed = seeds.len();
     let mut without_feed = 0_usize;
     let mut not_a_feed = 0_usize;
     let mut without_audio = 0_usize;
+    let mut failed = 0_usize;
     for seed in seeds {
-        let site_url = clean_optional(seed.site_url, 2_048);
-        let mut candidate = clean_optional(seed.feed_url, 2_048)
-            .or_else(|| clean_optional(seed.candidate_feed_url, 2_048));
-        if candidate.is_none() && suggestion_type == "substack" {
-            candidate = site_url
-                .as_deref()
-                .map(|value| format!("{}/feed", value.trim_end_matches('/')));
-        }
-        if candidate.is_none() && seed.is_likely_feed == Some(true) {
-            candidate = site_url.as_deref().and_then(infer_feed_url);
-        }
-        let Some(candidate) = candidate else {
+        let Some(candidate) = feed_seed_candidate_url(&seed, suggestion_type) else {
             without_feed += 1;
             continue;
         };
-        if requested.insert(candidate.clone()) {
-            candidates.push((seed.title, seed.rationale, seed.score, site_url, candidate));
-        }
-    }
-    let urls = candidates
-        .iter()
-        .map(|(_, _, _, _, candidate)| candidate.clone())
-        .collect::<Vec<_>>();
-    let validations = validator.validate_feeds(&urls).await;
-    let mut failures = Vec::new();
-    for ((title, rationale, score, site_url, candidate), validation) in
-        candidates.into_iter().zip(validations)
-    {
+        let Some(validation) = validations.get(&candidate) else {
+            failed += 1;
+            continue;
+        };
+        let site_url = clean_optional(seed.site_url, 2_048);
+        let (title, rationale, score) = (seed.title, seed.rationale, seed.score);
         let Some(validated) = (match validation {
-            Ok(Some(validated))
-                if suggestion_type == "podcast_rss" && !validated.has_audio_entries =>
-            {
+            Some(validated) if suggestion_type == "podcast_rss" && !validated.has_audio_entries => {
                 tracing::info!(
                     url = %candidate,
                     "onboarding podcast candidate had no audio entries"
@@ -374,19 +444,10 @@ async fn normalize_feed_seeds(
                 without_audio += 1;
                 None
             }
-            Ok(Some(validated)) => Some(validated),
-            Ok(None) => {
+            Some(validated) => Some(validated),
+            None => {
                 tracing::info!(url = %candidate, "onboarding candidate was not a feed");
                 not_a_feed += 1;
-                None
-            }
-            Err(error) => {
-                tracing::warn!(
-                    url = %candidate,
-                    error = %error,
-                    "onboarding feed candidate validation failed"
-                );
-                failures.push(error);
                 None
             }
         }) else {
@@ -416,9 +477,9 @@ async fn normalize_feed_seeds(
                 score: normalized_score(score),
             },
             Some(if suggestion_type == "podcast_rss" {
-                validated.podcast_publishing_activity
+                validated.podcast_publishing_activity.clone()
             } else {
-                validated.publishing_activity
+                validated.publishing_activity.clone()
             }),
         ));
         if seen.len() >= MAX_SUGGESTIONS_PER_KIND {
@@ -433,10 +494,9 @@ async fn normalize_feed_seeds(
         without_feed,
         not_a_feed,
         without_audio,
-        failed = failures.len(),
+        failed,
         "onboarding feed suggestions normalized"
     );
-    failures
 }
 
 fn normalize_subreddits(
@@ -679,6 +739,26 @@ mod tests {
     }
 
     #[test]
+    fn narration_survives_in_the_durable_payload_without_relying_on_summary_language() {
+        let narration = format!("{} Quiero entrevistas en español.", "ñ".repeat(7_900));
+        let request = parse_request(&plan(
+            &serde_json::json!({"user_id": 7, "run_id": 3, "narration": narration}),
+        ))
+        .unwrap();
+        assert_eq!(
+            request.narration,
+            narration.chars().take(8_000).collect::<String>()
+        );
+        assert!(
+            request
+                .narration
+                .ends_with("Quiero entrevistas en español.")
+        );
+        let legacy = parse_request(&plan(&serde_json::json!({"user_id": 7, "run_id": 3}))).unwrap();
+        assert!(legacy.narration.is_empty());
+    }
+
+    #[test]
     fn discovery_requires_server_owned_run() {
         let error = parse_request(&plan(&serde_json::json!({
             "user_id": 7,
@@ -714,5 +794,98 @@ mod tests {
             }],
         };
         assert!(provider_lanes(&snapshot).is_err());
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use newsly_providers::ValidatedFeedFormat;
+
+    fn cached_feed(url: &str, has_audio: bool) -> ValidatedFeed {
+        let now = chrono::Utc::now();
+        let activity = FeedPublishingActivity {
+            checked_at: now,
+            window_start: now,
+            year_window_start: now,
+            window_end: now,
+            latest_item: None,
+            observed_count: None,
+            observed_year_count: None,
+            undated_count: 1,
+        };
+        ValidatedFeed {
+            effective_url: url.to_owned(),
+            format: ValidatedFeedFormat::Rss,
+            has_audio_entries: has_audio,
+            publishing_activity: activity.clone(),
+            podcast_publishing_activity: activity,
+        }
+    }
+    fn seed(url: &str) -> OnboardingSuggestionSeed {
+        serde_json::from_value(serde_json::json!({"title": "Grounded show", "feed_url": url}))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn exact_attempt_cache_avoids_refetch_and_preserves_canonical_dedupe() {
+        // These URLs cannot pass a public-network fetch; a result proves reuse of the attempt's
+        // validation instead of a hidden second HTTP request.
+        let first = "http://127.0.0.1/first";
+        let second = "http://127.0.0.1/second";
+        let canonical = "https://example.com/feed";
+        let result = normalize_seeds_with_cached_feeds(
+            &FeedValidator::new(),
+            OnboardingDiscoverySeeds {
+                podcasts: vec![seed(first), seed(second)],
+                ..OnboardingDiscoverySeeds::default()
+            },
+            "Founder interviews",
+            &[],
+            HashMap::from([
+                (first.to_owned(), cached_feed(canonical, true)),
+                (second.to_owned(), cached_feed(canonical, true)),
+            ]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0.feed_url.as_deref(), Some(canonical));
+        assert!(result[0].1.is_some());
+    }
+
+    #[tokio::test]
+    async fn shared_validation_still_requires_audio_and_preserves_kind_order() {
+        let article = "http://127.0.0.1/article";
+        let show = "http://127.0.0.1/show";
+        let result = normalize_seeds_with_cached_feeds(
+            &FeedValidator::new(),
+            OnboardingDiscoverySeeds {
+                substacks: vec![seed(article)],
+                podcasts: vec![seed(article), seed(show)],
+                ..OnboardingDiscoverySeeds::default()
+            },
+            "Research",
+            &[],
+            HashMap::from([
+                (
+                    article.to_owned(),
+                    cached_feed("https://example.com/article-feed", false),
+                ),
+                (
+                    show.to_owned(),
+                    cached_feed("https://example.com/show-feed", true),
+                ),
+            ]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result
+                .iter()
+                .map(|(s, _)| s.suggestion_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["substack", "podcast_rss"]
+        );
     }
 }

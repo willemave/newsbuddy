@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(in crate::news_item) enum NewsRepositoryError {
+    #[error("news relation matcher: {0}")]
+    Relation(String),
     #[error("content-analysis usage was passed to a news-item extraction finalizer")]
     UnexpectedContentAnalysisUsage,
     #[error("accepted relation candidate {0} was not loaded")]

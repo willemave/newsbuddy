@@ -58,7 +58,7 @@ pub(crate) async fn main() -> Result<()> {
     let services = Arc::new(ContentWorkerServices::new(
         database.pool().clone(),
         queue.clone(),
-        ContentExtractionRuntime::new(extractor, firecrawl),
+        ContentExtractionRuntime::new(extractor, firecrawl, database.pool().clone()),
         body_store,
         content_analysis,
         x_lookup,

@@ -177,32 +177,52 @@ struct KnowledgeSavedContentButton: View {
     let onReprocess: () async -> Bool
     let onRemove: () -> Void
     var derivatives: KnowledgeSourceDerivatives = []
+    /// Opens an existing chat or deck from its trailing shortcut; nil hides shortcuts.
+    var onShortcut: ((KnowledgeSourceAction) -> Void)? = nil
 
     @State private var showsPreparationStatus = false
 
     private var content: ContentSummary { entry.content }
 
+    private var shortcuts: [KnowledgeSourceAction] {
+        guard onShortcut != nil, content.savedLibraryItemState == .ready else { return [] }
+        return entry.openableActions
+    }
+
     var body: some View {
-        Button {
-            guard content.savedLibraryItemState == .ready else {
-                showsPreparationStatus = true
-                return
+        HStack(spacing: 0) {
+            Button {
+                guard content.savedLibraryItemState == .ready else {
+                    showsPreparationStatus = true
+                    return
+                }
+                onOpen()
+            } label: {
+                KnowledgeSavedRow(entry: entry, derivatives: derivatives, shortcuts: shortcuts)
             }
-            onOpen()
-        } label: {
-            KnowledgeSavedRow(entry: entry, derivatives: derivatives)
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .accessibilityValue(
+                [derivatives.accessibilitySummary, entry.statusText]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+            )
+            .accessibilityHint(
+                content.savedLibraryItemState == .ready
+                    ? "Opens this saved item"
+                    : "Shows preparation status and recovery actions"
+            )
+
+            if let onShortcut, !shortcuts.isEmpty {
+                HStack(spacing: 2) {
+                    ForEach(shortcuts, id: \.self) { action in
+                        KnowledgeSourceShortcutButton(action: action, contentID: content.id) {
+                            onShortcut(action)
+                        }
+                    }
+                }
+                .padding(.trailing, Spacing.appHorizontalMargin - 4)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier)
-        .accessibilityValue(
-            [derivatives.accessibilitySummary, entry.statusText]
-                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
-        )
-        .accessibilityHint(
-            content.savedLibraryItemState == .ready
-                ? "Opens this saved item"
-                : "Shows preparation status and recovery actions"
-        )
         .sheet(isPresented: $showsPreparationStatus) {
             KnowledgePreparationStatusSheet(
                 content: content,
@@ -217,6 +237,8 @@ struct KnowledgeSavedContentButton: View {
 struct KnowledgeSavedRow: View {
     let entry: KnowledgeSavedTimelineEntry
     var derivatives: KnowledgeSourceDerivatives = []
+    /// Deep dives shown as trailing buttons instead of kicker markers.
+    var shortcuts: [KnowledgeSourceAction] = []
 
     private var content: ContentSummary { entry.content }
 
@@ -284,22 +306,21 @@ struct KnowledgeSavedRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Image(
-                systemName: content.savedLibraryItemState == .ready
-                    ? "chevron.right"
-                    : "info.circle"
-            )
-                .font(.appSymbol(size: 11, weight: .semibold))
-                .foregroundStyle(Color.onSurfaceTertiary)
+            if content.savedLibraryItemState != .ready {
+                Image(systemName: "info.circle")
+                    .font(.appSymbol(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.onSurfaceTertiary)
+            }
         }
-        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.leading, Spacing.appHorizontalMargin)
+        .padding(.trailing, shortcuts.isEmpty ? Spacing.appHorizontalMargin : 8)
         .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private var derivativeMarkers: some View {
-        let actions = derivatives.actions
+        let actions = derivatives.actions.filter { !shortcuts.contains($0) }
         if !actions.isEmpty {
             HStack(spacing: 5) {
                 ForEach(actions, id: \.self) { action in

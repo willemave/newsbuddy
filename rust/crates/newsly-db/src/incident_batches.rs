@@ -54,7 +54,7 @@ pub async fn artwork_candidates(
     sqlx::query_scalar(r"
         SELECT c.id::bigint FROM contents c
         WHERE c.id::bigint = ANY($1) AND c.status IN ('completed','awaiting_image')
-          AND c.content_type IN ('article','podcast') AND c.classification IS DISTINCT FROM 'skip'
+          AND c.content_type IN ('article','podcast')
           AND jsonb_typeof(COALESCE(c.content_metadata::jsonb #> '{processing,summary}',c.content_metadata::jsonb #> '{domain,summary}',c.content_metadata::jsonb -> 'summary')) = 'object'
           AND NULLIF(COALESCE(c.content_metadata::jsonb #> '{domain,image_generated_at}',c.content_metadata::jsonb -> 'image_generated_at'),'null'::jsonb) IS NULL
           AND NOT EXISTS (SELECT 1 FROM processing_tasks t WHERE t.content_id = c.id AND t.task_type = 'generate_image')

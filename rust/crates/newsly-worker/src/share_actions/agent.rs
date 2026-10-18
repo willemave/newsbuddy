@@ -614,11 +614,8 @@ fn mode_prompt(mode: &str) -> Result<&'static str, ShareActionAgentError> {
             include_str!("../../../../assets/prompts/llm_tasks/share_action.add_links.md")
         }
         "add_feed" => include_str!("../../../../assets/prompts/llm_tasks/share_action.add_feed.md"),
-        "chat" | "presentation" => {
+        "chat" | "presentation" | "bookmark_only" => {
             return Err(ShareActionAgentError::UnsupportedMode(mode.to_owned()));
-        }
-        "bookmark_only" => {
-            include_str!("../../../../assets/prompts/llm_tasks/share_action.bookmark_only.md")
         }
         other => return Err(ShareActionAgentError::UnsupportedMode(other.to_owned())),
     };
@@ -755,7 +752,7 @@ impl ShareActionAgentError {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_REQUEST_LIMIT, request_limit_for_mode};
+    use super::{MAX_REQUEST_LIMIT, ShareActionAgentError, mode_prompt, request_limit_for_mode};
 
     #[test]
     fn add_feed_gets_bounded_discovery_headroom() {
@@ -768,13 +765,16 @@ mod tests {
     }
 
     #[test]
+    fn immediate_bookmarks_never_load_an_agent_prompt() {
+        assert!(matches!(
+            mode_prompt("bookmark_only"),
+            Err(ShareActionAgentError::UnsupportedMode(_))
+        ));
+    }
+
+    #[test]
     fn other_share_modes_keep_the_configured_limit() {
-        for mode in [
-            "add_content",
-            "add_to_briefing",
-            "add_links",
-            "bookmark_only",
-        ] {
+        for mode in ["add_content", "add_to_briefing", "add_links"] {
             assert_eq!(request_limit_for_mode(mode, 8), 8, "mode {mode}");
         }
     }

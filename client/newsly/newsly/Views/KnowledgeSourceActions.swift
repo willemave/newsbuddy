@@ -169,6 +169,35 @@ private struct KnowledgeSourceActionButton: View {
     }
 }
 
+/// Trailing row button that jumps straight into a source's existing chat or deck.
+struct KnowledgeSourceShortcutButton: View {
+    let action: KnowledgeSourceAction
+    let contentID: Int
+    let perform: () -> Void
+
+    var body: some View {
+        Button(action: perform) {
+            Image(systemName: action.systemImage)
+                .font(.appSymbol(size: 12, weight: .semibold))
+                .foregroundStyle(Color.brandPrimary)
+                .frame(width: 30, height: 30)
+                .background(Color.surfaceSecondary, in: Circle())
+                .frame(width: 36, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(action.resultName)")
+        .accessibilityIdentifier("knowledge.saved.\(contentID).open_\(action.resultName)")
+    }
+}
+
+extension KnowledgeSavedTimelineEntry {
+    /// Existing deep dives the source row opens directly, in shortcut order.
+    var openableActions: [KnowledgeSourceAction] {
+        (chats.isEmpty ? [] : [.chat]) + (decks.isEmpty ? [] : [.deck])
+    }
+}
+
 private struct KnowledgeSwipeHintModifier: ViewModifier {
     let isActive: Bool
     let onFinished: () -> Void

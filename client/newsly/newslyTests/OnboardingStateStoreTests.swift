@@ -28,6 +28,99 @@ final class OnboardingStateStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    func testRestoredOriginalFilterIsEditableAndOptOutSurvivesRestart() async {
+        let user = makeUser(id: 61)
+        let service = DeferredOnboardingService()
+        store.saveProgress(userId: user.id, snapshot: OnboardingProgressSnapshot(
+            step: .reddit, isPersonalized: true, suggestions: nil, selectedSuggestionIds: [],
+            discoveryRunId: 77, discoveryRunStatus: "completed", discoveryErrorMessage: nil,
+            hasReachedPollingLimit: false, topicSummary: "An inferred summary", inferredTopics: []))
+        let model = OnboardingViewModel(user: user, service: service,
+            dictationService: FakeSpeechTranscriber(), onboardingStateStore: store)
+        let resume = Task { await model.resumeDiscoveryIfNeeded() }
+        let didRequest = await waitUntil { service.hasPendingDiscoveryStatus }
+        XCTAssertTrue(didRequest)
+        let exact = "  Only space; never celebrity news.\nKeep these words.  "
+        service.resolveDiscoveryStatus(OnboardingDiscoveryStatusResponse(
+            runId: 77, runStatus: "completed", topicSummary: "Different summary", inferredTopics: [],
+            lanes: [], suggestions: nil, errorMessage: nil, originalInputText: exact,
+            originalInputKind: "speech_transcript"))
+        await resume.value
+        XCTAssertEqual(model.newsFilterText, exact)
+        XCTAssertTrue(model.newsFilterEnabled)
+        XCTAssertEqual(model.step, .reddit)
+        model.updateNewsFilter(text: exact + " edited", enabled: false)
+        let restored = OnboardingViewModel(user: user, service: service,
+            dictationService: FakeSpeechTranscriber(), onboardingStateStore: store)
+        XCTAssertEqual(restored.newsFilterText, exact + " edited")
+        XCTAssertFalse(restored.newsFilterEnabled)
+        await restored.completeOnboarding()
+        XCTAssertEqual(service.completedRequest?.newsFilterSeed?.text, exact + " edited")
+        XCTAssertEqual(service.completedRequest?.newsFilterSeed?.enabled, false)
+    }
+
+    func testTypedDiscoveryPreservesExactInputAndKind() async {
+        let service = DeferredOnboardingService(immediateAudioResponse:
+            OnboardingAudioDiscoverResponse(runId: 78, runStatus: "pending", topicSummary: nil,
+                inferredTopics: [], lanes: []))
+        let model = OnboardingViewModel(user: makeUser(id: 63), service: service,
+            dictationService: FakeSpeechTranscriber(), onboardingStateStore: store)
+        model.startPersonalized()
+        let original = "  Quantum research, but never crypto.\n  "
+        await model.discoverTypedInterests(original)
+        XCTAssertEqual(service.audioRequest?.transcript, original)
+        XCTAssertEqual(service.audioRequest?.inputKind, "typed")
+        model.chooseDefaults()
+        if service.hasPendingDiscoveryStatus {
+            service.resolveDiscoveryStatus(OnboardingDiscoveryStatusResponse(
+                runId: 78, runStatus: "completed", topicSummary: nil, inferredTopics: [],
+                lanes: [], suggestions: nil, errorMessage: nil))
+        }
+    }
+
+    func testMultibyteOnboardingDraftCanOptOutButCannotActivate() async {
+        let user = makeUser(id: 64)
+        let service = DeferredOnboardingService()
+        store.saveProgress(userId: user.id, snapshot: OnboardingProgressSnapshot(
+            step: .reddit, isPersonalized: true, suggestions: nil, selectedSuggestionIds: [],
+            discoveryRunId: 79, discoveryRunStatus: "completed", discoveryErrorMessage: nil,
+            hasReachedPollingLimit: false, topicSummary: nil, inferredTopics: []))
+        let model = OnboardingViewModel(user: user, service: service,
+            dictationService: FakeSpeechTranscriber(), onboardingStateStore: store)
+        let text = String(repeating: "界", count: 3_000)
+        model.updateNewsFilter(text: text, enabled: true)
+        await model.completeOnboarding()
+        XCTAssertNil(service.completedRequest)
+        XCTAssertNotNil(model.errorMessage)
+        model.updateNewsFilter(text: text, enabled: false)
+        await model.completeOnboarding()
+        XCTAssertEqual(service.completedRequest?.newsFilterSeed?.text, text)
+        XCTAssertEqual(service.completedRequest?.newsFilterSeed?.enabled, false)
+    }
+
+    func testCompletionSeedWireEncodingOmitsAbsenceAndRejectsExplicitNull() throws {
+        let absent = APIOnboardingCompleteRequest()
+        let data = try JSONEncoder().encode(absent)
+        var body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(body["news_filter_seed"])
+        XCTAssertNoThrow(try JSONDecoder().decode(APIOnboardingCompleteRequest.self, from: data))
+        body["news_filter_seed"] = NSNull()
+        let nullData = try JSONSerialization.data(withJSONObject: body)
+        XCTAssertThrowsError(try JSONDecoder().decode(APIOnboardingCompleteRequest.self, from: nullData))
+    }
+
+    func testQuickStartCompletionOmitsFilterSeed() async throws {
+        let service = DeferredOnboardingService()
+        let model = OnboardingViewModel(user: makeUser(id: 62), service: service,
+            dictationService: FakeSpeechTranscriber(), onboardingStateStore: store)
+        model.chooseDefaults()
+        await model.completeOnboarding()
+        XCTAssertNil(service.completedRequest?.newsFilterSeed)
+        let request = try XCTUnwrap(service.completedRequest)
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request.api)) as? [String: Any]
+        XCTAssertNil(body?["news_filter_seed"])
+    }
+
     func testChooseDefaultsPersistsSuggestionsStepForResume() {
         let user = makeUser(id: 41)
         let viewModel = OnboardingViewModel(
@@ -597,6 +690,7 @@ private final class DeferredOnboardingService: OnboardingServicing {
     private var audioContinuation: CheckedContinuation<OnboardingAudioDiscoverResponse, Error>?
     private var statusContinuation: CheckedContinuation<OnboardingDiscoveryStatusResponse, Error>?
     private(set) var completedRequest: OnboardingCompleteRequest?
+    private(set) var audioRequest: OnboardingAudioDiscoverRequest?
 
     init(immediateAudioResponse: OnboardingAudioDiscoverResponse? = nil) {
         self.immediateAudioResponse = immediateAudioResponse
@@ -608,7 +702,7 @@ private final class DeferredOnboardingService: OnboardingServicing {
     func audioDiscover(
         request: OnboardingAudioDiscoverRequest
     ) async throws -> OnboardingAudioDiscoverResponse {
-        _ = request
+        audioRequest = request
         if let immediateAudioResponse {
             return immediateAudioResponse
         }

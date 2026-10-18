@@ -16,38 +16,21 @@ struct DetailActionBar: View {
     let isPodcastAudioLoading: Bool
     let isPodcastAudioActive: Bool
     let podcastAudioAccessibilityLabel: String
-    let onOpenExternal: (URL) -> Void
     let onShare: () -> Void
     let readerTransitionNamespace: Namespace.ID?
     let onOpenReader: () -> Void
     let onDownloadMore: () -> Void
     let onConvertLinkedArticle: () -> Void
     let onToggleKnowledgeSave: () -> Void
+    let onCreateDeck: () -> Void
     let onPodcastAudio: () -> Void
     let onPodcastAudioSpeed: (NarrationPlaybackSpeedOption) -> Void
     let onOpenKnowledgeActions: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            if let externalURL {
-                Button {
-                    onOpenExternal(externalURL)
-                } label: {
-                    actionIcon("safari")
-                }
-                .buttonStyle(.plain)
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.action.open_external")
-                .accessibilityLabel("Open article")
-            }
-
-            Button(action: onShare) {
-                actionIcon("square.and.arrow.up", verticalOffset: -1)
-            }
-            .detailActionBarSegment()
-            .accessibilityIdentifier("content.action.share")
-
-            if canShowReader {
+            // One reading entry; the reader opens on the original page when no text exists.
+            if canShowReader || externalURL != nil {
                 Button(action: onOpenReader) {
                     if isLoadingReaderBody {
                         ProgressView()
@@ -57,11 +40,18 @@ struct DetailActionBar: View {
                         actionIcon("doc.richtext")
                     }
                 }
+                .buttonStyle(.plain)
                 .detailActionBarSegment()
                 .matchedContentZoomSource(id: content.id, namespace: readerTransitionNamespace)
                 .accessibilityIdentifier("content.action.reader")
-                .accessibilityLabel("Read full article")
+                .accessibilityLabel(canShowReader ? readerAccessibilityLabel : "Open original")
             }
+
+            Button(action: onShare) {
+                actionIcon("square.and.arrow.up", verticalOffset: -1)
+            }
+            .detailActionBarSegment()
+            .accessibilityIdentifier("content.action.share")
 
             if content.contentType == .article || content.contentType == .podcast {
                 Button(action: onDownloadMore) {
@@ -97,6 +87,15 @@ struct DetailActionBar: View {
                 .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
             }
 
+            if content.contentType == .article || content.contentType == .podcast {
+                Button(action: onCreateDeck) {
+                    actionIcon("rectangle.on.rectangle")
+                }
+                .detailActionBarSegment()
+                .accessibilityIdentifier("content.action.create_deck")
+                .accessibilityLabel("Create Learning Deck")
+            }
+
             if supportsPodcastAudio {
                 NarrationPressButton(
                     isDisabled: isPodcastAudioLoading,
@@ -120,6 +119,10 @@ struct DetailActionBar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 44)
         .textSelection(.disabled)
+    }
+
+    private var readerAccessibilityLabel: String {
+        content.contentType == .podcast ? "Read transcript" : "Read full article"
     }
 
     /// The ask-the-buddy action, matching `actionIcon`'s metrics so the left-packed bar

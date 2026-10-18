@@ -60,3 +60,60 @@ async fn live_luna_priority_audio_plan_satisfies_the_product_contract() {
             .all(|lane| (2..=4).contains(&lane.queries.len()))
     );
 }
+
+#[test]
+fn planned_queries_preserve_source_archetypes_language_and_named_communities() {
+    let queries = vec![
+        "independent climate technology practitioner newsletters in English".to_owned(),
+        "academic climate research institutes recurring analysis RSS".to_owned(),
+        "institutional climate research journals RSS analysis".to_owned(),
+    ];
+    assert_eq!(
+        super::refine_queries(
+            OnboardingLaneTarget::Feeds,
+            queries.clone(),
+            "Climate",
+            &[],
+            "Climate"
+        ),
+        queries
+    );
+}
+
+#[test]
+fn missing_queries_use_show_level_fallback_without_rewriting_existing_query() {
+    let queries = super::refine_queries(
+        OnboardingLaneTarget::Podcasts,
+        vec!["long founder interviews English podcast shows".to_owned()],
+        "Founder interviews",
+        &["Business".to_owned()],
+        "Business",
+    );
+    assert_eq!(queries[0], "long founder interviews English podcast shows");
+    assert_eq!(queries.len(), 3);
+    assert!(queries.iter().all(|query| !query.contains("episodes")));
+}
+
+#[test]
+fn missing_format_cue_is_appended_without_rewriting_planned_interest() {
+    let query = "long founder interviews in Norwegian".to_owned();
+    assert_eq!(
+        super::ensure_query_target(query, OnboardingLaneTarget::Podcasts),
+        "long founder interviews in Norwegian podcast shows"
+    );
+    let reddit = "site:reddit.com/r/F1Technical race engineering discussions".to_owned();
+    assert_eq!(
+        super::ensure_query_target(reddit.clone(), OnboardingLaneTarget::Reddit),
+        reddit
+    );
+}
+
+#[test]
+fn incidental_format_substrings_do_not_hide_missing_source_type() {
+    for query in ["anatomy research", "feedback control systems"] {
+        assert_eq!(
+            super::ensure_query_target(query.to_owned(), OnboardingLaneTarget::Feeds),
+            format!("{query} RSS feeds")
+        );
+    }
+}

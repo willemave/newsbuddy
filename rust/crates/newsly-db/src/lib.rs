@@ -48,9 +48,11 @@ mod council_retirement_tests;
 mod discussions;
 mod e2e_fixtures;
 mod fingerprint;
+mod firecrawl_credit;
 mod integrations;
 mod interactions;
 mod jobs;
+mod learning_deck_generation;
 mod learning_deck_tasks;
 mod learning_decks;
 mod llm_task_dispatch;
@@ -59,6 +61,8 @@ mod media_tasks;
 mod migrations;
 mod news_actions;
 mod news_category_schedule;
+pub mod news_filter_preferences;
+pub mod news_grouping;
 mod onboarding;
 mod onboarding_flow;
 mod onboarding_tasks;
@@ -199,6 +203,7 @@ pub use content_misc::{
 pub use content_read::{
     ContentDetailProjection, ContentReadRepositoryError, NewsItemProjection, NewsListCursor,
     NewsListPage, NewsReadFilter, find_visible_content_detail, find_visible_news_item_detail,
+    find_visible_news_items_by_ids, find_visible_news_items_for_filter_preview,
     list_active_feed_urls, list_visible_news_items,
 };
 pub use content_submission::{
@@ -217,6 +222,10 @@ pub use e2e_fixtures::{
     ios_e2e_local_artifact_plan, seed_ios_e2e_fixture,
 };
 pub use fingerprint::FingerprintError;
+pub use firecrawl_credit::{
+    FirecrawlAdmission, FirecrawlCreditTransition, acquire_firecrawl_admission,
+    observe_firecrawl_response,
+};
 pub use integrations::{
     IntegrationRepositoryError, PrepareXOAuthExchangeOutcome, PreparedXOAuthExchange,
     UserLlmIntegrationProjection, XConnectionProjection, XDisconnectPlan,
@@ -229,6 +238,11 @@ pub use interactions::{
     insert_content_interaction, insert_feedback,
 };
 pub use jobs::{JobRepositoryError, JobStatusProjection, find_job_for_user};
+pub use learning_deck_generation::{
+    LearningDeckGenerationClaimFence, LearningDeckGenerationState, begin_learning_deck_generation,
+    learning_deck_generation_is_owned, publish_learning_deck_draft, publish_learning_deck_progress,
+    read_learning_deck_generation,
+};
 pub use learning_deck_tasks::{
     ContentBodyMaterial, LearningDeckModelUsage, LearningDeckPreparationOutcome,
     LearningDeckSourceMaterial, LearningDeckSourceSettlement, LearningDeckTaskRepositoryError,
@@ -264,7 +278,7 @@ pub use media_tasks::{
 };
 pub use migrations::{
     BASELINE_VERSION, MigrationError, embedded_migration_count, run_migrations,
-    run_migrations_with_barrier,
+    run_migrations_with_barrier, verify_migration_history,
 };
 pub use news_actions::{
     BulkNewsReadResult, NewsActionRepositoryError, mark_visible_news_items_read,
@@ -400,3 +414,5 @@ mod aggregator_visibility_tests;
 mod warm_news_tests;
 
 pub use briefing_refresh::reclustering as news_category_reclustering;
+
+pub mod news_filter;

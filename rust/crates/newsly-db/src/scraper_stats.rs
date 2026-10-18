@@ -82,7 +82,6 @@ pub async fn get_scraper_config_stats(
             stats.response.latest_publication_at = Some(publication_at);
         }
         if content.status == "completed"
-            && content.classification.as_deref() != Some("skip")
             && let Some(processed_at) = content.processed_at.map(|value| value.and_utc())
             && stats
                 .response
@@ -92,19 +91,17 @@ pub async fn get_scraper_config_stats(
             stats.response.latest_processed_at = Some(processed_at);
         }
 
-        if content.status == "completed" && content.classification.as_deref() != Some("skip") {
+        if content.status == "completed" {
             stats.response.completed_count += 1;
             stats.completed_ids.insert(content.id);
             if content.in_inbox {
                 stats.inbox_completed_ids.insert(content.id);
             }
         }
-        if content.classification.as_deref() != Some("skip")
-            && matches!(
-                content.status.as_str(),
-                "new" | "pending" | "processing" | "awaiting_image"
-            )
-        {
+        if matches!(
+            content.status.as_str(),
+            "new" | "pending" | "processing" | "awaiting_image"
+        ) {
             stats.processing_candidates.insert(content.id);
         }
         if content.status == "failed"
@@ -188,7 +185,6 @@ pub async fn get_scraper_config_stats(
 pub(super) struct ContentStatsRow {
     pub(super) id: i64,
     status: String,
-    classification: Option<String>,
     processed_at: Option<NaiveDateTime>,
     publication_date: Option<NaiveDateTime>,
     created_at: Option<NaiveDateTime>,
@@ -209,7 +205,6 @@ pub(super) async fn load_content_rows(
         SELECT
             content.id::bigint AS id,
             content.status,
-            content.classification,
             content.processed_at,
             content.publication_date,
             content.created_at,

@@ -1,13 +1,13 @@
 use super::{
-    ArtifactFields, ContentClassification, ContentDetailProjection, ContentDetailResponse,
-    ContentStatus, ContentSummaryResponse, ContentType, DISPLAY_SUMMARY_KINDS, FromStr,
-    LegacyNewsFields, Map, PresentationError, SavedSource, Value, backfill_legacy_news_article,
-    clean_optional_str, content_top_comment, detected_feed, extract_key_takeaway,
-    extract_short_summary, insert_string_if_missing, is_typed_artifact_detail,
-    legacy_content_news_fields, longform_artifact_fields, normalize_summary_contract, object_field,
-    parse_summary_kind, parse_summary_version, project_bullet_points, project_quotes,
-    project_topics, resolve_content_display_title, resolve_content_image_urls, resolve_content_url,
-    runtime_metadata, sanitize_metadata_for_api, string_field, structured_summary,
+    ArtifactFields, ContentDetailProjection, ContentDetailResponse, ContentStatus,
+    ContentSummaryResponse, ContentType, FromStr, LegacyNewsFields, Map, PresentationError,
+    SavedSource, Value, backfill_legacy_news_article, clean_optional_str, content_top_comment,
+    detected_feed, extract_key_takeaway, extract_short_summary, insert_string_if_missing,
+    is_typed_artifact_detail, legacy_content_news_fields, longform_artifact_fields,
+    normalize_summary_contract, object_field, parse_summary_kind, parse_summary_version,
+    project_bullet_points, project_quotes, project_topics, resolve_content_display_title,
+    resolve_content_image_urls, resolve_content_url, runtime_metadata, sanitize_metadata_for_api,
+    string_field, structured_summary,
 };
 
 // Normalized source values shared by the two independent wire projections.
@@ -195,16 +195,7 @@ pub(crate) fn present_content_summary(
         ..
     } = longform_artifact_fields(&metadata);
     let is_legacy_news = content.news_fields.is_some();
-    let classification = kind
-        .filter(|kind| !is_legacy_news && DISPLAY_SUMMARY_KINDS.contains(kind))
-        .and_then(|_| object_field(&metadata, "summary"))
-        .and_then(|summary| summary.get("classification"))
-        .and_then(Value::as_str)
-        .and_then(|value| match value {
-            "to_read" => Some(ContentClassification::ToRead),
-            "skip" => Some(ContentClassification::Skip),
-            _ => None,
-        });
+    let classification = None;
     let primary_topic = (!is_legacy_news)
         .then(|| project_topics(&metadata, kind, version))
         .and_then(|topics| {

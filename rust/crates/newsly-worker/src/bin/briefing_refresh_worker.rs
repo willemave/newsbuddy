@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use newsly_db::Database;
-use newsly_providers::BriefingCompositionGateway;
+use newsly_providers::{
+    BriefingCompositionGateway, NewsCategoryGateway, NewsFilterGateway, ProviderCredentials,
+};
 use newsly_queue::{QueueKernel, TaskType};
 use newsly_worker::HandlerRegistry;
 use newsly_worker::briefing_refresh::{
@@ -24,10 +26,10 @@ pub(crate) async fn run(task_type: TaskType) -> Result<()> {
     };
     let process = QueueWorkerProcessConfig::from_env(process_name, worker_id)
         .context("invalid Newsly Rust Briefing-refresh worker process configuration")?;
-    let briefing = BriefingRefreshWorkerConfig::from_env()
-        .context("invalid Newsly Rust Briefing-refresh configuration")?;
     initialize_observability(&process.log_filter, process.log_format)
         .context("Briefing-refresh worker observability initialization failed")?;
+    let briefing = BriefingRefreshWorkerConfig::from_env()
+        .context("invalid Newsly Rust Briefing-refresh configuration")?;
 
     let database = Database::connect_lazy(&process.database)
         .context("Briefing-refresh worker database configuration failed")?;
@@ -42,6 +44,10 @@ pub(crate) async fn run(task_type: TaskType) -> Result<()> {
         database.pool().clone(),
         queue.clone(),
         gateway,
+        NewsFilterGateway::new(ProviderCredentials::from_env().openrouter)
+            .context("News filter provider initialization failed")?,
+        NewsCategoryGateway::new(ProviderCredentials::from_env().openrouter)
+            .context("News category provider initialization failed")?,
         briefing,
     ));
 

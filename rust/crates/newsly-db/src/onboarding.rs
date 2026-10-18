@@ -8,6 +8,8 @@ struct DiscoveryRunRow {
     id: i64,
     status: String,
     topic_summary: Option<String>,
+    original_input_text: Option<String>,
+    original_input_kind: Option<String>,
     inferred_topics: Json<Value>,
     error_message: Option<String>,
 }
@@ -37,6 +39,8 @@ pub struct OnboardingDiscoveryStatusProjection {
     pub run_id: i64,
     pub run_status: String,
     pub topic_summary: Option<String>,
+    pub original_input_text: Option<String>,
+    pub original_input_kind: Option<String>,
     pub inferred_topics: Vec<String>,
     pub lanes: Vec<OnboardingDiscoveryLaneProjection>,
     pub suggestions: Option<Vec<OnboardingSuggestionProjection>>,
@@ -54,6 +58,8 @@ pub async fn find_onboarding_discovery_status(
             id::bigint AS id,
             status,
             topic_summary,
+            original_input_text,
+            original_input_kind,
             inferred_topics,
             error_message
         FROM onboarding_discovery_runs
@@ -129,6 +135,8 @@ pub async fn find_onboarding_discovery_status(
         run_id: run.id,
         run_status: run.status,
         topic_summary: run.topic_summary,
+        original_input_text: run.original_input_text,
+        original_input_kind: run.original_input_kind,
         inferred_topics,
         lanes,
         suggestions,

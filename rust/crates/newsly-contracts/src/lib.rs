@@ -22,7 +22,13 @@ mod jobs;
 mod learning_decks;
 mod llm_tasks;
 mod mutations;
+mod news_filter;
+mod news_filter_results;
+pub use news_filter_results::{
+    NewsFilterNewsItem, NewsFilterNewsResponse, NewsFilterPreviewRequest, NewsFilterPreviewResponse,
+};
 mod news_read;
+pub use news_filter::{NewsFilterPreference, OnboardingNewsFilterSeed, UpdateNewsFilterRequest};
 mod onboarding;
 mod onboarding_flow;
 mod openai;

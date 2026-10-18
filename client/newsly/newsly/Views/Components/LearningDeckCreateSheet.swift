@@ -132,6 +132,7 @@ struct LearningDeckCreateSheet: View {
                         dismiss()
                     }
                     .font(.modalBody)
+                    .disabled(isSubmitting)
                     .accessibilityIdentifier("learning_deck.create.cancel")
                 }
 

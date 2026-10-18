@@ -12,6 +12,8 @@ pub struct OnboardingAudioDiscoverRequest {
     #[schemars(length(min = 3, max = 8_000))]
     #[schema(min_length = 3, max_length = 8_000)]
     pub transcript: String,
+    /// typed or `speech_transcript`; omitted clients use `speech_transcript`.
+    pub input_kind: Option<String>,
     #[schemars(length(max = 20))]
     #[schema(max_length = 20)]
     pub locale: Option<String>,
@@ -73,6 +75,14 @@ pub struct OnboardingSelectedAggregator {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema, Default)]
 pub struct OnboardingCompleteRequest {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::news_filter::deserialize_news_filter_seed"
+    )]
+    #[schema(nullable = false, required = false)]
+    #[schemars(with = "crate::OnboardingNewsFilterSeed")]
+    pub news_filter_seed: Option<crate::OnboardingNewsFilterSeed>,
     /// Server-owned discovery run whose persisted proposals are being confirmed. This is `null`
     /// only for the explicit non-personalized path, which cannot select discovered suggestions.
     pub discovery_run_id: Option<i64>,

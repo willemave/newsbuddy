@@ -108,7 +108,7 @@
     {
       "category": "tasks",
       "path": "tasks/catalog.json",
-      "sha256": "8fa55cc4594d511691b174066db74f83cac18ebf7561976f6ecb7b4814172eda"
+      "sha256": "4fb4d6838897ac5e2066c20ba4ac46c1cd49235a01d9f1da4f64d52316a03afc"
     },
     {
       "category": "tasks",
@@ -158,7 +158,7 @@
     {
       "category": "tasks",
       "path": "tasks/onboarding_discover.schema.json",
-      "sha256": "b062c30ae2e5563de71b851e0918eec510f4d6fcf05303f9205804b868c6ad17"
+      "sha256": "bd2351dae3cca63f4c86b031008142ffb8a375d9565a762c1ab12bf392cca6f1"
     },
     {
       "category": "tasks",

@@ -9,9 +9,9 @@ use super::super::model::{
 use super::super::storage::ContentBodyStoreError;
 use super::ContentWorkerServices;
 use super::support::{
-    content_id, extraction_deadline, extraction_failure, feed_candidates_from_metadata, request_id,
-    resolve_article_url, runtime_bool, runtime_string, storage_failure, terminal_failure,
-    with_finalizer,
+    content_id, extraction_deadline, extraction_deferred, extraction_failure,
+    feed_candidates_from_metadata, request_id, resolve_article_url, runtime_bool, runtime_string,
+    storage_failure, terminal_failure, with_finalizer,
 };
 use crate::content::repository::load_content_snapshot;
 
@@ -88,12 +88,16 @@ pub(super) async fn execute_process_content(
     } else {
         let deadline = extraction_deadline(services.extraction_timeout);
         let request_id = request_id(plan);
-        let extraction = services.extraction.process_article(
-            &target_url,
-            &snapshot.content_type,
-            &request_id,
-            deadline,
-        );
+        let runtime = services
+            .extraction
+            .for_task(crate::content::FirecrawlAttribution {
+                task: plan.task_id,
+                content: Some(content_id),
+                news_item: None,
+                user: None,
+            });
+        let extraction =
+            runtime.process_article(&target_url, &snapshot.content_type, &request_id, deadline);
         tokio::pin!(extraction);
         let attempt = tokio::select! {
             attempt = &mut extraction => attempt,
@@ -106,6 +110,21 @@ pub(super) async fn execute_process_content(
         };
         match attempt {
             ExtractionAttempt::Success { article, usage } => (article, usage),
+            ExtractionAttempt::Deferred {
+                reason,
+                resume_at,
+                usage,
+            } => {
+                return extraction_deferred(
+                    services,
+                    plan,
+                    content_id,
+                    "process_content",
+                    reason,
+                    resume_at,
+                    usage,
+                );
+            }
             ExtractionAttempt::Failure {
                 reason,
                 code,

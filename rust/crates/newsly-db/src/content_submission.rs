@@ -64,7 +64,6 @@ struct ContentRow {
     source: Option<String>,
     source_url: Option<String>,
     title: Option<String>,
-    classification: Option<String>,
     content_metadata: Value,
 }
 
@@ -196,11 +195,13 @@ async fn lock_active_user(
     Ok(())
 }
 
+// Reuse durable duplicate identity, never a linked article or a broken alias fallback.
+// Failure leaves the caller's complete submission transaction available for rollback.
 async fn find_content_for_update(
     transaction: &mut Transaction<'_, Postgres>,
     url: &str,
-) -> Result<Option<ContentRow>, sqlx::Error> {
-    sqlx::query_as::<_, ContentRow>(
+) -> Result<Option<ContentRow>, ContentSubmissionRepositoryError> {
+    let existing = sqlx::query_as::<_, ContentRow>(
         r"
         SELECT
             id::bigint AS id,
@@ -210,7 +211,6 @@ async fn find_content_for_update(
             source,
             source_url,
             title,
-            classification,
             content_metadata
         FROM contents
         WHERE url = $1
@@ -221,7 +221,38 @@ async fn find_content_for_update(
     )
     .bind(url)
     .fetch_optional(&mut **transaction)
-    .await
+    .await?;
+    let Some(mut current) = existing else {
+        return Ok(None);
+    };
+    let mut visited = Vec::new();
+    for _ in 0..32 {
+        visited.push(current.id);
+        let metadata = runtime_metadata(&metadata_object(&current.content_metadata));
+        let Some(pointer) = metadata
+            .get("canonical_content_id")
+            .filter(|value| !value.is_null())
+        else {
+            return Ok(Some(current));
+        };
+        let canonical_id = pointer
+            .as_i64()
+            .or_else(|| pointer.as_str().and_then(|value| value.parse().ok()))
+            .filter(|id| *id > 0 && !visited.contains(id))
+            .ok_or(ContentSubmissionRepositoryError::InvalidCanonicalReference)?;
+        current = sqlx::query_as::<_, ContentRow>(
+            r"
+            SELECT id::bigint AS id, content_type, status, platform, source,
+                   source_url, title, content_metadata
+            FROM contents WHERE id::bigint = $1 FOR UPDATE
+            ",
+        )
+        .bind(canonical_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(ContentSubmissionRepositoryError::InvalidCanonicalReference)?;
+    }
+    Err(ContentSubmissionRepositoryError::InvalidCanonicalReference)
 }
 
 async fn insert_content(
@@ -241,7 +272,6 @@ async fn insert_content(
             is_aggregate,
             status,
             retry_count,
-            classification,
             content_metadata,
             created_at,
             updated_at
@@ -256,7 +286,6 @@ async fn insert_content(
             FALSE,
             'new',
             0,
-            'to_read',
             $5,
             timezone('UTC', now()),
             timezone('UTC', now())
@@ -270,7 +299,6 @@ async fn insert_content(
             source,
             source_url,
             title,
-            classification,
             content_metadata
         ",
     )
@@ -517,7 +545,6 @@ async fn is_generated_image_candidate(
 ) -> Result<bool, sqlx::Error> {
     if !matches!(content.content_type.as_str(), "article" | "podcast")
         || !matches!(content.status.as_str(), "awaiting_image" | "completed")
-        || content.classification.as_deref() == Some("skip")
     {
         return Ok(false);
     }
@@ -571,6 +598,8 @@ pub enum ContentSubmissionRepositoryError {
     UserMissingOrInactive,
     #[error("duplicate submission race did not resolve an existing content row")]
     LostDuplicateRace,
+    #[error("content canonical reference is invalid, missing, cyclic, or too deep")]
+    InvalidCanonicalReference,
     #[error("content action persistence failed")]
     ContentAction(#[from] ContentActionRepositoryError),
 }

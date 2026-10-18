@@ -1,11 +1,15 @@
 use chrono::{DateTime, Utc};
 use newsly_extraction::{
     DocumentExtractorClient, ExtractIntent, ExtractRequest, ExtractResult, ExtractionClientError,
-    ExtractionFailure, ExtractionFailureCode, ExtractionFallbackRequired, ExtractionMethod,
-    ExtractionSuccess, PubMedDelegation, PublicUrl,
+    ExtractionFailure, ExtractionFailureCode, ExtractionMethod, ExtractionSuccess,
+    PubMedDelegation, PublicUrl,
 };
 
-use super::FirecrawlUsage;
+use sqlx::PgPool;
+
+use super::firecrawl_accounting::FirecrawlAttribution;
+
+mod fallback;
 use super::firecrawl::{FirecrawlClient, FirecrawlError};
 use super::model::{ExtractedArticle, ExtractionUsageBatch, FeedCandidate, UsageWrite};
 
@@ -20,6 +24,8 @@ pub(crate) enum FirecrawlDemandPolicy {
 pub struct ContentExtractionRuntime {
     extractor: DocumentExtractorClient,
     firecrawl: FirecrawlClient,
+    credit_control: Option<PgPool>,
+    attribution: Option<FirecrawlAttribution>,
     demand_policy: FirecrawlDemandPolicy,
 }
 
@@ -27,6 +33,11 @@ pub struct ContentExtractionRuntime {
 pub(crate) enum ExtractionAttempt {
     Success {
         article: ExtractedArticle,
+        usage: Vec<UsageWrite>,
+    },
+    Deferred {
+        reason: String,
+        resume_at: DateTime<Utc>,
         usage: Vec<UsageWrite>,
     },
     Failure {
@@ -38,12 +49,43 @@ pub(crate) enum ExtractionAttempt {
 }
 
 impl ContentExtractionRuntime {
-    pub const fn new(extractor: DocumentExtractorClient, firecrawl: FirecrawlClient) -> Self {
+    /// Every production runtime shares the durable credit gate and attempt ledger.
+    pub fn new(
+        extractor: DocumentExtractorClient,
+        firecrawl: FirecrawlClient,
+        pool: PgPool,
+    ) -> Self {
         Self {
             extractor,
             firecrawl,
+            credit_control: Some(pool),
+            attribution: None,
             demand_policy: FirecrawlDemandPolicy::Allowed,
         }
+    }
+
+    #[cfg(test)]
+    fn fixture(extractor: DocumentExtractorClient, firecrawl: FirecrawlClient) -> Self {
+        Self {
+            extractor,
+            firecrawl,
+            credit_control: None,
+            attribution: None,
+            demand_policy: FirecrawlDemandPolicy::Allowed,
+        }
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    fn with_credit_control(mut self, pool: PgPool) -> Self {
+        self.credit_control = Some(pool);
+        self
+    }
+
+    pub(crate) fn for_task(&self, attribution: FirecrawlAttribution) -> Self {
+        let mut runtime = self.clone();
+        runtime.attribution = Some(attribution);
+        runtime
     }
 
     pub(crate) fn with_demand_policy(mut self, policy: FirecrawlDemandPolicy) -> Self {
@@ -220,116 +262,6 @@ impl ContentExtractionRuntime {
                     usage,
                 }
             }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn firecrawl_fallback(
-        &self,
-        fallback: ExtractionFallbackRequired,
-        intent: ExtractIntent,
-        original_url: &str,
-        request_id_base: &str,
-        deadline: DateTime<Utc>,
-        mut usage: Vec<UsageWrite>,
-    ) -> ExtractionAttempt {
-        if let Some(write) = usage_write(
-            fallback.request_id.clone(),
-            intent,
-            None,
-            fallback.usage_events,
-        ) {
-            usage.push(write);
-        }
-        if self.demand_policy == FirecrawlDemandPolicy::NoSubscriberDemand {
-            return ExtractionAttempt::Failure {
-                reason: format!(
-                    "Firecrawl fallback was not permitted because the global aggregator item is not visible to any active subscriber: {}",
-                    fallback.reason
-                ),
-                code: newsly_db::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE.to_owned(),
-                retryable: false,
-                usage,
-            };
-        }
-        let remaining = match (deadline - Utc::now()).to_std() {
-            Ok(remaining) if !remaining.is_zero() => remaining,
-            _ => {
-                return ExtractionAttempt::Failure {
-                    reason: "Firecrawl fallback deadline elapsed".to_owned(),
-                    code: "deadline_exceeded".to_owned(),
-                    retryable: true,
-                    usage,
-                };
-            }
-        };
-        let result =
-            match tokio::time::timeout(remaining, self.firecrawl.scrape(&fallback.url)).await {
-                Ok(Ok(result)) => result,
-                Ok(Err(error)) => {
-                    return firecrawl_failure(&error, usage);
-                }
-                Err(_) => {
-                    return ExtractionAttempt::Failure {
-                        reason: "Firecrawl fallback exceeded the task deadline".to_owned(),
-                        code: "deadline_exceeded".to_owned(),
-                        retryable: true,
-                        usage,
-                    };
-                }
-            };
-        let firecrawl_request_id = format!("{request_id_base}-firecrawl");
-        usage.push(UsageWrite::Firecrawl(FirecrawlUsage {
-            request_id: firecrawl_request_id,
-            url: fallback.url.to_string(),
-            status_code: result.status_code,
-            credit_cost_usd: result.credit_cost_usd,
-            credits_used: result.credits_used,
-            num_pages: result.num_pages,
-            total_pages: result.total_pages,
-            scrape_id: result.scrape_id,
-            cost_usd: result.cost_usd,
-        }));
-        if let Some(message) = result.error {
-            return firecrawl_failure(
-                &FirecrawlError::HttpStatus {
-                    status: reqwest::StatusCode::from_u16(result.status_code)
-                        .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
-                    message,
-                },
-                usage,
-            );
-        }
-        let Some(markdown) = result.markdown else {
-            return firecrawl_failure(&FirecrawlError::EmptyMarkdown, usage);
-        };
-        let final_url = match PublicUrl::parse(result.final_url.trim()) {
-            Ok(url) => url,
-            Err(error) => return client_failure(&error, usage),
-        };
-        if let Err(error) = final_url.validate_dns().await {
-            return client_failure(&error, usage);
-        }
-        let title = result.title.unwrap_or_else(|| "Untitled".to_owned());
-        let final_url = final_url.to_string();
-        ExtractionAttempt::Success {
-            article: ExtractedArticle {
-                original_url: original_url.to_owned(),
-                final_url: final_url.clone(),
-                title,
-                author: None,
-                published_at: result.published_at,
-                body: markdown,
-                feed_candidates: Vec::new(),
-                extraction_method: "firecrawl".to_owned(),
-                warnings: vec![format!(
-                    "document extractor requested Firecrawl fallback: {}",
-                    fallback.reason
-                )],
-                timings: fallback.timings,
-                used_firecrawl: true,
-            },
-            usage,
         }
     }
 }

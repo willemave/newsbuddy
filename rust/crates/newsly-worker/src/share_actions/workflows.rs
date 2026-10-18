@@ -270,6 +270,20 @@ pub(super) fn build_verified_source_action(
     ))
 }
 
+pub(crate) fn build_deterministic_bookmark_action(
+    task: &ShareActionAgentSnapshot,
+) -> Result<PreparedHostAction, ShareActionWorkflowError> {
+    let input = ShareActionHostInput::Content(ContentActionInput {
+        url: required_input_url(task)?,
+        title: None,
+        platform: None,
+        content_type: None,
+        instruction: input_optional_text(task, "instruction"),
+        chat_initial_message: None,
+    });
+    Ok(prepare_host_action("save_to_knowledge", input, None))
+}
+
 pub fn build_deterministic_chat_action(
     task: &ShareActionAgentSnapshot,
 ) -> Result<PreparedHostAction, ShareActionWorkflowError> {

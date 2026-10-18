@@ -6,8 +6,8 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      council_maintenance_cutover:
-        description: Run the council retirement maintenance cutover if migration 20261002010000 is pending
+      maintenance_cutover:
+        description: Stop old writers, back up, and apply pending maintenance migrations
         type: boolean
         default: false
 
@@ -138,6 +138,13 @@ jobs:
           docker run --rm --entrypoint /usr/local/bin/newsly-db \
             "$APP_IMAGE" migration-count
 
+          docker run --rm --entrypoint /bin/sh "$APP_IMAGE" -ec '
+            for worker in news-extraction news-processing news-lens briefing-refresh; do
+              test -x "/usr/local/bin/newsly-${worker}-worker"
+              test "$(readlink "/usr/local/bin/newsly-${worker}-worker")" = newsly-worker
+            done
+          '
+
           extractor_container="newsly-extractor-smoke-${GITHUB_RUN_ID}"
           cleanup() {
             docker rm -f "$extractor_container" >/dev/null 2>&1 || true
@@ -221,7 +228,7 @@ jobs:
           IMAGE_EXTRACTOR_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}-extractor
           IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}
           REGISTRY: ${{ env.REGISTRY }}
-          COUNCIL_CUTOVER_REQUESTED: ${{ inputs.council_maintenance_cutover == true }}
+          MAINTENANCE_CUTOVER_REQUESTED: ${{ inputs.maintenance_cutover == true }}
         run: |
           set -euo pipefail
 
@@ -240,30 +247,30 @@ jobs:
           REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
           OWNER_GROUP="${DEPLOY_SSH_USER}:${DEPLOY_SSH_USER}"
 
-          # This one-time authority migration needs a per-run operator request. Probe before
-          # syncing files or pulling images so ordinary pushes cannot attempt it online.
-          council_migration_applied="$(ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s <<'REMOTE_COUNCIL_STATE'
-          set -euo pipefail
-          docker exec newsly-postgres sh -c \
-            'psql --no-psqlrc --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --tuples-only --no-align --command "SELECT EXISTS (SELECT 1 FROM public._sqlx_migrations WHERE version = 20261002010000 AND success);"'
-          REMOTE_COUNCIL_STATE
-          )"
+          # Probe with this exact checkout before syncing files or pulling images.
+          # A normal push may never infer permission to stop production writers.
+          maintenance_versions=()
+          while IFS= read -r version; do
+            maintenance_versions+=("$version")
+          done < scripts/deploy/maintenance-migrations
+          maintenance_state="$(ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s -- \
+            "${maintenance_versions[@]}" < scripts/deploy/maintenance_migration_state.sh)"
           deploy_args=()
-          case "$council_migration_applied" in
-            t)
-              if [[ "$COUNCIL_CUTOVER_REQUESTED" == true ]]; then
-                echo "::notice::Council retirement already applied; using normal online deployment"
-              fi
-              ;;
-            f)
-              if [[ "$COUNCIL_CUTOVER_REQUESTED" != true ]]; then
-                echo "Council retirement is pending. Drain council work, verify readiness, then dispatch with council_maintenance_cutover=true." >&2
+          case "$maintenance_state" in
+            pending\ *)
+              if [[ "$MAINTENANCE_CUTOVER_REQUESTED" != true ]]; then
+                echo "Maintenance migrations ${maintenance_state#pending } are pending. Verify readiness, then dispatch with maintenance_cutover=true." >&2
                 exit 1
               fi
               deploy_args=(--maintenance-cutover)
               ;;
+            fresh|none)
+              if [[ "$MAINTENANCE_CUTOVER_REQUESTED" == true ]]; then
+                echo "::notice::No maintenance migration is pending; using normal online deployment"
+              fi
+              ;;
             *)
-              echo "Could not verify council migration state; refusing deployment" >&2
+              echo "Could not verify maintenance migration state; refusing deployment" >&2
               exit 1
               ;;
           esac

@@ -11,17 +11,20 @@ struct BriefingPassageView: UIViewRepresentable {
     var floatingExclusionAlignment: APIBriefingFigureAlignment = .right
     let onOpenSource: (String) -> Void
     var onOpenDiscussion: (String) -> Void = { _ in }
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
     let onDig: (String, String) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onOpenSource: onOpenSource,
-            onOpenDiscussion: onOpenDiscussion
+            onOpenDiscussion: onOpenDiscussion,
+            onSourceAction: onSourceAction
         )
     }
 
     func makeUIView(context: Context) -> DigDeeperTextView {
         let textView = DigDeeperTextView()
+        textView.accessibilityIdentifier = "briefing.passage"
         textView.isEditable = false
         textView.isSelectable = true
         textView.isScrollEnabled = false
@@ -49,6 +52,7 @@ struct BriefingPassageView: UIViewRepresentable {
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         context.coordinator.onOpenSource = onOpenSource
         context.coordinator.onOpenDiscussion = onOpenDiscussion
+        context.coordinator.onSourceAction = onSourceAction
         uiView.floatingExclusionSize = floatingExclusionSize
         uiView.floatingExclusionAlignment = floatingExclusionAlignment
         if let scaledText = context.coordinator.scaledTextIfNeeded(
@@ -150,6 +154,7 @@ struct BriefingPassageView: UIViewRepresentable {
 
         var onOpenSource: (String) -> Void
         var onOpenDiscussion: (String) -> Void
+        var onSourceAction: ((String, BriefingSourceAction) -> Void)?
         let measuringView = BriefingPassageView.makeMeasuringView()
         var contentRevision = 0
         var measurement: (fingerprint: MeasurementFingerprint, size: CGSize)?
@@ -157,10 +162,12 @@ struct BriefingPassageView: UIViewRepresentable {
 
         init(
             onOpenSource: @escaping (String) -> Void,
-            onOpenDiscussion: @escaping (String) -> Void
+            onOpenDiscussion: @escaping (String) -> Void,
+            onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
         ) {
             self.onOpenSource = onOpenSource
             self.onOpenDiscussion = onOpenDiscussion
+            self.onSourceAction = onSourceAction
         }
 
         func scaledTextIfNeeded(
@@ -191,13 +198,40 @@ struct BriefingPassageView: UIViewRepresentable {
             guard case .link(let url) = textItem.content,
                   isBriefingLink(url)
             else { return defaultAction }
-            // Customize only activation; UIKit retains its native long-press menu.
+            // Taps still open the source; long presses offer source actions below.
             return UIAction(
                 title: defaultAction.title,
                 image: defaultAction.image
             ) { [weak self] _ in
                 self?.openBriefingLink(url)
             }
+        }
+
+        func textView(
+            _ textView: UITextView,
+            menuConfigurationFor textItem: UITextItem,
+            defaultMenu: UIMenu
+        ) -> UITextItem.MenuConfiguration? {
+            guard case .link(let url) = textItem.content,
+                  let menu = sourceMenu(for: url)
+            else { return UITextItem.MenuConfiguration(menu: defaultMenu) }
+            return UITextItem.MenuConfiguration(preview: nil, menu: menu)
+        }
+
+        func sourceMenu(for url: URL) -> UIMenu? {
+            guard let sourceKey = discussionSourceKey(from: url) ?? sourceKey(from: url),
+                  let onSourceAction
+            else { return nil }
+            let actions = BriefingSourceAction.allCases.map { action in
+                UIAction(
+                    title: action.title,
+                    image: UIImage(systemName: action.systemImage),
+                    identifier: UIAction.Identifier("briefing.source_action.\(action.rawValue)")
+                ) { _ in
+                    onSourceAction(sourceKey, action)
+                }
+            }
+            return UIMenu(children: actions)
         }
 
         func openBriefingLink(_ url: URL) {

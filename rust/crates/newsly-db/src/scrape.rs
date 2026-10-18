@@ -171,12 +171,12 @@ pub async fn persist_scraped_content(
         r#"
         INSERT INTO contents (
             content_type, url, source_url, title, source, platform, is_aggregate,
-            status, error_message, retry_count, classification, content_metadata,
+            status, error_message, retry_count, content_metadata,
             created_at, updated_at, publication_date
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, FALSE,
-            'new', NULL, 0, NULL, $7,
+            'new', NULL, 0, $7,
             timezone('UTC', now()), timezone('UTC', now()), $8
         )
         ON CONFLICT (url, content_type) DO NOTHING

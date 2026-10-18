@@ -16,7 +16,9 @@ use newsly_db::{
     mark_share_action_applying, mark_share_action_failed,
 };
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
-use newsly_worker::share_actions::{apply_share_action_host_action, parse_stored_host_input};
+use newsly_worker::share_actions::{
+    apply_share_action_host_action, parse_stored_host_input, save_immediate_bookmark,
+};
 use serde_json::{Map, Value, json};
 
 use crate::auth::AuthenticatedUser;
@@ -64,6 +66,35 @@ pub(super) async fn create_share_action(
 
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
+    let queue = QueueKernel::new(state.database.pool().clone());
+    if normalized.mode == LlmTaskMode::BookmarkOnly {
+        let (created, action) = save_immediate_bookmark(
+            &mut transaction,
+            &queue,
+            current_user.id,
+            &normalized.input,
+            SANDBOX_ROOT,
+        )
+        .await
+        .map_err(|error| match error {
+            newsly_worker::share_actions::ShareActionFinalizationError::Repository(error) => {
+                repository_error(error, &request_id)
+            }
+            other => internal_error(other, &request_id),
+        })?;
+        crate::write_support::commit(transaction, &request_id).await?;
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(ShareActionResponse {
+                task_id: created.id,
+                mode: normalized.mode,
+                status: LlmTaskStatus::Completed,
+                workflow_state: "completed".to_owned(),
+                created_at: created.created_at,
+                actions: vec![present_action(action, &request_id)?],
+            }),
+        ));
+    }
     let created = insert_share_action_task(
         &mut transaction,
         &NewShareActionTask {
@@ -78,7 +109,6 @@ pub(super) async fn create_share_action(
     .await
     .map_err(|error| repository_error(error, &request_id))?;
 
-    let queue = QueueKernel::new(state.database.pool().clone());
     let mut request = EnqueueRequest::new(TaskType::RunLlmTask);
     request.payload = json!({
         "llm_task_id": created.id,
@@ -360,7 +390,7 @@ impl NormalizedShareAction {
             "interests_prompt",
             request_id,
         )?;
-        let approval_policy = payload.approval_policy.map_or_else(
+        let approval_policy: Map<String, Value> = payload.approval_policy.map_or_else(
             || Map::from_iter([("default".to_owned(), Value::from("auto_apply"))]),
             |policy| {
                 policy
@@ -369,6 +399,18 @@ impl NormalizedShareAction {
                     .collect()
             },
         );
+        if payload.mode == LlmTaskMode::BookmarkOnly
+            && approval_policy
+                .get("save_to_knowledge")
+                .or_else(|| approval_policy.get("default"))
+                .and_then(Value::as_str)
+                != Some("auto_apply")
+        {
+            return Err(validation_error(
+                "bookmark_only requires auto_apply approval policy",
+                request_id,
+            ));
+        }
         let input = Map::from_iter([
             ("url".to_owned(), Value::from(url)),
             ("mode".to_owned(), Value::from(payload.mode.as_str())),
@@ -548,4 +590,40 @@ fn application_error(message: impl Into<String>, request_id: &str) -> ApiError {
         message,
         request_id.to_owned(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn immediate_bookmarks_require_auto_apply() {
+        for policy in ["approval_required", "dry_run"] {
+            let payload = serde_json::from_value(json!({
+                "url": "https://example.test/article", "mode": "bookmark_only",
+                "approval_policy": { "default": policy }
+            }))
+            .expect("request");
+            assert!(NormalizedShareAction::try_from_request(payload, "test").is_err());
+        }
+        for policy in ["approval_required", "dry_run"] {
+            let payload = serde_json::from_value(json!({
+                "url": "https://example.test/article", "mode": "bookmark_only",
+                "approval_policy": {"default": "auto_apply", "save_to_knowledge": policy}
+            }))
+            .expect("request");
+            assert!(NormalizedShareAction::try_from_request(payload, "test").is_err());
+        }
+        let payload = serde_json::from_value(json!({
+            "url": "https://example.test/article", "mode": "bookmark_only",
+            "approval_policy": {}
+        }))
+        .expect("request");
+        assert!(NormalizedShareAction::try_from_request(payload, "test").is_err());
+        let payload = serde_json::from_value(json!({
+            "url": "https://example.test/article", "mode": "bookmark_only"
+        }))
+        .expect("request");
+        assert!(NormalizedShareAction::try_from_request(payload, "test").is_ok());
+    }
 }

@@ -14,33 +14,26 @@ struct E2EKnowledgeSourceActivityVisualState: View {
     private var saved: [ContentSummary] {
         [
             source(id: 901, title: "Finetuning with Sampling: SFT Lessons", summary: "The paper proposes reshaping expert traces to be more useful."),
-            source(id: 902, title: "Jev’s case: useful bounded decisions", summary: "Four enterprise tests suggest Jev’s strongest fit is fast decisions.")
+            source(id: 902, title: "Jev’s case: useful bounded decisions", summary: "Four enterprise tests suggest Jev’s strongest fit is fast decisions."),
+            source(id: 906, title: "Why small models keep winning", summary: "Distilled models match frontier quality on narrow, well-specified tasks.")
         ]
     }
 
+    // Source 906 has a settled chat and deck, so its row always shows both shortcuts.
     private var chats: [ChatSessionSummary] {
-        guard hasChat else { return [] }
-        return [ChatSessionSummary(
-            id: 904, contentId: 902, title: "Jev’s case: useful bounded decisions",
-            sessionType: "knowledge_chat", topic: nil, llmProvider: "openai", llmModel: "openai:gpt-5.5",
-            createdAt: Self.now, updatedAt: nil, lastMessageAt: Self.now,
-            articleTitle: nil, articleUrl: nil, articleSummary: nil, articleSource: nil,
-            hasPendingMessage: chatIsAnswering, lastMessagePreview: "Key takeaways", lastMessageRole: "assistant"
-        )]
+        var chats = [chat(id: 908, contentId: 906, title: "Why small models keep winning", isAnswering: false)]
+        if hasChat {
+            chats.append(chat(id: 904, contentId: 902, title: "Jev’s case: useful bounded decisions", isAnswering: chatIsAnswering))
+        }
+        return chats
     }
 
     private var decks: [LearningDeck] {
-        guard hasDeck else { return [] }
-        return [LearningDeck(
-            id: 903, title: "Finetuning with Sampling: SFT Lessons", sourceKind: .content,
-            sourceURL: nil, sourceContentId: 901, sourceTitle: nil, sourceMetadata: [:],
-            status: deckStatus, shareEnabled: false, viewerAvailable: deckStatus == .completed,
-            latestSuccessfulRunId: deckStatus == .completed ? 905 : nil,
-            latestRun: LearningDeckRun(
-                id: 905, status: deckStatus, interestsPrompt: nil, timeline: [], errorMessage: nil,
-                startedAt: Self.now, completedAt: nil, createdAt: Self.now, updatedAt: Self.now
-            ), createdAt: Self.now, updatedAt: Self.now
-        )]
+        var decks = [deck(id: 907, sourceContentId: 906, title: "Why small models keep winning", status: .completed)]
+        if hasDeck {
+            decks.append(deck(id: 903, sourceContentId: 901, title: "Finetuning with Sampling: SFT Lessons", status: deckStatus))
+        }
+        return decks
     }
 
     var body: some View {
@@ -90,7 +83,14 @@ struct E2EKnowledgeSourceActivityVisualState: View {
                 accessibilityIdentifier: item.id,
                 onOpen: { opened = "Saved source opened" },
                 onRefresh: {}, onReprocess: { false }, onRemove: {},
-                derivatives: derivatives[KnowledgeSource(entry.content)] ?? []
+                derivatives: derivatives[KnowledgeSource(entry.content)] ?? [],
+                onShortcut: { action in
+                    switch action {
+                    case .chat: opened = "Chat opened"
+                    case .deck: opened = "Deck opened"
+                    case .listen: break
+                    }
+                }
             )
             .contextMenu {
                 KnowledgeSourceActivityMenu(entry: entry, busyDeckIDs: [], perform: perform)
@@ -135,6 +135,30 @@ struct E2EKnowledgeSourceActivityVisualState: View {
         case .regenerateDeck: deckStatus = .generating
         case .deleteDeck: hasDeck = false
         }
+    }
+
+    private func chat(id: Int, contentId: Int, title: String, isAnswering: Bool) -> ChatSessionSummary {
+        ChatSessionSummary(
+            id: id, contentId: contentId, title: title,
+            sessionType: "knowledge_chat", topic: nil, llmProvider: "openai", llmModel: "openai:gpt-5.5",
+            createdAt: Self.now, updatedAt: nil, lastMessageAt: Self.now,
+            articleTitle: nil, articleUrl: nil, articleSummary: nil, articleSource: nil,
+            hasPendingMessage: isAnswering, lastMessagePreview: "Key takeaways", lastMessageRole: "assistant"
+        )
+    }
+
+    private func deck(id: Int, sourceContentId: Int, title: String, status: LearningDeckRunStatus) -> LearningDeck {
+        let runID = id + 100
+        return LearningDeck(
+            id: id, title: title, sourceKind: .content,
+            sourceURL: nil, sourceContentId: sourceContentId, sourceTitle: nil, sourceMetadata: [:],
+            status: status, shareEnabled: false, viewerAvailable: status == .completed,
+            latestSuccessfulRunId: status == .completed ? runID : nil,
+            latestRun: LearningDeckRun(
+                id: runID, status: status, interestsPrompt: nil, timeline: [], errorMessage: nil,
+                startedAt: Self.now, completedAt: nil, createdAt: Self.now, updatedAt: Self.now
+            ), createdAt: Self.now, updatedAt: Self.now
+        )
     }
 
     private func source(id: Int, title: String, summary: String) -> ContentSummary {

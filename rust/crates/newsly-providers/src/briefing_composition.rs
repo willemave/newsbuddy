@@ -1,3 +1,8 @@
+mod news;
+mod rejection;
+pub use news::briefing_composition_response_contract;
+pub use rejection::BriefingLayoutRejection;
+
 mod naming;
 pub use naming::{
     BRIEFING_LENS_NAMING_MAX_CATEGORIES, BRIEFING_LENS_NAMING_MAX_INPUT_BYTES,
@@ -69,15 +74,24 @@ pretending they are source quotations. Add a figure for each deep source that ha
 normally inset, with alternating alignment and at most one full figure. Cover every supplied source
 at least once.";
 
-const LENS_NAMING_SYSTEM_PROMPT: &str = r"Name one semantic cluster of unread Fast Reads for Newsly.
+const LENS_NAMING_SYSTEM_PROMPT: &str = r"Judge a proposed category of unread Fast Reads for Newsly and name its specific common theme.
 
 Return JSON matching the supplied schema. The key must begin with `news-`, contain only lowercase
 ASCII letters, digits, and hyphens, and be at most 64 characters. The title must be a specific
 reader-facing title of 2-40 characters. The deck must be one sentence of 8-180 characters explaining
-what connects the sources. Describe the shared theme across most sources, not
-the most vivid single story. If the sources are only loosely related, choose a broad but honest
-title. Avoid vague labels such as Updates, Briefs, News, or Misc unless the sources are genuinely
-mixed. Do not name a lens after one source unless nearly every source is about that topic.";
+what connects the members.
+
+The input supplies `minimum_sources` and `sources`. A theme needs at least `minimum_sources`
+sources. The title and deck must describe every member, and the theme must be specific. Exclude
+every source that does not fit; never widen the theme to absorb an outlier. Do not use a vivid
+single story as the theme for unrelated sources.
+
+Return `member_source_keys` for the sources sharing that theme and `excluded_source_keys` for
+every other supplied source. These two lists must partition the supplied source keys exactly:
+every supplied key appears once, in exactly one list, and no other key appears.
+If no `minimum_sources` sources share a specific common theme, return no members and exclude
+all sources. In that case use an honest general placeholder such as key `news-mixed`, title
+`Mixed sources`, and deck `These sources do not share a specific common theme.`";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingCompositionSource {
@@ -150,9 +164,13 @@ pub struct BriefingCompositionLayout {
 }
 
 impl BriefingCompositionLayout {
-    fn validate(self, tier: &str, sources: &[BriefingCompositionSource]) -> Result<Self, String> {
+    fn validate(
+        self,
+        tier: &str,
+        sources: &[BriefingCompositionSource],
+    ) -> Result<Self, BriefingLayoutRejection> {
         if self.blocks.is_empty() {
-            return Err("layout has no blocks".to_owned());
+            return Err(BriefingLayoutRejection::EmptyLayout);
         }
         let suggestion_ids = self
             .suggested_quotes
@@ -167,7 +185,7 @@ impl BriefingCompositionLayout {
                 suggestion.text.trim().is_empty() || suggestion.text.chars().count() > 360
             })
         {
-            return Err("suggested quotes must have unique bounded IDs and text".to_owned());
+            return Err(BriefingLayoutRejection::InvalidSuggestedQuotes);
         }
         let mut selected_quotes = BTreeSet::new();
         let mut passages = Vec::new();
@@ -175,7 +193,7 @@ impl BriefingCompositionLayout {
             match block {
                 BriefingCompositionBlock::Passage { markdown, .. } => {
                     if markdown.trim().is_empty() {
-                        return Err("passage markdown is empty".to_owned());
+                        return Err(BriefingLayoutRejection::EmptyPassage);
                     }
                     passages.push(markdown.as_str());
                 }
@@ -190,16 +208,14 @@ impl BriefingCompositionLayout {
                                 && (source.image_url.is_some() || source.thumbnail_url.is_some())
                         })
                     {
-                        return Err("figure does not reference an imaged source".to_owned());
+                        return Err(BriefingLayoutRejection::InvalidFigure);
                     }
                 }
                 BriefingCompositionBlock::Pullquote { suggestion_id } => {
                     if !suggestion_ids.contains(suggestion_id.trim())
                         || !selected_quotes.insert(suggestion_id.trim())
                     {
-                        return Err(
-                            "pullquote references an unknown or reused suggestion".to_owned()
-                        );
+                        return Err(BriefingLayoutRejection::InvalidPullquote);
                     }
                 }
             }
@@ -214,7 +230,7 @@ impl BriefingCompositionLayout {
             .iter()
             .any(|link| !allowed_links.contains(link))
         {
-            return Err("layout contains an unknown Briefing source link".to_owned());
+            return Err(BriefingLayoutRejection::UnknownSourceLink);
         }
         for source in sources {
             let link = source_link(&source.kind, source.id);
@@ -222,21 +238,22 @@ impl BriefingCompositionLayout {
                 .iter()
                 .filter(|found| found.as_str() == link)
                 .count();
-            if count == 0 || (tier == "news" && count != 1) {
-                return Err(format!(
-                    "source {} must be linked {}",
-                    source.source_key,
-                    if tier == "news" {
-                        "exactly once"
-                    } else {
-                        "at least once"
-                    }
+            if count == 0 {
+                return Err(if tier == "news" {
+                    BriefingLayoutRejection::NewsSourceLinkMissing(source.source_key.clone())
+                } else {
+                    BriefingLayoutRejection::SourceLinkMissing(source.source_key.clone())
+                });
+            }
+            if tier == "news" && count != 1 {
+                return Err(BriefingLayoutRejection::SourceLinkDuplicated(
+                    source.source_key.clone(),
                 ));
             }
         }
         if tier == "news" {
             if self.blocks.len() != 1 || passages.len() != 1 {
-                return Err("news layout must contain exactly one passage".to_owned());
+                return Err(BriefingLayoutRejection::NewsPassageCount);
             }
             if passages[0]
                 .split("\n\n")
@@ -244,7 +261,7 @@ impl BriefingCompositionLayout {
                 .count()
                 != 1
             {
-                return Err("news layout must contain exactly one paragraph".to_owned());
+                return Err(BriefingLayoutRejection::NewsParagraphCount);
             }
         }
         Ok(self)
@@ -264,9 +281,54 @@ pub struct BriefingLensName {
     pub key: String,
     pub title: String,
     pub deck: String,
+    pub member_source_keys: Vec<String>,
+    pub excluded_source_keys: Vec<String>,
 }
 
 impl BriefingLensName {
+    /// Requires an exact, unique partition of the sources shown to the naming model.
+    /// An empty member list, or fewer members than the planner's minimum, is valid.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for duplicate input keys or unknown, missing, overlapping, or repeated
+    /// output keys.
+    pub fn validate_membership(&self, sources: &[BriefingCompositionSource]) -> Result<(), String> {
+        let supplied = Self::supplied_source_keys(sources)?;
+        let mut classified = BTreeSet::new();
+        for key in self
+            .member_source_keys
+            .iter()
+            .chain(&self.excluded_source_keys)
+        {
+            if !supplied.contains(key.as_str()) {
+                return Err(format!(
+                    "lens membership contains unknown source key {key:?}"
+                ));
+            }
+            if !classified.insert(key.as_str()) {
+                return Err(format!("lens membership repeats source key {key:?}"));
+            }
+        }
+        if classified != supplied {
+            return Err("lens membership must classify every supplied source key".to_owned());
+        }
+        Ok(())
+    }
+
+    fn supplied_source_keys(
+        sources: &[BriefingCompositionSource],
+    ) -> Result<BTreeSet<&str>, String> {
+        let supplied = sources
+            .iter()
+            .map(|source| source.source_key.as_str())
+            .collect::<BTreeSet<_>>();
+        if supplied.len() != sources.len() {
+            return Err("lens naming input must contain unique source keys".to_owned());
+        }
+        Ok(supplied)
+    }
+
     fn validate(self) -> Result<Self, String> {
         let key = self.key.trim();
         let title = self.title.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -289,13 +351,15 @@ impl BriefingLensName {
             key: key.to_owned(),
             title,
             deck,
+            member_source_keys: self.member_source_keys,
+            excluded_source_keys: self.excluded_source_keys,
         })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedBriefingLayout {
-    pub layout: Result<BriefingCompositionLayout, String>,
+    pub layout: Result<BriefingCompositionLayout, BriefingLayoutRejection>,
     pub model: String,
     pub usage: ProviderUsage,
     pub provider_response_id: Option<String>,
@@ -415,37 +479,23 @@ impl BriefingCompositionGateway {
                 request.tier.clone(),
             ));
         }
-        let mut user_prompt = format!(
-            "Lens: {}\nTier: {}\n\nSources:\n{}\n\nCompose one complete Briefing window.",
-            request.lens_title,
-            request.tier,
-            serde_json::to_string_pretty(&request.sources)?,
-        );
-        if let Some(feedback) = feedback {
-            user_prompt.push_str(
-                "\nCorrect this validation failure in the complete replacement layout:\n",
-            );
-            user_prompt.push_str(feedback);
-        }
+        let user_prompt = news::composition_user_prompt(request, feedback)?;
         let outcome = self
             .run_structured(StructuredRunRequest {
                 feature: "briefing_compose",
                 system_prompt: COMPOSITION_SYSTEM_PROMPT,
                 user_prompt,
-                schema_name: "briefing_composer_layout_v1",
-                schema: schemars::schema_for!(BriefingCompositionLayout),
+                schema_name: briefing_composition_response_contract(&request.tier),
+                schema: news::composition_schema(&request.tier),
                 output_tokens: 3_200,
                 validation_retries: 0,
             })
             .await?;
-        let layout = outcome
-            .structured_output
-            .ok_or_else(|| "provider returned no structured output".to_owned())
-            .and_then(|value| {
-                serde_json::from_value::<BriefingCompositionLayout>(value)
-                    .map_err(|error| error.to_string())
-            })
-            .and_then(|layout| layout.validate(&request.tier, &request.sources));
+        let layout = news::decode_composition_layout(
+            outcome.structured_output,
+            &request.tier,
+            &request.sources,
+        );
         Ok(GeneratedBriefingLayout {
             layout,
             model: outcome.model_name,
@@ -454,7 +504,8 @@ impl BriefingCompositionGateway {
         })
     }
 
-    /// Generates and validates a concise lens name for a nonempty source collection.
+    /// Generates and validates a concise lens name with exactly one provider attempt.
+    /// The caller owns any retry after this attempt.
     ///
     /// # Errors
     ///
@@ -463,32 +514,47 @@ impl BriefingCompositionGateway {
     pub async fn name_lens(
         &self,
         sources: &[BriefingCompositionSource],
+        min_members: usize,
     ) -> Result<GeneratedBriefingLensName, BriefingCompositionGatewayError> {
         if sources.is_empty() {
             return Err(BriefingCompositionGatewayError::EmptyLensSources);
         }
-        let user_prompt = serde_json::to_string_pretty(sources)?;
+        BriefingLensName::supplied_source_keys(sources)
+            .map_err(BriefingCompositionGatewayError::InvalidLensName)?;
+        let user_prompt = serde_json::to_string_pretty(&serde_json::json!({
+            "minimum_sources": min_members,
+            "sources": sources,
+        }))?;
         let outcome = self
             .run_structured_with_model(
                 StructuredRunRequest {
                     feature: "briefing_lens_naming",
                     system_prompt: LENS_NAMING_SYSTEM_PROMPT,
                     user_prompt,
-                    schema_name: "briefing_lens_name_v1",
+                    schema_name: "briefing_lens_name_v2",
                     schema: schemars::schema_for!(BriefingLensName),
                     output_tokens: 320,
-                    validation_retries: 1,
+                    validation_retries: 0,
                 },
                 &self.naming_model_spec,
                 None,
             )
             .await?;
-        let value = outcome
+        let name = outcome
             .structured_output
-            .ok_or(BriefingCompositionGatewayError::MissingStructuredOutput)?;
-        let name = serde_json::from_value::<BriefingLensName>(value)?
-            .validate()
-            .map_err(BriefingCompositionGatewayError::InvalidLensName)?;
+            .ok_or_else(|| "provider returned no structured lens name".to_owned())
+            .and_then(|value| {
+                serde_json::from_value::<BriefingLensName>(value).map_err(|error| error.to_string())
+            })
+            .and_then(BriefingLensName::validate)
+            .and_then(|name| {
+                name.validate_membership(sources)?;
+                Ok(name)
+            })
+            .map_err(|reason| BriefingCompositionGatewayError::ObservedNaming {
+                reason,
+                usage: outcome.usage.clone(),
+            })?;
         Ok(GeneratedBriefingLensName {
             name,
             model: outcome.model_name,
@@ -671,6 +737,23 @@ pub enum BriefingCompositionGatewayError {
 }
 
 impl BriefingCompositionGatewayError {
+    /// A bounded diagnostic code; provider messages may contain generated text.
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            Self::ObservedAgent { source, .. } | Self::Agent(source) => match source {
+                AgentRuntimeError::Validation(_) => "structured_output_invalid",
+                AgentRuntimeError::RequestLimitExceeded => "request_limit_exceeded",
+                AgentRuntimeError::InvalidRequest(_) => "invalid_request",
+                AgentRuntimeError::DeadlineExceeded => "provider_deadline_exceeded",
+                AgentRuntimeError::Provider(_) => "provider_execution_failed",
+                _ => "agent_execution_failed",
+            },
+            Self::Json(_) => "request_encoding_failed",
+            Self::EmptySources => "empty_sources",
+            Self::UnsupportedTier(_) => "unsupported_tier",
+            _ => "provider_request_rejected",
+        }
+    }
     pub fn observed_usage(&self) -> Option<&ProviderUsage> {
         match self {
             Self::ObservedAgent { usage, .. } => usage.as_ref(),

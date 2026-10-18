@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct BriefingEmptyStateView: View {
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
     let refreshPhase: BriefingViewModel.RefreshPhase
     let onRefresh: () async -> Void
 
@@ -39,6 +40,22 @@ struct BriefingEmptyStateView: View {
                         .font(.appCaption)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .padding(.top, 12)
+
+                    NavigationLink("All News") {
+                        NewsFilterNewsView(service: dependencyFactory.newsFilterService, filtered: false)
+                    }
+                    .font(.appCallout.weight(.semibold))
+                    .foregroundStyle(Color.brandPrimary)
+                    .padding(.top, 20)
+                    .accessibilityIdentifier("briefing.empty.all_news")
+
+                    NavigationLink("Edit News Filter") {
+                        NewsFilterView(service: dependencyFactory.newsFilterService)
+                    }
+                    .font(.appCallout.weight(.semibold))
+                    .foregroundStyle(Color.brandPrimary)
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("briefing.empty.news_filter")
 
                     NavigationLink {
                         SettingsView()

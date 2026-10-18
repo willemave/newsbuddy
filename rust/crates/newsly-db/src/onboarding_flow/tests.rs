@@ -134,6 +134,7 @@ fn completion_input(
         user_id,
         discovery_run_id: Some(run_id),
         selected_suggestion_ids: suggestion_ids,
+        news_filter_seed: None,
         sources: Vec::new(),
         subreddits: Vec::new(),
         aggregators: Vec::new(),

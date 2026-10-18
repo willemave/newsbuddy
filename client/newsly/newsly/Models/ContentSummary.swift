@@ -124,7 +124,7 @@ struct ContentSummary: Identifiable, Equatable {
     }
 
     var displayTitle: String {
-        title ?? "Untitled"
+        Self.normalizedText(title) ?? URL(string: url)?.host ?? "Untitled"
     }
 
     var savedLibraryItemState: SavedLibraryItemState {

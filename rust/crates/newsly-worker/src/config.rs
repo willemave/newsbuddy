@@ -931,7 +931,8 @@ where
 
 fn parse_optional_f64(name: &'static str) -> Result<f64, WorkerConfigError> {
     let Ok(value) = env::var(name) else {
-        return Ok(0.000_83);
+        // An account-specific marginal credit price must be explicitly configured.
+        return Ok(0.0);
     };
     let parsed = value
         .parse::<f64>()

@@ -103,7 +103,7 @@ final class LearningDeckStatusRegistryTests: XCTestCase {
         )
     }
 
-    func testAdaptivePolicyPreservesWindowWithFewerRequests() async {
+    func testAdaptivePolicyCoversFifteenMinuteGenerationAndFinalization() async {
         let source = AlwaysActiveLearningDeckStatusSource()
         let delays = LearningDeckDelayRecorder()
         let policy = LearningDeckStatusPollingPolicy.adaptive
@@ -122,12 +122,12 @@ final class LearningDeckStatusRegistryTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
 
-        XCTAssertEqual(policy.maximumRequestCount, 80)
+        XCTAssertEqual(policy.maximumRequestCount, 200)
         let fetchCount = await source.callCount
         let recordedDelays = await delays.values
-        XCTAssertEqual(fetchCount, 80)
-        XCTAssertEqual(recordedDelays.count, 79)
-        XCTAssertEqual(recordedDelays.reduce(0, +), 363_000_000_000)
+        XCTAssertEqual(fetchCount, 200)
+        XCTAssertEqual(recordedDelays.count, 199)
+        XCTAssertEqual(recordedDelays.reduce(0, +), 963_000_000_000)
     }
 
     func testSleepFailureFinishesObserversInsteadOfLeavingThemSuspended() async {

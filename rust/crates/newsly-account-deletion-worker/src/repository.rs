@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::path::{Component, Path, PathBuf};
 
+use newsly_queue::TaskResult;
 use newsly_worker::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 use serde_json::{Map, Value};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
@@ -192,6 +193,16 @@ pub(crate) async fn prepare_cleanup_plan(
         collect_optional_key(row.agent_log_object_key, &mut object_keys);
     }
 
+    let tracked_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT candidate.object_key FROM artifact_cleanup_candidates AS candidate
+         JOIN llm_tasks AS task ON task.id::bigint = candidate.llm_task_id
+         WHERE task.user_id::bigint = $1",
+    )
+    .bind(user_id)
+    .fetch_all(&mut *transaction)
+    .await?;
+    object_keys.extend(tracked_keys);
+
     let personal_markdown_root = user_directory(personal_markdown_root, user_id)?;
     transaction.commit().await?;
     Ok(Some(AccountCleanupPlan {
@@ -334,18 +345,79 @@ impl AccountDeletionFinalizer {
     }
 }
 
+/// End an earlier grouping-conflict episode when account deletion waits for active work.
+/// This runs behind the same exact queue lease as the retry-neutral wait result.
+#[derive(Debug)]
+pub(crate) struct AccountDeletionWaitFinalizer {
+    pub(crate) task_id: i64,
+}
+
+impl TaskFinalizer for AccountDeletionWaitFinalizer {
+    fn apply<'a>(
+        &'a self,
+        transaction: &'a mut Transaction<'static, Postgres>,
+    ) -> HandlerFinalizerFuture<'a> {
+        Box::pin(async move {
+            newsly_db::news_grouping::clear_deferral(transaction, self.task_id).await?;
+            Ok(TaskFinalizerResult::Keep)
+        })
+    }
+}
+
 impl TaskFinalizer for AccountDeletionFinalizer {
     fn apply<'a>(
         &'a self,
         transaction: &'a mut Transaction<'static, Postgres>,
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
-            self.apply_inner(transaction)
-                .await
-                .map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>)?;
-            Ok(TaskFinalizerResult::Keep)
+            // Retain the outer queue lease while rolling back the entire account purge on
+            // grouping contention, including rows and shared metadata changed before News.
+            sqlx::query("SAVEPOINT account_deletion_news_grouping")
+                .execute(&mut **transaction)
+                .await?;
+            match self.apply_inner(transaction).await {
+                Ok(()) => {
+                    sqlx::query("RELEASE SAVEPOINT account_deletion_news_grouping")
+                        .execute(&mut **transaction)
+                        .await?;
+                    newsly_db::news_grouping::clear_deferral(transaction, self.current_task_id)
+                        .await?;
+                    Ok(TaskFinalizerResult::Keep)
+                }
+                Err(error) if newsly_db::news_grouping::contention_source(&error) => {
+                    sqlx::query("ROLLBACK TO SAVEPOINT account_deletion_news_grouping")
+                        .execute(&mut **transaction)
+                        .await?;
+                    sqlx::query("RELEASE SAVEPOINT account_deletion_news_grouping")
+                        .execute(&mut **transaction)
+                        .await?;
+                    let result = grouping_deferral(transaction, self.current_task_id).await?;
+                    Ok(TaskFinalizerResult::Override(result))
+                }
+                Err(error) => Err(Box::new(error) as Box<dyn Error + Send + Sync>),
+            }
         })
     }
+}
+
+async fn grouping_deferral(
+    transaction: &mut Transaction<'static, Postgres>,
+    task_id: i64,
+) -> Result<TaskResult, sqlx::Error> {
+    let deferral = newsly_db::news_grouping::record_deferral(transaction, task_id).await?;
+    tracing::warn!(
+        task_id,
+        count = deferral.count,
+        age_seconds = deferral.age_seconds,
+        exhausted = deferral.exhausted,
+        code = "account_deletion_news_grouping_contention",
+        "Account deletion encountered a busy News grouping scope"
+    );
+    Ok(if deferral.exhausted {
+        TaskResult::fail(Some("news_grouping_budget_exhausted".to_owned()), false)
+    } else {
+        TaskResult::defer(deferral.delay_seconds)
+    })
 }
 
 async fn delete_indirect_rows(
@@ -563,6 +635,31 @@ mod tests {
         );
     }
 
+    #[sqlx::test]
+    async fn cleanup_plan_includes_registered_private_deck_objects(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users(apple_id,email,is_admin,is_active) VALUES('private-deck-cleanup','cleanup@example.com',false,false) RETURNING id::bigint",
+        ).fetch_one(&pool).await.unwrap();
+        let task_id: i64 = sqlx::query_scalar(
+            "INSERT INTO llm_tasks(user_id,task_kind,mode,workflow_key,workflow_version,workflow_state,status,approval_policy,allowed_actions,tool_policy,input_json,output_json,artifact_manifest,usage_json,status_history) VALUES($1,'learning_deck','learning_deck_presentation','learning_deck.presentation.v1',1,'running','running','{}','[]','{}','{}','{}','{}','{}','[]') RETURNING id::bigint",
+        ).bind(user_id).fetch_one(&pool).await.unwrap();
+        for key in ["private/deck/manifest.json", "private/deck/index.html"] {
+            newsly_db::track_artifact(&pool, key, task_id)
+                .await
+                .unwrap();
+        }
+        let root = tempfile::tempdir().unwrap();
+        let plan = super::prepare_cleanup_plan(&pool, user_id, root.path(), root.path())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            plan.object_keys,
+            vec!["private/deck/index.html", "private/deck/manifest.json"]
+        );
+    }
+
     #[sqlx::test(migrations = "../newsly-db/migrations")]
     async fn shared_metadata_scrub_preserves_other_users(pool: PgPool) {
         let metadata = json!({
@@ -709,3 +806,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "repository_contention_tests.rs"]
+mod contention_tests;

@@ -26,6 +26,7 @@ fn completion_never_requeues_onboarding_discovery() {
 #[test]
 fn runless_completion_cannot_name_discovered_suggestions() {
     let request = OnboardingCompleteRequest {
+        news_filter_seed: None,
         discovery_run_id: None,
         selected_suggestion_ids: vec![9],
         selected_aggregators: Vec::new(),
@@ -59,4 +60,24 @@ fn onboarding_aggregators_keep_only_catalog_keys_and_their_topics() {
             ("hfpapers", Vec::new()),
         ]
     );
+}
+
+#[test]
+fn completion_seed_requires_personalized_run_and_preserves_disabled_drafts() {
+    let mut request = newsly_contracts::OnboardingCompleteRequest {
+        news_filter_seed: Some(newsly_contracts::OnboardingNewsFilterSeed {
+            text: "AI, never funding".to_owned(),
+            enabled: false,
+        }),
+        ..Default::default()
+    };
+    assert!(super::validate_completion_request(&request, "seed-test").is_err());
+    request.discovery_run_id = Some(1);
+    assert!(super::validate_completion_request(&request, "seed-test").is_ok());
+    request.news_filter_seed.as_mut().unwrap().text = "界".repeat(3000);
+    request.news_filter_seed.as_mut().unwrap().enabled = true;
+    // Onboarding retains the whole draft disabled instead of blocking completion.
+    assert!(super::validate_completion_request(&request, "seed-test").is_ok());
+    request.news_filter_seed.as_mut().unwrap().text = "a".repeat(8001);
+    assert!(super::validate_completion_request(&request, "seed-test").is_err());
 }

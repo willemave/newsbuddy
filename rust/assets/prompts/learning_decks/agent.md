@@ -48,9 +48,9 @@ Hosting constraints:
 
 Visual quality contract:
 - Read `input/deck-design-brief.md` before designing the deck and follow it.
-- Do not ship a default Reveal.js theme with lightly edited colors. Use the injected Daylight house
-  visual system and its classes; keep any deck-authored CSS focused on source-specific diagrams,
-  tables, code/file callouts, and citations.
+- Author the complete Daylight CSS in your output: warm near-white paper, dark ink, restrained
+  emerald accents, and clear typography. The viewer injects responsive canvas configuration only;
+  no theme or house classes are supplied. Design source-specific diagrams, tables, and citations.
 - Include bespoke teaching graphics. For a normal deck, aim for six or more source-specific visuals:
   architecture maps, mechanism diagrams, timelines, repo/file topology, comparison matrices, method
   pipelines, annotated code snippets, or result/claim maps.
@@ -74,15 +74,13 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
 
 ## Visual System
 
-- The Daylight house theme is injected at view time. Do not invent a competing palette, font stack,
-  centered hero system, or default Reveal theme.
-- Use the house classes documented below for cover, split, section, statement, eyebrow, lede, rule,
-  and bullet layouts.
+- Define the Daylight theme yourself: warm near-white background, dark ink, restrained emerald
+  accent, legible display/body/mono fonts. Include every CSS class your deck uses.
+- Author reusable layouts for covers, splits, statements, eyebrows, rules, and teaching diagrams.
 - Use the single house emerald accent only for emphasis, diagrams, and status marks.
 - Keep border radii restrained. Prefer crisp panes, ruled sections, timelines, and diagrams over
   oversized rounded cards.
-- Use the house type system and add only minimal structural CSS when a source-specific diagram needs
-  it.
+- Define readable typography and responsive structural CSS for every source-specific diagram.
 
 ## Required Slide Craft
 
@@ -180,8 +178,10 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
 - Use `data-background-*`, auto-animate, and speaker notes sparingly. They should clarify a
   relationship or presentation beat, not compensate for weak slide structure.
 
-Before finishing, inspect every slide at 390 × 844 portrait and 844 × 390 landscape in a browser or
-with screenshot tooling. Check for overflow, unreadably small text, excessive unused vertical space,
+Write a complete deck and source notes early, then improve them in place so interrupted work can
+resume. Call `validate_deck` with `{}` to run the canonical hosted-viewer checks at 390 × 844 portrait
+and 844 × 390 landscape. Fix its repairable reports and call it again. Do not replace these checks
+with an invented browser script. Also inspect for unreadably small text, excessive unused vertical space,
 dead images/assets, broken next/previous navigation, missing citations, and source-notes mappings.
 Reject your own work if it still looks like a generic AI-generated deck or a landscape deck merely
 scaled down in portrait.
@@ -210,10 +210,12 @@ Before finishing, verify:
 2. output/index.html declares `$responsive_layout_meta_tag`.
 3. output/source-notes.md exists and has source sections.
 4. Source notes map important claims/slides back to sources.
-5. output/index.html follows the design brief: Daylight house classes, source-specific graphics,
+5. output/index.html follows the design brief: complete Daylight CSS, source-specific graphics,
    varied slide layouts, and no default Reveal/AI-template styling.
 6. Any React/JSX, TypeScript, or Node authoring work has been compiled so the hosted deck uses only
    valid browser HTML/CSS/JS, local assets, and allowed presentation CDN scripts.
 
-Return a short completion summary only after the files are written.
+7. `validate_deck` passes for the current files.
+
+Return a short completion summary only after the files are written and checked.
 <!-- /prompt-section -->

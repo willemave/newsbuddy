@@ -15,8 +15,8 @@ use super::agent::ShareActionAgentRuntime;
 use super::finalizer::{ShareActionFailureFinalizer, ShareActionSuccessFinalizer};
 use super::submission::{ShareSubmissionPolicy, submit_content_action};
 use super::workflows::{
-    ContentActionInput, build_deterministic_chat_action, build_deterministic_presentation_action,
-    build_host_action,
+    ContentActionInput, build_deterministic_bookmark_action, build_deterministic_chat_action,
+    build_deterministic_presentation_action, build_host_action,
 };
 
 #[derive(Debug, Clone)]
@@ -176,9 +176,14 @@ impl ShareActionTaskExecutor {
             snapshot
         };
 
-        if matches!(snapshot.mode.as_str(), "chat" | "presentation") {
+        if matches!(
+            snapshot.mode.as_str(),
+            "chat" | "presentation" | "bookmark_only"
+        ) {
             let action = if snapshot.mode == "chat" {
                 build_deterministic_chat_action(&snapshot)
+            } else if snapshot.mode == "bookmark_only" {
+                build_deterministic_bookmark_action(&snapshot)
             } else {
                 build_deterministic_presentation_action(&snapshot)
             };

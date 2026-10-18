@@ -23,36 +23,10 @@ fn centroid_model_change_resets_instead_of_blending() {
         routing_rule: None,
         updated_at: Utc::now(),
     };
-    let mut working = WorkingLens::existing(&lens, &[0.5, 0.5], "openrouter:new", 2);
+    let mut working = WorkingLens::existing(&lens, "openrouter:new", 2);
     working.update_centroid(&[0.0, 1.0], 32, "openrouter:new");
     assert_eq!(working.centroid, Some(vec![0.0, 1.0]));
     assert_eq!(working.centroid_weight, 1);
-    assert_eq!(working.similarity_vector, vec![0.5, 0.5]);
-}
-
-#[test]
-fn routing_keeps_the_first_lens_on_equal_similarity() {
-    let lenses = vec![
-        WorkingLens::new(
-            "news-first".to_owned(),
-            "First".to_owned(),
-            "First semantic category.".to_owned(),
-            2,
-            vec![1.0, 0.0],
-            1,
-            "openrouter:model",
-        ),
-        WorkingLens::new(
-            "news-second".to_owned(),
-            "Second".to_owned(),
-            "Second semantic category.".to_owned(),
-            3,
-            vec![1.0, 0.0],
-            1,
-            "openrouter:model",
-        ),
-    ];
-    assert_eq!(best_lens(&[1.0, 0.0], &lenses), Some((0, 1.0)));
 }
 
 #[test]
@@ -125,7 +99,7 @@ fn singleton_cluster(id: i64) -> Cluster {
 }
 
 #[test]
-fn packing_small_clusters_merges_a_remainder_into_the_only_group() {
+fn packing_small_clusters_leaves_a_remainder_durable() {
     let packed = pack_small_clusters((1..=5).map(singleton_cluster).collect(), 3, 4);
     assert_eq!(packed.len(), 1);
     let ids: Vec<_> = packed[0]
@@ -133,11 +107,11 @@ fn packing_small_clusters_merges_a_remainder_into_the_only_group() {
         .iter()
         .map(|candidate| candidate.pending.source_id)
         .collect();
-    assert_eq!(ids, vec![1, 2, 3, 4, 5]);
+    assert_eq!(ids, vec![1, 2, 3, 4]);
 }
 
 #[test]
-fn packing_small_clusters_keeps_other_groups_when_merging_a_remainder() {
+fn packing_small_clusters_never_overflows_a_naming_proposal() {
     let packed = pack_small_clusters((1..=9).map(singleton_cluster).collect(), 3, 4);
     let ids: Vec<Vec<_>> = packed
         .iter()
@@ -149,7 +123,7 @@ fn packing_small_clusters_keeps_other_groups_when_merging_a_remainder() {
                 .collect()
         })
         .collect();
-    assert_eq!(ids, vec![vec![1, 2, 3, 4, 9], vec![5, 6, 7, 8]]);
+    assert_eq!(ids, vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
 }
 
 fn generated_name(id: i64) -> newsly_providers::GeneratedBriefingLensName {
@@ -158,11 +132,22 @@ fn generated_name(id: i64) -> newsly_providers::GeneratedBriefingLensName {
             key: format!("news-{id}"),
             title: format!("Category {id}"),
             deck: "A category for the test sources.".to_owned(),
+            member_source_keys: vec![format!("news:{id}")],
+            excluded_source_keys: vec![],
         },
         model: "test".to_owned(),
         usage: newsly_agent_runtime::ProviderUsage::default(),
         provider_response_id: None,
     }
+}
+
+fn generated_for(candidates: &[Candidate]) -> newsly_providers::GeneratedBriefingLensName {
+    let mut generated = generated_name(candidates[0].pending.source_id);
+    generated.name.member_source_keys = candidates
+        .iter()
+        .map(|candidate| candidate.pending.source.source_key.clone())
+        .collect();
+    generated
 }
 
 #[tokio::test]
@@ -197,15 +182,16 @@ async fn naming_overlaps_four_requests_but_preserves_order_and_available_slots()
     assert_eq!(calls.load(Ordering::SeqCst), 5);
     assert_eq!(
         names
+            .names
             .iter()
-            .map(|name| name.name.key.as_str())
+            .map(|name| name.as_ref().unwrap().name.key.as_str())
             .collect::<Vec<_>>(),
         vec!["news-1", "news-2", "news-3", "news-4", "news-5"]
     );
 }
 
 #[tokio::test]
-async fn failed_naming_batch_stops_before_requesting_later_categories() {
+async fn partial_naming_batch_preserves_siblings_without_requesting_later_categories() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let clusters: Vec<_> = (1..=9).map(singleton_cluster).collect();
@@ -221,7 +207,10 @@ async fn failed_naming_batch_stops_before_requesting_later_categories() {
         }
     })
     .await;
-    assert!(result.is_err());
+    let result = result.unwrap();
+    assert_eq!(result.names.len(), 4);
+    assert!(result.names[1].is_none());
+    assert_eq!(result.names.iter().flatten().count(), 3);
     assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
 
@@ -303,9 +292,7 @@ fn category_budget_config() -> BriefingRefreshConfig {
         new_lens_min_items: 3,
         pending_max_age_seconds: 0,
         max_news_lenses: 3,
-        category_similarity: 0.9,
         category_cluster_similarity: 0.9,
-        category_absorb_similarity: 0.9,
         centroid_max_weight: 32,
         sweep_seconds: 60,
         lens_idle_days: 7,
@@ -325,12 +312,12 @@ async fn unrestricted_rebuild_keeps_clusters_beyond_the_category_cap() {
         &gateway,
         &seed,
         &config,
-        128,
+        &discovery_routes(&seed),
         vectors,
         usize::MAX,
         |candidates| {
             calls.fetch_add(1, Ordering::SeqCst);
-            async move { Ok(generated_name(candidates[0].pending.source_id)) }
+            async move { Ok(generated_for(&candidates)) }
         },
     )
     .await
@@ -340,7 +327,7 @@ async fn unrestricted_rebuild_keeps_clusters_beyond_the_category_cap() {
         3,
         "the category cap bounds naming, not source coverage"
     );
-    assert_eq!(plan.new_lenses.len(), 3);
+    assert_eq!(plan.new_lenses.len(), 4);
     assert_eq!(plan.assignments.len(), 16);
     let actual: HashSet<_> = plan
         .assignments
@@ -355,14 +342,14 @@ async fn unrestricted_rebuild_keeps_clusters_beyond_the_category_cap() {
         .collect();
     assert_eq!(
         actual, expected,
-        "the fourth orthogonal cluster must fall back into an existing category"
+        "the fourth orthogonal cluster must remain reachable in general Briefs"
     );
     assert_eq!(
         plan.new_lenses
             .iter()
             .map(|lens| lens.position)
             .collect::<Vec<_>>(),
-        vec![2, 3, 4]
+        vec![2, 3, 4, 5]
     );
 }
 
@@ -379,12 +366,12 @@ async fn progressive_budget_names_one_cluster_then_advances_to_a_second_category
         &gateway,
         &seed,
         &config,
-        128,
+        &discovery_routes(&seed),
         vectors.clone(),
         1,
         |candidates| {
             calls.fetch_add(1, Ordering::SeqCst);
-            async move { Ok(generated_name(candidates[0].pending.source_id)) }
+            async move { Ok(generated_for(&candidates)) }
         },
     )
     .await
@@ -445,12 +432,12 @@ async fn progressive_budget_names_one_cluster_then_advances_to_a_second_category
         &gateway,
         &seed,
         &config,
-        128,
+        &discovery_routes(&seed),
         remaining_vectors,
         1,
         |candidates| {
             calls.fetch_add(1, Ordering::SeqCst);
-            async move { Ok(generated_name(candidates[0].pending.source_id)) }
+            async move { Ok(generated_for(&candidates)) }
         },
     )
     .await
@@ -476,3 +463,16 @@ async fn progressive_budget_names_one_cluster_then_advances_to_a_second_category
         8
     );
 }
+
+#[path = "coherence_tests.rs"]
+mod coherence;
+
+#[path = "naming_tests.rs"]
+mod naming_usage;
+
+fn discovery_routes(seed: &PreparedBriefingRefreshSeed) -> Vec<CategoryRoute> {
+    vec![CategoryRoute::Discover; seed.lens_assignment.pending_sources.len()]
+}
+
+#[path = "routing_tests.rs"]
+mod routing_tests;

@@ -127,7 +127,6 @@ async fn image_is_eligible(
 ) -> Result<bool, sqlx::Error> {
     if !matches!(applied.status.as_str(), "completed" | "awaiting_image")
         || !matches!(applied.content_type.as_str(), "article" | "podcast")
-        || applied.classification.as_deref() == Some("skip")
     {
         return Ok(false);
     }
@@ -170,7 +169,6 @@ async fn prepare_briefing_requests(
         WHERE id::bigint = $1
           AND status = 'completed'
           AND content_type IN ('article', 'podcast')
-          AND (classification IS NULL OR classification <> 'skip')
           AND NULLIF(COALESCE(
               content_metadata::jsonb #> '{domain,image_generated_at}',
               content_metadata::jsonb -> 'image_generated_at'

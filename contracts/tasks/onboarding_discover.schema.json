@@ -17,6 +17,11 @@
     "user_id": {
       "title": "User Id",
       "type": "integer"
+    },
+    "narration": {
+      "type": "string",
+      "maxLength": 8000,
+      "description": "Original validated user narration for source language and format preferences; optional for earlier tasks."
     }
   },
   "required": [

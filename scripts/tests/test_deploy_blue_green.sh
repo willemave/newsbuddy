@@ -21,6 +21,9 @@ cat > "${harness_root}/bin/docker" <<'EOF'
 set -euo pipefail
 printf 'docker %s\n' "$*" >> "${HARNESS_LOG}"
 
+if [[ "$*" == *"verify-history" && "${HARNESS_HISTORY_FAIL:-false}" == true ]]; then
+  exit 1
+fi
 if [[ "$*" == *"verify-council-retirement" && "${HARNESS_PREFLIGHT_FAIL:-false}" == true ]]; then
   exit 1
 fi
@@ -48,7 +51,16 @@ if [[ "$*" == *"pg_restore --list"* ]]; then
   exit 0
 fi
 if [[ "$*" == *"exec newsly-postgres"* && "$*" == *"to_regclass"* ]]; then
-  printf 't\n'
+  case "${HARNESS_MIGRATIONS_TABLE_STATE:-present}" in
+    present) printf 't\n' ;;
+    missing) printf 'f\n' ;;
+    unknown) exit 1 ;;
+    *) printf 'unexpected response\n' ;;
+  esac
+  exit 0
+fi
+if [[ "$*" == *"exec newsly-postgres"* && "$*" == *"WITH required(version)"* ]]; then
+  printf '%s\n' "${HARNESS_MAINTENANCE_STATE:-none}"
   exit 0
 fi
 if [[ "$*" == *"exec newsly-postgres"* && "$*" == *"version = 20261002010000"* ]]; then
@@ -172,6 +184,10 @@ run_deploy() {
   local active_slot="${6:-blue}"
   local target_switch_failure="${7:-false}"
   local cutover="${HARNESS_MAINTENANCE_CUTOVER:-false}"
+  local maintenance_state="${HARNESS_MAINTENANCE_STATE:-none}"
+  if [[ "${cutover}" == true && -z "${HARNESS_MAINTENANCE_STATE+x}" ]]; then
+    maintenance_state="pending 20261002010000,20261018000001,20261018000002"
+  fi
   local migration_failure="${HARNESS_MIGRATE_FAIL:-false}"
   local preflight_failure="${HARNESS_PREFLIGHT_FAIL:-false}"
   local post_stop_preflight_failure="${HARNESS_POST_STOP_PREFLIGHT_FAIL:-false}"
@@ -212,6 +228,9 @@ run_deploy() {
     HARNESS_TARGET_SWITCH_FAIL="${target_switch_failure}" \
     HARNESS_MIGRATE_FAIL="${migration_failure}" \
     HARNESS_PREFLIGHT_FAIL="${preflight_failure}" \
+    HARNESS_HISTORY_FAIL="${HARNESS_HISTORY_FAIL:-false}" \
+    HARNESS_MAINTENANCE_STATE="${maintenance_state}" \
+    HARNESS_MIGRATIONS_TABLE_STATE="${HARNESS_MIGRATIONS_TABLE_STATE:-present}" \
     HARNESS_POST_STOP_PREFLIGHT_FAIL="${post_stop_preflight_failure}" \
     HARNESS_BASELINE_PREFLIGHT_FAIL="${baseline_preflight_failure}" \
     HARNESS_BACKUP_FAIL="${backup_failure}" \
@@ -294,22 +313,60 @@ assert_not_contains "docker start" "${empty_writer_stop_failure_log}"
 assert_not_contains "switch green" "${empty_writer_stop_failure_log}"
 
 cutover_log="$(HARNESS_MAINTENANCE_CUTOVER=true run_deploy cutover false 0)"
+assert_contains "verify-history" "${cutover_log}"
 assert_contains "verify-council-retirement" "${cutover_log}"
 assert_contains " stop api_blue api_green workers scheduler" "${cutover_log}"
 assert_contains "exec pg_dump" "${cutover_log}"
 assert_contains "pg_restore --list" "${cutover_log}"
 assert_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_log}"
 assert_before " stop api_blue api_green workers scheduler" "exec pg_dump" "${cutover_log}"
+assert_before "verify-history" "verify-council-retirement" "${cutover_log}"
+assert_before "verify-council-retirement" " stop api_blue api_green workers scheduler" "${cutover_log}"
 assert_before "pg_restore --list" "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${cutover_log}"
 assert_before "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "switch green" "${cutover_log}"
 
-for migration_state in applied unknown; do
-  guarded_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_COUNCIL_MIGRATION_STATE="${migration_state}" run_deploy "cutover-${migration_state}" false 2)"
+for migration_state in none fresh unknown; do
+  guarded_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_MAINTENANCE_STATE="${migration_state}" run_deploy "cutover-${migration_state}" false 2)"
   assert_not_contains "verify-council-retirement" "${guarded_log}"
   assert_not_contains " stop api_blue api_green workers scheduler" "${guarded_log}"
   assert_not_contains "exec pg_dump" "${guarded_log}"
   assert_not_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${guarded_log}"
 done
+
+for migration_state in 'pending 20261018000001,20261018000002' 'pending 20261018000002' unknown 'pending invalid'; do
+  guarded_log="$(HARNESS_MAINTENANCE_STATE="${migration_state}" run_deploy online-maintenance-guard false 2)"
+  assert_not_contains " stop " "${guarded_log}"
+  assert_not_contains " migrate" "${guarded_log}"
+  assert_not_contains "exec pg_dump" "${guarded_log}"
+done
+
+for table_state in missing present; do
+  fresh_log="$(HARNESS_MIGRATIONS_TABLE_STATE="${table_state}" HARNESS_MAINTENANCE_STATE=fresh run_deploy "fresh-${table_state}" false 0)"
+  assert_contains "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=false migrate" "${fresh_log}"
+  assert_not_contains " stop api_blue" "${fresh_log}"
+done
+
+unknown_log="$(HARNESS_MIGRATIONS_TABLE_STATE=unknown run_deploy unknown-probe false 2)"
+assert_not_contains " stop " "${unknown_log}"
+assert_not_contains " migrate" "${unknown_log}"
+
+for pending in '20261018000001,20261018000002' '20261018000002'; do
+  grouping_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_MAINTENANCE_STATE="pending ${pending}" run_deploy grouping-only false 0)"
+  assert_not_contains "verify-council-retirement" "${grouping_log}"
+  assert_before "verify-history" " stop api_blue api_green workers scheduler" "${grouping_log}"
+  assert_before " stop api_blue api_green workers scheduler" "exec pg_dump" "${grouping_log}"
+  assert_before "pg_restore --list" "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" "${grouping_log}"
+  assert_before "NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true migrate" " up -d --no-deps api_green" "${grouping_log}"
+  assert_before "curl https://newsly.test/health" " up -d --no-deps workers scheduler" "${grouping_log}"
+  assert_not_contains " up -d --no-deps api_blue" "${grouping_log}"
+  assert_not_contains "docker start" "${grouping_log}"
+done
+
+history_failure_log="$(HARNESS_MAINTENANCE_CUTOVER=true HARNESS_HISTORY_FAIL=true run_deploy history-failure false 1)"
+assert_contains "verify-history" "${history_failure_log}"
+assert_not_contains " stop " "${history_failure_log}"
+assert_not_contains "verify-council-retirement" "${history_failure_log}"
+assert_not_contains "exec pg_dump" "${history_failure_log}"
 
 cutover_failed_log="$(HARNESS_MAINTENANCE_CUTOVER=true run_deploy cutover-public-failure true 1)"
 assert_contains "exec pg_dump" "${cutover_failed_log}"

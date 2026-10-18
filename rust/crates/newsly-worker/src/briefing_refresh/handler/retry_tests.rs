@@ -18,7 +18,11 @@ impl BriefingComposer for RejectedComposer {
     ) -> Result<GeneratedBriefingLayout, BriefingCompositionGatewayError> {
         self.0.lock().unwrap().push(feedback.map(str::to_owned));
         Ok(GeneratedBriefingLayout {
-            layout: Err("missing source content:1".to_owned()),
+            layout: Err(
+                newsly_providers::BriefingLayoutRejection::NewsSourceLinkMissing(
+                    "content:1".to_owned(),
+                ),
+            ),
             model: "test".to_owned(),
             usage: ProviderUsage {
                 request_count: 1,
@@ -101,8 +105,8 @@ async fn correction_budget_survives_new_jobs_and_changed_input_recovers(pool: Pg
         *fake.0.lock().unwrap(),
         vec![
             None,
-            Some("missing source content:1".to_owned()),
-            Some("missing source content:1".to_owned())
+            Some("source content:1 must be linked exactly once".to_owned()),
+            Some("source content:1 must be linked exactly once".to_owned())
         ]
     );
     sqlx::query("UPDATE processing_tasks SET status = 'failed', locked_by = NULL, locked_at = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id = $1")
@@ -237,6 +241,8 @@ async fn progressive_selection_keeps_articles_and_podcasts_with_one_ready_news(p
         pool.clone(),
         QueueKernel::new(pool.clone()),
         BriefingCompositionGateway::from_env().unwrap(),
+        NewsFilterGateway::new(None).unwrap(),
+        NewsCategoryGateway::new(None).unwrap(),
         BriefingRefreshWorkerConfig::from_env().unwrap(),
     );
     let context = CompositionContext {
@@ -335,4 +341,38 @@ async fn progressive_selection_keeps_articles_and_podcasts_with_one_ready_news(p
         );
         assert!(usage.is_empty());
     }
+}
+
+#[sqlx::test]
+async fn prior_response_contract_cooldown_does_not_block_revised_news(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('compose-contract','compose-contract@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+    let fake = RejectedComposer::default();
+    let mut news = unit("Captured source");
+    news.lens.tier = "news".to_owned();
+    let request = composition_request(&news);
+    // Exact prior production fingerprint, before the response contract was included.
+    let prior = newsly_domain::sha256_hex(
+        format!("briefing-v9-headlines|fake:test|0|{request:?}").as_bytes(),
+    );
+    sqlx::query("INSERT INTO briefing_composition_cooldowns(user_id,fingerprint,retry_after) VALUES($1,$2,now()+interval '24 hours')")
+        .bind(user).bind(prior).execute(&pool).await.unwrap();
+    let (task, fence) = claim(&pool, user).await;
+    let context = CompositionContext {
+        pool: &pool,
+        task_id: task,
+        user_id: user,
+        fence: &fence,
+    };
+    assert!(
+        composition_is_ready(fake.model_spec(), 0, &news, context)
+            .await
+            .unwrap()
+    );
+    assert!(compose_unit(&fake, news, 1, 0, context).await.is_err());
+    assert_eq!(
+        fake.0.lock().unwrap().len(),
+        1,
+        "revised contract must get a fresh validated attempt"
+    );
 }

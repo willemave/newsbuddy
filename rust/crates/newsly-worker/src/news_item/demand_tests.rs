@@ -84,7 +84,6 @@ async fn firecrawl_demand_denial_is_replayable_and_allows_metadata_processing(po
             article_url: "https://example.com/story".to_owned(),
             reason: "No active subscriber sees this story".to_owned(),
         },
-        usage: Vec::new(),
         finalized_at: Utc::now(),
     };
     assert_eq!(
@@ -159,7 +158,6 @@ async fn firecrawl_demand_subscription_during_extraction_reprepares_without_queu
                 article_url: "https://example.com/story".to_owned(),
                 reason: "No audience at preparation".to_owned(),
             },
-            usage: Vec::new(),
             finalized_at: Utc::now(),
         },
     );
@@ -283,7 +281,6 @@ async fn firecrawl_demand_full_body_replay_invalidates_metadata_only_summary(poo
             extraction_method: "firecrawl".to_owned(),
             body,
         },
-        usage: Vec::new(),
         finalized_at: Utc::now(),
     };
     apply_enrichment(&mut tx, &QueueKernel::new(pool.clone()), &plan)
@@ -345,7 +342,6 @@ async fn firecrawl_demand_full_body_replay_rejects_metadata_only_sibling_summary
             extraction_method: "firecrawl".to_owned(),
             body,
         },
-        usage: Vec::new(),
         finalized_at: Utc::now(),
     };
     apply_enrichment(&mut tx, &QueueKernel::new(pool.clone()), &plan)

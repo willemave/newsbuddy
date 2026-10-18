@@ -12,6 +12,9 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
+use super::firecrawl_accounting::FirecrawlRecorder;
+use super::model::FirecrawlUsage;
+
 const MAX_FIRECRAWL_RESPONSE_BYTES: usize = 2_500_000;
 
 #[derive(Clone)]
@@ -97,7 +100,11 @@ impl FirecrawlClient {
     /// # Errors
     ///
     /// Returns typed retryability for configuration, transport, HTTP, size, and response failures.
-    pub(super) async fn scrape(&self, url: &PublicUrl) -> Result<FirecrawlResult, FirecrawlError> {
+    pub(super) async fn scrape(
+        &self,
+        url: &PublicUrl,
+        recorder: Option<&FirecrawlRecorder>,
+    ) -> Result<FirecrawlResult, FirecrawlError> {
         let Some(api_key) = &self.api_key else {
             return Err(FirecrawlError::Unavailable);
         };
@@ -116,12 +123,68 @@ impl FirecrawlClient {
                 languages: ["en-US"],
             },
         };
+        let recorded = match recorder {
+            Some(recorder) => Some(
+                recorder
+                    .begin(url.as_str(), self.credit_cost_usd)
+                    .await
+                    .map_err(FirecrawlError::Accounting)?,
+            ),
+            None => None,
+        };
+        let result = self.send_request(api_key, &request, url).await;
+        if let Some(recorded) = recorded {
+            let observation = match &result {
+                Ok(result) => {
+                    recorded
+                        .observe(&FirecrawlUsage {
+                            request_id: String::new(),
+                            url: url.to_string(),
+                            status_code: result.status_code,
+                            credit_cost_usd: result.credit_cost_usd,
+                            credits_used: result.credits_used,
+                            num_pages: result.num_pages,
+                            total_pages: result.total_pages,
+                            scrape_id: result.scrape_id.clone(),
+                            cost_usd: result.cost_usd,
+                        })
+                        .await
+                }
+                Err(error) => {
+                    let status = match error {
+                        FirecrawlError::HttpStatus { status, .. }
+                        | FirecrawlError::InvalidResponse { status, .. }
+                        | FirecrawlError::ResponseTooLarge { status } => Some(status.as_u16()),
+                        _ => None,
+                    };
+                    recorded
+                        .unknown_completion(status, error.telemetry_code())
+                        .await
+                }
+            };
+            if let Err(error) = observation {
+                // Dispatch is already durable and explicitly unknown. Do not hide the
+                // provider status from the credit gate if its observation write failed.
+                tracing::error!(%error, observed_status = ?result.as_ref().ok().map(|result| result.status_code),
+                    observed_credits = ?result.as_ref().ok().and_then(|result| result.credits_used),
+                    "Firecrawl response accounting failed; dispatched attempt remains unpriced");
+            }
+        }
+        result
+    }
+
+    async fn send_request(
+        &self,
+        api_key: &SecretString,
+        request: &FirecrawlRequest<'_>,
+        url: &PublicUrl,
+    ) -> Result<FirecrawlResult, FirecrawlError> {
         let response = self
             .http
             .post(self.endpoint.clone())
             .header(AUTHORIZATION, format!("Bearer {}", api_key.expose_secret()))
             .header(CONTENT_TYPE, "application/json")
-            .json(&request)
+            .json(request)
             .send()
             .await
             .map_err(FirecrawlError::Transport)?;
@@ -130,14 +193,24 @@ impl FirecrawlClient {
             .content_length()
             .is_some_and(|length| length > MAX_FIRECRAWL_RESPONSE_BYTES as u64)
         {
-            return Err(FirecrawlError::ResponseTooLarge);
+            return Err(FirecrawlError::ResponseTooLarge { status });
         }
         let mut body = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(FirecrawlError::Transport)?;
+            let chunk = chunk.map_err(|error| {
+                if status == StatusCode::PAYMENT_REQUIRED {
+                    FirecrawlError::HttpStatus {
+                        status,
+                        message: "Provider credit-exhaustion response body could not be read"
+                            .to_owned(),
+                    }
+                } else {
+                    FirecrawlError::Transport(error)
+                }
+            })?;
             if body.len().saturating_add(chunk.len()) > MAX_FIRECRAWL_RESPONSE_BYTES {
-                return Err(FirecrawlError::ResponseTooLarge);
+                return Err(FirecrawlError::ResponseTooLarge { status });
             }
             body.extend_from_slice(&chunk);
         }
@@ -279,12 +352,14 @@ pub enum FirecrawlError {
     Unavailable,
     #[error("invalid Firecrawl configuration: {0}")]
     InvalidConfiguration(&'static str),
+    #[error("Firecrawl usage accounting unavailable")]
+    Accounting(#[source] sqlx::Error),
     #[error("Firecrawl transport failed")]
     Transport(#[source] reqwest::Error),
     #[error("Firecrawl returned HTTP {status}: {message}")]
     HttpStatus { status: StatusCode, message: String },
     #[error("Firecrawl response exceeded the configured size bound")]
-    ResponseTooLarge,
+    ResponseTooLarge { status: StatusCode },
     #[error("Firecrawl returned invalid JSON with HTTP {status}")]
     InvalidResponse {
         status: StatusCode,
@@ -298,9 +373,23 @@ pub enum FirecrawlError {
 }
 
 impl FirecrawlError {
+    const fn telemetry_code(&self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::InvalidConfiguration(_) => "invalid_configuration",
+            Self::Accounting(_) => "accounting_unavailable",
+            Self::Transport(_) => "transport",
+            Self::HttpStatus { .. } => "http_status",
+            Self::ResponseTooLarge { .. } => "response_too_large",
+            Self::InvalidResponse { .. } => "invalid_json",
+            Self::EmptyMarkdown => "empty_markdown",
+            Self::PublicUrl(_) => "unsafe_url",
+        }
+    }
+
     pub fn retryable(&self) -> bool {
         match self {
-            Self::Transport(_) => true,
+            Self::Transport(_) | Self::Accounting(_) => true,
             Self::HttpStatus { status, .. } => {
                 status.is_server_error()
                     || *status == StatusCode::REQUEST_TIMEOUT
@@ -308,7 +397,7 @@ impl FirecrawlError {
             }
             Self::Unavailable
             | Self::InvalidConfiguration(_)
-            | Self::ResponseTooLarge
+            | Self::ResponseTooLarge { .. }
             | Self::InvalidResponse { .. }
             | Self::EmptyMarkdown
             | Self::PublicUrl(_) => false,

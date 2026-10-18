@@ -229,6 +229,7 @@ struct BriefingLensPageView: View, Equatable {
     /// 1:1 while the chrome collapses.
     let topContentInset: CGFloat
     let onOpenSource: (String) -> Void
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
     let onRefresh: () async -> Void
@@ -344,6 +345,7 @@ struct BriefingLensPageView: View, Equatable {
                                     BriefingSegmentView(
                                         model: segmentModel,
                                         onOpenSource: onOpenSource,
+                                        onSourceAction: onSourceAction,
                                         onOpenDiscussion: onOpenDiscussion,
                                         onDig: onDig
                                     )
@@ -402,7 +404,6 @@ struct BriefingLensPageView: View, Equatable {
                     .id(contentIdentity)
                     .contentMargins(.top, topContentInset)
                     .contentMargins(.bottom, 40)
-                    .bottomScreenEdgeFade()
                     .refreshable {
                         await onRefresh()
                     }
@@ -576,7 +577,6 @@ private struct BriefingLensEmptyView: View {
             }
             .contentMargins(.top, topContentInset)
             .contentMargins(.bottom, 40)
-            .bottomScreenEdgeFade()
             .refreshable {
                 await onRefresh()
             }
@@ -668,6 +668,7 @@ private struct BriefingTimelineSeparator: View {
 private struct BriefingSegmentView: View {
     let model: BriefingSegmentRenderModel
     let onOpenSource: (String) -> Void
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
 
@@ -677,7 +678,8 @@ private struct BriefingSegmentView: View {
                 BriefingSegmentHeadlineView(
                     headline: headline,
                     segmentID: model.segment.id,
-                    onOpenSource: onOpenSource
+                    onOpenSource: onOpenSource,
+                    onSourceAction: onSourceAction
                 )
             }
             ForEach(model.displayBlocks) { item in
@@ -695,6 +697,7 @@ private struct BriefingSegmentView: View {
                         figureOpacity: readOpacity(for: figure.briefingDirectSourceKeys),
                         passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
                         onOpenSource: onOpenSource,
+                        onSourceAction: onSourceAction,
                         onOpenDiscussion: openDiscussion(forSourceKey:),
                         onDig: onDig
                     )
@@ -723,6 +726,7 @@ private struct BriefingSegmentView: View {
                     content: content,
                     onOpenSource: onOpenSource,
                     onOpenDiscussion: openDiscussion(forSourceKey:),
+                    onSourceAction: onSourceAction,
                     onDig: onDig
                 )
                 .opacity(readOpacity(for: block.briefingFallbackReadSourceKeys))
@@ -735,7 +739,8 @@ private struct BriefingSegmentView: View {
             BriefingFigureView(
                 block: block,
                 source: source(for: block),
-                onOpenSource: onOpenSource
+                onOpenSource: onOpenSource,
+                onSourceAction: onSourceAction
             )
             .opacity(readOpacity(for: block.briefingDirectSourceKeys))
             .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
@@ -743,7 +748,8 @@ private struct BriefingSegmentView: View {
             BriefingPullquoteView(
                 block: block,
                 source: source(for: block),
-                onOpenSource: onOpenSource
+                onOpenSource: onOpenSource,
+                onSourceAction: onSourceAction
             )
             .opacity(readOpacity(for: block.briefingDirectSourceKeys))
             .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
@@ -771,6 +777,7 @@ private struct BriefingFloatingFigurePassage: View {
     let figureOpacity: Double
     let passageOpacity: Double
     let onOpenSource: (String) -> Void
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
     var onOpenDiscussion: (String) -> Void = { _ in }
     let onDig: (String, String) -> Void
 
@@ -787,6 +794,7 @@ private struct BriefingFloatingFigurePassage: View {
                     floatingExclusionAlignment: alignment,
                     onOpenSource: onOpenSource,
                     onOpenDiscussion: onOpenDiscussion,
+                    onSourceAction: onSourceAction,
                     onDig: onDig
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -819,6 +827,7 @@ private struct BriefingFloatingFigurePassage: View {
                 }
             }
             .buttonStyle(.plain)
+            .briefingSourceMenu(sourceKey: figure.sourceKey ?? source?.sourceKey, onAction: onSourceAction)
             .opacity(figureOpacity)
             .animation(.easeInOut(duration: 0.35), value: figureOpacity)
             .accessibilityLabel(source?.title ?? "Article image")
@@ -830,6 +839,7 @@ private struct BriefingFigureView: View {
     let block: APIBriefingBlock
     let source: APIBriefingSource?
     let onOpenSource: (String) -> Void
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
 
     private var figureHeight: CGFloat {
         BriefingFigureLayoutPolicy.canonicalPlacement(block.placement) == .inset ? 176 : 216
@@ -873,6 +883,7 @@ private struct BriefingFigureView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
+                .briefingSourceMenu(sourceKey: block.sourceKey ?? source?.sourceKey, onAction: onSourceAction)
             }
         }
     }
@@ -882,6 +893,7 @@ private struct BriefingPullquoteView: View {
     let block: APIBriefingBlock
     let source: APIBriefingSource?
     let onOpenSource: (String) -> Void
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -909,6 +921,7 @@ private struct BriefingPullquoteView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .briefingSourceMenu(sourceKey: block.sourceKey ?? source?.sourceKey, onAction: onSourceAction)
                 .accessibilityLabel(
                     source.map { "Open source: \($0.title)" } ?? "Open source"
                 )

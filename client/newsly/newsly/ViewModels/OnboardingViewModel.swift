@@ -205,6 +205,8 @@ final class OnboardingViewModel {
     var hasReachedDiscoveryPollingLimit = false
     var topicSummary: String?
     var inferredTopics: [String] = []
+    private(set) var newsFilterText: String?
+    private(set) var newsFilterEnabled = false
     var twitterUsername: String = ""
 
     @ObservationIgnored
@@ -341,13 +343,22 @@ final class OnboardingViewModel {
         guard !didAttemptResume else { return }
         didAttemptResume = true
 
-        guard step == .loading else { return }
+        guard step == .loading || (isPersonalized && newsFilterText == nil) else { return }
         guard let runId = discoveryRunId ?? onboardingStateStore.discoveryRunId(userId: user.id) else {
             return
         }
 
         discoveryRunId = runId
         let generation = discoveryGeneration
+        if step != .loading {
+            do {
+                let status = try await service.discoveryStatus(runId: runId)
+                guard generation == discoveryGeneration, discoveryRunId == runId else { return }
+                seedNewsFilter(from: status.originalInputText)
+                persistProgress()
+            } catch { errorMessage = error.localizedDescription }
+            return
+        }
         await refreshDiscoveryStatus(runId: runId, generation: generation)
 
         guard generation == discoveryGeneration, discoveryRunId == runId else { return }
@@ -506,11 +517,19 @@ final class OnboardingViewModel {
                 errorMessage = "Personalized discovery must finish before onboarding can be completed."
                 return
             }
+            if isPersonalized, let text = newsFilterText,
+               let message = NewsFilterValidation.message(text: text, enabled: newsFilterEnabled) {
+                errorMessage = message
+                return
+            }
             let request = OnboardingCompleteRequest(
                 discoveryRunId: isPersonalized ? discoveryRunId : nil,
                 selectedSuggestionIds: Array(selectedSuggestionIDs).sorted(),
                 selectedAggregators: buildSelectedAggregators(),
-                twitterUsername: normalizedTwitterUsername()
+                twitterUsername: normalizedTwitterUsername(),
+                newsFilterSeed: isPersonalized ? newsFilterText.map {
+                    APIOnboardingNewsFilterSeed(text: $0, enabled: newsFilterEnabled)
+                } : nil
             )
             let response = try await service.complete(request: request)
             completionResponse = response
@@ -531,7 +550,14 @@ final class OnboardingViewModel {
         }
     }
 
-    private func beginDiscovery(transcript: String) async {
+    func discoverTypedInterests(_ text: String) async {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        stopAudioCapture()
+        audioState = .transcribing
+        await beginDiscovery(transcript: text, inputKind: "typed")
+    }
+
+    private func beginDiscovery(transcript: String, inputKind: String = "speech_transcript") async {
         guard !isSubmittingAudioDiscovery else { return }
         discoveryGeneration += 1
         let generation = discoveryGeneration
@@ -550,7 +576,8 @@ final class OnboardingViewModel {
             )
             let request = OnboardingAudioDiscoverRequest(
                 transcript: transcript,
-                locale: Locale.current.identifier
+                locale: Locale.current.identifier,
+                inputKind: inputKind
             )
             let response = try await service.audioDiscover(request: request)
             guard generation == discoveryGeneration, step == .audio else { return }
@@ -635,7 +662,20 @@ final class OnboardingViewModel {
         }
     }
 
+    func updateNewsFilter(text: String, enabled: Bool) {
+        newsFilterText = text
+        newsFilterEnabled = enabled
+        persistProgress()
+    }
+
+    private func seedNewsFilter(from original: String?) {
+        guard newsFilterText == nil, let original else { return }
+        newsFilterText = original
+        newsFilterEnabled = NewsFilterValidation.message(text: original, enabled: true) == nil
+    }
+
     private func applyDiscoveryStatus(_ status: OnboardingDiscoveryStatusResponse) {
+        seedNewsFilter(from: status.originalInputText)
         discoveryRunId = status.runId
         discoveryRunStatus = status.runStatus
         discoveryLanes = status.lanes
@@ -710,6 +750,8 @@ final class OnboardingViewModel {
     private func clearDiscoveryState() {
         discoveryGeneration += 1
         tasks.cancel(.discoveryPolling)
+        newsFilterText = nil
+        newsFilterEnabled = false
         discoveryRunId = nil
         discoveryRunStatus = nil
         discoveryLanes = []
@@ -855,6 +897,8 @@ final class OnboardingViewModel {
         hasReachedDiscoveryPollingLimit = snapshot.hasReachedPollingLimit
         topicSummary = snapshot.topicSummary
         inferredTopics = snapshot.inferredTopics
+        newsFilterText = snapshot.newsFilterText
+        newsFilterEnabled = snapshot.newsFilterEnabled ?? false
     }
 
     private func persistProgress() {
@@ -886,7 +930,9 @@ final class OnboardingViewModel {
                 discoveryErrorMessage: discoveryErrorMessage,
                 hasReachedPollingLimit: hasReachedDiscoveryPollingLimit,
                 topicSummary: topicSummary,
-                inferredTopics: inferredTopics
+                inferredTopics: inferredTopics,
+                newsFilterText: newsFilterText,
+                newsFilterEnabled: newsFilterText == nil ? nil : newsFilterEnabled
             )
         )
     }

@@ -27,6 +27,35 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-17 — `main` — Composition, category coherence and source discovery
+
+- **Status:** Implemented and locally validated; first-run latency target remains open.
+- **Scope:** Reduce avoidable first-run composition repair, prevent unrelated stories from inheriting narrow category names, and preserve source-discovery relevance and language preferences.
+- **Evidence:** The captured two-attempt composition spent 20.023s + 12.010s. Historical exact rejection reason is unavailable. Later runtime telemetry recorded 34 layout and 18 provider rejections across 1,075 attempts. Cached embeddings put the parenting/football and Disney/geopolitics outliers well below the clustering threshold; simply removing small-cluster packing would turn all 40 initial stories into general news in three captured cohorts. Discovery rewrote specific model searches into generic templates and serialized independent directory/validation requests.
+- **Decisions:** Use explicit Opus 5.5 planning and final verification. Keep source coverage and writing validation; simplify the news-only provider response rather than lowering quality checks. Evaluate category membership during existing naming work. Preserve planned searches and use bounded feed evidence for language fit without another selection-model pass. Add an explicit canonical citation manifest and version its prompt fingerprint. Review one bounded parallel batch of four category proposals; retain successful siblings when naming fails, keep failed proposals pending, and preserve observed usage exactly once. Keep one complete news window per publication and the existing model, reasoning settings, and coherence thresholds.
+- **Validation so far:** Isolated integration checkout: 159 provider tests, 210 worker tests, then 62 focused Briefing tests after usage recovery; 18 feed-validation tests after test-module extraction; affected all-target warning-denied Clippy, formatting, and 844-file module guard pass. Exact Opus 5.5 reviewed the three implementations and usage recovery. Two membership canaries exclude parenting from football and treat Disney/geopolitics as mixed. Fresh local audio/HTTP flow: transcription 0.915s, discovery 18.210s, first readable news 33.989s; first specific category was delayed to 168.457s. Eight observed passages cover 31 sources exactly once. A citation-manifest follow-up accepted the failing four-source input in one 28.022s call; this is not a demonstrated latency improvement. Low reasoning was rejected for factual misattribution; medium was not retained because timing was cache-confounded and detail was weaker. API, extractor, scheduler and workers run against the production clone; all nine aggregators exceed 30 ready stories, which does not prove all inventory is fresh. The Mac remains locked, blocking fresh UI/physical-microphone verification.
+- **Final validation:** 161 provider tests and 221 worker tests pass in the isolated integration checkout, plus warning-denied affected all-target Clippy, formatting, module guard, and four native runtime builds. Exact Opus 5.5 approved parallel review and partial-failure handling. Final fresh audio/HTTP flow: discovery 17.344s; specific category visible at 77.553s and readable at 99.042s (preceding run 168.457s/179.662s). First news was readable at 68.346s, including 32.133s queue creation-to-claim; its composition accepted on one 23.706s attempt. Therefore this is not an overall first-readable speedup. The cohorts share 36 of 40 news sources; runs are not controlled benchmarks. Both observed final passages preserve every source citation exactly once, and the named midterm category contains four relevant stories. A two-source experiment accepted in 7.801s, but smaller windows were deferred because the proposed version-zero trigger misses prior audio publication and increases later work. Evidence: `test-results/onboarding-optimization-20261017/quality-followup/{comparison.json,validation.json,integration-manifest.json,final-live-flow/}`. API, extractor, scheduler and all 18 native workers remain running on verified scoped binaries; production was not changed.
+- **Remaining:** Queue capacity/wait and provider generation still prevent a latency guarantee. One 81-word passage exceeds the existing 75-word writing limit, which current citation/layout validation does not enforce; no claim of complete prose-quality enforcement. A fresh UI and physical-microphone pass remains blocked by the locked Mac. Pre-existing usage loss on cancellation of planning or a successful plan discarded before publication is outside this failure-path correction; ambiguous commit outcomes are not blindly re-recorded.
+- **Commits:** Uncommitted.
+
+### 2026-10-17 — `main` — Bound pending-news pruning to pending identities
+
+- **Scope:** Behavior-preserving Briefing pending-source pruning and indexable predicates in source-key/read lookups.
+- **Changes:** Resolve only the user's pending news identities before canonical visibility checks. Preserve ready/representative, topic/subscription, cluster-read, ownership and source-kind rules. Move affected integer-column predicate casts onto bigint parameters without narrowing IDs. No admission or schema changes.
+- **Evidence:** Read-only production-clone SELECT plans for 452 pending stories: custom 1151.685ms → 18.336ms; generic 996.437ms → 18.003ms. Both-direction result differences were empty for two users and an out-of-range bigint user ID. These are query measurements, not a complete runtime benchmark.
+- **Validation:** Explicit Claude Opus 5.5 high planning and final implementation reviews approved the scoped change. The focused isolated PostgreSQL equivalence regression and all 211 DB library tests passed; DB all-target warning-denied Clippy, formatting and diff checks passed. Module guard reports only unrelated preexisting `learning_deck_tasks.rs` growth (1289 lines versus 1119 limit). No commit, push or production mutation.
+
+### 2026-10-17 — `main` — Quality-preserving onboarding follow-up
+
+- **Status:** Complete locally.
+- **Scope:** Complete native voice onboarding; reduce redundant eligibility scanning; diagnose rejected composition attempts without weakening validation.
+- **Evidence:** Full iPhone 17/iOS 26.5 flow now completed through real recording, silence stop, transcription, personalized discovery, selecting 24 sources, and opening a generated passage. The 14.88s synthesized clip used the real recording lifecycle; physical microphone input was substituted. Transcription took 1.674s, discovery planning 4.097s plus 16.061s worker execution. First news publication was 25.467s after completion click; visible category/readiness observations are upper bounds because human-like tool interaction was not continuous. Screenshot and logs: `test-results/onboarding-optimization-20261017/ui-followup/`.
+- **Decisions:** Preserve provider/model, source coverage and validators. Production-clone query plans show repeated prune scanning costs ~0.8s; exact pending-ID lookup retains canonical visibility and cluster-read semantics. Composition diagnostics now distinguish successful provider transport from accepted layout using bounded, non-content reason codes. Inspect forced weak-cluster mixing separately before altering semantic routing.
+- **Changes:** Removed duplicate first-run category row; retained mark-all-read confirmation on the single row. Updated B15. Provider/model/prompt, source selection and validation remain unchanged. Composition diagnostics use a coarse stable provider-layout code and typed normalization codes, without logging source/provider text.
+- **Validation:** All 211 DB tests and six focused worker handler tests passed; DB/worker all-target warning-denied Clippy passed. Explicit Opus 5.5 planning/final reviews approved the DB change; its diagnostics concern was resolved by removing error-string matching. iOS Debug rebuilt; computer use verified the single row, readable cited passage, and mark-all-read confirmation/cancel. Runtime pruning measured 36ms after restart. API/extractor readiness passed; live scheduler and workers remain running. The canonical restart redundantly recompiled after an already successful binary build and stalled; launched the canonical runtime body using SHA256-verified binaries from the successful build, with applied migrations. Launcher and hashes are in ignored evidence.
+- **Remaining:** Future evaluated work: composition repair causes, weak-cluster coherence, source-discovery language fit, and initial/full-corpus admission scanning. Historical retry reasons and exact clustering route are unavailable; no speculative model/routing changes made. Physical microphone input remains untested. Global module-size guard remains blocked by unrelated existing Learning Deck growth. No commit, push or deployment.
+- **Commits:** Uncommitted.
+
 ### 2026-10-17 — `aggregator-integration` — Reduce first-run refresh delays
 
 - **Status:** Validated locally; merged runtime timing pending.
@@ -46,6 +75,59 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes continued:** Typed paid-fallback demand policy preserves free extraction; locked denial publication defers if a new audience appeared. Topic expansion retries previously denied stories. Shared dedupe prevents duplicate ingest/replay work; body-backed stories cannot reuse metadata-only target or sibling summaries. Polling retains the first discovery timestamp and excludes only verified non-input engagement counters and scrape clocks from source fingerprints, preserving substantive-input checkpoint invalidation; summary finalization retains the fenced current metadata so refreshed counters survive publication. The separate credit-deferral overlay remains outside this commit.
 - **Remaining:** Merge into the shared local checkout, restore unrelated work, and verify fresh-user runtime timing. No push, deployment, or fresh production intake claim.
 
+
+### 2026-10-17 — `main` — Production-corpus onboarding timing and aggregator integration
+
+- **Status:** Local integration and real-provider API comparison complete; native UI/microphone test blocked on Mac unlock.
+- **Scope:** Audit onboarding/category branches, restore current production data locally, measure first categories and readable news, and adapt the remaining aggregator-freshness branch while preserving unrelated work.
+- **Integration:** All seven related branch refs are ancestors of local main `5a5b75cd`; adaptation `d572f469` and explicit ancestry merge preserve the original dirty aggregator worktree. No relevant open PR remains; unrelated Knowledge/Learning PR #10 is untouched. No push or production deployment. Preservation audit found zero missing files, unexpected unrelated changes, or validated worker mismatches; the safety stash remains available.
+- **Runtime:** Canonical production sync restored 31,660 contents into isolated `newsly_onboarding_20261017`; API, scheduler, extractor, native PostgreSQL, 17 content/feature workers and account-deletion worker are running. All nine aggregators have more than 30 summarized ready representatives (minimum 97). SciURLs remains stale; its live first 100 links match the stored September set. Successful fetching does not establish fresh intake.
+- **Measurement:** Fresh users subscribing to all nine aggregators, timing from onboarding-completion API dispatch: first semantic category 12.573s → 7.703s; first readable news 21.873s → 19.841s; second category 63.548s → 25.930s; three readable categories 95.900s → 80.639s. Returned lens bodies were verified. The first three productive refreshes now scheduled zero-second successor delays rather than the observed baseline 30s embedding backoff. Initial preparation took 2893ms; next two took 1502ms/1441ms. Provider composition is still a material remaining cost. Live providers/corpus and warmed shared embeddings make this single comparison indicative, not a controlled benchmark or UI measurement.
+- **Validation:** Clean integration suites: 619 passed, one existing ignored; formatting, warning-denied Clippy and module checks passed. After restoring unrelated credit/deck/iOS edits, 16 news-item and nine warm-news tests plus affected all-target warning-denied Clippy passed. Explicit Claude Opus 5.5 high planning, implementation and correction reviews approved the scoped changes. Final API and extractor readiness checks passed. Evidence: ignored `test-results/onboarding-optimization-20261017/`, including `timing-comparison.json`, `final-health.json`, `branch-ancestry.json`, and `merge-preservation.json`.
+- **Voice/UI:** Current iOS Debug app installed on iPhone 17/iOS 26.5 and reached introduction. Actual transcription endpoint returned the intended synthesized recording in 1.732s. Native computer use repeatedly reports the Mac locked; physical microphone, visible category timing, and full interactive onboarding remain unverified.
+- **Remaining:** Unlock the Mac and finish the interactive onboarding/audio flow. Services stay running for that test. No production freshness or deployment claim.
+- **Commits:** `d572f469`, `5a5b75cd`; this runtime follow-up and preexisting unrelated work remain uncommitted.
+
+### 2026-10-17 — `main` — One reading surface on detail: reader ⇄ web, with Deck
+
+- **Status:** Complete (pending user sign-off)
+- **Scope:** iOS `DetailActionBar`, `ArticleReaderView`, new `ArticleWebView`, `ContentDetailViewModel.canShowReader`, `ContentDetailView` reader wiring, the `detail-action-bar` E2E state, new `DetailReaderUITests`, law C22.
+- **Decisions:** `SFSafariViewController` allows no custom toolbar buttons. The user chose to replace it on this path with an in-place `WKWebView` mode inside the reader, accepting the loss of Safari Reader, content blockers, and autofill. The detail bar's Safari button is gone. The single `doc.richtext` button always opens the reader, which starts on the web page when no body text exists. The top-trailing button flips Reader ⇄ Web. Both surfaces stay mounted once opened, so scroll position and page state survive flips. A Deck button (both modes) presents `LearningDeckContentCreateSheet` from inside the reader, because a sheet presented from detail would sit behind the full-screen cover. The resulting deck opens over the reader. Podcasts with a stored transcript now use the reader. The other `SafariView` callers (Search, Knowledge preparation status, Briefing) are unchanged.
+- **Changes:** Removed `.accessibilityElement(children: .ignore)` from the reader toolbar, which was replacing button labels and identifiers with SF Symbol names. The toolbar keeps a 50pt minimum height so it doesn't jump between modes. The E2E fixture URL is now `https://example.com/`. The `detail-action-bar` E2E state now renders the podcast and article bars together. Follow-up: article and podcast bars gained a direct Deck button (`content.action.create_deck`, after Save to Knowledge) that opens the existing `learningDeckCreate` sheet. Deck creation stays in the Buddy sheet too. The bar is back to 7 icons (356pt), which fits 390pt phones and overflows about 9pt into the trailing margin on 375pt phones, the same as the old 7-icon article bar. `testDetailDeckButtonOpensDeckCreation` passes.
+- **Validation:** Simulator build. `DetailReaderUITests` covers: one reader entry, no detail Safari action, toolbar order, flip to web and back, text-size control hidden in web mode, and the Deck sheet opening from web mode. All 3 `KnowledgeSourceActivityUITests` pass. Checked screenshots of the text, web, and deck-sheet states.
+- **Remaining:** None. Full run of `newslyTests` plus `DetailReaderUITests` after the final polish: 729 passed, 0 failed.
+- **Commits:** Uncommitted
+
+### 2026-10-16 — `main` — Learning Deck deadlines and private recovery
+
+- **Status:** Complete locally; preserving unrelated checkout edits.
+- **Evidence:** Deck 31/task 126 exhausted three deliveries near the shared 300-second sandbox boundary. Earlier validation found real portrait overflow; the final delivery completed model work with roughly two seconds left before host validation transport failed. Manual task 127 later succeeded. Infrastructure errors were flattened into artifact errors; no complete private draft survived retries.
+- **Decisions:** User authorized both fixes and a fifteen-minute generation budget. One persisted task deadline covers automatic retries; model phases reserve validation/publication time. Private immutable checkpoints survive fresh VMs, exact lease/current-deck fencing prevents stale writes, canonical validation checks the same captured bytes that publish, and typed infrastructure errors never enter artifact repair prompts.
+- **Changes:** Dedicated timeout setting; generation-state migration and repository; bounded manifest/assets and deletion cleanup; stage progress; canonical validation tool, sealed browser snapshots and specific overflow reports; iOS observation window and read-only refresh on timeout; corrected theme prompt to require authored CSS.
+- **Validation:** Planning and implementation reviewed with explicit Claude Opus 5.5 high; corrected phase-cutoff validation, changed-input draft invalidation, and stale-checkpoint fallback after normal completion. 29 worker tests, seven isolated database tests, one account-cleanup test, seven real Chromium fixtures, and eleven focused iOS Simulator tests pass. Formatting, scoped whitespace checks and warning-denied Clippy pass for all three affected Rust crates. Follow-up Opus 5.5 review confirmed the fixes with no blocking regressions; the final interrupted checkpoint is capped at ten seconds and reused for validation, and retries require enough budget for useful work.
+- **Remaining:** No paid provider/E2B generation smoke or full generation orchestration fixture; provider integration remains unproven by these local checks. Each changed checkpoint keeps independent immutable assets (20 MiB candidate cap, 30-second cadence, ten-second periodic checkpoint timeout), so repeated large changes can amplify private storage until cleanup. No production mutation, commit, push, or deployment authorized/performed.
+- **Commits:** Uncommitted.
+
+### 2026-10-16 — `main` — Knowledge row chat/deck shortcuts
+
+- **Status:** Complete (design preview; pending user sign-off)
+- **Scope:** iOS Knowledge saved-source rows (`KnowledgeView.swift`, `KnowledgeSourceActions.swift`, `KnowledgeTimelineView.swift`), the `knowledge-source-activity` E2E state, `KnowledgeSourceActivityUITests`, law K19.
+- **Decisions:** Ready rows with an existing chat or deck show 30pt circular trailing buttons (chat, then deck) in place of the chevron. They reuse the swipe-action path, so chat resumes the latest Knowledge chat and deck opens the latest deck/status. Buttons sit beside the row button rather than inside it, so taps don't nest. Kicker markers now cover only deep dives without a button (narration). Non-ready rows keep the `info.circle`. Standalone chat/deck rows keep their chevrons.
+- **Changes:** Added `KnowledgeSourceShortcutButton` and `KnowledgeSavedTimelineEntry.openableActions`. The E2E fixture gains source 906 with a settled chat and deck.
+- **Validation:** Simulator build succeeded. All 3 `KnowledgeSourceActivityUITests` pass, including the new shortcut test. Checked simulator screenshots of the fixture.
+- **Remaining:** None.
+- **Commits:** Uncommitted
+
+### 2026-10-12 — `main` — Briefing source long-press actions
+
+- **Status:** Complete locally.
+- **Scope:** iOS source links in News, Articles, and Podcasts Briefing, native source menus and existing Knowledge/chat/deck services. Preserve unrelated local UI changes.
+- **Changes:** Add Knowledge, Chat, and Create Deck to inline/discussion links, source headlines, floating images, captions and quote links. Save is idempotent; news saves its linked article. Resume the latest source chat without sending a prompt; open existing decks or offer the existing optional-focus form. Refresh Knowledge after successful commands, preserve ID namespaces, fence canceled results, and prevent duplicate submissions or dismissing an active deck submission. Document B18.
+- **Review:** Explicit `claude-opus-5-5` at high effort reviewed planning, implementation and corrections; verified `modelUsage` for all three consultations. Addressed news decks' converted-content identity, stale modal-reader state, chat navigation and misleading save feedback.
+- **Validation:** Simulator build passes. All 39 focused renderer/coordinator/headline/command/deck-lookup unit tests and four gesture UI tests pass on iPhone 17e / iOS 26.4. Gesture tests exercise all three actions in every tier, headline menus, source activation and Dig Deeper. Backend-free fixtures disable animations to avoid XCTest's native-menu animation timeout; brief presses verify link activation. UI result bundle: `test_sim_2026-10-12T17-13-56-852Z_pid23460_37a5403f.xcresult`. Screenshots and review evidence: `/tmp/newsly-briefing-link-actions/`. Scoped diff checks pass.
+- **Limits:** No live product command, provider/E2B smoke, physical-device check, commit or release. News deck lookup compares the normalized source URL because decks store converted article IDs; an original-to-final redirect alias unavailable to the client can miss an existing deck and offer creation. Resolving that rare case needs server-owned source identity lookup.
+- **Remaining:** None within this scoped local change.
+- **Commits:** Uncommitted.
 
 ### 2026-10-10 — `main` — Correct production podcast snapshot SQL
 
@@ -3213,3 +3295,308 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Extraction:** Local Poppler extraction retains all PDF pages within the complete-text byte limit and requests the Rust-owned Firecrawl fallback for scanned/malformed PDFs, including static analysis. Oversized image inventories now request fallback instead of falsely classifying the complete text as too large. Provider-reported Firecrawl credits determine resource quantity and configured-rate cost; absent measurements remain unknown and fenced finalization retains observed usage even when content fails validation. Added durable architecture notes.
 - **Validation:** Initial clean commit `a23ed53c` passed Rust/SQLx/contracts/architecture, warning-denied Clippy, both Python packages (evals 43 passed/5 skipped; extractor 47 passed), all 716 native tests with zero skips, and AXe. Live direct/chat/share/ownership scenarios passed; the generated Learning Deck failed responsive-canvas overflow validation after its bounded repair. No backend deck code changed in that release; retained evidence establishes artifact rejection, not an infrastructure failure. Preserve detailed artifact evidence on subsequent smoke failures and retain the validator unchanged.
 - **Remaining:** Complete focused correction coverage, final explicit Opus verification, and the entire canonical gate on the corrected clean SHA before push/deployment. No production mutation or push has occurred.
+
+### 2026-10-11 — `main` — Bottom fade reaches the screen edge
+
+- **Status:** Complete locally; uncommitted.
+- **Scope:** SwiftUI root compact tab bar and Briefing/Knowledge list bottom chrome.
+- **Decisions:** Replaced the per-list 28-point `bottomScreenEdgeFade` (which ended at the safe-area edge, so rows beside the floating bar ran hard into the screen bottom) with one fade owned by the root compact tab bar. It starts 24 points above the bar, reaches solid surface by mid-bar, extends through the home-indicator area, and disappears with the bar on pushed screens.
+- **Validation:** iOS Simulator `xcodebuild` build succeeded. Populated-scroll visual check not done: no local API was listening on port 8000, so the Knowledge timeline had no rows.
+- **Remaining:** Confirm on device with populated Knowledge and Briefing lists.
+
+
+## 2026-10-14 — Firecrawl credit reliability and spend diagnostics (main, local)
+
+- Added shared durable HTTP402 pause, serialized ordinary-task recovery probes,
+  prerequisite deferrals preserving retries and article coverage, and durable
+  exhaustion/recovery signals through existing pipeline alert delivery.
+- Record each Firecrawl invocation before dispatch and observed credits before
+  content validation/finalization. Missing quantities/prices stay unknown; explicit
+  account-specific marginal top-up pricing replaces the guessed default. Deployment
+  must set FIRECRAWL_CREDIT_COST_USD=0.004 for the verified current $10/2500 quote.
+- Added stable Python local-stage/reason counters and persisted fallback decisions.
+  Public bounded probes found Phys.org/TheHill/FastCompany403 and MarketWatch401;
+  sampled ESPN static extraction retained16/16 article-body paragraphs. No domain
+  threshold relaxation, source deferral, or PDF page caps were justified or added.
+- Python59 tests/Ruff/MyPy and shared credit-state4 isolated SQLx tests passed.
+  Combined Rust runtime5, deferral/fencing2, and existing news-item accounting1
+  tests passed; architecture guard
+  passed. Warning-denied workerClippy and Python Ruff/MyPy passed. An automatic approval
+  review rejected the separate accounting-helper test rerun as outside its recognized
+  authorization; that command did not execute and remains separately unverified.
+- No billing changes, paid test requests, production edits/requeues, commits/pushes,
+  or external AI disclosure. Production rollout requires schema+worker+extractor
+  deployment and configured existing alert delivery; historical recovery stays scoped
+  to a separately authorized operation.
+- Read-only production recovery verified at22:00:10UTC: usage481817, task2042822,
+  news item145763, HTTP200/1credit, extraction completed with a stored body.
+  Existing scheduler alertdestination is unconfigured; outbound delivery needs an
+  explicitly selected/configured destination during rollout. No task replay caused
+  the observed recovery.
+
+## 2026-10-17 — News filter text evaluation (main, local)
+
+- Added an offline Jev ablation design, eight synthetic interest profiles in four
+  equivalent structures, reproducible public News corpus sampling, checkpointed
+  provider/judge runners, and development-only selection with held-out metrics.
+- Read-only Rust operator exports produced 1,000 canonical News items across nine
+  aggregators and 377 publisher domains: 950 recently ingested plus 50 explicitly
+  older SciURLs cases. Raw summaries/outputs stay in ignored test-results.
+- Prepared 2,000 item/profile pairs and 8,000 Jev jobs; a separate two-item smoke
+  preserves the main corpus. Aggregate limits: $5 Jev inference/8,400 attempts,
+  65 local Claude Opus 5.5 grading invocations, no paid judge API fallback.
+- Opus design review completed; corrected shared conditional-exclusion semantics,
+  reference blinding, exact inference hashes, selection rules, and human-audit bias.
+  Implementation review and follow-up completed using only claude-opus-5-5.
+  Hardened the runner with an append-only Jev reservation/completion ledger,
+  separate per-attempt raw files, required budget flags, sanitized judge subprocess
+  environment, explicit audited halt recovery, development-only partial metrics,
+  and zero selection precision for profiles with no admissions.
+- Opus smoke passed; primary grading ran through the locally authenticated
+  Claude Max CLI with no exported Anthropic provider overrides. Strict quote
+  validation rejected attempts 10, 11, and 12 for inserted ellipses; those failures
+  and their raw responses remain preserved, with explicit retry acknowledgements.
+  Attempt 15 differed only in curly/straight quote typography. Around 18:19 UTC,
+  before any Jev calls, adopted literal-quote-typography-v2 and explicitly
+  revalidated/promoted that whole stored batch without another model call. The
+  validator only maps four curly quotes and whitespace; no changed words or
+  inserted ellipses are accepted. Frozen manifest, prompts, and all 55 batch hashes stayed
+  unchanged. Independent Opus review verified this correction needs no regrading;
+  all earlier 520 accepted labels still satisfy the original strict check.
+- Follow-up reporting fixes bind accepted references to their completed/promoted
+  attempt and saved raw response, separate human review cohorts, and record future
+  recovery timestamps and raw hashes. Earlier completion hashes were not recorded
+  at completion; that limitation is reported rather than rewriting history.
+- Local validation: 42 focused tests, Ruff, and MyPy passed. A blinded 48-case
+  human review worksheet is available in the ignored run directory.
+- Completed 2,000 primary references and 200 fresh-session repeats; verified all
+  55 accepted batches against raw responses. Repeat agreement was 194/200 (97%),
+  a consistency measure rather than accuracy. Six blinded disagreement cases form
+  a separate targeted review packet. Used 61 main plus one smoke CLI invocation,
+  within the 65 grading-invocation ceiling; no calls remain active. Recorded the
+  aggregate execution report and method hashes. Climate/energy, science/health,
+  and sports have fewer than 20 recent-development positives, so their recall
+  is descriptive only under the frozen design.
+- User approved TypeSafe terms/privacy acceptance. Completed Google basic-profile
+  sign-in, but TypeSafe returned `turnstile_blocked`; one reload/retry exposed a
+  Cloudflare human-verification checkbox requiring browser action-time confirmation.
+  Console access remains unconfirmed. No Jev requests, API key creation, production
+  mutations, commits, pushes, or deployment occurred.
+- TypeSafe continuation: CAPTCHA approval received after the challenge expired.
+  Google retry stalled; normal email magic-link authentication succeeded. Setup now
+  requires a separate Master Customer Agreement/Privacy Policy acceptance before
+  console access; retained the tab for confirmation. No API key or Jev calls yet.
+
+- User replaced direct TypeSafe signup with OpenRouter Jev 1.14. Froze new provider
+  manifests while preserving all 2,000 reference labels, 200 repeat judgments, pairs,
+  four filter formats and original human worksheets. Source descriptors hash the
+  original judge state and raw files; no judges were rerun. Exact model/provider
+  routing and reported input-only billing verified in a 16-call smoke ($0.000537852).
+- OpenRouter main run in progress under the existing aggregate $5/8,400-attempt cap.
+  Saved attempt 30 was explicitly revalidated for two-decimal probability rounding,
+  without another request or normalization. Attempt 121's non-argmax choice remains
+  a failed billed response; explicit acknowledgement permits bounded retry, and
+  later instances retry within the existing three-attempt limit. Unknown billing
+  and unrelated protocol failures still halt. No held-out outcomes inspected yet.
+
+- Completed all 8,000 Jev decisions in 8,005 main attempts; including the 16-call
+  smoke, actual reported inference cost was $0.254117976. No unknown bills or
+  exhausted jobs. Median API latency 185 ms, p95 278 ms. Preserved five non-argmax
+  failures and their paid retries, and one original-response rounding recovery.
+- Froze development selection before held-out scoring: structured text at 0.50.
+  Recent held-out results against Opus: 412/424 relevant pairs kept, 641/713
+  irrelevant pairs excluded, 85.1% admission precision. Prose tied aggregate
+  counts; paired differences do not establish structured superiority. Kept the
+  earlier 0.90 product-default proposal pending human audit/shadow evaluation;
+  News-only onboarding/settings design stays intact. Climate and sports weaknesses
+  and sparse positives are explicit. No production filter implementation added.
+- OpenRouter migration/recovery review findings addressed; final reviews used
+  only Opus 5.5, while the migration planning consultation also reported Haiku.
+  Final 112 focused tests passed with Ruff/MyPy; metered cost, first-attempt
+  fail-open sensitivity, source hashes and complete results saved locally.
+
+### 2026-10-17 — News filter preferences and onboarding seed (working tree)
+
+- Added immutable account filter revisions with user-row serialized revision checks; Settings saves enqueue/expedite append refresh and remove only unpublished News pending rows for rechecking.
+- Added authenticated GET/PUT `/api/briefing/filter`, exact onboarding input retention/provenance and authorized status restoration, and optional non-null completion seed validation. One-time initialization runs before first-edition preparation; omitted old-client/agent seeds remain disabled, blank choices remain durable, and existing revisions are preserved.
+- Storage accepts 8,000 characters; activation uses the conservative 8,192-byte bound. Onboarding retains over-token drafts disabled without truncation. Added contract, validation, isolated PostgreSQL concurrency, pending-row, and initialization coverage.
+- Validation: API offline compilation passed; focused preference tests passed (4/4, including isolated PostgreSQL races and pending preservation); contract seed decoding test passed. Integrated Clippy, contracts, and client validation remain with the parent implementation. No commit, deployment, or paid provider call.
+
+### 2026-10-17 — Retire global editorial classification (working tree)
+
+- Removed News summary editorial classification from provider instructions/output and new durable metadata; saved legacy summaries remain reusable while ignoring their inert classification key.
+- Removed the global skip veto from owned content feeds/direct access, chat/search, onboarding seeds/image readiness, learning-deck sources, source stats/history, and worker image/Briefing fanout. Normal ownership, completion, image, archive/read and lifecycle skipped semantics remain authoritative.
+- New content producers omit the old editorial column. Existing installed-client `classification` response keys remain present with null; legacy input fixtures preserve old metadata to exercise compatibility.
+- Added explicit legacy skip readability/reuse coverage and updated expected wire fixtures. Isolated PostgreSQL feed test passed with a legacy skip row. API/worker validation currently blocked by concurrently edited onboarding discovery Send lifetimes; parent handles integrated validation. No schema drop, historical repair sweep, production mutation, or commit.
+
+### 2026-10-17 — Personalized News filter implementation (`main`, local)
+
+Implemented onboarding-seeded immutable preference revisions, Settings editing/Preview, All News/Filtered Out, and Jev admission inside the existing Briefing refresh lease. No new task type, preference compiler, or training service. Successful decisions cache by exact user/revision/summary/evaluator; negative choice needs >=0.90. Request caps are 128/pass and 500/user/UTC-day; Preview is 20/run and 200/day. Articles and Podcasts bypass filtering, published coverage survives changes/rebuilds, and old editorial classification is inert with nullable wire compatibility retained. Exact expected lease and user locks fence stale work; current exclusions defeat concurrent failure admission. Cached-only crash recovery and filtered/deferred first-run settlement are covered.
+
+Planning and implementation reviewed through explicit Claude Opus 5.5. Verified and fixed review findings: optional non-null Swift seed generation, exact unavailable admissions through Full rebuilds, unchanged-save cache reuse, current-summary publication fencing, undispatched budget refunds, independent spend accounting, and indexed filtered-list/off-user query paths. Inference unavailability or unusable evidence remains conservative admission; no per-user coordinator was added for bounded duplicate concurrent requests. New migrations follow the existing October 17 migrations. Latest validation: 28 isolated PostgreSQL preference/filter/publication tests and 21 existing Briefing tests passed; all 88 API unit tests passed, 12 codegen tests and contract-drift check passed; clean Simulator build, 41 focused native unit/UI tests, and targeted follow-up native regressions passed with portrait screenshots inspected. Opus 5.5 follow-up found no remaining blockers in admission, billing/refunds or publication. Post-review provider tests (11), API filter tests (4, including detached preview accounting after request cancellation), worker filtering/accounting tests (3), and warning-denied DB/API/worker/codegen Clippy passed. Scoped native follow-ups passed after final user-facing copy changes. Canonical contract drift, full Rust formatting and diff whitespace checks passed. Preview completion owns its bounded accounting task independently of a client disconnect; unpolled candidates request a follow-up refresh. No commit, push, deployment, production mutation or new live Jev inference performed.
+
+### 2026-10-17 — Jev category-routing experiment (main, local only)
+
+- Read the active filtering/onboarding sessions and their artifacts; kept this offline
+  evaluation separate from their production implementation work. Strong-model taxonomy
+  generation plus Jev routing tested on 60 development and 120 held-out public-news stories.
+- Added the bounded category decision runner and focused tests under `python/evals`.
+  Frozen allocation: 240 format-comparison, 24 reversed-order, 24 repeated-order and 8
+  captured-case calls. All 296 succeeded; reported Jev cost $0.018958128, median 0.241s.
+- At fixed p>=0.85, full rules assigned 83/120 stories: 82 exact reference matches,
+  83 acceptable. Overall exact agreement was 90% for both title+deck and full rules;
+  no demonstrated overall gain from richer rules. No current-centroid replay or human gold.
+- Local Codex rejected GPT-6.1 Sol; explicit local Opus 5.5 authored taxonomy, classified
+  and independently labeled blinded batches. Same-family bias and CLI usage are documented.
+  Planning/final Opus reviews completed; final review independently reproduced scores.
+- Validation: 24 offline runner tests, Ruff/formatting, MyPy; all 296 original provider
+  responses revalidated against frozen requests/results. Model/provider drift now halts
+  future dispatch. No actual drift occurred, and no paid evaluation was rerun.
+- Report: `docs/initiatives/2026-10-17-jev-category-evaluation.md`; raw evidence, audit CSV,
+  frozen inputs and reproducible scoring under `test-results/jev-categories-20261017/`.
+  Next evidence needed: paired shadow replay on real per-user categories/current centroid
+  routing before any production change. No production writes, commit, push or deployment.
+
+### 2026-10-18 — `main` — News filter cleanup and strict review
+
+- **Status:** Complete locally.
+- **Scope:** Personalized News filter persistence, provider/accounting paths, Preview, and native contract generation; unrelated shared-checkout work preserved.
+- **Decisions:** Keep preview and worker cancellation ownership separate. Preserve canonical News presentation: validate evaluated evidence hashes in the same read as visible projections, and show changed evidence as pending without additional inference. Retain existing lock ordering after the proposed deadlock was disproved by the unchanged-code regression and PostgreSQL compatible-lock behavior.
+- **Changes:** Removed the untracked provider entry point, unused response model/provider fields, write-only preview usage map, and preparation wrapper that bypassed the expected lease token. Collapsed encoder branches and shared native Preview eligibility. Documented the Settings/finalization locking invariant.
+- **Validation:** 81 focused tests passed: 28 filter/preferences/publication, 16 existing Briefing, 11 provider, 5 API, 3 worker/accounting, 12 codegen, and 6 Simulator view-model tests. Final Preview regression rerun passed after the lint fix. Warning-denied Clippy for all five affected Rust packages/all targets, Rust formatting, diff whitespace, and canonical contract drift checks passed. Explicit Claude Opus 5.5 planning and final reviews completed; final review found no blockers. No live Jev calls.
+- **Remaining:** None in this cleanup scope. Full release/deployment gates were not requested or run.
+- **Commits:** Uncommitted; nothing pushed or deployed.
+
+### 2026-10-18 — Jev versus embedding routing comparison (main, local only)
+
+- Reused the frozen 60-development/120-test category benchmark, prior Jev outputs and
+  blinded references. Confirmed existing categories already persist per user in
+  `briefing_lenses`, unique `(user_id,key)`, with title/deck/rule and centroid metadata;
+  no new category table or production schema change is needed.
+- Added an offline embedding replay helper and 31 focused tests. Matched Rust frozen
+  within-batch vectors, two-pass .55/.45 cap rules, 40-item passes, ties and capped centroid
+  updates. Three real-data scenarios match compiled original Rust math on all assignments,
+  cosine scores and final centroids. Ruff/formatting and MyPy passed.
+- The local cache lacked all 180 benchmark IDs. Eight bounded fresh Qwen embedding calls
+  returned 200 vectors, cost $0.00032778; all used Nebius/expected model. Two local explicit
+  Opus 5.5 calls labeled development stories; no repeated Jev or held-out judge calls.
+- Default cap-rule centroid replay: 92/120 named, 72 exact and 80 acceptable assignments.
+  Jev fixed .70: 96 named, 92 exact and 96 acceptable. Jev .85: 83 named, 82 exact and
+  83 acceptable. Profile-only and fixed-centroid diagnostics and order sensitivity saved.
+- This compares the same broad generated taxonomy using teacher-seeded centroids, not
+  original live user centroids or full discovery/composition. Strong shared-model labels
+  and the small balanced corpus limit generalization; real per-user shadow evidence remains.
+- Report: `docs/initiatives/2026-10-18-jev-versus-embedding-routing.md`; full frozen data,
+  code snapshots, raw responses, scores and parity proof in
+  `test-results/jev-embedding-comparison-20261018/`. No application DB writes, routing-default
+  changes, commit, push or deployment.
+- Final independent Opus 5.5 review reproduced counts and reran 31 tests/Ruff with no
+  blocking defect. Report now leads with strongest embedding variant: on 107 reference-
+  named stories, Jev exact 103/107 versus full-description embeddings 92/107; paired wins
+  13 versus 2. The .55-only arm is explicitly a hypothetical no-absorption diagnostic.
+  Final preparation verifier checks all 200 texts, exact judge templates, source snapshots,
+  ledger-manifest binding and the prior frozen Jev thresholds without overwriting inputs.
+
+
+## 2026-10-18 — Parallel News grouping design (main)
+
+- Designed parallel preparation with fresh deterministic grouping inside a short,
+  scope-guarded, exact-lease publication transaction; retained the existing task.
+- Added proposed vector reuse/accounting, candidate-writer coordination, published
+  reprocessing/member-move rules, race tests and staged concurrency rollout gates.
+- Explicit Claude Opus 5.5 review completed; verified fresh-match simplification
+  and reprocessing hazards, and rejected leaving scrape/scope writers unguarded.
+- Design: `docs/initiatives/2026-10-18-parallel-news-grouping-design.md`.
+- Validation: source inspection and document consistency/whitespace checks only.
+  Implementation, race tests, performance measurement and production rollout remain
+  outstanding. No runtime code/config changes, commit, push or deployment.
+
+## 2026-10-18 — Jev category assignment (main, local)
+
+- Reused each user's existing `briefing_lenses` definitions and fenced pending assignments. Jev now routes summary evidence against title/deck/optional routing rule at selected probability >=0.85; uncertain or unavailable decisions remain in general news. Generative naming stays on its existing separate model setting; embeddings remain for discovery, event grouping and nightly identity.
+- Removed category-profile embedding calls, cosine assignment/absorption settings and metadata-topic automatic assignment. Four bounded single-attempt Jev requests run concurrently; the existing usage recorder preserves reported cost and token observations independently of lease loss, naming or stale publication. No new table, queue, decision cache or service. Normal sweep default is five minutes; naming maintenance cadence is unchanged.
+- Incremental unreviewed cluster members wait for a saved category; full rebuilds preserve their coverage in general news. Nightly publication clears fitted pending assignments for the normal Jev refresh, while unfitted pending and composed coverage retain the existing drain policy. Preexisting limitation retained: an unfitted pending story on a reused category key can keep its prior assignment when that category's definition changes.
+- Independent design and implementation reviews used explicit Claude Opus 5.5. The review prompted direct descriptive option keys rather than synthetic aliases and a repeat of the frozen 120-story evaluation through the Rust adapter. Final validation/results follow below.
+- Local implementation only; no commit, push, deployment, production mutation or new model judge calls.
+- Validation complete: 73 worker Briefing tests, 24 DB Briefing/reclustering tests (isolated local PostgreSQL), six provider tests, workspace formatting, scoped diff checks, and warning-denied all-target Clippy for worker/providers/db passed. Final resumed Opus 5.5 review reported no remaining material findings.
+- Shipping Rust gateway replay: 120/120 valid responses, preferred reference agreement 108/120 and acceptable agreement 117/120. The fixed 0.85 gate named 82/120 stories: 81 preferred, all 82 acceptable, no reference-other stories named. All choices matched the earlier definitions run; probability variation reduced gated coverage from 83 to 82. Cost $0.009471294, p50 167 ms/p95 206 ms per request. Frozen Opus reference, not human ground truth; no new judges. Earlier three-request transport canary cost $0.000233184. Resume with a dummy credential dispatched no requests and preserved all observation hashes. Evidence: `test-results/jev-category-implementation/` and `test-results/jev-category-rust-canary-20261018/`.
+
+### 2026-10-18 — `main` — Integrated content-pipeline performance plan
+
+- Status: design only; target confirmed as up to 100 daily active users. Read the onboarding, JEV categorization and production queue/cost chats and verified the relevant current worker/provider/DB/extractor paths. Runtime code and production configuration unchanged.
+- Plan: `docs/initiatives/2026-10-18-content-pipeline-performance-design.md`. Sequence browser timeout-ownership fix and extraction/processing split, incremental JEV/shared-vector improvements, per-user coalesced Briefing capacity, then guarded grouping before parallel processing if measured queues require it. Preserve quality, filter semantics, exact leases and accounting.
+- Validation: extended the prior 666-pair captured-task replay; separate 2/1 and 4/4 consumers model whole-window p95 completion of 11.81 and 4.11 minutes, respectively. These fixed-duration simulations omit contention and are not production capacity proof. Reproducible inputs/script/results are in `test-results/content-pipeline-plan-20261018/`.
+- Independent review: Claude Opus 5.5 high completed; `modelUsage` verified as `claude-opus-5-5`. Verified browser waiter-timeout recycling, shared-vector dependency, append/sweep dedupe gap, broad Briefing-version invalidation, subscriber fanout cost, polling and editorial delays; incorporated material findings. Plan links verified. No application tests or paid application-provider benchmarks run for this design task.
+- Remaining: implement scoped slices, integrated quality/load validation, determine final capacity and latency targets, and separately authorized release. No commit, push or deployment.
+
+### 2026-10-18 — `main` — Content pipeline performance implementation started
+
+- Status: in progress, implementing the reviewed performance design with simplification as an explicit constraint. Baseline snapshot of inherited dirty files is `/tmp/newsly-pipeline-implementation-base-20261018` for scoped review; unrelated work is preserved.
+- Independent slices: browser timeout ownership; task-specific extraction/processing and shared-embedding capacity; completion-driven JEV routing and embedding-ready wakeups. Primary owns Briefing coordination, fanout, integration and validation. Existing processing remains serial until grouping correctness and measured need justify expansion.
+- Opus design review from planning is retained; a focused follow-up is checking whether queue-enforced per-user execution exclusion is simpler than new durable refresh-intent state. Final independent implementation review is required. No commit, push or deployment authorized.
+
+## 2026-10-18 — Content pipeline performance implementation
+
+- Branch: `main`, local uncommitted work; preserved the pre-existing onboarding, JEV/filter, client and other changes using a pre-edit snapshot for scoped review. No commit, push, production mutation or live application-provider benchmark.
+- Split News extraction/processing into disjoint serial consumers, two of each, plus two shared-vector and two Briefing consumers. Removed the combined News alias. All 23 serial worker pools cap at two connections plus one listener each (69); explicit container API five/scheduler two caps give 81 with both API slots, against PostgreSQL 100. First rollout must check the prior API slot: its old cap twenty raises the transient ceiling to 96 until that inactive slot is stopped/recreated. Briefing composition max six per refresh preserves the earlier default total twelve calls.
+- Fixed browser waiter timeout/cancellation ownership. JEV now refills four slots continuously, restores source order, and stops dispatch after twenty seconds; the unstarted suffix stays pending. Shared-vector completion expedites only coalesced waiting tasks without bypassing retry backoff, with five-second recovery polling. Stale assignment rolls back, retains observed usage and defers with a five-minute conflict-age limit.
+- Follow-up Claude Opus 5.5 review selected per-owner queue claim exclusion instead of extra refresh intent fields: keep append/sweep/Full identities, use a partial processing-owner index, and retry only its named claim race. Existing pending-source and successor logic remains authoritative.
+- Grouping now prepares exact private artifacts, then uses a short nonblocking visibility/owner guard before querying fresh candidates and matching. Database triggers cover every candidate writer. Published roots remain ready while reprocessing; merges move the whole membership. Bounded relation/link/extraction caches reuse paid work and verify staged body integrity. Shared deferral accounting avoids copied policy across processing, scraping and account deletion; conflicts roll back product changes and preserve provider retries.
+- Subscriber insert/count/expedite SQL is batched; enabled filters use canonical revisioned admission. If an append is already processing, a filtered arrival wakes a pending sweep. A query-to-claim race still relies on bounded sweep recovery; no atomic immediate-wake guarantee was introduced.
+- Independent cleanup removed unused finalizer usage plumbing, duplicate candidate/input preparation and empty-vector queries; private claim and scrape-finalizer modules keep the affected file-size limits intact. Integration checks also refreshed onboarding schema fixture hashes and added missing filter account-deletion registry entries.
+- Final local validation: combined Rust run 586 passing checks (DB, queue, worker, account deletion and task corpus); focused suites include 33 News and a final post-review 85-test Briefing rerun; extractor 64 passed, Ruff/MyPy clean; final affected four-crate all-target warning-denied Clippy passed. Queue load fixture: 100 users/200 tasks, two concurrent owners with no same-owner overlap, 456 ms using 1 ms fake provider work. Cached grouping with 100 candidates/100 subscribers: 30–55 ms local; canonical prefilter remains twelve candidates. These fixtures are not live-provider throughput or onboarding SLO proof.
+- Independent Opus 5.5 implementation review identified retry/backoff and conflict-episode regressions, opposite task lock ordering and deployment capacity gaps. Fixed nonpublication paths retaining provider/credit timing; episode reset on provider retry or other progress; completed naming usage before lease/DB checks; canonical task-ID wake locks; separate precheck/concurrent-index migrations; legacy composition settings capped at six with a warning. No refresh-intent state or additional service was introduced.
+- Review closure: explicit Claude Opus 5.5 follow-up verified the main corrections with no blocking finding. Its remaining neutral-wait marker case was fixed under the exact lease and verified by all 85 Briefing tests; the reported queue lint gap was disproved by the executed four-crate all-target command and log, then the final all-target check was repeated after cleanup. Both reviews have verified modelUsage. Evidence: `test-results/content-pipeline-implementation-20261018/validation.json` and scoped diff/hashes.
+- Local implementation complete. Full production release gate/deployment, live-provider cost/latency tests and Simulator first-run timing are not claimed here. Existing unchanged module-size violations in `newsly-db/src/learning_deck_tasks.rs` and `newsly-db/src/onboarding_flow.rs` remain outside this implementation. No commit, push or deployment.
+
+### 2026-10-18 — `main` — Immediate Knowledge saves and processing observation
+
+- **Status:** Complete locally; no commit, push, or deployment.
+- **Scope:** Share Sheet Add to Knowledge, visible saved-library updates, X import regression coverage, and canonical article save reconciliation. Existing unrelated checkout changes retained.
+- **Decisions:** Add to Knowledge atomically persists saved/read source and required preparation before success; retains the existing response/ledger contract and avoids the LLM worker/sandbox. Existing queued bookmark actions finish deterministically with approval policy respected. Per-account/server share-success tokens invalidate iOS freshness. Visible Knowledge reads saved pages at five seconds during preparation for up to two minutes after activation/new local save, then thirty seconds; stalled rows use thirty seconds. Polls retain loaded pagination and errors, yield to user pagination, and cannot consume signals after cancellation. No X API requests or sync cadence change.
+- **Canonical saves:** Existing submissions follow bounded durable canonical pointers instead of re-saving skipped aliases. Article redirects move save/read/X provenance to usable destinations atomically, preserve feed subscriptions, and retain successful extraction when the existing destination is failed/skipped. Invalid canonical chains roll back acceptance.
+- **Validation:** Affected Rust check and warning-denied API/worker/DB Clippy (all targets), formatting, contract drift, and diff checks passed. Five immediate-save PostgreSQL tests, four X finalizer PostgreSQL tests, one canonical redirect/rollback/subscription/failed-target regression, three existing submission tests, and API/DB policy tests passed. App/Share Extension build, 64 expanded native tests, final 13 pagination tests, and three preceding Knowledge UI fixture tests passed. Explicit Claude Opus 5.5 implementation review and follow-up verified with modelUsage; all material findings resolved. Evidence is in `/tmp/newsly-knowledge-*` and `/tmp/newsly-immediate-*` logs/results for this session.
+- **Limits:** No live Share Extension-to-production roundtrip, provider smoke, full release gate, commit, push, or deployment. Unrelated working-tree edits remain untouched. The compatibility ledger records the effective auto-apply policy for immediate saves.
+
+### 2026-10-18 — `main` — Category purpose and boundary clarification
+
+- **Status:** Complete locally; uncommitted and not deployed.
+- **Scope:** Jev decision instructions; screenshot regression and existing frozen benchmark.
+- **Decision:** Opus 5.5 planning review narrowed this to subject-first decision instructions; naming, its cache and saved definitions remain unchanged. Prompt-only Mars scored 0.84 and failed the frozen 0.85 requirement. After observing results, revised the single acceptance/discovery gate to 0.80: a diagnostic adjustment, not a frozen-plan pass or independent validation. No hardcoded per-user category IDs, database migration, or production reassignment.
+- **Evidence:** Exact saved summaries preferred Science for the Mars orbiter (0.80) and observatory (0.96); the orbiter therefore fell to general news. Artifacts: `test-results/jev-purpose-routing-20261018/`.
+- **Validation:** 135 live Jev calls cost $0.010655652. Four screenshot runs all route Mars (0.81–0.87) and the observatory (0.91–0.93) to Science, and App Store (other, 0.50–0.54) to general. Frozen 120-story replay at 0.80: 85 named, 84 preferred and all 85 acceptable, zero reference-other named. At 0.85: 82 named, 81 preferred and all 82 acceptable. Model-reference agreement is not human accuracy, the threshold was selected after observation, and the original 80–84 named-coverage guardrail was revised. Three synthetic boundary probes passed separately.
+- **Checks:** Six provider protocol tests and five worker routing/cancellation/deadline tests passed; provider and worker all-target warning-denied Clippy, workspace formatting and diff checks passed. The unchanged DB metering test was excluded from the worker slice. Explicit Claude Opus 5.5 reviews approved the limited change with the evaluation caveats retained.
+- **Remaining:** Deploy through the normal release workflow when requested. Existing published segments are not rewritten. Detailed evidence and methodology are appended to `docs/initiatives/2026-10-18-jev-versus-embedding-routing.md`.
+
+
+## 2026-10-18 — Whole-checkout cleanup and strict review (main)
+
+- Scope: all 312 initially changed/untracked files after confirming the empty index. Three read-only reviewers covered native client, Python/operations, and processing; primary reviewed shared boundaries and integrated fixes. No staging, commit, push, production operation, or paid application-provider call.
+- Structural cleanup: separated Learning Deck publication, Share Action approval policy, canonical-content reconciliation, and first-edition creation into private modules; all four module-size guardrail failures resolved without raising limits. Reused canonical source-chat methods and one native News Filter validation policy. Kept extractor diagnostic events separate from download/page usage instead of repeatedly recovering them from string prefixes. Removed obsolete semantic-assignment argument/branch and centroid copy.
+- Verified corrections: recovery checks every other verified raw attempt before appending, including malformed rejected bodies; Knowledge revalidation follows its prior saved-date/identity boundary instead of item count and preserves equal rounded timestamps; original-page failures expose retry of the actual failed URL, preserve browser-owned URLs and route user-activated app links externally; News Filter preserves bounded metered HTTP error bodies. Historical Python embedding replay is explicitly pinned to its pre-Jev source snapshot, not represented as current-production parity.
+- Naming accounting: explicit Claude Opus 5.5 design review approved bounded drain using the existing interruption policy. Initial/retry dispatch checks lease/cancellation; observed successful and rejected siblings finish independent accounting before stale publication is rejected. Regression tests cover cancelled initial dispatch, suppressed retries, retained usage, and sibling drain.
+- Validation: full Rust workspace passed 1,055 tests (two opt-in live tests and six generated doctests ignored); final affected slices passed 87 Briefing and 44 filter/share-action tests. Workspace all-target warning-denied Clippy, architecture/module-size/wire/contract/deploy-script guards, formatting and diff checks passed. Native baseline: 753 unit and 11 UI tests passed; follow-ups passed 42 unit tests, then 25 unit/two reader UI tests, then three WebKit unit/two reader UI tests after the last navigation-policy correction. Python: 214 eval tests (five optional skips), 64 extractor tests, Ruff/format/MyPy clean. All seven local Chromium deck-validation fixtures passed.
+- Evidence: `test-results/cleanup-review-20261018/`. The first Rust test invocation omitted the PostgreSQL username and failed setup; corrected localhost connection uses isolated SQLx test databases. The clean-commit release gate and live provider/E2B smoke remain separate release work.
+
+- Independent review closure: explicit Claude Opus 5.5 broad review and focused design/final reviews completed with verified `modelUsage`. Resolved duplicate Briefing law IDs, removed the unreachable bookmark-agent prompt, documented the deterministic legacy worker path's owner/removal condition, and strengthened exact-threshold filter coverage. Existing evaluator-version, age-window and daily-cap integration coverage disproved the broader missing-coverage claim. No unresolved commit blocker was found.
+- Release prerequisites are documented in `docs/initiatives/2026-10-18-content-pipeline-performance-design.md`: ship the ordered migration bundle atomically, verify applied prefix/checksums, drain old Briefing and News/grouping writers, and handle a failed concurrent index through authorized inspection/repair. Ordinary blue-green deployment does not enforce that drain. Behavior-changing budget/probe/deletion policies and broader shared orchestration were intentionally left for separately scoped design work; detailed dispositions are in `test-results/cleanup-review-20261018/validation.json`.
+- Final closure: all 13 ingestion regression gate cases passed with isolated local PostgreSQL; final diff check passed. Cleanup and strict review are complete locally. Evidence summary: `test-results/cleanup-review-20261018/validation.json`. No staging, commit, push, deployment or live application-provider smoke was performed.
+
+### 2026-10-18 — `main` — Second whole-checkout review and release preparation
+
+- **Status:** Complete locally; ready for a scoped commit and the exact-commit release gate.
+- **Scope:** All current changes; focused follow-up on Briefing Full rebuild coverage, retained native pagination, and the first deployment's migration boundary. No staging, commit, push or production mutation.
+- **Decisions:** Explicit Claude Opus 5.5 design reviews approved using the existing Full General fallback and coverage fence instead of adding durable rebuild checkpoints, and extending the existing maintenance cutover instead of creating another deploy mode. Full publication must preserve every still-eligible old source; stale Full work retains its original intent. Ordinary sweeps remove covered pending replacements left by failed Full work. Native mutations invalidate retained buffered reads while allowing an empty initial load to reconcile at publication.
+- **Deployment:** One shared version list and read-only probe gate the workflow and deploy script. Exact-image history verification runs before drain; maintenance stops both API slots, workers and scheduler, backs up, and keeps old writers stopped after failure. Grouping and owner-index migrations require current attestation on populated databases. The unapplied owner precheck and plain unique index now commit with their ledger row in one transaction. The runner resets pooled attestation on every invocation. Documentation supersedes the previous entry's manual-drain/concurrent-index prerequisite.
+- **Preflight:** Read-only production shows revision `48a21d7e5cce7475570a991ef36c54695502a06b`, 30 applied migrations matching the current 39-migration bundle, and no pending/processing Full tasks at inspection. Local HEAD contains origin/main and is six commits ahead. The inspected local database's 29 applied migrations also match. Runtime Firecrawl pricing is unset; account-price verification is documented before release cost reporting.
+- **Validation:** Final clean serial DB suite passed 264/264, alongside 47 native, 90 Briefing worker and 21 queue tests. All six new migration tests passed. Test-only mandatory fields/lease cleanup were corrected; concurrent duplicate SQLx fixture names were resolved by running serially. Architecture, contract, deployment shell, formatting, diff checks and final affected warning-denied all-target Clippy passed. Evidence: `test-results/commit-readiness-review-20261018/`.
+- **Independent verification:** Final explicit Claude Opus 5.5 review found no remaining code blocker. Its stale test-log concern is resolved by the clean serial run. Corrected the obsolete rollback instruction and repeated the read-only production owner-overlap query successfully: zero duplicate processing owners at inspection. Advisory retry-route availability and hypothetical Full/cohort rejection remain documented in the evidence; neither permits old binaries to restart or drops published coverage.
+- **Remaining:** Clean-commit canonical release gate and live production-shaped smoke, then separately authorized push and explicit maintenance deployment. This preparation does not establish deployed health for the new code.
+- **Commits:** Uncommitted.
+
+### 2026-10-18 — `main` — Reviewed checkout release
+
+- **Status:** Release authorized; exact-commit validation and deployment in progress.
+- **Scope:** All 332 reviewed changed/untracked files plus the six local commits already ahead of origin/main. User authorized build-test-deploy and accepts downtime; use the explicit maintenance cutover for the guarded migrations.
+- **Evidence:** Two cleanup/review passes and explicit Claude Opus 5.5 verification are recorded above. The checkout matches the final review hashes, and origin/main remains an ancestor. Canonical release evidence will be stored under `test-results/release-gate/<tested-sha>/`; runtime proof is recorded separately from local validation.
+- **Remaining:** Run the clean-commit gate with the live provider/E2B matrix, push the tested SHA, dispatch maintenance deployment, then verify image, readiness, migration history and worker progress. Apple distribution is outside this release.

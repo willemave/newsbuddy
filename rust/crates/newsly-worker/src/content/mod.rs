@@ -1,5 +1,6 @@
 mod extraction;
 mod firecrawl;
+mod firecrawl_accounting;
 mod handlers;
 mod model;
 mod repository;
@@ -10,6 +11,7 @@ use url::Url;
 pub use extraction::ContentExtractionRuntime;
 pub(crate) use extraction::{ExtractionAttempt, FirecrawlDemandPolicy};
 pub use firecrawl::FirecrawlClient;
+pub(crate) use firecrawl_accounting::FirecrawlAttribution;
 pub use handlers::{AnalyzeUrlHandler, ContentWorkerServices, ProcessContentHandler};
 pub(crate) use model::{FirecrawlUsage, UsageWrite};
 pub(crate) use repository::{UsageInsert, insert_usage};

@@ -277,6 +277,32 @@ exact stamps, token, generation, and an unexpired lease. Expired work is
 reclaimable. Deferral preserves the retry budget. Notifications wake workers;
 polling remains the correctness fallback.
 
+Normal Briefing claims additionally exclude another `processing` refresh for the
+same owner. A partial unique index closes concurrent claim snapshots; only its
+named conflict retries the claim transaction, at most three times. Expired work
+retains that slot until reclaimed under a new exact lease. Append, sweep and Full
+retain their existing task identities, so pending Full work is not absorbed by an
+append. There is no second owner lease or refresh-intent table.
+
+Native and supervised runtimes use two News extraction, two News processing and
+two shared-lens consumers with disjoint task scopes.
+The shared multicall worker remains serial per process; concurrency comes from
+bounded process replicas, with unique identities and small per-process DB pools.
+Briefing uses two consumers (configurable down to one), each limited to six
+composition calls, preserving the prior default total of twelve. JEV and filter
+phases each retain their separate four-call bound per active refresh. These bounds
+are capacity limits, not measured provider throughput guarantees. Container pools cap
+each serial worker at two connections, each API slot at five and the scheduler at
+two. Including 23 dedicated worker listeners and both API slots, the default
+ceiling is 81 connections against PostgreSQL's 100, leaving operating headroom.
+The first rollout requires an explicit maintenance cutover that stops both old API
+slots, workers and scheduler before migrations. Only the new API slot resumes, so
+the old twenty-connection pool cannot overlap the expanded worker topology. The
+next ordinary deployment recreates that stopped slot with the five-connection cap.
+The grouping trigger and Briefing owner index require a migration-session barrier
+attestation on populated databases. The owner precheck and plain unique-index build
+commit atomically with SQLx history while writers are stopped.
+
 Every provider-backed executor follows:
 
 ```text
@@ -340,7 +366,26 @@ explicitly rather than dropping pages. Poppler subprocesses are deadline-bound
 and reaped on cancellation; container resource limits bound the process host.
 Firecrawl billing uses provider-reported credits and the configured per-credit
 rate. Missing credit quantities or a usable rate leave cost unknown, and usage
-survives downstream content rejection through the normal exact-lease finalizer.
+is recorded at dispatch and observed response boundaries independently of product
+finalization. Each invocation has its own durable identity, including cancelled
+or malformed responses whose credit quantities remain unknown. The configured
+price is an account-specific marginal top-up estimate before tax, not an invoice
+or an inferred subscription allocation; an absent price remains unknown.
+
+An HTTP 402 closes one shared PostgreSQL Firecrawl credit gate and activates the
+existing durable pipeline alert. Local extraction continues. Work requiring
+Firecrawl defers without consuming retries or publishing terminal extraction
+failure; deferred News enrichment waits for article evidence before downstream
+summarization. After a fifteen-minute cooldown one ordinary queued article may
+probe recovery under a six-minute lease. Matching successful probes clear the
+pause and signal recovery; failed/abandoned probes retain the pause, and stale
+responses cannot clear a newer incident. Schema installation never requeues
+historical failures.
+
+The database-free extractor emits bounded local-stage/reason counters and fallback
+diagnostics without raw exception strings or article text. Rust retains those
+counters and the fallback decision with provider usage so domain improvements
+can be based on fetch, quality, browser, or PDF failure evidence.
 
 Content bodies are staged by hash and published only through the exact fenced
 transaction. Feed links returned by extraction are candidates; Rust validates
@@ -397,9 +442,29 @@ fingerprint. Relation retries reuse that checkpoint; substantive source changes 
 Polling preserves the first discovery timestamp; fingerprints exclude only verified
 non-input engagement counters and scrape clocks. Summary finalization overlays its
 result on the already-fenced current row metadata, preserving refreshed counters.
-Summary, relation/cluster state, relevant links, remaining provider usage, Briefing pending
-sources, Agent Data synchronization, and the queue transition publish
-atomically. News never enters the long-form generated-artwork path.
+Summary, relation/cluster state, relevant links, Briefing pending sources, Agent
+Data synchronization, and the queue transition publish atomically. Observed paid
+usage persists through its checkpoint or independent ledger before publication. News never enters the long-form generated-artwork path.
+
+News relation preparation caches exact source/text/provider/model/encoder vectors
+separately from the shared Briefing story vectors, plus fingerprinted optional link
+results. External work holds no connection. Finalization takes a nonblocking
+transaction-scoped guard for the exact visibility/owner pool before querying fresh
+candidates and running the canonical Rust matcher. Missing fresh artifacts and
+contention defer within a durable count/age budget for the current conflict episode.
+Provider retries start a new episode; other completed News outcomes clear it,
+including credit deferrals. Nonpublication failures retain their provider backoff
+without taking an unrelated grouping guard. Reprocessing preserves the
+last ready representation, and representative merges move all prior members.
+A database trigger guards candidate-affecting writes from every writer; operator
+repairs must not disable that trigger or use TRUNCATE to bypass it. The guard uses
+a dedicated two-integer advisory namespace, separate from scheduler bigint locks.
+Subscriber pending insertion, counts and deadline advancement use set-based SQL;
+canonical queue insertion still owns per-task validation and notification. Enabled
+personal filters receive coalesced admission wakes without inserting unversioned
+pending rows. A known processing append gets a pending sweep wake; the remaining
+query-to-claim race relies on bounded sweep recovery. Composition retains its
+editorial batching policy.
 
 Shared aggregator checks use `source_ingestion_health`: news sources target 15/60
 minutes for active/no subscribers, and daily research-paper sources retain 60/120
@@ -427,16 +492,20 @@ stay one inlinable expression, which a database test guards. Changing the rule n
 `CREATE OR REPLACE` migration. Adding an aggregator needs a catalog entry, its provider
 fetcher, and the iOS onboarding option, which still lists keys and topics itself.
 Ready representative news schedules `prepare_news_lens`, handled by a dedicated
-`newsly-news-lens-worker` process using the existing worker binary dispatcher. `news_lens_embeddings` stores the canonical planner input hash, encoder
+`newsly-news-lens-worker` consumers using the existing worker binary dispatcher. `news_lens_embeddings` stores the canonical planner input hash, encoder
 version, model and dimension-validated vector. Preparation releases its database
 connection before provider work and finalizes through the exact queue lease.
 Scheduler ticks backfill at most 128 eligible missing embeddings, including under
 content-queue backpressure; foreground misses promote the same task. A short
 exact-lease checkpoint stores the input hash/model/encoder before external work,
 so terminal failures of any kind have a six-hour fingerprint-specific cooldown.
-Briefing assigns cached news semantically, isolates failed sources, and leaves
+Briefing routes cached news with Jev summary decisions, isolates failed sources, and leaves
 uncached news pending while publishing other ready tiers. Queue priority orders work within existing retry
-fairness buckets, and promotion preserves `available_at` backoff.
+fairness buckets, and promotion preserves `available_at` backoff. Successful vector
+publication expedites only existing pending refreshes explicitly waiting on the
+source, excluding provider retries. It creates no per-user embedding task. A
+five-second recovery poll covers completion before the successor task exists.
+Observed successful embedding usage is recorded before product finalization.
 
 First-run news admission freezes up to 40 eligible stories in
 `onboarding_first_edition_items`, balanced across platform/topic before recency.
@@ -452,8 +521,11 @@ Item status writes do not acquire onboarding run locks through triggers.
 Stale publication schedules at most three quick recoveries, then a one-minute
 interval while initial news remains outstanding or the normal interval afterward.
 A completing sweep releases its own dedupe key inside the exact-lease transaction
-before enqueuing its successor. Existing-table indexes use separate concurrent
-SQLx migrations. Nonproductive initial sweeps wait 30–60 seconds. Active-run
+before enqueuing its successor. Online changes to existing-table indexes use separate
+concurrent SQLx migrations; maintenance cutovers build indexes transactionally after
+draining writers. Nonproductive initial sweeps without outstanding preparation wait
+30–60 seconds; a bounded routing/filter pass or missing vectors retries after five
+seconds. Active-run
 projection reconciles sources once per response using a bounded ingestion window.
 
 ### 8.3 Briefing, discussions, media, and images
@@ -462,15 +534,66 @@ Briefing uses durable source/pending/publication state and versioned client
 observation. Publication is atomic; partial provider success cannot expose a
 half-assembled edition.
 
-While the first news cohort is unsettled, incremental refreshes name at most one
-new semantic category and publish one complete news window per durable task.
+While the first news cohort is unsettled, incremental refreshes review at most one
+parallel batch of four semantic category proposals and publish one complete news
+window per durable task. Each coherent accepted proposal may create a category;
+mixed proposals cannot serialize the discovery of healthy later siblings.
 New categories take precedence over additional windows in existing categories;
 unchanged inputs in composition cooldown are skipped. Remaining identities stay
 pending, and the normal fenced finalizer schedules the next pass. Initial passes
 defer compaction; explicit Full rebuilds retain complete preparation/publication.
 Other refreshes name categories in ordered batches of at most four provider calls.
-A failed batch stops later batches; cancellation drops in-flight requests. Names
-retain source-cluster order before fenced assignment.
+Naming results retain source-cluster order before fenced assignment. A failed
+proposal remains pending while successful siblings can advance. Any failure stops
+later paid batches; a wholly failed plan returns through the retry path.
+Cancellation drops in-flight requests. Naming retries retain observed
+usage across failed attempts; completed planning errors persist observed naming and
+embedding usage in a separate short transaction, without publishing assignments.
+Initial category naming reviews a bounded proposal and returns a complete partition
+of its source identities into theme members and exclusions. The provider validates
+the partition; the planner retains the existing minimum for named categories and
+builds their centroids only from accepted members. Exclusions and mixed proposals
+remain reachable through the separate general-news desk. Similarity packing only
+forms proposals; it does not establish semantic membership.
+
+Existing categories are assigned by pinned Jev decisions over title, summary and key
+points, using the user's saved `briefing_lenses` title, deck and optional routing rule.
+Instructions prioritize what the story mainly reports over supporting tools, vendors,
+contracts or funding, while honoring explicit scope restrictions and exclusions.
+Specificity resolves competing primary-subject fits. The selected model score must
+reach 0.80; it is an acceptance threshold, not a calibrated probability of correctness.
+A confident `other` can enter discovery;
+uncertain or failed decisions use general news. At the ten-category limit, unmatched
+stories use general news without cosine absorption. Unshown members of newly named
+clusters remain pending until the next incremental task can route against the saved
+category. Full rebuilds preserve their immediate coverage through general news.
+Story embeddings remain cached for discovery, event grouping and nightly identity;
+category-profile embeddings and their cosine routing thresholds are removed.
+
+Routing continuously refills four single-attempt requests, each with a five-second
+deadline. A twenty-second dispatch budget and lease loss stop new requests while
+already-started calls drain; source-index ordering is restored. Undispatched sources
+and their aligned vectors remain pending for a successor. Stale assignment rolls
+back partial writes, retains observed usage, and defers the original task without
+consuming provider retries: three five-second recoveries, then sixty-second waits,
+with terminal diagnostics after five minutes of repeated conflicts within the same
+provider-retry episode. A new retry or expired-lease reclaim resets that episode. Nightly-maintenance
+and changed-filter waits clear it under the exact lease while retaining Full intent.
+Completed naming-plan usage is recorded before lease and database checks, then
+removed from the publication plan to prevent duplicate accounting. Cancellation
+before naming returns remains an existing observation boundary. The existing
+`AgentUsageRecorder` persists observed costs and tokens independently of naming and
+fenced assignment publication; unknown billing remains unknown. Category definitions
+need no new table or cache: the existing user-owned rows and complete lens/source
+snapshot checks fence publication. Naming retains its separate
+`BRIEFING_CATEGORY_NAMING_MODEL` setting. Normal refresh defaults to five minutes
+(`BRIEFING_SWEEP_SECONDS`); naming maintenance keeps its existing nightly schedule.
+
+News composition requests a single markdown field and converts it to the canonical
+passage layout before the existing citation and layout checks. Article and podcast
+composition retain the rich layout contract. Provider-owned rejection codes identify
+failed constraints without logging source text; response-contract identity participates
+in the composition fingerprint.
 News event grouping reuses the shared story embedding cache only when input hash,
 model, encoder and vector validation match; only cache misses reach the provider.
 Cache reads release database connections before external work. Stage timings
@@ -479,8 +602,11 @@ Normal news catch-up admits at most 40 new pending stories per refresh and bound
 each unassigned routing snapshot and the total assigned-news composition snapshot
 to 40. Admission shares slots across source/topic streams; composition shares
 slots across active news lenses, retaining oldest pending order within each lens.
-Deferred sources remain eligible or pending for later sweeps. Full rebuilds keep
-their complete source set so partial preparation cannot retire existing coverage.
+Deferred sources remain eligible or pending for later sweeps. Full rebuilds assign
+any still-undecided original source to general news after bounded planning. A
+publication-time coverage check prevents a partial or empty Full replacement from
+retiring eligible old coverage. Ordinary preparation removes already-published
+pending rows left by an abandoned Full, preserving exactly-once coverage.
 
 Nightly news-category maintenance is a separate `recluster_news_lenses` task
 and worker process. The authenticated profile owns a revisioned IANA timezone;
@@ -506,7 +632,10 @@ in-flight naming call's append-only audit to finish but stops new reservations
 and retries. A successor lease may use the remaining reserved attempt while an
 old call drains; the two-attempt cap and independent usage audit still apply,
 and this does not grant the old execution authority to publish. Pending
-assignments publish through one bound relational update.
+assignments for fitted, unpublished stories are cleared through one bound update.
+The existing refresh then makes Jev decisions against the saved definitions; the
+embedding partition never assigns those stories directly. Unfitted pending stories
+retain the existing drain policy. Published segments are unchanged.
 `accepts_news` separates future routing from existing readable
 segments; empty draining lenses retire, while composed Markdown, source coverage,
 and narration remain intact. Normal refresh and maintenance defer around each
@@ -590,6 +719,34 @@ URLs. `llm_tasks` is canonical for new Learning Deck work. The
 until production counts, backfill verification, and an explicit schema
 migration permit its retirement.
 
+Learning Deck generation starts a durable 900-second budget after source preparation,
+configurable through `LEARNING_DECK_GENERATION_TIMEOUT_SECONDS`. Automatic deliveries reuse
+that deadline; a new user-requested generation gets a new task and budget. Model phases stop
+before the deadline to reserve snapshot, browser validation, and publication time. Sandbox TTL
+includes a cleanup grace period and is separate from the generation budget. Every attempt
+uses a fresh VM, with durable sandbox cleanup on interruption.
+
+`learning_deck_generation_state` owns the task's input/contract fingerprint, deadline, and
+private draft pointer. Checkpoint and progress writes fence the exact queue lease and current
+nondeleted deck, serializing on queue then task without locking the deck. Immutable draft
+manifests and content-hashed assets are registered before upload, bounded to 20 MiB of candidate
+content, and never exposed through public deck artifacts. Automatic retries restore only the
+same task's matching draft, validate it before another model call, and repair it when necessary.
+Changed inputs or generation contracts discard the draft pointer without extending the deadline;
+corrupt draft content is rejected and generation can restart only within the remaining budget.
+Interrupted edits retain the last complete candidate; a normal model completion must validate
+its current files and cannot silently fall back to an older draft. Deletion collects private registered
+objects; interrupted uploads and terminal candidates use the existing artifact cleanup sweep.
+
+The agent's `validate_deck` tool and final publication use the same static and Chromium checks.
+Browser validation renders an exact root-owned, sealed copy of the captured candidate; publication
+uses those captured bytes with the same viewer transform. Only explicit artifact defects are
+model-repairable. Transport, ownership, and validator infrastructure failures preserve their
+classification and retry the task within the original budget. Stage notes distinguish generation,
+resume, checking, repair, retry, and publication while keeping the public running status. iOS
+observes for roughly sixteen minutes, then offers a read-only status refresh instead of an
+indefinite spinner or automatic new generation.
+
 Deep research uses provider-native background response create/retrieve/cancel
 behind a dedicated gateway. Its resumable identity is durable; SDK objects are
 not.
@@ -608,6 +765,19 @@ Reddit lanes use Reddit's own community search through app-only OAuth, since
 web search does not index reddit.com. One structured model call then selects
 across all lanes, and the worker validates every feed before persisting. Feed
 validation accepts documents up to the same body limit as feed ingestion.
+Planned searches retain their language, format and source-archetype qualifiers.
+Independent directory terms, podcast web/directory lookup and feed validation run
+with bounded concurrency. Podcast selection can use bounded publisher descriptions
+and recent episode titles, obtained through the same guarded feed validator under
+one per-run enrichment budget. Successful validations are reused only within that
+attempt; unknown evidence is not a definitive language rejection. The server-owned
+discovery task carries bounded original narration so selection can honor explicit
+language preferences after planning has summarized the topics.
+For this flow, the owner-bound task payload is the durable narration authority,
+bounded by the API's 8,000-character input limit and retired with task retention or
+account deletion. If discovery runs gain their own persisted original input, move
+selection to that run snapshot and remove narration from newly enqueued payloads;
+do not retain two canonical copies.
 
 X bookmark sync owns OAuth refresh, bounded pagination, resource billing
 deduplication, synced-item ledger/checkpoints, canonical ingestion, Knowledge
@@ -888,6 +1058,14 @@ first waiter to end. Secondary reads carry the same publication fence.
 replacement merge, and append semantics. Content Detail uses typed Content or
 News identity. Knowledge keeps a five-minute freshness policy and one aggregate
 four-source revalidation barrier while retaining the existing timeline.
+An account/server-scoped Share Extension save token bypasses that freshness
+window after Add to Knowledge succeeds. Visible Knowledge also revalidates
+saved pages every five seconds during preparation for up to two minutes after
+activation or a new local save, then every thirty seconds to discover imports
+and update slower work. These are library reads, never integration sync
+requests. Loaded pages publish together, user pagination takes priority over
+observation, and lifecycle cancellation does not take ownership of an explicit
+refresh.
 Briefing preserves its snapshot, ETag, lens, read, document, command, and
 version-observation state machines. Chat and Deck commands remain single-attempt
 and resume observation by durable ID.
@@ -987,6 +1165,19 @@ The Share Extension lives in `client/newsly/ShareExtension/` and offers Add to
 Briefing, Add to Knowledge, Create Deck, and Chat. All four use
 `/api/share-actions`; the backend owns URL classification, canonicalization, and
 asynchronous work.
+
+Add to Knowledge is a synchronous database command within that endpoint: its
+transaction creates or reuses the source, saves and marks it read, enqueues
+required content preparation, and completes the Share Action ledger before
+returning success. It does not enqueue an agent or acquire a sandbox. Existing
+queued bookmark actions complete deterministically through the worker while
+preserving their approval policy. This compatibility path is owned by the Share
+Action worker. Remove its deterministic bookmark dispatcher only after every
+pre-cutover bookmark ledger is terminal (including actions awaiting approval)
+and no old API binary can enqueue another bookmark job. The agent has no bookmark
+prompt or execution mode. URL resolution stays in content preparation;
+canonical redirects retain saved state and X import provenance. The extension
+publishes its account/server save token only after a successful response.
 
 The extension shares the app-group Keychain and a deliberately small networking
 core: `APIClient`, `HTTPTransport`, `CredentialSession`,
@@ -1107,3 +1298,15 @@ When changing the backend, keep these mental models:
    search alone.
 10. Local implementation, tested SHA, deployed image, and production authority
     are different facts and must be reported separately.
+
+## Personal News filtering
+
+`news_filter_preferences` stores immutable per-user revisions; the latest revision is canonical. User-row locks serialize Settings CAS saves and one-time onboarding initialization. Original onboarding input is retained independently of the inferred discovery summary. API routes under `/api/briefing/filter` own load/save, bounded preview, and the authorized All News collection. Swift clients use generated contracts and preserve the News source namespace.
+
+The existing leased `briefing_refresh` task evaluates at most 128 uncached, unread, unpublished, recent News candidates before admission. It reserves a 500-request user/UTC-day budget in a short transaction, releases the connection, calls a pooled Jev adapter with four-way concurrency and a 20-second phase deadline, then stores successful decisions under the exact live lease. Preview checks the 20 most recent eligible sources, with two-way concurrency, a 15-second deadline and 200 requests/user/day with one busy lease. Its results are not durable decisions; the response reads the canonical visible projection and evaluated evidence hash in one statement, showing changed evidence as pending without more inference. Apply uses the background source-balanced candidate order. Undispatched slots are refunded to their reservation day; dispatched cancellations retain an unknown-cost usage record. Crashed reservations remain conservatively counted. No automatic provider retries or new queue are introduced. Disabled filters do no inference.
+
+The adapter sends the exact plain-language preference plus bounded title, summary and key points through OpenRouter `typesafe/jev-1.14`, requires the evaluated `typesafe/jev-1.14-20261014` response revision and TypeSafe provider, disables fallback and requests ZDR. It validates Choice schema, probability sums and billed usage. Only `no_match >= 0.90` excludes. Actual provider cost is recorded as provider-reported independently of product lease ownership; ambiguous failed requests retain unknown cost. There is no preference compiler or training service.
+
+Immutable decisions are keyed by user, preference revision, canonical News ID, evidence hash and evaluator version. SQL computes the same evidence identity used by preparation, cache reads and publication. Unavailable inference and unusable bounded evidence are an ephemeral pass result; admitted pending rows retain their revision/hash/outcome so retries can compose without repeating the failed inference. A current successful exclusion takes precedence over a concurrent failure. Outside the seven-day automatic window and after budget exhaustion, unknown News stays accessible without entering Briefing. Existing refresh scheduling resumes bounded catch-up.
+
+Settings invalidates unpublished News pending rows while holding the user lock; preparation and publication share-lock that user. Settings only expedites pending refresh tasks and must not wait on a processing task while holding the user update lock. Finalization acquires only a compatible user share lock and updates its task afterward. Publication additionally checks current evidence and pending ownership. Existing published coverage bypasses new admission decisions, including full rebuilds. Articles and Podcasts never participate in this filter. All News uses descending canonical IDs with user/collection-bound keyset cursors; it is a live collection rather than a fixed-version snapshot. Account deletion cascades preferences, decisions and budgets; already-spent request accounting can persist anonymously. Concurrent append and sweep passes can make a bounded duplicate request before either caches its result; immutable outcomes and the atomic daily cap contain that tradeoff without another coordinator. Legacy classification columns remain inert for rolling compatibility; public required-nullable fields emit null.

@@ -132,7 +132,10 @@ worker_processes=(
   audio_episode
   image
   discussion
-  news_item
+  news_extraction
+  news_extraction
+  news_processing
+  news_processing
   scrape
   summarization
   x_sync
@@ -140,6 +143,7 @@ worker_processes=(
   feed_discovery
   onboarding_discovery
   briefing_refresh
+  news_lens
   news_lens
   news_recluster
   chat
@@ -209,6 +213,27 @@ supervise_children() {
   return "${shutdown_status}"
 }
 
+# Per-owner queue exclusion lets two users advance independently.
+configure_worker_topology() {
+  local consumers="${NEWSLY_BRIEFING_REFRESH_CONSUMERS:-2}"
+  if [[ "${consumers}" != "1" && "${consumers}" != "2" ]]; then
+    echo "NEWSLY_BRIEFING_REFRESH_CONSUMERS must be 1 or 2" >&2
+    return 2
+  fi
+  if [[ "${consumers}" == "2" ]]; then
+    worker_processes+=(briefing_refresh)
+  fi
+}
+
+run_native_worker() {
+  local process="$1" instance="$2"
+  # Include the role and instance even when an env file supplies a shared ID.
+  exec env NEWSLY_WORKER_PROCESS="${process}" \
+    NEWSLY_RUST_WORKER_ID="${NEWSLY_RUST_WORKER_ID:-rust-native}-${process}-$$-${instance}" \
+    NEWSLY_NEWS_ITEM_WORKER_ID="${NEWSLY_NEWS_ITEM_WORKER_ID:-rust-news}-${process}-$$-${instance}" \
+    "${rust_target}/newsly-worker"
+}
+
 start_worker_group() {
   newsly_require_database_url
   build_packages \
@@ -216,10 +241,11 @@ start_worker_group() {
     --package newsly-account-deletion-worker --bin newsly-account-deletion-worker
 
   local -a worker_pids=()
-  local process
+  local process instance=0
   for process in "${worker_processes[@]}"; do
     echo "starting native worker: ${process}"
-    NEWSLY_WORKER_PROCESS="${process}" "${rust_target}/newsly-worker" &
+    instance=$((instance + 1))
+    run_native_worker "${process}" "${instance}" &
     worker_pids+=("$!")
   done
   echo "starting native worker: account_deletion"
@@ -252,9 +278,10 @@ start_all() {
   "${rust_target}/newsly-scheduler" &
   service_pids+=("$!")
 
-  local process
+  local process instance=0
   for process in "${worker_processes[@]}"; do
-    NEWSLY_WORKER_PROCESS="${process}" "${rust_target}/newsly-worker" &
+    instance=$((instance + 1))
+    run_native_worker "${process}" "${instance}" &
     service_pids+=("$!")
   done
   "${rust_target}/newsly-account-deletion-worker" &
@@ -316,6 +343,7 @@ done
 
 env_file="$(newsly_resolve_env_file "${repository_root}" "${env_file_option}")"
 load_environment "${env_file}"
+configure_worker_topology
 if [[ "${debug}" == "true" ]]; then
   export NEWSLY_RUST_LOG_FORMAT=pretty
   export RUST_LOG="${RUST_LOG:-newsly_api=debug,newsly_worker=debug,newsly_queue=debug,newsly_scheduler=debug}"

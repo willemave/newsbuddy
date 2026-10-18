@@ -264,7 +264,9 @@ final class ContentDetailViewModel {
 
     func canShowReader(for content: ContentDetail) -> Bool {
         guard content.bodyAvailable else { return false }
-        return content.contentType == .article || content.contentType == .news
+        return content.contentType == .article
+            || content.contentType == .podcast
+            || content.contentType == .news
     }
 
     func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
@@ -419,6 +421,8 @@ final class ContentDetailViewModel {
     }
 
     private func trackOpenedInteraction(for fetched: ContentDetail) async {
+        // News IDs belong to a separate source namespace from Content interactions.
+        guard fetched.contentType != .news else { return }
         let contextData: [String: Any] = [
             "content_type": fetched.contentType.rawValue,
             "was_read_when_loaded": fetched.isRead,

@@ -65,7 +65,7 @@ pub(crate) async fn load_title_clustering_source(
             c.title,
             c.source,
             c.status,
-            c.classification,
+            NULL::text AS classification,
             c.content_metadata,
             c.created_at,
             c.updated_at,

@@ -95,6 +95,9 @@ enum APIEndpoints {
     static let feedback = "/api/feedback"
 
     // MARK: - Briefing Endpoints
+    static let newsFilter = "/api/briefing/filter"
+    static let newsFilterPreview = "/api/briefing/filter/preview"
+    static let newsFilterNews = "/api/briefing/filter/news"
     static let briefing = "/api/briefing"
     static func briefingLens(_ key: String) -> String {
         return "/api/briefing/lenses/\(key)"

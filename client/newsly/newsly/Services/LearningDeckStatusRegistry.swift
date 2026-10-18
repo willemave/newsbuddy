@@ -16,11 +16,12 @@ struct LearningDeckStatusPollingPolicy: Sendable, Equatable {
         delaysNanoseconds.count + 1
     }
 
+    // Allow the 15-minute generation budget plus about a minute for finalization.
     static let adaptive = LearningDeckStatusPollingPolicy(
         delaysNanoseconds:
             Array(repeating: 1_000_000_000, count: 4)
             + Array(repeating: 3_000_000_000, count: 8)
-            + Array(repeating: 5_000_000_000, count: 67)
+            + Array(repeating: 5_000_000_000, count: 187)
     )
 
     static func fixed(intervalNanoseconds: UInt64, attemptLimit: Int) -> Self {

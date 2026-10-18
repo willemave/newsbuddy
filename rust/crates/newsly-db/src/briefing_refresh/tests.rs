@@ -7,8 +7,7 @@ use super::{
     BriefingRefreshPublication, BriefingRefreshSource, ComposedBriefingAppend,
     ComposedBriefingSegment, PrepareBriefingRefreshOutcome, PreparedBriefingRefresh,
     PreparedBriefingRefreshSeed, Utc, apply_briefing_lens_assignment, apply_briefing_refresh, json,
-    prepare_briefing_refresh,
-    sources::{briefing_context, news_topic},
+    prepare_briefing_refresh, sources::briefing_context,
 };
 
 fn test_config() -> BriefingRefreshConfig {
@@ -19,9 +18,7 @@ fn test_config() -> BriefingRefreshConfig {
         new_lens_min_items: 3,
         pending_max_age_seconds: 1_500,
         max_news_lenses: 10,
-        category_similarity: 0.55,
         category_cluster_similarity: 0.62,
-        category_absorb_similarity: 0.45,
         centroid_max_weight: 32,
         sweep_seconds: 3_600,
         lens_idle_days: 7,
@@ -98,6 +95,8 @@ async fn prepare_seed(pool: &PgPool, task_id: i64, user_id: i64) -> PreparedBrie
         user_id,
         BriefingRefreshMode::Append,
         &test_config(),
+        &crate::news_filter::NewsFilterPass::default(),
+        "00000000-0000-4000-8000-000000000091".parse().unwrap(),
     )
     .await
     .expect("Briefing prepare should succeed");
@@ -167,18 +166,6 @@ fn refresh_modes_are_closed() {
         BriefingRefreshMode::Append
     );
     assert!(BriefingRefreshMode::try_from("replace").is_err());
-}
-
-#[test]
-fn topic_slug_is_stable_and_bounded() {
-    let metadata = json!({"aggregator": {"topic": "AI & Machine Learning"}});
-    assert_eq!(
-        news_topic(&metadata),
-        (
-            Some("ai-machine-learning".to_owned()),
-            Some("Ai Machine Learning".to_owned())
-        )
-    );
 }
 
 #[test]
@@ -557,6 +544,8 @@ async fn full_news_rebuild_preserves_its_complete_source_set(pool: PgPool) {
         user_id,
         BriefingRefreshMode::Full,
         &test_config(),
+        &crate::news_filter::NewsFilterPass::default(),
+        "00000000-0000-4000-8000-000000000091".parse().unwrap(),
     )
     .await
     .unwrap();
@@ -635,3 +624,153 @@ async fn assigned_news_backlog_composition_is_bounded_and_drains_without_losing_
     assert_eq!(pending, 45, "unselected identities remain pending");
     tx.rollback().await.unwrap();
 }
+
+#[sqlx::test(migrations = false)]
+async fn pending_pruning_preserves_visibility_cluster_reads_and_source_kinds(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let user = insert_eligible_article(&pool).await;
+    let other: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('prune-other','prune-other@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES($1::bigint::integer,'aggregator','aggregator://brutalist','{\"key\":\"brutalist\",\"topics\":[\"science\"]}',true)")
+        .bind(user).execute(&pool).await.unwrap();
+    let mut ids = Vec::new();
+    for (key, scope, owner, platform, status, metadata) in [
+        ("owned", "user", Some(user), "reddit", "ready", json!({})),
+        ("foreign", "user", Some(other), "reddit", "ready", json!({})),
+        (
+            "cross-listed",
+            "global",
+            None,
+            "brutalist",
+            "ready",
+            json!({"aggregator":{"topic":"politics","topics":["politics","science"]}}),
+        ),
+        (
+            "wrong-topic",
+            "global",
+            None,
+            "brutalist",
+            "ready",
+            json!({"aggregator":{"topic":"politics"}}),
+        ),
+        ("not-ready", "user", Some(user), "reddit", "new", json!({})),
+        (
+            "read-representative",
+            "user",
+            Some(user),
+            "reddit",
+            "ready",
+            json!({}),
+        ),
+        (
+            "read-member",
+            "user",
+            Some(user),
+            "reddit",
+            "ready",
+            json!({}),
+        ),
+        (
+            "other-reader",
+            "user",
+            Some(user),
+            "reddit",
+            "ready",
+            json!({}),
+        ),
+        ("member", "user", Some(user), "reddit", "ready", json!({})),
+    ] {
+        let id: i64 = sqlx::query_scalar("INSERT INTO news_items(ingest_key,visibility_scope,owner_user_id,platform,status,raw_metadata,ingested_at,created_at) VALUES($1,$2,$3::bigint::integer,$4,$5,$6,now(),now()) RETURNING id::bigint")
+            .bind(key).bind(scope).bind(owner).bind(platform).bind(status).bind(metadata)
+            .fetch_one(&pool).await.unwrap();
+        ids.push(id);
+    }
+    sqlx::query(
+        "UPDATE news_items SET representative_news_item_id=$2::bigint::integer WHERE id=$1::bigint",
+    )
+    .bind(ids[8])
+    .bind(ids[6])
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (reader, item) in [(user, ids[5]), (user, ids[8]), (other, ids[7])] {
+        sqlx::query("INSERT INTO news_item_read_status(user_id,news_item_id,read_at,created_at) VALUES($1::bigint::integer,$2::bigint::integer,now(),now())")
+            .bind(reader).bind(item).execute(&pool).await.unwrap();
+    }
+    sqlx::query("INSERT INTO briefing_pending_sources(user_id,source_kind,source_id) SELECT $1::bigint::integer,'news',unnest($2::integer[])")
+        .bind(user).bind(ids.iter().map(|id| i32::try_from(*id).unwrap()).collect::<Vec<_>>())
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO briefing_pending_sources(user_id,source_kind,source_id) VALUES($1::bigint::integer,'news',$2::bigint::integer),($3::bigint::integer,'unknown',1),($3::bigint::integer,'news',2147483647)")
+        .bind(other).bind(ids[0]).bind(user).execute(&pool).await.unwrap();
+    let content: i64 = sqlx::query_scalar(
+        "SELECT content_id::bigint FROM content_status WHERE user_id=$1::bigint",
+    )
+    .bind(user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Independent content/news sequences deliberately overlap in this fixture.
+    assert_eq!(content, ids[0]);
+    sqlx::query("INSERT INTO briefing_pending_sources(user_id,source_kind,source_id) VALUES($1::bigint::integer,'content',$2::bigint::integer)")
+        .bind(user).bind(content).execute(&pool).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    // Compare against the old full visible-news relation on the same snapshot.
+    let expected: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "WITH visible_news AS ({}) SELECT pending.source_id::bigint FROM briefing_pending_sources pending WHERE pending.user_id=$1::bigint AND pending.source_kind='news' AND EXISTS(SELECT 1 FROM visible_news news WHERE news.id=pending.source_id AND NOT EXISTS(SELECT 1 FROM news_items member JOIN news_item_read_status read_status ON read_status.news_item_id=member.id WHERE read_status.user_id=$1::bigint AND coalesce(member.representative_news_item_id,member.id)=news.id)) ORDER BY pending.source_id",
+        super::sources::visible_news_sql()
+    ))).bind(user).fetch_all(&mut *tx).await.unwrap();
+    assert_eq!(expected, vec![ids[0], ids[2], ids[7]]);
+    let eligible = super::sources::load_eligible_sources_for_keys(
+        &mut tx,
+        user,
+        &ids.iter()
+            .map(|id| format!("news:{id}"))
+            .chain([format!("content:{content}")])
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(eligible.len(), 4);
+    assert_eq!(
+        super::preparation::prune_ineligible_pending(&mut tx, user)
+            .await
+            .unwrap(),
+        8
+    );
+    let remaining: Vec<i64> = sqlx::query_scalar("SELECT source_id::bigint FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news' ORDER BY source_id")
+        .bind(user).fetch_all(&mut *tx).await.unwrap();
+    assert_eq!(remaining, expected);
+    let content_count: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='content'").bind(user).fetch_one(&mut *tx).await.unwrap();
+    assert_eq!(content_count, 1);
+    let other_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
+    )
+    .bind(other)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(other_count, 1);
+    assert_eq!(
+        super::preparation::prune_ineligible_pending(&mut tx, i64::MAX)
+            .await
+            .unwrap(),
+        0
+    );
+    // A later sweep must observe subscription loss and newly read content.
+    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id=$1::bigint")
+        .bind(user)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO content_read_status(user_id,content_id,read_at,created_at) VALUES($1::bigint::integer,$2::bigint::integer,now(),now())")
+        .bind(user).bind(content).execute(&mut *tx).await.unwrap();
+    assert_eq!(
+        super::preparation::prune_ineligible_pending(&mut tx, user)
+            .await
+            .unwrap(),
+        2
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[path = "category_routing_tests.rs"]
+mod category_routing_tests;

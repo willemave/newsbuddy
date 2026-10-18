@@ -79,6 +79,16 @@ pub(super) async fn audio_discover(
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_length(&payload.transcript, 3, 8_000, "transcript", &request_id)?;
     validate_optional_length(payload.locale.as_deref(), 20, "locale", &request_id)?;
+    if payload
+        .input_kind
+        .as_deref()
+        .is_some_and(|kind| !matches!(kind, "typed" | "speech_transcript"))
+    {
+        return Err(ApiError::validation(
+            "input_kind must be typed or speech_transcript",
+            &request_id,
+        ));
+    }
     let transcript = payload.transcript.trim();
     if transcript.is_empty() {
         return Err(bad_request("Transcript is required", &request_id));
@@ -86,7 +96,8 @@ pub(super) async fn audio_discover(
     let response = start_audio_run(
         &state,
         current_user.id,
-        transcript,
+        &payload.transcript,
+        payload.input_kind.as_deref().unwrap_or("speech_transcript"),
         payload.locale.as_deref(),
         &stamp,
         &request_id,
@@ -160,7 +171,8 @@ pub(super) async fn start_agent_onboarding(
     let response = start_audio_run(
         &state,
         current_user.id,
-        payload.brief.trim(),
+        &payload.brief,
+        "agent_brief",
         None,
         &stamp,
         &request_id,
@@ -244,6 +256,7 @@ pub(super) async fn complete_agent_onboarding(
         selected_suggestion_ids,
         selected_aggregators: payload.selected_aggregators,
         twitter_username: None,
+        news_filter_seed: None,
     };
     validate_completion_request(&completion, &request_id)?;
     let response =
@@ -255,6 +268,7 @@ async fn start_audio_run(
     state: &AppState,
     user_id: i64,
     transcript: &str,
+    input_kind: &str,
     locale: Option<&str>,
     stamp: &RouteOwnershipStamp,
     request_id: &str,
@@ -268,12 +282,16 @@ async fn start_audio_run(
     usage.finish().await;
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), stamp, request_id).await?;
-    let input = audio_run_input(user_id, plan);
+    let input = audio_run_input(user_id, transcript, input_kind, plan);
     let run = create_onboarding_audio_run(&mut transaction, &input)
         .await
         .map_err(|error| internal_error(error, request_id))?;
     let mut request = EnqueueRequest::new(TaskType::OnboardingDiscover);
-    request.payload = object(json!({"user_id": user_id, "run_id": run.run_id}));
+    request.payload = object(json!({
+        "user_id": user_id,
+        "run_id": run.run_id,
+        "narration": transcript.chars().take(8_000).collect::<String>(),
+    }));
     request.owner_user_id = Some(user_id);
     QueueKernel::new(state.database.pool().clone())
         .enqueue_many_in_transaction(&mut transaction, vec![request])
@@ -298,9 +316,16 @@ async fn start_audio_run(
     })
 }
 
-fn audio_run_input(user_id: i64, plan: OnboardingAudioPlan) -> OnboardingAudioRunInput {
+fn audio_run_input(
+    user_id: i64,
+    transcript: &str,
+    input_kind: &str,
+    plan: OnboardingAudioPlan,
+) -> OnboardingAudioRunInput {
     OnboardingAudioRunInput {
         user_id,
+        original_input_text: transcript.to_owned(),
+        original_input_kind: input_kind.to_owned(),
         topic_summary: plan.topic_summary,
         inferred_topics: plan.inferred_topics,
         lanes: plan
@@ -435,6 +460,9 @@ async fn prepare_completion(
             user_id,
             discovery_run_id: payload.discovery_run_id,
             selected_suggestion_ids,
+            news_filter_seed: payload
+                .news_filter_seed
+                .map(|seed| (seed.text, seed.enabled)),
             sources,
             subreddits,
             aggregators,
@@ -683,6 +711,20 @@ fn validate_completion_request(
     payload: &OnboardingCompleteRequest,
     request_id: &str,
 ) -> Result<(), ApiError> {
+    if let Some(seed) = &payload.news_filter_seed {
+        if payload.discovery_run_id.is_none() {
+            return Err(bad_request(
+                "news_filter_seed requires a discovery run",
+                request_id,
+            ));
+        }
+        if seed.text.chars().count() > 8_000 {
+            return Err(ApiError::validation(
+                "news_filter_seed.text exceeds 8000 characters",
+                request_id,
+            ));
+        }
+    }
     if payload.discovery_run_id.is_some_and(|run_id| run_id <= 0) {
         return Err(bad_request(
             "discovery_run_id must be greater than zero",

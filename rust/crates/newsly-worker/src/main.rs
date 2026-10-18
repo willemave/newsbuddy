@@ -44,7 +44,8 @@ enum WorkerProcess {
     AudioEpisode,
     Image,
     Discussion,
-    NewsItem,
+    NewsExtraction,
+    NewsProcessing,
     Scrape,
     Summarization,
     XSync,
@@ -81,7 +82,8 @@ impl WorkerProcess {
             "newsly-audio-worker" | "audio_episode" => Ok(Self::AudioEpisode),
             "newsly-image-worker" | "image" => Ok(Self::Image),
             "newsly-discussion-worker" | "discussion" => Ok(Self::Discussion),
-            "newsly-news-item-worker" | "news_item" => Ok(Self::NewsItem),
+            "newsly-news-extraction-worker" | "news_extraction" => Ok(Self::NewsExtraction),
+            "newsly-news-processing-worker" | "news_processing" => Ok(Self::NewsProcessing),
             "newsly-scrape-worker" | "scrape" => Ok(Self::Scrape),
             "newsly-summarization-worker" | "summarization" => Ok(Self::Summarization),
             "newsly-x-sync-worker" | "x_sync" => Ok(Self::XSync),
@@ -108,7 +110,12 @@ impl WorkerProcess {
             Self::AudioEpisode => audio_episode_worker::main(),
             Self::Image => image_worker::main(),
             Self::Discussion => discussion_worker::main(),
-            Self::NewsItem => news_item_worker::main(),
+            Self::NewsExtraction => {
+                news_item_worker::run(news_item_worker::NewsItemWorkerMode::Extraction)
+            }
+            Self::NewsProcessing => {
+                news_item_worker::run(news_item_worker::NewsItemWorkerMode::Processing)
+            }
             Self::Scrape => scrape_worker::main(),
             Self::Summarization => summarization_worker::main(),
             Self::XSync => x_sync_worker::main(),
@@ -145,7 +152,16 @@ mod tests {
             ("newsly-audio-worker", WorkerProcess::AudioEpisode),
             ("newsly-image-worker", WorkerProcess::Image),
             ("newsly-discussion-worker", WorkerProcess::Discussion),
-            ("newsly-news-item-worker", WorkerProcess::NewsItem),
+            (
+                "newsly-news-extraction-worker",
+                WorkerProcess::NewsExtraction,
+            ),
+            (
+                "newsly-news-processing-worker",
+                WorkerProcess::NewsProcessing,
+            ),
+            ("news_extraction", WorkerProcess::NewsExtraction),
+            ("news_processing", WorkerProcess::NewsProcessing),
             ("newsly-scrape-worker", WorkerProcess::Scrape),
             ("newsly-summarization-worker", WorkerProcess::Summarization),
             ("newsly-x-sync-worker", WorkerProcess::XSync),

@@ -22,7 +22,6 @@ pub async fn get_unread_counts(
             SELECT c.content_type, count(*)::bigint AS item_count
             FROM contents AS c
             WHERE c.status = 'completed'
-              AND (c.classification IS NULL OR c.classification <> 'skip')
               AND c.content_type <> 'news'
               AND EXISTS (
                   SELECT 1 FROM content_status AS cs
@@ -184,7 +183,6 @@ pub async fn get_long_form_unread_count(
         SELECT count(*)::bigint
         FROM contents AS c
         WHERE c.status = 'completed'
-          AND (c.classification IS NULL OR c.classification <> 'skip')
           AND (
               c.content_type IN ('article', 'podcast')
               OR (c.platform = 'youtube' AND c.content_type <> 'news')

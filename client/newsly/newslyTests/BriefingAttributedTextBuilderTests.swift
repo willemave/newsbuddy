@@ -20,6 +20,32 @@ final class BriefingPassageCoordinatorTests: XCTestCase {
         XCTAssertEqual(openedDiscussionKey, "news:8")
     }
 
+    @MainActor
+    func testSourceMenusCoverNewsContentAndDiscussionLinksWithoutOpeningThem() throws {
+        var openedCount = 0
+        var actionCount = 0
+        let coordinator = BriefingPassageView.Coordinator(
+            onOpenSource: { _ in openedCount += 1 },
+            onOpenDiscussion: { _ in openedCount += 1 },
+            onSourceAction: { _, _ in actionCount += 1 }
+        )
+        for rawURL in [
+            "newsly://briefing/news/42", "newsly://briefing/content/42",
+            "newsly://briefing/discussion/news/42"
+        ] {
+            let menu = try XCTUnwrap(coordinator.sourceMenu(for: XCTUnwrap(URL(string: rawURL))))
+            let actions = menu.children.compactMap { $0 as? UIAction }
+            XCTAssertEqual(actions.map(\.title), ["Add to Knowledge", "Chat", "Create Deck"])
+            XCTAssertEqual(actions.map { $0.identifier.rawValue }, [
+                "briefing.source_action.addToKnowledge", "briefing.source_action.chat",
+                "briefing.source_action.createDeck"
+            ])
+        }
+        XCTAssertNil(coordinator.sourceMenu(for: try XCTUnwrap(URL(string: "https://example.com"))))
+        XCTAssertEqual(openedCount, 0)
+        XCTAssertEqual(actionCount, 0)
+    }
+
     func testNonBriefingLinkDoesNotRouteInsideTheApp() throws {
         var callbackCount = 0
         let coordinator = BriefingPassageView.Coordinator(

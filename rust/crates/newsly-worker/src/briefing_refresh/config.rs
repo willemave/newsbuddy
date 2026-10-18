@@ -26,17 +26,18 @@ impl BriefingRefreshWorkerConfig {
                 new_lens_min_items: parse_usize("BRIEFING_NEW_LENS_MIN_ITEMS", 3)?,
                 pending_max_age_seconds: parse_i64("BRIEFING_PENDING_MAX_AGE_SECONDS", 1_500)?,
                 max_news_lenses: parse_usize("BRIEFING_MAX_NEWS_LENSES", 10)?,
-                category_similarity: parse_f64("BRIEFING_CATEGORY_SIMILARITY", 0.55)?,
                 category_cluster_similarity: parse_f64(
                     "BRIEFING_CATEGORY_CLUSTER_SIMILARITY",
                     0.62,
                 )?,
-                category_absorb_similarity: parse_f64("BRIEFING_CATEGORY_ABSORB_SIMILARITY", 0.45)?,
                 centroid_max_weight: parse_i32("BRIEFING_CENTROID_MAX_WEIGHT", 32)?,
-                sweep_seconds: parse_i64("BRIEFING_SWEEP_SECONDS", 3_600)?,
+                sweep_seconds: parse_i64("BRIEFING_SWEEP_SECONDS", 300)?,
                 lens_idle_days: parse_i64("BRIEFING_LENS_IDLE_DAYS", 7)?,
             },
-            compose_parallelism: parse_usize("BRIEFING_COMPOSE_PARALLELISM", 12)?,
+            compose_parallelism: bounded_compose_parallelism(parse_usize(
+                "BRIEFING_COMPOSE_PARALLELISM",
+                6,
+            )?)?,
             embedding_batch_size: parse_usize("BRIEFING_CATEGORY_EMBEDDING_BATCH_SIZE", 32)?,
             event_similarity: parse_f64("BRIEFING_NEWS_EVENT_SIMILARITY", 0.78)?,
             max_figures_deep: parse_usize("BRIEFING_MAX_FIGURES_DEEP", 12)?,
@@ -49,7 +50,7 @@ impl BriefingRefreshWorkerConfig {
         self.repository
             .validate()
             .map_err(|_| BriefingRefreshWorkerConfigError::Range("Briefing repository settings"))?;
-        if !(1..=16).contains(&self.compose_parallelism) {
+        if !(1..=6).contains(&self.compose_parallelism) {
             return Err(BriefingRefreshWorkerConfigError::Range(
                 "BRIEFING_COMPOSE_PARALLELISM",
             ));
@@ -71,6 +72,27 @@ impl BriefingRefreshWorkerConfig {
         }
         Ok(())
     }
+}
+
+fn bounded_compose_parallelism(
+    requested: usize,
+) -> Result<usize, BriefingRefreshWorkerConfigError> {
+    // Existing installations may retain the previous 12-call setting. Keep that
+    // configuration startable while enforcing the two-consumer total of 12.
+    if !(1..=16).contains(&requested) {
+        return Err(BriefingRefreshWorkerConfigError::Range(
+            "BRIEFING_COMPOSE_PARALLELISM",
+        ));
+    }
+    if requested > 6 {
+        tracing::warn!(
+            requested,
+            effective = 6,
+            code = "briefing_compose_parallelism_capped",
+            "Capping legacy Briefing composition concurrency for two consumers"
+        );
+    }
+    Ok(requested.min(6))
 }
 
 fn parse_usize(
@@ -129,18 +151,36 @@ mod tests {
                 new_lens_min_items: 3,
                 pending_max_age_seconds: 1_500,
                 max_news_lenses: 10,
-                category_similarity: 0.55,
                 category_cluster_similarity: 0.62,
-                category_absorb_similarity: 0.45,
                 centroid_max_weight: 32,
                 sweep_seconds: 3_600,
                 lens_idle_days: 7,
             },
-            compose_parallelism: 12,
+            compose_parallelism: 6,
             embedding_batch_size: 32,
             event_similarity: 0.78,
             max_figures_deep: 12,
         }
+    }
+
+    #[test]
+    fn legacy_compose_configuration_is_capped_without_disabling_workers() {
+        for requested in 1..=16 {
+            assert_eq!(
+                bounded_compose_parallelism(requested).unwrap(),
+                requested.min(6)
+            );
+        }
+        assert!(bounded_compose_parallelism(0).is_err());
+        assert!(bounded_compose_parallelism(17).is_err());
+    }
+
+    #[test]
+    fn accepts_six_calls_and_rejects_larger_per_refresh_budget() {
+        let mut config = valid_config();
+        assert!(config.validate().is_ok());
+        config.compose_parallelism = 7;
+        assert!(config.validate().is_err());
     }
 
     #[test]

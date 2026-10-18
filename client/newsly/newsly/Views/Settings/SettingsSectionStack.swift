@@ -28,6 +28,9 @@ struct SettingsSectionStack: View {
                 XConnectionAttentionBanner(connection: xConnection)
             }
             SettingsBrandHeader()
+            if case .authenticated = authState {
+                SettingsNewsFilterSection()
+            }
             SettingsLibrarySection()
             SettingsAccountSection(
                 authState: authState,

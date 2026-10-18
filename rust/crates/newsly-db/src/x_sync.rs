@@ -82,7 +82,6 @@ struct SyncStateRow {
 struct ImageCandidateRow {
     content_type: String,
     status: String,
-    classification: Option<String>,
     content_metadata: Value,
     has_active_image_task: bool,
 }
@@ -685,7 +684,7 @@ pub async fn x_bookmark_destination_needs_image(
         SELECT
             content_type,
             status,
-            classification,
+
             COALESCE(content_metadata, '{}'::json) AS content_metadata,
             EXISTS (
                 SELECT 1
@@ -706,7 +705,6 @@ pub async fn x_bookmark_destination_needs_image(
     };
     if !matches!(candidate.content_type.as_str(), "article" | "podcast")
         || !matches!(candidate.status.as_str(), "awaiting_image" | "completed")
-        || candidate.classification.as_deref() == Some("skip")
         || candidate.has_active_image_task
     {
         return Ok(false);

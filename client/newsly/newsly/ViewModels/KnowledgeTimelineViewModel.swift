@@ -93,6 +93,10 @@ final class KnowledgeTimelineViewModel {
     @ObservationIgnored
     private let freshnessPolicy: KnowledgeFreshnessPolicy
     @ObservationIgnored
+    private let saveSignalToken: () -> String?
+    @ObservationIgnored
+    private var handledSaveSignalToken: String?
+    @ObservationIgnored
     private let now: () -> Date
     @ObservationIgnored
     private var aggregateReadTask: Task<Bool, Never>?
@@ -102,6 +106,14 @@ final class KnowledgeTimelineViewModel {
     private var aggregateReadMayContinueInBackground = false
     @ObservationIgnored
     private var automaticReadContextIsActive = false
+    @ObservationIgnored
+    private var isSavedObservationReadInFlight = false
+    @ObservationIgnored
+    private var fastSavedObservationUntil: Date?
+    @ObservationIgnored
+    private var fastSavedObservationActivation: UInt64?
+    @ObservationIgnored
+    private var lastObservedSaveSignalToken: String?
 
     init(
         savedContent: ContentListViewModel,
@@ -109,6 +121,7 @@ final class KnowledgeTimelineViewModel {
         decks: LearningDecksViewModel,
         narrations: CustomNarrationLibraryViewModel,
         freshnessPolicy: KnowledgeFreshnessPolicy = .standard,
+        saveSignalToken: @escaping () -> String? = { nil },
         now: @escaping () -> Date = Date.init
     ) {
         self.savedContent = savedContent
@@ -117,6 +130,7 @@ final class KnowledgeTimelineViewModel {
         self.narrations = narrations
         self.freshnessPolicy = freshnessPolicy
         self.now = now
+        self.saveSignalToken = saveSignalToken
         refreshTimelineProjection()
         observeTimelineSources()
     }
@@ -176,7 +190,13 @@ final class KnowledgeTimelineViewModel {
     func activate(_ activation: AppLifecycle.Activation) async {
         automaticReadContextIsActive = true
 
-        guard lastHandledActivationGeneration != activation.generation
+        if fastSavedObservationActivation != activation.generation {
+            fastSavedObservationActivation = activation.generation
+            fastSavedObservationUntil = now().addingTimeInterval(120)
+        }
+        noteSaveSignal()
+        let hasNewSave = saveSignalToken() != handledSaveSignalToken
+        guard hasNewSave || lastHandledActivationGeneration != activation.generation
                 || holdsPublicationBarrier else {
             knowledgeLifecycleLogger.debug(
                 "Activation skipped | generation=\(activation.generation, privacy: .public) reason=already_handled"
@@ -186,7 +206,7 @@ final class KnowledgeTimelineViewModel {
         }
 
         let needsInitialLoad = !hasFinishedInitialLoad
-        if !needsInitialLoad,
+        if !hasNewSave, !needsInitialLoad,
            !holdsPublicationBarrier,
            !freshnessPolicy.shouldRevalidate(
                lastValidatedAt: lastValidatedAt,
@@ -238,6 +258,11 @@ final class KnowledgeTimelineViewModel {
         automaticReadsEnabled = false
         decks.suspendAutomaticObservation()
         narrations.suspendAutomaticObservation()
+        // An explicit aggregate may have preempted this observer and now owns
+        // the saved feed. Only cancel a standalone observation's request.
+        if isSavedObservationReadInFlight, aggregateReadTask == nil {
+            savedContent.cancelAutomaticRead()
+        }
 
         guard aggregateReadTask != nil,
               !aggregateReadMayContinueInBackground else {
@@ -246,7 +271,58 @@ final class KnowledgeTimelineViewModel {
         cancelAggregateRead(generation: aggregateReadGeneration)
     }
 
+    /// Owned by the visible view's task. These are ordinary server reads, never
+    /// X sync commands. Slow discovery checks also find saves from other devices.
+    func observeSavedKnowledge() async {
+        // A second share may finish while activation's request is in flight.
+        // Re-read its token before entering the ordinary discovery interval.
+        noteSaveSignal()
+        if saveSignalToken() != handledSaveSignalToken {
+            await revalidateSavedKnowledgeIfIdle()
+        }
+        while automaticReadContextIsActive, !Task.isCancelled {
+            do { try await Task.sleep(for: savedObservationInterval) } catch { return }
+            guard !Task.isCancelled, automaticReadContextIsActive else { return }
+            await revalidateSavedKnowledgeIfIdle()
+        }
+    }
+
+    var savedObservationInterval: Duration {
+        guard let deadline = fastSavedObservationUntil, now() < deadline,
+              savedContent.contents.contains(where: {
+                  $0.savedLibraryItemState == .processing && !$0.hasStalledKnowledgePreparation
+              }) else { return .seconds(30) }
+        return .seconds(5)
+    }
+
+    private func noteSaveSignal() {
+        let token = saveSignalToken()
+        if token != lastObservedSaveSignalToken {
+            lastObservedSaveSignalToken = token
+            fastSavedObservationUntil = now().addingTimeInterval(120)
+        }
+    }
+
+    func revalidateSavedKnowledgeIfIdle() async {
+        guard automaticReadsEnabled, !isAggregateReadInFlight,
+              !isSavedObservationReadInFlight, !savedContent.isReadInFlight else { return }
+        noteSaveSignal()
+        isSavedObservationReadInFlight = true
+        defer { isSavedObservationReadInFlight = false }
+        let signalAtStart = saveSignalToken()
+        let succeeded = await savedContent.revalidateKnowledgeLibrary(preservingLoadedPages: true)
+        guard succeeded, !Task.isCancelled, !isAggregateReadInFlight,
+              automaticReadContextIsActive else { return }
+        if savedContent.initialLoadErrorMessage == nil {
+            handledSaveSignalToken = signalAtStart
+        }
+        if !holdsPublicationBarrier { refreshTimelineProjection() }
+    }
+
     func loadNextPage() async {
+        if isSavedObservationReadInFlight, aggregateReadTask == nil {
+            savedContent.cancelAutomaticRead()
+        }
         let savedOldest = savedContent.hasMoreContent
             ? savedContent.contents.last?.knowledgeActivityDate
             : nil
@@ -331,12 +407,14 @@ final class KnowledgeTimelineViewModel {
         aggregateReadMayContinueInBackground = mayContinueInBackground
         cancelObsoleteChildReads()
 
+        let signalAtStart = saveSignalToken()
         let task = Task { @MainActor [weak self] in
             guard let self else { return false }
             let completed = await self.performSourceRead(isInitial: isInitial)
             return self.finishAggregateRead(
                 generation: generation,
-                completed: completed
+                completed: completed,
+                signalAtStart: signalAtStart
             )
         }
         aggregateReadTask = task
@@ -359,7 +437,8 @@ final class KnowledgeTimelineViewModel {
 
     private func finishAggregateRead(
         generation: Int,
-        completed: Bool
+        completed: Bool,
+        signalAtStart: String?
     ) -> Bool {
         guard generation == aggregateReadGeneration else { return false }
 
@@ -369,6 +448,9 @@ final class KnowledgeTimelineViewModel {
 
         if completed {
             hasFinishedInitialLoad = true
+            if savedContent.initialLoadErrorMessage == nil {
+                handledSaveSignalToken = signalAtStart
+            }
             if sourceLoadsSucceeded {
                 lastValidatedAt = now()
             }

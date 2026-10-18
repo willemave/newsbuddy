@@ -9,10 +9,10 @@ use super::{
     NaiveDateTime, PendingContentRow, PendingNewsRow, Postgres, PrepareBriefingRefreshOutcome,
     PreparedBriefingRefreshSeed, SegmentRow, SemanticLensRow, Transaction, UnassignedNewsRow, Utc,
     Uuid,
-    lens_assignment::{assign_pending_ids, next_news_position},
+    lens_assignment::next_news_position,
     sources::{
-        event_group_count, json_strings, load_eligible_sources_for_keys, news_topic,
-        source_from_content, source_from_news, visible_cohort_news_sql, visible_news_sql,
+        event_group_count, json_strings, load_eligible_sources_for_keys, source_from_content,
+        source_from_news, visible_cohort_news_sql, visible_news_sql, visible_pending_news_sql,
     },
 };
 
@@ -26,13 +26,32 @@ pub async fn prepare_briefing_refresh(
     user_id: i64,
     mode: BriefingRefreshMode,
     config: &BriefingRefreshConfig,
+    filter_pass: &crate::news_filter::NewsFilterPass,
+    expected_lease: Uuid,
 ) -> Result<PrepareBriefingRefreshOutcome, BriefingRefreshRepositoryError> {
+    // Serialize admission against Settings/initialization without holding locks during inference.
+    crate::news_filter::lock_active_user(transaction, user_id).await?;
+    let preference = crate::news_filter_preferences::load_current(transaction, user_id).await?;
+    if preference.revision != filter_pass.revision && preference.enabled {
+        return Err(BriefingRefreshRepositoryError::FilterChanged);
+    }
+    let failed_ids: Vec<i64> = filter_pass.unavailable.iter().map(|(id, _)| *id).collect();
+    let failed_hashes: Vec<String> = filter_pass
+        .unavailable
+        .iter()
+        .map(|(_, hash)| hash.clone())
+        .collect();
+    let mut unavailable_ids:Vec<i64>=sqlx::query_scalar("SELECT n.id::bigint FROM news_items n JOIN unnest($1::bigint[],$2::text[]) failed(id,hash) ON n.id=failed.id AND news_filter_input_hash(n)=failed.hash ORDER BY n.id FOR SHARE OF n")
+        .bind(failed_ids).bind(failed_hashes).fetch_all(&mut **transaction).await?;
     let preparation_started = std::time::Instant::now();
     config.validate()?;
     crate::first_edition_progress::expire_runs(transaction, user_id).await?;
     let claim_fence = load_briefing_refresh_claim_fence(transaction, task_id, user_id)
         .await?
         .ok_or(BriefingRefreshRepositoryError::ClaimOwnershipLost)?;
+    if claim_fence.lease_token != expected_lease {
+        return Err(BriefingRefreshRepositoryError::ClaimOwnershipLost);
+    }
     ensure_state(transaction, user_id, config).await?;
     let starting_version = state_version(transaction, user_id).await?;
     if !active_user_exists(transaction, user_id).await? {
@@ -42,23 +61,40 @@ pub async fn prepare_briefing_refresh(
     }
     ensure_fixed_lenses(transaction, user_id).await?;
     if mode == BriefingRefreshMode::Full {
+        // Full preparation replaces pending rows, but a current unavailable admission is already
+        // settled work. Retain its exact policy/evidence identity without repeating inference.
+        // Lock evidence through reseeding so an intervening summary edit cannot inherit it.
+        let retained_unavailable: Vec<i64> = sqlx::query_scalar(
+            "SELECT news.id::bigint FROM briefing_pending_sources pending JOIN news_items news ON news.id=pending.source_id WHERE pending.user_id::bigint=$1 AND pending.source_kind='news' AND pending.filter_outcome='unavailable' AND pending.filter_revision=$2 AND pending.filter_input_hash=news_filter_input_hash(news) ORDER BY news.id FOR SHARE OF news"
+        ).bind(user_id).bind(preference.revision).fetch_all(&mut **transaction).await?;
+        unavailable_ids.extend(retained_unavailable);
+        unavailable_ids.sort_unstable();
+        unavailable_ids.dedup();
         sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint = $1")
             .bind(user_id)
             .execute(&mut **transaction)
             .await?;
     }
     let full = mode == BriefingRefreshMode::Full;
+    let prune_started = std::time::Instant::now();
+    prune_ineligible_pending(transaction, user_id).await?;
+    let prune_ms = prune_started.elapsed().as_millis() as u64;
     let content_started = std::time::Instant::now();
     let content_added = seed_content_pending(transaction, user_id, full).await?;
     let content_seed_ms = content_started.elapsed().as_millis() as u64;
     let news_started = std::time::Instant::now();
-    let news_added = seed_news_pending(transaction, user_id, full).await?;
+    let news_added = seed_filtered_news_pending(
+        transaction,
+        user_id,
+        full,
+        &unavailable_ids,
+        filter_pass.examined && !filter_pass.more_work,
+        preference.enabled,
+    )
+    .await?;
     let news_seed_ms = news_started.elapsed().as_millis() as u64;
-    let prune_started = std::time::Instant::now();
-    prune_ineligible_pending(transaction, user_id).await?;
-    let prune_ms = prune_started.elapsed().as_millis() as u64;
     let assignment_started = std::time::Instant::now();
-    let assigned = assign_nonsemantic_pending_lenses(transaction, user_id, full).await?;
+    let assigned = assign_nonsemantic_pending_lenses(transaction, user_id).await?;
     let assignment_ms = assignment_started.elapsed().as_millis() as u64;
     let snapshot_started = std::time::Instant::now();
     let lens_assignment = load_lens_assignment_snapshot(transaction, user_id, full).await?;
@@ -249,7 +285,6 @@ pub(super) async fn seed_content_pending(
          AND membership.status = 'inbox'
         WHERE content.status = 'completed'
           AND content.content_type IN ('article', 'podcast')
-          AND (content.classification IS NULL OR content.classification <> 'skip')
           AND NULLIF(COALESCE(
               content.content_metadata::jsonb #> '{domain,image_generated_at}',
               content.content_metadata::jsonb -> 'image_generated_at'
@@ -285,10 +320,25 @@ pub(super) async fn seed_content_pending(
     .rows_affected() as usize)
 }
 
+#[cfg(test)]
 pub(crate) async fn seed_news_pending(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
     full: bool,
+) -> Result<usize, sqlx::Error> {
+    let enabled = crate::news_filter_preferences::load_current(transaction, user_id)
+        .await?
+        .enabled;
+    seed_filtered_news_pending(transaction, user_id, full, &[], false, enabled).await
+}
+
+async fn seed_filtered_news_pending(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
+    full: bool,
+    unavailable_ids: &[i64],
+    examined_all: bool,
+    filter_enabled: bool,
 ) -> Result<usize, sqlx::Error> {
     let active_run = sqlx::query_as::<_, (i64, bool, bool)>("SELECT id::bigint, news_seeded, news_seed_settled FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' ORDER BY id DESC LIMIT 1 FOR UPDATE")
         .bind(user_id).fetch_optional(&mut **transaction).await?;
@@ -301,7 +351,7 @@ pub(crate) async fn seed_news_pending(
                 WITH visible_news AS ({visible_news}), ranked AS (
                     SELECT n.id, COALESCE(n.published_at,n.ingested_at) AS arrival,
                            row_number() OVER (PARTITION BY n.platform, n.raw_metadata::jsonb #>> '{{aggregator,topic}}' ORDER BY COALESCE(n.published_at,n.ingested_at) DESC, n.id DESC) AS source_rank
-                    FROM visible_news n WHERE NOT EXISTS (
+                    FROM visible_news n WHERE (NOT $5::boolean OR news_filter_admits($1,n.id,n.id::bigint=ANY($4::bigint[]))) AND NOT EXISTS (
                         SELECT 1 FROM news_item_read_status r JOIN news_items m ON m.id=r.news_item_id
                         WHERE r.user_id::bigint=$1 AND COALESCE(m.representative_news_item_id,m.id)=n.id
                     )
@@ -310,15 +360,16 @@ pub(crate) async fn seed_news_pending(
                 SELECT $2::bigint::integer,'news',id FROM ranked ORDER BY source_rank,arrival DESC,id DESC LIMIT $3
                 ON CONFLICT DO NOTHING
             "#, visible_news=visible_news_sql())))
-                .bind(user_id).bind(run_id).bind(NEWS_REFRESH_BATCH_SIZE).execute(&mut **transaction).await?;
+                .bind(user_id).bind(run_id).bind(NEWS_REFRESH_BATCH_SIZE).bind(unavailable_ids).bind(filter_enabled).execute(&mut **transaction).await?;
             // Leave an empty corpus open until ready news actually arrives.
-            sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news') WHERE id::bigint=$1")
-                .bind(run_id).execute(&mut **transaction).await?;
-        } else if !settled {
+            sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=$2 OR EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news') WHERE id::bigint=$1")
+                .bind(run_id).bind(examined_all).execute(&mut **transaction).await?;
+        }
+        if !settled {
             let settled_rows = sqlx::query(AssertSqlSafe(format!(r"WITH visible_news AS ({visible_news})
-                UPDATE onboarding_first_edition_runs r SET news_seed_settled=TRUE WHERE r.id::bigint=$2 AND NOT EXISTS (
+                UPDATE onboarding_first_edition_runs r SET news_seed_settled=TRUE WHERE r.id::bigint=$2 AND r.news_seeded AND NOT EXISTS (
                     SELECT 1 FROM onboarding_first_edition_items i JOIN visible_news n ON n.id=i.source_id
-                    WHERE i.run_id=r.id AND i.source_kind='news'
+                    WHERE i.run_id=r.id AND i.source_kind='news' AND NOT news_filter_settled($1,n.id)
                       AND NOT EXISTS(SELECT 1 FROM briefing_segments s WHERE s.user_id=r.user_id AND s.status IN ('active','degraded') AND s.source_keys::jsonb ? ('news:' || n.id::text))
                       AND NOT EXISTS(SELECT 1 FROM news_item_read_status rs JOIN news_items m ON m.id=rs.news_item_id WHERE rs.user_id=r.user_id AND COALESCE(m.representative_news_item_id,m.id)=n.id)
                 )", visible_news=visible_cohort_news_sql("$2"))))
@@ -329,7 +380,7 @@ pub(crate) async fn seed_news_pending(
         }
     }
     let visible_news = if cohort_run_id.is_some() {
-        visible_cohort_news_sql("$4")
+        visible_cohort_news_sql("$6")
     } else {
         visible_news_sql()
     };
@@ -337,12 +388,15 @@ pub(crate) async fn seed_news_pending(
         r#"
         WITH visible_news AS ({visible_news})
         INSERT INTO briefing_pending_sources (
-            user_id, lens_key, source_kind, source_id, enqueued_at
+            user_id, lens_key, source_kind, source_id, enqueued_at, filter_revision, filter_input_hash, filter_outcome
         )
         SELECT $1::bigint::integer, NULL, 'news', news.id,
-               timezone('UTC', clock_timestamp())
+               timezone('UTC', clock_timestamp()),
+               COALESCE((SELECT revision FROM news_filter_preferences WHERE user_id=$1::bigint ORDER BY revision DESC LIMIT 1),0),
+               news_filter_input_hash(news::news_items),
+               CASE WHEN news.id::bigint=ANY($4::bigint[]) THEN 'unavailable' ELSE 'decided' END
         FROM visible_news AS news
-        WHERE NOT EXISTS (
+        WHERE (NOT $5::boolean OR news_filter_admits($1,news.id,news.id::bigint=ANY($4::bigint[]))) AND NOT EXISTS (
               SELECT 1 FROM briefing_pending_sources p
               WHERE p.user_id::bigint = $1 AND p.source_kind = 'news' AND p.source_id = news.id
           )
@@ -373,7 +427,9 @@ pub(crate) async fn seed_news_pending(
     )))
     .bind(user_id)
     .bind(full)
-    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE));
+    .bind((!full).then_some(NEWS_REFRESH_BATCH_SIZE))
+    .bind(unavailable_ids)
+    .bind(filter_enabled);
     let query = if let Some(run_id) = cohort_run_id {
         query.bind(run_id)
     } else {
@@ -386,21 +442,28 @@ pub(super) async fn prune_ineligible_pending(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
 ) -> Result<usize, sqlx::Error> {
+    // A failed Full may leave replacement rows for sources still in the old edition.
+    // Published membership also supplies discussion demand; these rows are redundant.
+    let covered = sqlx::query(
+        "DELETE FROM briefing_pending_sources pending WHERE pending.user_id::bigint=$1
+         AND EXISTS (SELECT 1 FROM briefing_segments segment
+             WHERE segment.user_id=pending.user_id AND segment.status IN ('active','degraded')
+             AND segment.source_keys::jsonb ? (pending.source_kind || ':' || pending.source_id::text))",
+    ).bind(user_id).execute(&mut **transaction).await?.rows_affected() as usize;
     let content = sqlx::query(
         r#"
         DELETE FROM briefing_pending_sources AS pending
-        WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'content'
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'content'
           AND NOT EXISTS (
               SELECT 1 FROM contents AS content
               JOIN content_status AS membership ON membership.content_id = content.id
               WHERE content.id = pending.source_id
-                AND membership.user_id::bigint = $1 AND membership.status = 'inbox'
+                AND membership.user_id = $1::bigint AND membership.status = 'inbox'
                 AND content.status = 'completed'
                 AND content.content_type IN ('article', 'podcast')
-                AND (content.classification IS NULL OR content.classification <> 'skip')
-                AND NOT EXISTS (
+                      AND NOT EXISTS (
                     SELECT 1 FROM content_read_status AS read_status
-                    WHERE read_status.user_id::bigint = $1
+                    WHERE read_status.user_id = $1::bigint
                       AND read_status.content_id = content.id
                 )
           )
@@ -414,21 +477,22 @@ pub(super) async fn prune_ineligible_pending(
         r#"
         WITH visible_news AS ({visible_news})
         DELETE FROM briefing_pending_sources AS pending
-        WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'news'
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'news'
           AND NOT EXISTS (
               SELECT 1 FROM visible_news AS news
               WHERE news.id = pending.source_id
+                AND news_filter_pending_admits($1,news.id,pending.filter_revision,pending.filter_input_hash,pending.filter_outcome)
                 AND NOT EXISTS (
                     SELECT 1
                     FROM news_items AS member
                     JOIN news_item_read_status AS read_status
                       ON read_status.news_item_id = member.id
-                    WHERE read_status.user_id::bigint = $1
+                    WHERE read_status.user_id = $1::bigint
                       AND coalesce(member.representative_news_item_id, member.id) = news.id
                 )
           )
         "#,
-        visible_news = visible_news_sql()
+        visible_news = visible_pending_news_sql()
     )))
     .bind(user_id)
     .execute(&mut **transaction)
@@ -437,22 +501,21 @@ pub(super) async fn prune_ineligible_pending(
     let unknown = sqlx::query(
         r#"
         DELETE FROM briefing_pending_sources
-        WHERE user_id::bigint = $1 AND source_kind NOT IN ('content', 'news')
+        WHERE user_id = $1::bigint AND source_kind NOT IN ('content', 'news')
         "#,
     )
     .bind(user_id)
     .execute(&mut **transaction)
     .await?
     .rows_affected() as usize;
-    Ok(content + news + unknown)
+    Ok(covered + content + news + unknown)
 }
 
 pub(super) async fn assign_nonsemantic_pending_lenses(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
-    full: bool,
 ) -> Result<usize, sqlx::Error> {
-    let mut changed = sqlx::query(
+    let changed = sqlx::query(
         r#"
         UPDATE briefing_pending_sources AS pending
         SET lens_key = CASE WHEN content.content_type = 'podcast' THEN 'podcasts' ELSE 'articles' END
@@ -465,28 +528,6 @@ pub(super) async fn assign_nonsemantic_pending_lenses(
     .execute(&mut **transaction)
     .await?
     .rows_affected() as usize;
-    let unassigned = unassigned_news_rows(transaction, user_id, full).await?;
-    if unassigned.is_empty() {
-        return Ok(changed);
-    }
-    let active_lens_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news",
-    )
-    .bind(user_id)
-    .fetch_all(&mut **transaction)
-    .await?
-    .into_iter()
-    .collect::<HashSet<_>>();
-    for row in &unassigned {
-        let Some(key) = news_topic(&row.source.raw_metadata)
-            .0
-            .map(|slug| format!("news-{slug}"))
-            .filter(|key| active_lens_keys.contains(key))
-        else {
-            continue;
-        };
-        changed += assign_pending_ids(transaction, user_id, &[row.pending_id], &key).await?;
-    }
     Ok(changed)
 }
 

@@ -1,3 +1,6 @@
+mod policy;
+use policy::{approval_policy, requested_action_is_approved};
+
 use chrono::{DateTime, NaiveDateTime, Utc};
 use newsly_domain::truncate_chars;
 use serde_json::{Map, Value, json};
@@ -133,7 +136,8 @@ struct TaskRow {
     user_is_active: bool,
 }
 
-/// Inserts the generic LLM ledger row. The caller enqueues `run_llm_task` in the same transaction.
+/// Inserts the generic LLM ledger row. The caller completes deterministic actions or enqueues
+/// `run_llm_task` in the same transaction.
 pub async fn insert_share_action_task(
     transaction: &mut Transaction<'_, Postgres>,
     input: &NewShareActionTask<'_>,
@@ -262,8 +266,11 @@ pub async fn begin_share_action_preparation(
     )
     .await?;
 
-    let prepare_shared_source = !matches!(row.mode.as_str(), "add_feed" | "add_to_briefing")
-        && json_positive_i64(&row.input_json, "knowledge_content_id").is_none();
+    let prepare_shared_source = !matches!(
+        row.mode.as_str(),
+        "add_feed" | "add_to_briefing" | "bookmark_only"
+    ) && json_positive_i64(&row.input_json, "knowledge_content_id")
+        .is_none();
     Ok(ShareActionPreparation::Ready(ShareActionPreparationDraft {
         id: row.id,
         user_id: row.user_id,
@@ -976,38 +983,6 @@ async fn set_task_terminal(
     .execute(&mut **transaction)
     .await?;
     Ok(())
-}
-
-fn approval_policy<'a>(
-    policy: &'a Map<String, Value>,
-    action_name: &str,
-) -> Result<&'a str, ShareActionRepositoryError> {
-    let value = policy
-        .get("overrides")
-        .and_then(Value::as_object)
-        .and_then(|overrides| overrides.get(action_name))
-        .or_else(|| policy.get("default"))
-        .and_then(Value::as_str)
-        .unwrap_or("approval_required");
-    if matches!(value, "auto_apply" | "approval_required" | "dry_run") {
-        Ok(value)
-    } else {
-        Err(ShareActionRepositoryError::UnsupportedApprovalPolicy(
-            value.to_owned(),
-        ))
-    }
-}
-
-fn requested_action_is_approved(value: &str) -> Result<bool, ShareActionRepositoryError> {
-    match value {
-        "approved" => Ok(true),
-        "applying" | "applied" | "awaiting_approval" | "proposed" | "rejected" | "failed" => {
-            Ok(false)
-        }
-        other => Err(ShareActionRepositoryError::InvalidActionStatus(
-            other.to_owned(),
-        )),
-    }
 }
 
 fn history_entry(status: &str, state: &str, note: &str, now: DateTime<Utc>) -> Value {

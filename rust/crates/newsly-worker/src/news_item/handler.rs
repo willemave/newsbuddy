@@ -20,7 +20,7 @@ use super::input::{
 };
 use super::model::{
     BodySource, EnrichmentFinalizationPlan, EnrichmentMutation, EnrichmentPreparation,
-    ModelUsageWrite, ProcessFinalizationPlan, ProcessMutation,
+    ProcessFinalizationPlan, ProcessMutation,
 };
 use super::repository::{
     checkpoint_summary, load_relation_candidates, prepare_enrichment, prepare_processing,
@@ -88,7 +88,7 @@ impl TaskHandler for EnrichNewsItemArticleHandler {
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
         let services = Arc::clone(&self.services);
-        Box::pin(async move { execute_enrichment(&services, &plan, lease).await })
+        Box::pin(async move { Box::pin(execute_enrichment(&services, &plan, lease)).await })
     }
 }
 
@@ -145,22 +145,24 @@ async fn execute_enrichment(
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost before news enrichment", true);
     }
-    let (mutation, usage) = match preparation {
+    match super::enrichment_checkpoint::load(&services.pool, &snapshot, &services.body_store).await
+    {
+        Ok(Some(mutation)) => {
+            return soft_enrichment(services, plan, snapshot, mutation);
+        }
+        Ok(None) => {}
+        Err(error) => return plain_failure(error, true),
+    }
+    let mutation = match preparation {
         EnrichmentPreparation::NotFound => unreachable!("snapshot checked"),
-        EnrichmentPreparation::Existing { .. } => (EnrichmentMutation::Existing, Vec::new()),
+        EnrichmentPreparation::Existing { .. } => EnrichmentMutation::Existing,
         EnrichmentPreparation::Metadata {
             text, source_url, ..
-        } => (
-            EnrichmentMutation::Metadata { text, source_url },
-            Vec::new(),
-        ),
-        EnrichmentPreparation::Skip { reason, .. } => (
-            EnrichmentMutation::Skipped {
-                article_url: None,
-                reason,
-            },
-            Vec::new(),
-        ),
+        } => EnrichmentMutation::Metadata { text, source_url },
+        EnrichmentPreparation::Skip { reason, .. } => EnrichmentMutation::Skipped {
+            article_url: None,
+            reason,
+        },
         EnrichmentPreparation::Content {
             content_id,
             final_url,
@@ -170,16 +172,13 @@ async fn execute_enrichment(
         } => {
             let article_url = super::input::choose_article_url(&snapshot);
             match read_body_with_lease(services, &snapshot.body_source, &mut lease).await {
-                BodyRead::Ready(body) => (
-                    EnrichmentMutation::Content {
-                        content_id,
-                        article_url: article_url.unwrap_or_default(),
-                        final_url,
-                        extracted_chars: i32::try_from(body.chars().count()).unwrap_or(i32::MAX),
-                        source_metadata,
-                    },
-                    Vec::new(),
-                ),
+                BodyRead::Ready(body) => EnrichmentMutation::Content {
+                    content_id,
+                    article_url: article_url.unwrap_or_default(),
+                    final_url,
+                    extracted_chars: i32::try_from(body.chars().count()).unwrap_or(i32::MAX),
+                    source_metadata,
+                },
                 BodyRead::Missing => {
                     let Some(article_url) = article_url else {
                         return soft_enrichment(
@@ -192,7 +191,6 @@ async fn execute_enrichment(
                                     "Existing article body is missing and no URL can be extracted"
                                         .to_owned(),
                             },
-                            Vec::new(),
                         );
                     };
                     return extract_enrichment(
@@ -220,7 +218,7 @@ async fn execute_enrichment(
                 .await;
         }
     };
-    soft_enrichment(services, plan, snapshot, mutation, usage)
+    soft_enrichment(services, plan, snapshot, mutation)
 }
 
 async fn extract_enrichment(
@@ -236,7 +234,12 @@ async fn extract_enrichment(
     let extraction_url = article_url.clone();
     let runtime = services
         .extraction
-        .clone()
+        .for_task(crate::content::FirecrawlAttribution {
+            task: plan.task_id,
+            content: None,
+            news_item: Some(snapshot.id),
+            user: snapshot.owner_user_id,
+        })
         .with_demand_policy(demand_policy);
     let extraction = runtime.process_article(&extraction_url, "article", &request_id, deadline);
     tokio::pin!(extraction);
@@ -246,16 +249,34 @@ async fn extract_enrichment(
             return plain_failure("queue lease was lost during news article extraction", true);
         }
     };
+    let observed_usage = match &attempt {
+        ExtractionAttempt::Success { usage, .. }
+        | ExtractionAttempt::Deferred { usage, .. }
+        | ExtractionAttempt::Failure { usage, .. } => usage,
+    };
+    // Observations are independent of grouping, source validity and the final lease decision.
+    let recorded = async {
+        let mut tx = services.pool.begin().await?;
+        super::repository::persist_extraction_usage(
+            &mut tx,
+            plan.task_id,
+            snapshot.owner_user_id,
+            snapshot.id,
+            observed_usage,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok::<_, super::repository::NewsRepositoryError>(())
+    }
+    .await;
+    if let Err(error) = recorded {
+        return plain_failure(error.to_string(), true);
+    }
     match attempt {
-        ExtractionAttempt::Success { article, usage } => {
+        ExtractionAttempt::Success { article, .. } => {
             let staged = match services.body_store.stage(snapshot.id, &article.body).await {
                 Ok(staged) => staged,
                 Err(error) => {
-                    tracing::warn!(
-                        news_item_id = snapshot.id,
-                        error = %error,
-                        "news article body staging failed softly; processing will continue"
-                    );
                     return soft_enrichment(
                         services,
                         plan,
@@ -266,33 +287,50 @@ async fn extract_enrichment(
                             strategy: Some(article.extraction_method),
                             reason: error.to_string(),
                         },
-                        usage,
                     );
                 }
             };
             let domain = url::Url::parse(&article.final_url)
                 .ok()
                 .and_then(|url| url.host_str().map(str::to_owned));
-            soft_enrichment(
-                services,
-                plan,
-                snapshot,
-                EnrichmentMutation::Storage {
-                    article_url,
-                    final_url: article.final_url,
-                    title: Some(article.title),
-                    article_domain: domain,
-                    extraction_method: article.extraction_method,
-                    body: staged,
-                },
-                usage,
-            )
+            let mutation = EnrichmentMutation::Storage {
+                article_url,
+                final_url: article.final_url,
+                title: Some(article.title),
+                article_domain: domain,
+                extraction_method: article.extraction_method,
+                body: staged,
+            };
+            if let Err(error) =
+                super::enrichment_checkpoint::save(&services.pool, &snapshot, &mutation).await
+            {
+                return plain_failure(error, true);
+            }
+            soft_enrichment(services, plan, snapshot, mutation)
         }
+        ExtractionAttempt::Deferred {
+            reason, resume_at, ..
+        } => HandlerExecution::with_finalizer(
+            TaskResult::defer((resume_at - Utc::now()).num_seconds().max(1)),
+            EnrichmentFinalizer::new(
+                services.queue.clone(),
+                EnrichmentFinalizationPlan {
+                    task_id: plan.task_id,
+                    snapshot,
+                    mutation: EnrichmentMutation::Deferred {
+                        article_url: Some(article_url),
+                        reason,
+                        resume_at,
+                    },
+                    finalized_at: Utc::now(),
+                },
+            ),
+        ),
         ExtractionAttempt::Failure {
             reason,
             code,
             retryable,
-            usage,
+            ..
         } => {
             if code == newsly_db::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE {
                 return soft_enrichment(
@@ -303,16 +341,9 @@ async fn extract_enrichment(
                         article_url,
                         reason,
                     },
-                    usage,
                 );
             }
-            tracing::warn!(
-                news_item_id = snapshot.id,
-                error_code = code,
-                retryable,
-                error = %reason,
-                "news article extraction failed softly; processing will continue"
-            );
+            tracing::warn!(news_item_id=snapshot.id,error_code=code,retryable,error=%reason,"news article extraction failed softly; processing will continue");
             soft_enrichment(
                 services,
                 plan,
@@ -320,10 +351,9 @@ async fn extract_enrichment(
                 EnrichmentMutation::Failed {
                     article_url: Some(article_url.clone()),
                     final_url: Some(article_url),
-                    strategy: Some("document_extractor".to_owned()),
+                    strategy: Some("document_extractor".into()),
                     reason,
                 },
-                usage,
             )
         }
     }
@@ -334,7 +364,6 @@ fn soft_enrichment(
     plan: &OwnedWorkPlan,
     snapshot: super::model::NewsSnapshot,
     mutation: EnrichmentMutation,
-    usage: Vec<crate::content::UsageWrite>,
 ) -> HandlerExecution {
     HandlerExecution::with_finalizer(
         TaskResult::ok(),
@@ -344,7 +373,6 @@ fn soft_enrichment(
                 task_id: plan.task_id,
                 snapshot,
                 mutation,
-                usage,
                 finalized_at: Utc::now(),
             },
         ),
@@ -403,7 +431,6 @@ async fn execute_processing(
                 return processing_failure(services, plan, preparation.snapshot, &error, true);
             }
         };
-    let mut usage = Vec::new();
     let (summary, used_existing_summary) = if let Some(summary) = preparation.reusable_summary {
         tracing::info!(
             news_item_id,
@@ -472,13 +499,12 @@ async fn execute_processing(
             Ok(true) => {}
             Ok(false) => return HandlerExecution::from_result(TaskResult::defer(1)),
             Err(error) => {
-                return processing_failure_with_usage(
+                return processing_failure(
                     services,
                     plan,
                     preparation.snapshot,
                     &error.to_string(),
                     true,
-                    Vec::new(),
                 );
             }
         }
@@ -488,13 +514,12 @@ async fn execute_processing(
         let mut transaction = match services.pool.begin().await {
             Ok(transaction) => transaction,
             Err(error) => {
-                return processing_failure_with_usage(
+                return processing_failure(
                     services,
                     plan,
                     preparation.snapshot,
                     &error.to_string(),
                     true,
-                    usage,
                 );
             }
         };
@@ -504,35 +529,31 @@ async fn execute_processing(
             {
                 Ok(candidates) => candidates,
                 Err(error) => {
-                    return processing_failure_with_usage(
+                    return processing_failure(
                         services,
                         plan,
                         preparation.snapshot,
                         &error.to_string(),
                         true,
-                        usage,
                     );
                 }
             };
         if let Err(error) = transaction.commit().await {
-            return processing_failure_with_usage(
+            return processing_failure(
                 services,
                 plan,
                 preparation.snapshot,
                 &error.to_string(),
                 true,
-                usage,
             );
         }
         prefilter_relation_candidates(&item_document, candidates)
     };
-    let texts = prepare_relation_embedding_texts(
-        &item_document,
-        &candidates
-            .iter()
-            .map(|candidate| candidate.document.clone())
-            .collect::<Vec<_>>(),
-    );
+    let candidate_documents = candidates
+        .iter()
+        .map(|candidate| candidate.document.clone())
+        .collect::<Vec<_>>();
+    let texts = prepare_relation_embedding_texts(&item_document, &candidate_documents);
     let exact_match = item_document
         .exact_relation_key
         .as_ref()
@@ -541,168 +562,150 @@ async fn execute_processing(
                 .iter()
                 .any(|candidate| candidate.document.exact_relation_key.as_ref() == Some(key))
         });
+    let owners =
+        super::relation_preparation::text_sources(&item_document, &candidate_documents, &texts);
     let embeddings = if candidates.is_empty() || exact_match {
-        match EmbeddingVectorStore::new(1, Vec::<EmbeddingVector>::new()) {
-            Ok(store) => store,
-            Err(error) => {
-                return processing_failure_with_usage(
-                    services,
-                    plan,
-                    preparation.snapshot,
-                    &error.to_string(),
-                    false,
-                    usage,
-                );
-            }
-        }
+        EmbeddingVectorStore::new(1, Vec::<EmbeddingVector>::new()).expect("empty embedding store")
     } else {
-        let inputs = texts
-            .iter()
-            .map(|text| text.text.clone())
-            .collect::<Vec<_>>();
-        let call = services.gateway.embed(&inputs);
-        tokio::pin!(call);
-        let batch = tokio::select! {
-            result = &mut call => match result {
-                Ok(result) => result,
-                Err(error) => {
-                    return processing_failure_with_usage(
-                        services,
-                        plan,
-                        preparation.snapshot,
-                        &error.to_string(),
-                        error.retryable(),
-                        usage,
-                    );
-                }
-            },
-            () = lease.wait_for_ownership_loss() => {
-                return processing_failure_with_usage(
-                    services,
-                    plan,
-                    preparation.snapshot,
-                    "queue lease was lost during relation embeddings",
-                    true,
-                    usage,
-                );
-            }
-        };
-        usage.push(ModelUsageWrite {
-            provider: "openrouter".to_owned(),
-            model: batch.model.clone(),
-            feature: "news_processing",
-            operation: "news_processing.embed_relations",
-            provider_response_id: batch.provider_response_id,
-            usage: batch.usage,
-            metadata: json!({
-                "news_item_id": news_item_id,
-                "source_type": preparation.snapshot.source_type.as_deref(),
-                "text_count": inputs.len(),
-            }),
-        });
-        let dimensions = batch.vectors.first().map_or(0, Vec::len);
-        let vectors = texts
-            .iter()
-            .zip(batch.vectors)
-            .map(|(text, vector)| EmbeddingVector {
-                id: text.id.clone(),
-                text_sha256: text.text_sha256.clone(),
-                vector,
-            })
-            .collect::<Vec<_>>();
-        match EmbeddingVectorStore::new(dimensions, vectors) {
+        let prepared = prepare_relation_vectors(
+            services,
+            plan,
+            &preparation.snapshot,
+            &texts,
+            &owners,
+            &std::iter::once(news_item_id)
+                .chain(candidate_documents.iter().map(|document| document.id))
+                .collect::<Vec<_>>(),
+            &mut lease,
+        )
+        .await;
+        match prepared {
             Ok(store) => store,
-            Err(error) => {
-                return processing_failure_with_usage(
-                    services,
-                    plan,
-                    preparation.snapshot,
-                    &error.to_string(),
-                    true,
-                    usage,
-                );
+            Err((error, retryable)) => {
+                return processing_failure(services, plan, preparation.snapshot, &error, retryable);
             }
         }
     };
     let relation = match related_representatives(
         &item_document,
-        &candidates
-            .iter()
-            .map(|candidate| candidate.document.clone())
-            .collect::<Vec<_>>(),
+        &candidate_documents,
         services.relation_thresholds,
         &embeddings,
     ) {
         Ok(relation) => relation,
         Err(error) => {
-            return processing_failure_with_usage(
+            return processing_failure(
                 services,
                 plan,
                 preparation.snapshot,
                 &error.to_string(),
                 true,
-                usage,
             );
         }
     };
-    let relevant_links = if relation.accepted_ids.is_empty() {
-        match article_body
-            .as_deref()
-            .and_then(|body| relevant_link_input(&preparation.snapshot, body))
+    let links_prepared = relation.accepted_ids.is_empty();
+    let link_input = article_body
+        .as_deref()
+        .and_then(|body| relevant_link_input(&preparation.snapshot, body));
+    let link_identity = newsly_domain::relation_embedding_key(&json!({
+        "source_fingerprint": preparation.snapshot.fingerprint,
+        "input": link_input.as_ref().map(|input| json!({"title":input.title,"source_url":input.source_url,"candidates":input.candidates})),
+        "prompt_version": 1,
+    }).to_string());
+    let cached_links = if links_prepared {
+        let mut connection = match services.pool.acquire().await {
+            Ok(value) => value,
+            Err(error) => return plain_failure(error.to_string(), true),
+        };
+        match super::relation_preparation::load_links(
+            &mut connection,
+            news_item_id,
+            &link_identity,
+            services.gateway.link_model(),
+        )
+        .await
         {
-            Some(input) => {
-                let usage_sink = Arc::new(AgentUsageRecorder::new(
-                    services.pool.clone(),
-                    AgentUsageAttribution {
-                        operation: "news_processing.select_article_links".to_owned(),
-                        source: "queue".to_owned(),
-                        task_id: plan.task_id,
-                        content_id: None,
-                        session_id: None,
-                        message_id: None,
-                        user_id: preparation.snapshot.owner_user_id,
-                    },
-                ));
-                let call = services.gateway.select_relevant_links_with_events(
-                    input.title.as_deref(),
-                    input.source_url.as_deref(),
-                    &input.candidates,
-                    usage_sink.clone(),
-                );
-                tokio::pin!(call);
-                let selection = tokio::select! {
-                    result = &mut call => Some(result),
-                    () = lease.wait_for_ownership_loss() => None,
-                };
-                usage_sink.finish().await;
-                let Some(selection) = selection else {
-                    return processing_failure_with_usage(
-                        services,
-                        plan,
-                        preparation.snapshot,
-                        "queue lease was lost during relevant-link selection",
-                        true,
-                        usage,
-                    );
-                };
-                match selection {
-                    Ok(selected) => Some(selected.links),
-                    Err(error) => {
-                        tracing::warn!(
-                            news_item_id,
-                            error = %error,
-                            "relevant-link selection failed closed"
-                        );
-                        None
-                    }
-                }
-            }
-            None => None,
+            Ok(value) => value,
+            Err(error) => return plain_failure(error.to_string(), true),
         }
     } else {
         None
     };
-    let relation_trace = serde_json::to_value(&relation).unwrap_or_else(|_| json!({}));
+    let relevant_links = if let Some(links) = cached_links {
+        links
+    } else {
+        let links = if relation.accepted_ids.is_empty() {
+            match link_input {
+                Some(input) => {
+                    let usage_sink = Arc::new(AgentUsageRecorder::new(
+                        services.pool.clone(),
+                        AgentUsageAttribution {
+                            operation: "news_processing.select_article_links".to_owned(),
+                            source: "queue".to_owned(),
+                            task_id: plan.task_id,
+                            content_id: None,
+                            session_id: None,
+                            message_id: None,
+                            user_id: preparation.snapshot.owner_user_id,
+                        },
+                    ));
+                    let call = services.gateway.select_relevant_links_with_events(
+                        input.title.as_deref(),
+                        input.source_url.as_deref(),
+                        &input.candidates,
+                        usage_sink.clone(),
+                    );
+                    tokio::pin!(call);
+                    let selection = tokio::select! {
+                        result = &mut call => Some(result),
+                        () = lease.wait_for_ownership_loss() => None,
+                    };
+                    usage_sink.finish().await;
+                    let Some(selection) = selection else {
+                        return processing_failure(
+                            services,
+                            plan,
+                            preparation.snapshot,
+                            "queue lease was lost during relevant-link selection",
+                            true,
+                        );
+                    };
+                    match selection {
+                        Ok(selected) => Some(selected.links),
+                        Err(error) => {
+                            tracing::warn!(
+                                news_item_id,
+                                error = %error,
+                                "relevant-link selection failed closed"
+                            );
+                            None
+                        }
+                    }
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        if links_prepared {
+            let mut connection = match services.pool.acquire().await {
+                Ok(value) => value,
+                Err(error) => return plain_failure(error.to_string(), true),
+            };
+            if let Err(error) = super::relation_preparation::save_links(
+                &mut connection,
+                news_item_id,
+                &link_identity,
+                services.gateway.link_model(),
+                links.as_deref(),
+            )
+            .await
+            {
+                return plain_failure(error.to_string(), true);
+            }
+        }
+        links
+    };
     HandlerExecution::with_finalizer(
         TaskResult::ok(),
         ProcessNewsFinalizer::new(
@@ -713,15 +716,13 @@ async fn execute_processing(
                 mutation: Some(ProcessMutation {
                     summary,
                     used_existing_summary,
+                    relation_model: services.gateway.embedding_model().to_owned(),
+                    relation_thresholds: services.relation_thresholds,
+                    links_prepared,
                     item_document,
-                    candidates,
-                    accepted_ids: relation.accepted_ids,
                     relevant_links,
-                    relation_trace,
-                    usage,
                 }),
                 failure: None,
-                failure_usage: Vec::new(),
                 terminal_failure: false,
                 finalized_at: Utc::now(),
                 briefing_debounce_seconds: services.briefing_debounce_seconds,
@@ -729,6 +730,120 @@ async fn execute_processing(
             },
         ),
     )
+}
+
+async fn prepare_relation_vectors(
+    services: &NewsItemWorkerServices,
+    plan: &OwnedWorkPlan,
+    snapshot: &super::model::NewsSnapshot,
+    texts: &[newsly_domain::RelationEmbeddingText],
+    owners: &[i64],
+    authorized_sources: &[i64],
+    lease: &mut LeaseHealth,
+) -> Result<EmbeddingVectorStore, (String, bool)> {
+    let model = services.gateway.embedding_model();
+    let mut vectors = {
+        let mut connection = services
+            .pool
+            .acquire()
+            .await
+            .map_err(|error| (error.to_string(), true))?;
+        super::relation_preparation::load_vectors(&mut connection, texts, authorized_sources, model)
+            .await
+            .map_err(|error| (error.to_string(), true))?
+    };
+    let missing = vectors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, vector)| vector.is_none().then_some(index))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        tracing::info!(
+            news_item_id = snapshot.id,
+            source_type = snapshot.source_type.as_deref(),
+            missing_text_count = missing.len(),
+            model,
+            "preparing missing News relation vectors"
+        );
+        let inputs = missing
+            .iter()
+            .map(|index| texts[*index].text.clone())
+            .collect::<Vec<_>>();
+        let call = services.gateway.embed(&inputs);
+        tokio::pin!(call);
+        let batch = tokio::select! {
+            result = &mut call => result.map_err(|error| (error.to_string(), error.retryable()))?,
+            () = lease.wait_for_ownership_loss() => return Err(("queue lease lost during relation embeddings".into(), true)),
+        };
+        // Observed costs survive invalid vectors, stale publication, cancellation and lease loss.
+        let recorder = AgentUsageRecorder::new(
+            services.pool.clone(),
+            AgentUsageAttribution {
+                operation: "news_processing.embed_relations".into(),
+                source: "queue".into(),
+                task_id: plan.task_id,
+                content_id: None,
+                session_id: None,
+                message_id: None,
+                user_id: snapshot.owner_user_id,
+            },
+        );
+        recorder
+            .record(newsly_agent_runtime::AgentModelUsageObservation {
+                run_id: uuid::Uuid::new_v4(),
+                sequence: 1,
+                feature: "news_processing".into(),
+                provider: "openrouter".into(),
+                model: batch.model,
+                endpoint: "embeddings".into(),
+                response_id: batch.provider_response_id,
+                provider_request_id: None,
+                requested_service_tier: None,
+                processing_tier: None,
+                usage_is_observed: true,
+                provider_reported_cost_usd: None,
+                usage: batch.usage,
+            })
+            .map_err(|error| (error.to_string(), true))?;
+        recorder.finish().await;
+        if batch.vectors.len() != missing.len() {
+            return Err(("relation embedding response count mismatch".into(), true));
+        }
+        let missing_texts = missing
+            .iter()
+            .map(|index| texts[*index].clone())
+            .collect::<Vec<_>>();
+        let missing_owners = missing
+            .iter()
+            .map(|index| owners[*index])
+            .collect::<Vec<_>>();
+        super::relation_preparation::vector_store(&missing_texts, batch.vectors.clone())
+            .map_err(|error| (error.to_string(), true))?;
+        {
+            let mut connection = services
+                .pool
+                .acquire()
+                .await
+                .map_err(|error| (error.to_string(), true))?;
+            super::relation_preparation::save_vectors(
+                &mut connection,
+                &missing_texts,
+                &missing_owners,
+                model,
+                &batch.vectors,
+            )
+            .await
+            .map_err(|error| (error.to_string(), true))?;
+        }
+        for (index, vector) in missing.into_iter().zip(batch.vectors) {
+            vectors[index] = Some(vector);
+        }
+    }
+    super::relation_preparation::vector_store(
+        texts,
+        vectors.into_iter().map(Option::unwrap).collect(),
+    )
+    .map_err(|error| (error.to_string(), true))
 }
 
 enum BodyRead {
@@ -768,17 +883,6 @@ fn processing_failure(
     error: &str,
     retryable: bool,
 ) -> HandlerExecution {
-    processing_failure_with_usage(services, plan, snapshot, error, retryable, Vec::new())
-}
-
-fn processing_failure_with_usage(
-    services: &NewsItemWorkerServices,
-    plan: &OwnedWorkPlan,
-    snapshot: super::model::NewsSnapshot,
-    error: &str,
-    retryable: bool,
-    usage: Vec<ModelUsageWrite>,
-) -> HandlerExecution {
     let terminal = !retryable || plan.retry_count >= services.max_retries.max(0);
     HandlerExecution::with_finalizer(
         TaskResult::fail(Some(error.to_owned()), retryable),
@@ -789,7 +893,6 @@ fn processing_failure_with_usage(
                 snapshot,
                 mutation: None,
                 failure: Some(error.to_owned()),
-                failure_usage: usage,
                 terminal_failure: terminal,
                 finalized_at: Utc::now(),
                 briefing_debounce_seconds: services.briefing_debounce_seconds,

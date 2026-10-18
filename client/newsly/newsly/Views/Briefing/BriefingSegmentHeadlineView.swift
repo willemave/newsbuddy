@@ -58,6 +58,7 @@ struct BriefingSegmentHeadlineView: View {
     let headline: BriefingSegmentHeadline
     let segmentID: Int
     let onOpenSource: (String) -> Void
+    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
 
     private var timestamp: String {
         headline.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
@@ -100,6 +101,7 @@ struct BriefingSegmentHeadlineView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(BriefingHeadlineButtonStyle())
+        .briefingSourceMenu(sourceKey: headline.sourceKey, onAction: onSourceAction)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             [headline.title, headline.publisher, headline.meta, timestamp]

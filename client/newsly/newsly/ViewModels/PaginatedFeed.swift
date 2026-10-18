@@ -15,6 +15,12 @@ enum LoadPhase: Equatable {
     case error(String)
 }
 
+enum PageReadResult: Equatable {
+    case succeeded
+    case failed(String)
+    case cancelled
+}
+
 struct Page<Item: Identifiable & Sendable>: Sendable where Item.ID: Sendable {
     let items: [Item]
     let nextCursor: String?
@@ -86,11 +92,27 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         )
     }
 
-    func refresh() async {
+    @discardableResult
+    func refresh() async -> PageReadResult {
         await requestPage(
             cursor: nil,
             loadingPhase: items.isEmpty ? .initialLoading : .loaded,
             mode: .replace(clearExistingItems: false)
+        )
+    }
+
+    /// Refresh every loaded page so background observation preserves scroll
+    /// depth and can update processing items beyond the first page.
+    @discardableResult
+    func refreshLoadedPages(
+        isOrderedBefore: @escaping (Item, Item) -> Bool
+    ) async -> PageReadResult {
+        guard let boundary = items.last else { return await refresh() }
+        return await requestPage(
+            cursor: nil,
+            loadingPhase: items.isEmpty ? .initialLoading : .loaded,
+            mode: .replace(clearExistingItems: false),
+            precedesLoadedBoundary: { isOrderedBefore($0, boundary) }
         )
     }
 
@@ -148,11 +170,13 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         case append
     }
 
+    @discardableResult
     private func requestPage(
         cursor: String?,
         loadingPhase: LoadPhase,
-        mode: RequestMode
-    ) async {
+        mode: RequestMode,
+        precedesLoadedBoundary: ((Item) -> Bool)? = nil
+    ) async -> PageReadResult {
         requestGeneration += 1
         let generation = requestGeneration
         requestTask?.cancel()
@@ -169,7 +193,23 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
 
         let loader = loadPage
         let task = Task {
-            try await loader(cursor, generation)
+            var page = try await loader(cursor, generation)
+            var visitedCursors = Set<String>()
+            var existingIDs = Set(page.items.map(\.id))
+            while let precedesLoadedBoundary, page.hasMore,
+                  page.items.last.map(precedesLoadedBoundary) ?? true {
+                try Task.checkCancellation()
+                guard let next = page.nextCursor, visitedCursors.insert(next).inserted else {
+                    throw URLError(.cannotParseResponse)
+                }
+                let additional = try await loader(next, generation)
+                page = Page(
+                    items: page.items + additional.items.filter { existingIDs.insert($0.id).inserted },
+                    nextCursor: additional.nextCursor,
+                    hasMore: additional.hasMore
+                )
+            }
+            return page
         }
         requestTask = task
 
@@ -179,25 +219,29 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
             } onCancel: {
                 task.cancel()
             }
-            guard generation == requestGeneration else { return }
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { return .cancelled }
 
             apply(page: page, mode: mode)
             phase = items.isEmpty ? .empty : .loaded
             requestTask = nil
             phaseBeforeRequest = nil
             isRequestInFlight = false
+            return .succeeded
         } catch where ClientFailure.classify(error) == .cancelled {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration else { return .cancelled }
             phase = previousPhase
             requestTask = nil
             phaseBeforeRequest = nil
             isRequestInFlight = false
+            return .cancelled
         } catch {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration else { return .cancelled }
             phase = .error(error.localizedDescription)
             requestTask = nil
             phaseBeforeRequest = nil
             isRequestInFlight = false
+            return .failed(error.localizedDescription)
         }
     }
 

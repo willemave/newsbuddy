@@ -23,7 +23,7 @@ async fn summary_checkpoint_survives_relation_failure_but_rejects_changed_input(
     tx.commit().await.unwrap();
     let summary: newsly_providers::NewsSummary = serde_json::from_value(json!({
         "title":"Saved summary", "article_url":"https://example.com/story", "key_points":["A fact"],
-        "summary":"A saved summary", "classification":"to_read", "summarization_date":Utc::now()
+        "summary":"A saved summary", "classification":"skip", "summarization_date":Utc::now()
     }))
     .unwrap();
     assert!(
@@ -130,7 +130,6 @@ async fn refetch_discovery_time_preserves_news_work_but_title_changes_invalidate
         article_url: Some("https://example.com/story".to_owned()),
         key_points: vec!["A fact".to_owned()],
         summary: "A saved summary".to_owned(),
-        classification: newsly_providers::NewsClassification::ToRead,
         summarization_date: Utc::now(),
     };
     assert!(
@@ -312,21 +311,19 @@ async fn polling_metrics_preserve_news_work_and_prompts_but_evidence_changes_do_
         .await
         .unwrap();
     let mutation = ProcessMutation {
+        relation_model: "test-model".into(),
+        relation_thresholds: newsly_domain::RelationThresholds::default(),
+        links_prepared: true,
         item_document: prepared.snapshot.relation_document(&summary),
         summary,
         used_existing_summary: false,
-        candidates: Vec::new(),
-        accepted_ids: Vec::new(),
         relevant_links: None,
-        relation_trace: json!({}),
-        usage: Vec::new(),
     };
     let plan = ProcessFinalizationPlan {
         task_id: claim.id,
         snapshot: prepared.snapshot,
         mutation: Some(mutation),
         failure: None,
-        failure_usage: Vec::new(),
         terminal_failure: false,
         finalized_at: Utc::now(),
         briefing_debounce_seconds: 0,

@@ -14,6 +14,10 @@ struct E2EVisualStateView: View {
         case "landing":
             LandingView()
                 .environment(authViewModel)
+        case "news-filter":
+            E2ENewsFilterVisualState()
+        case "onboarding-news-filter":
+            OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .reddit)) { _ in }
         case "onboarding-intro":
             OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .intro)) { _ in }
         case "onboarding-audio":
@@ -22,6 +26,8 @@ struct E2EVisualStateView: View {
             OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .loading)) { _ in }
         case "briefing-dig-markdown":
             E2EBriefingDigMarkdownVisualState()
+        case "briefing-source-actions":
+            E2EBriefingSourceActionsVisualState()
         case "briefing-list-metadata":
             E2EBriefingListMetadataVisualState()
         case "briefing-loading":
@@ -141,7 +147,11 @@ struct E2EVisualStateView: View {
             onboardingStateStore: OnboardingStateStore(defaults: defaults)
         )
         viewModel.step = step
-        viewModel.isPersonalized = step == .audio || step == .loading
+        viewModel.isPersonalized = step == .audio || step == .loading || step == .reddit
+        if step == .reddit {
+            viewModel.discoveryRunId = 999_902
+            viewModel.updateNewsFilter(text: "Space launches, but never celebrity news or sports.", enabled: true)
+        }
         if step == .audio {
             viewModel.audioState = .recording
             viewModel.audioDurationSeconds = 2
@@ -268,81 +278,128 @@ private struct E2EKnowledgeProcessingVisualState: View {
 }
 
 private struct E2EDetailActionBarVisualState: View {
-    private static let content = ContentDetail(
-        api: APIContentDetailResponse(
-            id: 999_902,
-            contentType: .podcast,
-            url: "https://example.invalid/episode",
-            sourceUrl: nil,
-            discussionUrl: nil,
-            title: "A calmer way to follow the news",
-            displayTitle: "A calmer way to follow the news",
-            source: "Newsbuddy Radio",
-            status: .completed,
-            errorMessage: nil,
-            retryCount: 0,
-            metadata: [:],
-            createdAt: Date(timeIntervalSince1970: 0),
-            updatedAt: nil,
-            processedAt: nil,
-            checkedOutBy: nil,
-            checkedOutAt: nil,
-            publicationDate: nil,
-            summary: nil,
-            shortSummary: nil,
-            summaryKind: nil,
-            summaryVersion: nil,
-            structuredSummary: nil,
-            longformArtifact: nil,
-            feedPreview: nil,
-            artifactType: nil,
-            previewBullets: nil,
-            reasonToRead: nil,
-            fullMarkdown: nil,
-            bodyKind: nil,
-            bodyFormat: nil,
-            newsArticleUrl: nil,
-            newsDiscussionUrl: nil,
-            newsKeyPoints: nil,
-            newsSummary: nil,
-            imageUrl: nil,
-            thumbnailUrl: nil,
-            detectedFeed: nil
+    private static let content = content(id: 999_902, type: .podcast)
+    private static let article = content(id: 999_903, type: .article)
+
+    private static func content(id: Int, type: APIContentType) -> ContentDetail {
+        ContentDetail(
+            api: APIContentDetailResponse(
+                id: id,
+                contentType: type,
+                url: "https://example.com/",
+                sourceUrl: nil,
+                discussionUrl: nil,
+                title: "A calmer way to follow the news",
+                displayTitle: "A calmer way to follow the news",
+                source: "Newsbuddy Radio",
+                status: .completed,
+                errorMessage: nil,
+                retryCount: 0,
+                metadata: [:],
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: nil,
+                processedAt: nil,
+                checkedOutBy: nil,
+                checkedOutAt: nil,
+                publicationDate: nil,
+                summary: nil,
+                shortSummary: nil,
+                summaryKind: nil,
+                summaryVersion: nil,
+                structuredSummary: nil,
+                longformArtifact: nil,
+                feedPreview: nil,
+                artifactType: nil,
+                previewBullets: nil,
+                reasonToRead: nil,
+                fullMarkdown: nil,
+                bodyKind: nil,
+                bodyFormat: nil,
+                newsArticleUrl: nil,
+                newsDiscussionUrl: nil,
+                newsKeyPoints: nil,
+                newsSummary: nil,
+                imageUrl: nil,
+                thumbnailUrl: nil,
+                detectedFeed: nil
+            )
         )
+    }
+
+    private static let readerBody = ContentBody(
+        contentId: 999_902,
+        variant: "rendered",
+        kind: "transcript",
+        format: "markdown",
+        text: """
+        **Host:** Welcome back. Today we're asking whether following the news has to feel like drinking from a firehose.
+
+        **Guest:** It doesn't. The trick is choosing a few sources you trust and letting them come to you, instead of refreshing all day.
+
+        **Host:** So fewer inputs, read more carefully.
+
+        **Guest:** Exactly. Depth beats volume, and you remember more of what you read.
+        """,
+        updatedAt: nil
     )
+
+    @State private var showsReader = false
+    @State private var showsDeckCreate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("DETAIL ACTIONS")
                 .kicker()
 
-            DetailActionBar(
-                content: Self.content,
-                overlaid: false,
-                externalURL: URL(string: Self.content.url),
-                canShowReader: true,
-                isLoadingReaderBody: false,
-                isConverting: false,
-                supportsPodcastAudio: true,
-                isPodcastAudioLoading: false,
-                isPodcastAudioActive: false,
-                podcastAudioAccessibilityLabel: "Play episode",
-                onOpenExternal: { _ in },
-                onShare: {},
-                readerTransitionNamespace: nil,
-                onOpenReader: {},
-                onDownloadMore: {},
-                onConvertLinkedArticle: {},
-                onToggleKnowledgeSave: {},
-                onPodcastAudio: {},
-                onPodcastAudioSpeed: { _ in },
-                onOpenKnowledgeActions: {}
-            )
+            Text("PODCAST").kicker()
+            actionBar(for: Self.content)
+            Text("ARTICLE").kicker()
+            actionBar(for: Self.article)
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 120)
         .background(Color.surfacePrimary)
+        .fullScreenCover(isPresented: $showsReader) {
+            ArticleReaderView(
+                content: Self.content,
+                articleBody: Self.readerBody,
+                isLoading: false,
+                errorMessage: nil,
+                showsReaderText: true,
+                onRetry: {},
+                onDigDeeper: { _ in }
+            )
+        }
+        .sheet(isPresented: $showsDeckCreate) {
+            Text("Learning Deck")
+                .accessibilityIdentifier("e2e.detail.deck_create")
+        }
+    }
+
+    private func actionBar(for content: ContentDetail) -> some View {
+        DetailActionBar(
+            content: content,
+            overlaid: false,
+            externalURL: URL(string: content.url),
+            canShowReader: true,
+            isLoadingReaderBody: false,
+            isConverting: false,
+            supportsPodcastAudio: true,
+            isPodcastAudioLoading: false,
+            isPodcastAudioActive: false,
+            podcastAudioAccessibilityLabel: "Play episode",
+            onShare: {},
+            readerTransitionNamespace: nil,
+            onOpenReader: { showsReader = true },
+            onDownloadMore: {},
+            onConvertLinkedArticle: {},
+            onToggleKnowledgeSave: {},
+            onCreateDeck: { showsDeckCreate = true },
+            onPodcastAudio: {},
+            onPodcastAudioSpeed: { _ in },
+            onOpenKnowledgeActions: {}
+        )
     }
 }
 

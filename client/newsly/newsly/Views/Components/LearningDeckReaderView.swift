@@ -277,10 +277,12 @@ private struct LearningDeckReaderContent: View {
                 }
                     .padding(.top, 4)
             } else {
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(Color.brandPrimary)
-                    .accessibilityIdentifier("learning_deck.reader.generating")
+                if viewModel.isResolvingViewer {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(Color.brandPrimary)
+                        .accessibilityIdentifier("learning_deck.reader.generating")
+                }
                 Text(deck.displayTitle)
                     .font(.terracottaHeadlineSmall)
                     .foregroundStyle(Color.onSurface)
@@ -292,6 +294,15 @@ private struct LearningDeckReaderContent: View {
                     Text(note)
                         .font(.terracottaBodySmall)
                         .foregroundStyle(Color.onSurfaceSecondary)
+                }
+                if viewModel.isStatusObservationPaused {
+                    pillButton(
+                        "Refresh status",
+                        accessibilityIdentifier: "learning_deck.reader.refresh_status"
+                    ) {
+                        viewModel.retryViewerResolution()
+                    }
+                        .padding(.top, 4)
                 }
             }
         }

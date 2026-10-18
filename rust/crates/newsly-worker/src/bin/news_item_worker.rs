@@ -16,10 +16,34 @@ use newsly_worker::process::{
     QueueWorkerRunConfig, initialize_observability, notification_database_url, run_queue_worker,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum NewsItemWorkerMode {
+    Extraction,
+    Processing,
+}
+
+impl NewsItemWorkerMode {
+    const fn task_types(self) -> &'static [TaskType] {
+        match self {
+            Self::Extraction => &[TaskType::EnrichNewsItemArticle],
+            Self::Processing => &[TaskType::ProcessNewsItem],
+        }
+    }
+
+    const fn application_name(self) -> &'static str {
+        match self {
+            Self::Extraction => "newsly-news-extraction-worker",
+            Self::Processing => "newsly-news-processing-worker",
+        }
+    }
+}
+
 #[tokio::main]
-pub(crate) async fn main() -> Result<()> {
-    let config = NewsItemWorkerProcessConfig::from_env()
+pub(crate) async fn run(mode: NewsItemWorkerMode) -> Result<()> {
+    let mut config = NewsItemWorkerProcessConfig::from_env()
         .context("invalid Newsly Rust news-item-worker configuration")?;
+    mode.application_name()
+        .clone_into(&mut config.process.database.application_name);
     initialize_observability(&config.log_filter, config.log_format)
         .context("news-item-worker observability initialization failed")?;
 
@@ -60,7 +84,7 @@ pub(crate) async fn main() -> Result<()> {
         database.pool().clone(),
         queue.clone(),
         gateway,
-        ContentExtractionRuntime::new(extractor, firecrawl),
+        ContentExtractionRuntime::new(extractor, firecrawl, database.pool().clone()),
         body_store,
         config.max_retries,
         config.relation_thresholds,
@@ -78,13 +102,34 @@ pub(crate) async fn main() -> Result<()> {
         handlers,
         notification_database_url(config.database_url()),
         QueueWorkerRunConfig {
-            process_name: "Newsly Rust news-item worker",
+            process_name: mode.application_name(),
             worker_id: &config.worker_id,
             lease_duration: config.lease_duration,
             max_retries: config.max_retries,
-            task_types: &[TaskType::EnrichNewsItemArticle, TaskType::ProcessNewsItem],
+            task_types: mode.task_types(),
             task_type_filter: None,
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NewsItemWorkerMode, TaskType};
+
+    #[test]
+    fn extraction_and_processing_claim_disjoint_tasks() {
+        assert_eq!(
+            NewsItemWorkerMode::Extraction.task_types(),
+            &[TaskType::EnrichNewsItemArticle]
+        );
+        assert_eq!(
+            NewsItemWorkerMode::Processing.task_types(),
+            &[TaskType::ProcessNewsItem]
+        );
+        assert_ne!(
+            NewsItemWorkerMode::Extraction.application_name(),
+            NewsItemWorkerMode::Processing.application_name()
+        );
+    }
 }

@@ -100,6 +100,7 @@ final class LearningDeckReaderViewModel {
     // being generated and has no viewer URL yet.
     var resolvedViewerURL: URL?
     var isResolvingViewer = false
+    var isStatusObservationPaused = false
     var viewerFailureKind: LearningDeckViewerFailureKind?
     var isRetryingGeneration = false
     var generationStatusLabel = "Preparing your deck"
@@ -150,7 +151,7 @@ final class LearningDeckReaderViewModel {
         initialVoiceDictationAvailable: Bool = false,
         deckStatusRegistry: LearningDeckStatusRegistry? = nil,
         viewerPollIntervalNanoseconds: UInt64 = 3_000_000_000,
-        viewerPollAttemptLimit: Int = 120
+        viewerPollAttemptLimit: Int = 321
     ) {
         self.deck = deck
         self.chatService = chatService
@@ -230,6 +231,7 @@ final class LearningDeckReaderViewModel {
     }
 
     private func startViewerResolution() {
+        isStatusObservationPaused = false
         isResolvingViewer = true
         viewerFailureKind = nil
         tasks.runReplacing(.viewer) { [weak self] in
@@ -295,8 +297,9 @@ final class LearningDeckReaderViewModel {
         } catch LearningDeckStatusRegistryError.timeout {
             isResolvingViewer = false
             viewerFailureKind = nil
-            generationStatusLabel = "Taking longer than expected"
-            generationNote = "Your deck is still being prepared."
+            isStatusObservationPaused = true
+            generationStatusLabel = "Status updates paused"
+            generationNote = "Your deck may still be preparing. Refresh its status to check for updates."
         } catch {
             isResolvingViewer = false
             viewerFailureKind = .viewerResolution

@@ -9,8 +9,12 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use futures_util::{StreamExt, stream};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
+
+use super::feed_evidence::{PodcastEnrichmentBudget, enrich_podcast_results};
+use crate::ValidatedFeed;
 
 use super::{
     FAST_DISCOVER_TIMEOUT, OnboardingAudioLane, OnboardingExaUsage, OnboardingGateway,
@@ -20,6 +24,7 @@ use super::{
 pub(super) struct LaneEvidence {
     pub(super) results: Vec<WebResult>,
     pub(super) exa_usage: OnboardingExaUsage,
+    pub(super) validated_feeds: HashMap<String, ValidatedFeed>,
 }
 
 const ITUNES_SEARCH_URL: &str = "https://itunes.apple.com/search";
@@ -80,8 +85,10 @@ impl OnboardingGateway {
         &self,
         lane: &OnboardingAudioLane,
         inferred_topics: &[String],
+        enrichment: &PodcastEnrichmentBudget,
     ) -> Result<LaneEvidence, OnboardingGatewayError> {
         let mut exa_usage = OnboardingExaUsage::default();
+        let mut validated_feeds = HashMap::new();
         let mut results = match lane.target {
             OnboardingLaneTarget::Reddit => {
                 self.subreddit_results(&reddit_terms(lane, inferred_topics))
@@ -96,17 +103,36 @@ impl OnboardingGateway {
                 outcome.results
             }
             OnboardingLaneTarget::Podcasts => {
-                let mut results = self
-                    .podcast_directory_results(&podcast_terms(lane, inferred_topics))
+                let terms = podcast_terms(lane, inferred_topics);
+                let directory = async {
+                    let results = self.podcast_directory_results(&terms).await;
+                    enrich_podcast_results(results, enrichment, &format!("{}:directory", lane.name))
+                        .await
+                };
+                let web = async {
+                    let mut outcome = self.web_lane_results(lane).await;
+                    for result in &mut outcome.results {
+                        result.feed_url = explicit_feed_url(result);
+                    }
+                    self.attach_apple_podcast_feeds(&mut outcome.results).await;
+                    let (results, validated) = enrich_podcast_results(
+                        outcome.results,
+                        enrichment,
+                        &format!("{}:web", lane.name),
+                    )
                     .await;
-                let outcome = self.web_lane_results(lane).await;
+                    outcome.results = results;
+                    (outcome, validated)
+                };
+                let ((mut results, directory_validated), (outcome, web_validated)) =
+                    tokio::join!(directory, web);
                 if outcome.all_attempts_failed() && results.is_empty() {
                     return Err(OnboardingGatewayError::SearchUnavailable);
                 }
+                validated_feeds.extend(directory_validated);
+                validated_feeds.extend(web_validated);
                 exa_usage = outcome.usage;
-                let mut web = outcome.results;
-                self.attach_apple_podcast_feeds(&mut web).await;
-                results.extend(web);
+                results.extend(outcome.results);
                 results
             }
         };
@@ -117,7 +143,11 @@ impl OnboardingGateway {
             results = results.len(),
             "onboarding lane evidence collected"
         );
-        Ok(LaneEvidence { results, exa_usage })
+        Ok(LaneEvidence {
+            results,
+            exa_usage,
+            validated_feeds,
+        })
     }
 
     async fn web_lane_results(&self, lane: &OnboardingAudioLane) -> super::SearchManyOutcome {
@@ -127,41 +157,45 @@ impl OnboardingGateway {
     }
 
     async fn podcast_directory_results(&self, terms: &[String]) -> Vec<WebResult> {
-        let mut results = Vec::new();
-        for term in terms {
-            let limit = PODCASTS_PER_TERM.to_string();
-            let response = self
-                .client
-                .get(ITUNES_SEARCH_URL)
-                .timeout(DIRECTORY_TIMEOUT)
-                .query(&[
-                    ("media", "podcast"),
-                    ("entity", "podcast"),
-                    ("limit", limit.as_str()),
-                    ("term", term.as_str()),
-                ])
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            let rows = match response {
-                Ok(response) => match response.json::<ItunesResponse>().await {
-                    Ok(body) => body.results,
-                    Err(error) => {
-                        tracing::warn!(error = %error, term, "podcast directory response was invalid");
-                        continue;
-                    }
-                },
+        let groups = stream::iter(terms.to_vec())
+            .map(|term| async move { self.podcast_directory_term(&term).await })
+            .buffered(MAX_DIRECTORY_TERMS)
+            .collect::<Vec<_>>()
+            .await;
+        super::balanced_web_results(groups, MAX_DIRECTORY_TERMS * PODCASTS_PER_TERM)
+    }
+
+    async fn podcast_directory_term(&self, term: &str) -> Vec<WebResult> {
+        let limit = PODCASTS_PER_TERM.to_string();
+        let response = self
+            .client
+            .get(ITUNES_SEARCH_URL)
+            .timeout(DIRECTORY_TIMEOUT)
+            .query(&[
+                ("media", "podcast"),
+                ("entity", "podcast"),
+                ("limit", limit.as_str()),
+                ("term", term),
+            ])
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status);
+        let rows = match response {
+            Ok(response) => match response.json::<ItunesResponse>().await {
+                Ok(body) => body.results,
                 Err(error) => {
-                    tracing::warn!(error = %error, term, "podcast directory search failed");
-                    continue;
+                    tracing::warn!(error = %error, term, "podcast directory response was invalid");
+                    return Vec::new();
                 }
-            };
-            results.extend(
-                rows.into_iter()
-                    .filter_map(|row| podcast_directory_result(row, term)),
-            );
-        }
-        results
+            },
+            Err(error) => {
+                tracing::warn!(error = %error, term, "podcast directory search failed");
+                return Vec::new();
+            }
+        };
+        rows.into_iter()
+            .filter_map(|row| podcast_directory_result(row, term))
+            .collect()
     }
 
     /// Appends the RSS feed to web results that are Apple Podcasts show pages, so the model can
@@ -204,6 +238,7 @@ impl OnboardingGateway {
             };
             let snippet = result.snippet.take().unwrap_or_default();
             result.snippet = Some(format!("RSS feed: {feed}. {snippet}"));
+            result.feed_url = Some(feed.clone());
         }
     }
 
@@ -219,45 +254,55 @@ impl OnboardingGateway {
                 return Vec::new();
             }
         };
-        let mut results = Vec::new();
-        for term in terms {
-            let limit = SUBREDDITS_PER_TERM.to_string();
-            let response = self
-                .client
-                .get(REDDIT_SEARCH_URL)
-                .timeout(DIRECTORY_TIMEOUT)
-                .bearer_auth(&token)
-                .header(reqwest::header::USER_AGENT, &credentials.user_agent)
-                .query(&[
-                    ("q", term.as_str()),
-                    ("limit", limit.as_str()),
-                    ("raw_json", "1"),
-                ])
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            let listing = match response {
-                Ok(response) => match response.json::<RedditListing>().await {
-                    Ok(listing) => listing,
-                    Err(error) => {
-                        tracing::warn!(error = %error, term, "Reddit community search was invalid");
-                        continue;
-                    }
-                },
+        stream::iter(terms.to_vec())
+            .map(|term| {
+                let token = &token;
+                async move { self.subreddit_term(&term, token, credentials).await }
+            })
+            .buffered(MAX_DIRECTORY_TERMS)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    async fn subreddit_term(
+        &self,
+        term: &str,
+        token: &str,
+        credentials: &RedditCredentials,
+    ) -> Vec<WebResult> {
+        let limit = SUBREDDITS_PER_TERM.to_string();
+        let response = self
+            .client
+            .get(REDDIT_SEARCH_URL)
+            .timeout(DIRECTORY_TIMEOUT)
+            .bearer_auth(token)
+            .header(reqwest::header::USER_AGENT, &credentials.user_agent)
+            .query(&[("q", term), ("limit", limit.as_str()), ("raw_json", "1")])
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status);
+        let listing = match response {
+            Ok(response) => match response.json::<RedditListing>().await {
+                Ok(listing) => listing,
                 Err(error) => {
-                    tracing::warn!(error = %error, term, "Reddit community search failed");
-                    continue;
+                    tracing::warn!(error = %error, term, "Reddit community search was invalid");
+                    return Vec::new();
                 }
-            };
-            results.extend(
-                listing
-                    .data
-                    .children
-                    .into_iter()
-                    .filter_map(|child| subreddit_result(child.data, term)),
-            );
-        }
-        results
+            },
+            Err(error) => {
+                tracing::warn!(error = %error, term, "Reddit community search failed");
+                return Vec::new();
+            }
+        };
+        listing
+            .data
+            .children
+            .into_iter()
+            .filter_map(|child| subreddit_result(child.data, term))
+            .collect()
     }
 
     async fn reddit_token(
@@ -352,6 +397,8 @@ fn podcast_directory_result(row: ItunesPodcast, term: &str) -> Option<WebResult>
         )),
         published_date: None,
         query: format!("podcast directory: {term}"),
+        feed_url: Some(feed_url),
+        feed_evidence: None,
     })
 }
 
@@ -374,6 +421,8 @@ fn subreddit_result(community: RedditCommunity, term: &str) -> Option<WebResult>
         )),
         published_date: None,
         query: format!("reddit community search: {term}"),
+        feed_url: None,
+        feed_evidence: None,
     })
 }
 
@@ -444,6 +493,35 @@ fn unique_terms(terms: impl IntoIterator<Item = String>) -> Vec<String> {
         .collect()
 }
 
+/// Only URLs present in search evidence that explicitly identify a feed, never invented paths.
+fn explicit_feed_url(result: &WebResult) -> Option<String> {
+    std::iter::once(result.url.as_str())
+        .chain(
+            result
+                .snippet
+                .as_deref()
+                .unwrap_or_default()
+                .split_whitespace(),
+        )
+        .map(|token| token.trim_matches(['<', '>', '(', ')', '[', ']', ',', '.', ';', '"']))
+        .find_map(|raw| {
+            let url = reqwest::Url::parse(raw).ok()?;
+            if !matches!(url.scheme(), "http" | "https") {
+                return None;
+            }
+            let path = url.path().trim_end_matches('/').to_ascii_lowercase();
+            let explicit = path.rsplit_once('.').is_some_and(|(_, extension)| {
+                extension.eq_ignore_ascii_case("rss") || extension.eq_ignore_ascii_case("xml")
+            }) || path.ends_with("/feed")
+                || path.ends_with("/rss")
+                || url.query_pairs().any(|(key, value)| {
+                    matches!(key.as_ref(), "format" | "feed" | "vrtx")
+                        && matches!(value.as_ref(), "rss" | "atom" | "feed")
+                });
+            explicit.then(|| url.to_string())
+        })
+}
+
 fn apple_podcast_id(url: &str) -> Option<String> {
     let url = reqwest::Url::parse(url).ok()?;
     if url.host_str()? != "podcasts.apple.com" {
@@ -507,6 +585,30 @@ mod tests {
 
         let generic = lane("Reddit", OnboardingLaneTarget::Reddit, &["best subreddits"]);
         assert_eq!(reddit_terms(&generic, &topics), vec!["Chess"]);
+    }
+
+    #[test]
+    fn direct_feed_evidence_is_recognized_without_guessing_homepage_paths() {
+        let mut row = super::WebResult {
+            title: "NORA".to_owned(),
+            url: "https://www.nora.ai/podcast/episoder?vrtx=feed".to_owned(),
+            snippet: None,
+            published_date: None,
+            query: String::new(),
+            feed_url: None,
+            feed_evidence: None,
+        };
+        assert_eq!(
+            super::explicit_feed_url(&row).as_deref(),
+            Some(row.url.as_str())
+        );
+        row.url = "https://example.com/show".to_owned();
+        assert!(super::explicit_feed_url(&row).is_none());
+        row.snippet = Some("RSS feed: https://example.com/show.xml".to_owned());
+        assert_eq!(
+            super::explicit_feed_url(&row).as_deref(),
+            Some("https://example.com/show.xml")
+        );
     }
 
     #[test]

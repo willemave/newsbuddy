@@ -20,6 +20,10 @@ struct OnboardingRedditStep: View {
                         titleAccessibilityIdentifier: "onboarding.reddit.screen"
                     )
 
+                    if viewModel.isPersonalized {
+                        OnboardingNewsFilterEditor(viewModel: viewModel)
+                    }
+
                     if viewModel.subredditSuggestions.isEmpty {
                         Text("No subreddits matched your interests. You can add them later.")
                             .font(.appCallout)

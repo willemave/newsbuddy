@@ -77,6 +77,18 @@ pub(crate) async fn submit_content_action(
     input: &ContentActionInput,
     policy: ShareSubmissionPolicy,
 ) -> Result<SubmittedShareContent, ShareSubmissionError> {
+    submit_content_action_with_channel(transaction, queue, user_id, input, policy, "share_action")
+        .await
+}
+
+pub(super) async fn submit_content_action_with_channel(
+    transaction: &mut Transaction<'_, Postgres>,
+    queue: &QueueKernel,
+    user_id: i64,
+    input: &ContentActionInput,
+    policy: ShareSubmissionPolicy,
+    submitted_via: &str,
+) -> Result<SubmittedShareContent, ShareSubmissionError> {
     let normalized_platform = input.platform.as_deref().map(str::to_ascii_lowercase);
     let applied = apply_content_submission(
         transaction,
@@ -92,7 +104,7 @@ pub(crate) async fn submit_content_action(
             save_to_knowledge_and_mark_read: policy.save_to_knowledge_and_mark_read,
             deck_source_only: policy.deck_source_only,
             user_id,
-            submitted_via: "share_action",
+            submitted_via,
         },
     )
     .await?;

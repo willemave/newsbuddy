@@ -395,6 +395,242 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
         XCTAssertEqual(store.timeline.map(\.id), ["chat-102", "saved-101"])
     }
 
+    func testNewSaveRevalidatesRecentSameActivationAndDoesNotConsumeConcurrentSave() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        var signal: String?
+        let store = makeStore(contentService: service, saveSignalToken: { signal })
+        let activation = AppLifecycle.Activation(generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil)
+        let initial = Task { await store.activate(activation) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [])
+        await initial.value
+
+        signal = "first"
+        let firstSave = Task { await store.activate(activation) }
+        await service.waitForPendingRequestCount(1)
+        signal = "second"
+        service.resolveRequest(at: 0, with: [makeSaved(id: 51, activityDate: now)])
+        await firstSave.value
+
+        let secondSave = Task { await store.activate(activation) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 52, activityDate: now)])
+        await secondSave.value
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-52"])
+        await store.activate(activation)
+        await service.waitForPendingRequestCount(0)
+    }
+
+    func testFailedSaveReadKeepsSignalPendingForSameActivation() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        var signal: String?
+        let store = makeStore(contentService: service, saveSignalToken: { signal })
+        let activation = AppLifecycle.Activation(
+            generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil
+        )
+        let initial = Task { await store.activate(activation) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [])
+        await initial.value
+        signal = "saved"
+        service.failNextRequest = true
+        await store.activate(activation)
+        XCTAssertNotNil(store.savedContent.initialLoadErrorMessage)
+        let retry = Task { await store.activate(activation) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 53, activityDate: now)])
+        await retry.value
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-53"])
+    }
+
+    func testVisibleSavedRevalidationUpdatesRowsAndStopsWhenSuspended() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        let store = makeStore(contentService: service)
+        let initial = Task { await store.activate(.init(generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil)) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 61, activityDate: now, status: .processing)])
+        await initial.value
+        XCTAssertEqual(store.savedContent.contents.first?.savedLibraryItemState, .processing)
+
+        for status in [APIContentStatus.completed, .failed] {
+            let refresh = Task { await store.revalidateSavedKnowledgeIfIdle() }
+            await service.waitForPendingRequestCount(1)
+            XCTAssertEqual(store.timeline.map(\.id), ["saved-61"])
+            service.resolveRequest(at: 0, with: [makeSaved(id: 61, activityDate: now, status: status)])
+            await refresh.value
+            XCTAssertEqual(store.savedContent.contents.first?.status, status)
+            if case .saved(let entry) = store.timeline.first {
+                XCTAssertEqual(entry.content.status, status)
+            } else { XCTFail("Saved row disappeared") }
+        }
+        store.suspendAutomaticReads()
+        await store.revalidateSavedKnowledgeIfIdle()
+        await service.waitForPendingRequestCount(0)
+    }
+
+    func testSuspendCancelsStandaloneSavedObservationAndFencesLateResponse() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        let store = makeStore(contentService: service)
+        let initial = Task { await store.activate(.init(
+            generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil
+        )) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 71, activityDate: now)])
+        await initial.value
+
+        let poll = Task { await store.revalidateSavedKnowledgeIfIdle() }
+        await service.waitForPendingRequestCount(1)
+        XCTAssertTrue(store.savedContent.isReadInFlight)
+        store.suspendAutomaticReads()
+        XCTAssertFalse(store.savedContent.isReadInFlight)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 72, activityDate: now)])
+        await poll.value
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-71"])
+        XCTAssertNil(store.savedContent.initialLoadErrorMessage)
+    }
+
+    func testSuspendCannotCancelExplicitAggregateThatPreemptedSavedObservation() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        let store = makeStore(contentService: service)
+        let initial = Task { await store.activate(.init(
+            generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil
+        )) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 81, activityDate: now)])
+        await initial.value
+
+        let poll = Task { await store.revalidateSavedKnowledgeIfIdle() }
+        await service.waitForPendingRequestCount(1)
+        let explicit = Task { await store.forceReload() }
+        await service.waitForPendingRequestCount(2)
+        store.suspendAutomaticReads()
+        XCTAssertTrue(store.savedContent.isReadInFlight)
+        service.resolveRequest(at: 1, with: [makeSaved(id: 82, activityDate: now)])
+        await explicit.value
+        service.resolveRequest(at: 0, with: [makeSaved(id: 83, activityDate: now)])
+        await poll.value
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-82"])
+        XCTAssertNil(store.savedContent.initialLoadErrorMessage)
+    }
+
+    func testFastObservationExpiresAndOnlyNewSaveOrActivationRestartsIt() async {
+        var date = Date()
+        var signal: String?
+        let store = makeStore(
+            saved: [makeSaved(id: 91, activityDate: date, status: .processing, createdAt: date)],
+            saveSignalToken: { signal }, now: { date }
+        )
+        let activation = AppLifecycle.Activation(
+            generation: 1, kind: .initialLaunch, occurredAt: date, backgroundDuration: nil
+        )
+        await store.activate(activation)
+        XCTAssertEqual(store.savedObservationInterval, .seconds(5))
+        date = date.addingTimeInterval(121)
+        XCTAssertEqual(store.savedObservationInterval, .seconds(30))
+        await store.activate(activation)
+        XCTAssertEqual(store.savedObservationInterval, .seconds(30))
+        signal = "new-save"
+        await store.activate(activation)
+        XCTAssertEqual(store.savedObservationInterval, .seconds(5))
+        date = date.addingTimeInterval(121)
+        await store.revalidateSavedKnowledgeIfIdle()
+        XCTAssertEqual(store.savedObservationInterval, .seconds(30))
+        await store.activate(.init(
+            generation: 2, kind: .warmResume, occurredAt: date, backgroundDuration: .seconds(30)
+        ))
+        XCTAssertEqual(store.savedObservationInterval, .seconds(5))
+    }
+
+    func testObservationRetainsLoadErrorsUntilSuccessAndNeverClearsPaginationError() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        service.nextCursor = "next"
+        let store = makeStore(contentService: service)
+        let initial = Task { await store.activate(.init(
+            generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil
+        )) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 101, activityDate: now)])
+        await initial.value
+        service.failNextRequest = true
+        await store.savedContent.loadMoreContent()
+        let paginationError = store.savedContent.loadMoreErrorMessage
+        XCTAssertNotNil(paginationError)
+        service.failNextRequest = true
+        await store.revalidateSavedKnowledgeIfIdle()
+        let loadError = store.savedContent.initialLoadErrorMessage
+        XCTAssertNotNil(loadError)
+
+        let poll = Task { await store.revalidateSavedKnowledgeIfIdle() }
+        await service.waitForPendingRequestCount(1)
+        XCTAssertEqual(store.savedContent.initialLoadErrorMessage, loadError)
+        XCTAssertEqual(store.savedContent.loadMoreErrorMessage, paginationError)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 101, activityDate: now)])
+        await poll.value
+        XCTAssertNil(store.savedContent.initialLoadErrorMessage)
+        XCTAssertEqual(store.savedContent.loadMoreErrorMessage, paginationError)
+        XCTAssertTrue(store.hasPaginationError)
+
+        let supersededPoll = Task { await store.revalidateSavedKnowledgeIfIdle() }
+        await service.waitForPendingRequestCount(1)
+        service.failNextRequest = true
+        await store.loadNextPage()
+        XCTAssertNil(store.savedContent.initialLoadErrorMessage)
+        XCTAssertNotNil(store.savedContent.loadMoreErrorMessage)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 102, activityDate: now)])
+        await supersededPoll.value
+        XCTAssertNil(store.savedContent.initialLoadErrorMessage)
+        XCTAssertNotNil(store.savedContent.loadMoreErrorMessage)
+    }
+
+    func testUserPaginationPreemptsObservationAndLatePollCannotReplaceAppendedRows() async {
+        let service = ControlledKnowledgeTimelineContentService()
+        service.nextCursor = "next"
+        var signal: String?
+        let store = makeStore(contentService: service, saveSignalToken: { signal })
+        let initial = Task { await store.activate(.init(
+            generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil
+        )) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 111, activityDate: now)])
+        await initial.value
+
+        signal = "new-save"
+        let poll = Task { await store.revalidateSavedKnowledgeIfIdle() }
+        await service.waitForPendingRequestCount(1)
+        let pagination = Task { await store.loadNextPage() }
+        await service.waitForPendingRequestCount(2)
+        service.nextCursor = nil
+        service.resolveRequest(at: 1, with: [makeSaved(id: 112, activityDate: now.addingTimeInterval(-1))])
+        await pagination.value
+        service.resolveRequest(at: 0, with: [makeSaved(id: 113, activityDate: now)])
+        await poll.value
+        XCTAssertEqual(store.savedContent.contents.map(\.id), [111, 112])
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-111", "saved-112"])
+        let signalRetry = Task { await store.activate(.init(
+            generation: 1, kind: .initialLaunch, occurredAt: now, backgroundDuration: nil
+        )) }
+        await service.waitForPendingRequestCount(1)
+        service.resolveRequest(at: 0, with: [makeSaved(id: 114, activityDate: now)])
+        await signalRetry.value
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-114"])
+    }
+
+    func testSaveSignalsArePartitionedByAccountAndServer() throws {
+        let suite = "KnowledgeSaveSignalTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = KnowledgeSaveSignalStore(defaults: defaults, server: "https://one", userID: 1)
+        let otherUser = KnowledgeSaveSignalStore(defaults: defaults, server: "https://one", userID: 2)
+        let otherServer = KnowledgeSaveSignalStore(defaults: defaults, server: "https://two", userID: 1)
+        XCTAssertNil(first.token)
+        first.recordSave()
+        let token = try XCTUnwrap(first.token)
+        XCTAssertNil(otherUser.token)
+        XCTAssertNil(otherServer.token)
+        first.recordSave()
+        XCTAssertNotEqual(first.token, token)
+    }
+
     private func makeStore(
         saved: [ContentSummary] = [],
         chatLoadFails: Bool = false,
@@ -404,6 +640,7 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
         contentService: (any ContentSummaryListServicing)? = nil,
         narrationService: (any CustomNarrationLibraryServicing)? = nil,
         freshnessPolicy: KnowledgeFreshnessPolicy = .standard,
+        saveSignalToken: @escaping () -> String? = { nil },
         now: @escaping () -> Date = Date.init
     ) -> KnowledgeTimelineViewModel {
         KnowledgeTimelineViewModel(
@@ -429,6 +666,7 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
                 readStateCache: makeTestReadStateCache()
             ),
             freshnessPolicy: freshnessPolicy,
+            saveSignalToken: saveSignalToken,
             now: now
         )
     }
@@ -444,7 +682,9 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
         )
     }
 
-    private func makeSaved(id: Int, activityDate: Date) -> ContentSummary {
+    private func makeSaved(
+        id: Int, activityDate: Date, status: APIContentStatus = .completed, createdAt: Date? = nil
+    ) -> ContentSummary {
         ContentSummary(
             id: id,
             contentType: .article,
@@ -452,9 +692,9 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
             title: "Saved \(id)",
             source: "Example",
             platform: nil,
-            status: .completed,
+            status: status,
             shortSummary: "Summary",
-            createdAt: ServerDate.format(activityDate.addingTimeInterval(-365 * 24 * 60 * 60)),
+            createdAt: ServerDate.format(createdAt ?? activityDate.addingTimeInterval(-365 * 24 * 60 * 60)),
             processedAt: nil,
             isRead: false,
             isSavedToKnowledge: true,
@@ -640,12 +880,18 @@ private final class ControlledKnowledgeTimelineContentService: ContentSummaryLis
     }
 
     private var pendingRequests: [PendingRequest] = []
+    var failNextRequest = false
+    var nextCursor: String?
 
     func fetchKnowledgeLibrary(
         query: String?,
         cursor: String?,
         limit: Int
     ) async throws -> ContentListResponse {
+        if failNextRequest {
+            failNextRequest = false
+            throw Failure.unused
+        }
         let contents = await withCheckedContinuation { continuation in
             pendingRequests.append(PendingRequest(continuation: continuation))
         }
@@ -654,8 +900,8 @@ private final class ControlledKnowledgeTimelineContentService: ContentSummaryLis
             availableDates: [],
             contentTypes: [],
             meta: PaginationMetadata(
-                nextCursor: nil,
-                hasMore: false,
+                nextCursor: nextCursor,
+                hasMore: nextCursor != nil,
                 pageSize: contents.count,
                 total: nil
             )

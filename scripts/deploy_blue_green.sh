@@ -7,6 +7,7 @@ if [[ $# -lt 1 || $# -gt 2 || ( $# -eq 2 && "$2" != --maintenance-cutover ) ]]; 
 fi
 
 image="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 maintenance_cutover=false
 if [[ "${2:-}" == --maintenance-cutover ]]; then
   maintenance_cutover=true
@@ -88,7 +89,7 @@ if [[ "${baseline_adoption}" == "true" && "${maintenance_cutover}" == "true" ]];
 fi
 
 if [[ "${maintenance_cutover}" == "true" ]]; then
-  deployment_mode="council_retirement"
+  deployment_mode="maintenance_cutover"
 elif [[ "${baseline_adoption}" == "true" ]]; then
   deployment_mode="baseline_adoption"
 else
@@ -108,7 +109,7 @@ case "${deployment_mode}" in
       exit 1
     fi
     ;;
-  council_retirement)
+  maintenance_cutover)
     writer_drain_policy="maintenance_barrier"
     route_rollback_policy="fail_closed"
     ;;
@@ -144,6 +145,34 @@ for attempt in $(seq 1 60); do
   fi
   sleep 5
 done
+
+maintenance_versions=()
+while IFS= read -r version; do
+  maintenance_versions+=("${version}")
+done < "${script_dir}/deploy/maintenance-migrations"
+maintenance_state="$(bash "${script_dir}/deploy/maintenance_migration_state.sh" "${maintenance_versions[@]}")"
+council_pending=false
+case "${maintenance_state}" in
+  pending\ *)
+    if [[ "${deployment_mode}" == online ]]; then
+      echo "Maintenance migrations ${maintenance_state#pending } are pending; explicitly use --maintenance-cutover after verifying readiness" >&2
+      exit 2
+    fi
+    case ",${maintenance_state#pending }," in
+      *,20261002010000,*) council_pending=true ;;
+    esac
+    ;;
+  fresh|none)
+    if [[ "${deployment_mode}" == maintenance_cutover ]]; then
+      echo "No maintenance migration is pending; use normal deployment" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "Could not verify maintenance migration state; refusing deployment" >&2
+    exit 2
+    ;;
+esac
 
 restorable_containers=()
 failure_restore_policy="none"
@@ -258,23 +287,27 @@ restore_processes_after_failed_deploy() {
 trap restore_processes_after_failed_deploy EXIT
 
 case "${deployment_mode}" in
-  council_retirement)
-    if [[ "$(authority_migration_state 20261002010000)" != not_applied ]]; then
-      echo "Council retirement is already applied or unverifiable; use normal deployment after verifying its state" >&2
-      exit 2
-    fi
-    echo "Running read-only council retirement preflight before stopping writers"
+  maintenance_cutover)
+    echo "Verifying database migration history with the exact image before stopping writers"
     compose --profile ops run --rm --no-deps \
       --entrypoint /usr/local/bin/newsly-db \
-      migrate verify-council-retirement
+      migrate verify-history
+    if [[ "${council_pending}" == true ]]; then
+      echo "Running read-only council retirement preflight before stopping writers"
+      compose --profile ops run --rm --no-deps \
+        --entrypoint /usr/local/bin/newsly-db \
+        migrate verify-council-retirement
+    fi
 
     echo "Entering the explicit maintenance cutover; failures leave prior writers stopped"
     # Keep restoration disabled. Migration outcome can be ambiguous, and automatic recovery must
     # never restart old binaries after a one-way cutover.
     compose stop api_blue api_green workers scheduler
-    compose --profile ops run --rm --no-deps \
-      --entrypoint /usr/local/bin/newsly-db \
-      migrate verify-council-retirement
+    if [[ "${council_pending}" == true ]]; then
+      compose --profile ops run --rm --no-deps \
+        --entrypoint /usr/local/bin/newsly-db \
+        migrate verify-council-retirement
+    fi
 
     # Every attempt takes a fresh verified backup after writers have stopped. The state directory
     # is already the deployer's durable, private host directory (also overrideable in the harness).

@@ -84,42 +84,50 @@ The production services are defined in `docker-compose.production.yml`.
 recorded in `/opt/newsly/state/active-api-slot`; Nginx reads
 `/etc/nginx/newsly-active-upstream.conf`.
 
-The command selects online deployment, baseline adoption, or council retirement once before
+The command selects online deployment, baseline adoption, or maintenance cutover once before
 migration preparation. Each mode owns its drain and rollback rules; backup creation and
 verification are shared. The existing image argument, maintenance flag, and adoption environment
 variable select the mode.
 
-### Council retirement maintenance cutover
+### Explicit maintenance cutover
 
-Migration `20261002010000` requires an explicit maintenance barrier on a populated database.
-Normal blue-green deployment refuses this pending migration while old writers remain online.
-The GitHub workflow probes SQLx history before syncing the host. A normal push refuses a pending
-retirement before mutating production. For the authorized one-time cutover, dispatch `Docker
-Deploy` on the tested `main` SHA with `council_maintenance_cutover=true`. The workflow passes the
-maintenance flag only while this migration is pending; later runs use online deployment even if
-the input was selected. Direct script calls with a stale maintenance flag refuse before draining
-writers. Retire this dispatch input, history probe and maintenance mode after production cutover
-verification and the recovery window closes.
-Before scheduling the cutover, run the exact target image's read-only `newsly-db
-verify-council-retirement` command. It reports processing message IDs and malformed session IDs
-without transcript content. Drain council work with the old worker before proceeding; stuck or
-orphaned rows require separately authorized operator investigation and repair. The migration
-never silently fails accepted work. Stop council-producing API traffic while draining if needed.
+`scripts/deploy/maintenance-migrations` lists the migrations that require stopped
+writers. The workflow runs the checked-out read-only probe before syncing the host;
+the deploy script repeats it after PostgreSQL readiness. A normal push refuses any
+pending listed migration, and unknown state fails closed. Fresh databases follow
+the normal migration path. For an authorized cutover, dispatch `Docker Deploy` on
+the tested `main` SHA with `maintenance_cutover=true`. Once the listed migrations
+are applied, the workflow uses online deployment even when that input remains
+selected. A direct script call with an unnecessary maintenance flag refuses.
 
-For the authorized release, invoke `scripts/deploy_blue_green.sh <exact-image>
---maintenance-cutover`. This explicit mode rechecks readiness, stops both API slots, workers and
-scheduler, then checks again. It creates a fresh custom-format database backup under
-`/opt/newsly/state/maintenance-backups/`, verifies its archive inventory and checksum, and runs
-the exact-image migration with the barrier attestation. It starts only the new runtime and
-disables automatic rollback/restoration of old containers, including after ambiguous migration
-failure. A failure after entering the barrier leaves old writers stopped for manual recovery.
-This mode is separate from baseline adoption and cannot be combined with it.
+The exact target image's `newsly-db verify-history` validates the applied version,
+checksum and description prefix before stopping writers. Council retirement also
+runs `verify-council-retirement` while its migration is pending; it reports bounded
+processing-message and malformed-session IDs without transcript text. Drain that
+work with the old worker first; stuck or orphaned rows need separately authorized
+repair. The new grouping/Briefing owner cutover requires both APIs, all workers and
+the scheduler to stop before migrations. It also prevents the old API pool from
+overlapping the larger worker process count.
 
-Conversion keeps parent IDs and selected follow-up message IDs; initial/retry council rows and
-alternate follow-ups remain in archived children. New database constraints reject attempts by an
-old binary to recreate active council state. Retained columns do not authorize restarting an old
-runtime after this cutover. Local databases synced from production also require stopped local
-writers and `newsly-db migrate --maintenance-barrier-confirmed` for this pending migration.
+Invoke `scripts/deploy_blue_green.sh <exact-image> --maintenance-cutover` for the
+authorized release. The shared path stops both API slots, workers and scheduler,
+creates a custom-format backup under `/opt/newsly/state/maintenance-backups/`,
+verifies its archive inventory and checksum, and runs the exact-image migration
+with barrier attestation. The grouping trigger and owner index require this
+attestation on populated databases. The owner precheck, index and SQLx history
+are transactional, so failure rolls back that migration as a unit.
+
+A failure after entering the barrier leaves old writers stopped. Start only the
+new runtime after its health checks and public-route verification succeed. Recovery
+is a forward fix; the supported migration runner rejects an older image's shorter
+history. Do not manually restart old containers. Baseline adoption remains a
+separate operation and cannot be combined with maintenance cutover.
+
+Historical council conversion keeps parent and selected follow-up message IDs;
+initial/retry council rows and alternate follow-ups remain archived. Retained
+columns do not authorize old runtime ownership. Remove obsolete versions from the
+maintenance list only after their deployment verification and recovery window have
+closed; retain the shared mode for future migrations requiring a barrier.
 
 ### SQLx baseline-adoption recovery
 

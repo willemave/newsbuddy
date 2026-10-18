@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use newsly_db::{
     Database, DatabaseConfig, adopt_existing_database, embedded_migration_count,
     run_migrations_with_barrier, verify_council_retirement, verify_existing_baseline,
+    verify_migration_history,
 };
 use secrecy::SecretString;
 
@@ -49,6 +50,8 @@ enum Command {
     },
     /// Verify that an existing database is exactly eligible for baseline adoption without writing.
     VerifyBaseline,
+    /// Verify the applied migration prefix and checksums without changing the database.
+    VerifyHistory,
     /// Report blocking council messages and malformed links without reading transcripts or writing.
     VerifyCouncilRetirement,
     /// Print the number of migrations embedded in this exact binary.
@@ -132,6 +135,13 @@ async fn main() -> Result<()> {
                     "council retirement is blocked; drain or explicitly repair the reported records before entering the maintenance barrier"
                 );
             }
+        }
+        Command::VerifyHistory => {
+            let database =
+                Database::connect_lazy(&config).context("invalid database configuration")?;
+            verify_migration_history(database.pool()).await?;
+            println!("applied migrations match this binary's ordered checksum prefix");
+            database.close().await;
         }
         Command::MigrationCount => unreachable!("handled before database initialization"),
     }

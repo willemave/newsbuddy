@@ -2,7 +2,7 @@ use super::{NewsCategoryCandidate, NewsCategoryPublicationLens, NewsCategorySnap
 use crate::briefing_refresh::{BriefingRefreshRepositoryError, lens_assignment::valid_lens_key};
 use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub async fn load_candidate(
     pool: &PgPool,
@@ -48,7 +48,6 @@ pub async fn apply_partition(
     .fetch_one(&mut **tx)
     .await?;
     let centroid_model = format!("openrouter:{}", snapshot.model);
-    let mut assignments = HashMap::new();
     for lens in lenses {
         let weight = i32::try_from(lens.story_ids.len())
             .unwrap_or(32)
@@ -64,9 +63,6 @@ pub async fn apply_partition(
             .bind(json!(lens.centroid)).bind(weight).bind(&centroid_model).bind(&lens.routing_rule)
             .execute(&mut **tx).await?;
         next_position = next_position.saturating_add(1);
-        for id in &lens.story_ids {
-            assignments.insert(*id, lens.key.as_str());
-        }
     }
     // Mixed coverage is a utility lens, separate from the bounded semantic topics.
     sqlx::query(r#"INSERT INTO briefing_lenses(user_id,key,tier,title,deck,position,status,centroid_weight,accepts_news)
@@ -74,28 +70,22 @@ pub async fn apply_partition(
       ON CONFLICT(user_id,key) DO UPDATE SET accepts_news=true,status='active',retired_at=NULL"#)
         .bind(user_id).bind(next_position).execute(&mut **tx).await?;
     let fitting_ids: HashSet<i64> = snapshot.stories.iter().map(|s| s.source.id).collect();
-    let (pending_ids, pending_lens_keys): (Vec<i64>, Vec<String>) = snapshot
+    let pending_ids: Vec<i64> = snapshot
         .pending
         .iter()
         .filter(|pending| fitting_ids.contains(&pending.source_id))
-        .map(|pending| {
-            let key = assignments
-                .get(&pending.source_id)
-                .copied()
-                .unwrap_or("misc");
-            (pending.id, key.to_owned())
-        })
-        .unzip();
+        .map(|pending| pending.id)
+        .collect();
+    // Nightly fitting publishes category definitions. The next normal refresh
+    // evaluates these unpublished stories against the saved definitions.
     sqlx::query(
         r#"UPDATE briefing_pending_sources AS pending
-           SET lens_key=assignment.lens_key
-           FROM UNNEST($2::bigint[],$3::text[]) AS assignment(id,lens_key)
-           WHERE pending.id::bigint=assignment.id AND pending.user_id::bigint=$1
+           SET lens_key=NULL
+           WHERE pending.id::bigint=ANY($2::bigint[]) AND pending.user_id::bigint=$1
              AND pending.source_kind='news'"#,
     )
     .bind(user_id)
     .bind(&pending_ids)
-    .bind(&pending_lens_keys)
     .execute(&mut **tx)
     .await?;
     sqlx::query(r#"UPDATE briefing_lenses AS lens

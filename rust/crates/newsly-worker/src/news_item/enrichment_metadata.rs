@@ -1,4 +1,4 @@
-//! Product projection for article evidence and demand-scoped paid fallback.
+//! Product projection for article evidence and deferred prerequisites.
 use super::{EnrichmentMutation, NewsSnapshot, normalize_http_url};
 use chrono::Utc;
 use serde::Serialize;
@@ -25,7 +25,11 @@ pub(super) fn apply_enrichment_metadata(
     mutation: &EnrichmentMutation,
     finalized_at: chrono::DateTime<Utc>,
 ) -> Value {
+    if !matches!(mutation, EnrichmentMutation::Deferred { .. }) {
+        metadata.remove("article_extraction_resume_at");
+    }
     // A newly available full article must replace the metadata-only summary.
+    // Credit deferral also invalidates reuse before replacing the denial marker.
     if metadata
         .get("article_extraction")
         .and_then(|value| value.get("error_code"))
@@ -33,7 +37,9 @@ pub(super) fn apply_enrichment_metadata(
         == Some(newsly_db::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE)
         && matches!(
             mutation,
-            EnrichmentMutation::Storage { .. } | EnrichmentMutation::Content { .. }
+            EnrichmentMutation::Storage { .. }
+                | EnrichmentMutation::Content { .. }
+                | EnrichmentMutation::Deferred { .. }
         )
     {
         metadata.remove("summary_version");
@@ -184,6 +190,27 @@ pub(super) fn apply_enrichment_metadata(
             extracted_chars: 0,
             updated_at,
         },
+        EnrichmentMutation::Deferred {
+            article_url,
+            reason,
+            resume_at,
+        } => {
+            metadata.insert(
+                "article_extraction_resume_at".to_owned(),
+                Value::String(resume_at.to_rfc3339()),
+            );
+            EnrichmentMetadata {
+                status: "deferred",
+                source: None,
+                article_url: article_url.clone(),
+                final_url: None,
+                strategy: None,
+                error: Some(reason.clone()),
+                error_code: None,
+                extracted_chars: 0,
+                updated_at,
+            }
+        }
         EnrichmentMutation::MetadataOnly {
             article_url,
             reason,

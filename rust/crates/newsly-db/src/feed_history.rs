@@ -45,7 +45,6 @@ pub async fn load_feed_history(
                    COALESCE(NULLIF(content.title, ''), 'Untitled item') AS title,
                    content.content_type,
                    CASE
-                     WHEN content.classification = 'skip' THEN 'skipped'
                      WHEN content.status = 'completed' THEN 'completed'
                      WHEN content.status IN ('new', 'pending', 'processing', 'awaiting_image') AND task.status = 'processing' AND task.lease_expires_at > timezone('UTC', now()) THEN 'running'
                      WHEN content.status IN ('new', 'pending', 'processing', 'awaiting_image') AND task.status IN ('pending', 'processing') THEN 'queued'
@@ -54,7 +53,7 @@ pub async fn load_feed_history(
                      ELSE 'waiting'
                    END AS status,
                    CASE WHEN task.status IN ('pending', 'processing') THEN task.task_type END AS stage,
-                   CASE WHEN content.status = 'completed' AND content.classification IS DISTINCT FROM 'skip'
+                   CASE WHEN content.status = 'completed'
                         THEN content.processed_at AT TIME ZONE 'UTC' END AS processed_at,
                    content.publication_date AT TIME ZONE 'UTC' AS publication_at,
                    jsonb_build_object('duration_seconds', content.content_metadata -> 'duration_seconds') AS metadata,

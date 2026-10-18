@@ -112,11 +112,11 @@ pub async fn convert_news_item_to_learning_deck_source(
         r#"
         INSERT INTO contents (
             content_type, url, source_url, title, source, status, retry_count,
-            classification, platform, is_aggregate, content_metadata, created_at, updated_at
+            platform, is_aggregate, content_metadata, created_at, updated_at
         )
         VALUES (
             'article', $1, $1, $2, $3, 'pending', 0,
-            NULL, NULL, FALSE, '{"deck_source_only":true,"processing":{"deck_source_only":true}}'::jsonb, timezone('UTC', now()), timezone('UTC', now())
+            NULL, FALSE, '{"deck_source_only":true,"processing":{"deck_source_only":true}}'::jsonb, timezone('UTC', now()), timezone('UTC', now())
         )
         ON CONFLICT (url, content_type) DO NOTHING
         RETURNING id::bigint
@@ -216,7 +216,6 @@ const CONTENT_SOURCE_SQL: &str = r#"
                     AND inbox.content_id = content.id
                     AND inbox.status = 'inbox'
               )
-              AND (content.classification IS NULL OR content.classification <> 'skip')
           )
       )
     FOR SHARE

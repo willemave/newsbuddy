@@ -55,6 +55,9 @@ pub enum PrepareWorkOutcome {
     SkipInactiveOwner(OwnedWorkPlan),
 }
 
+mod claim;
+use claim::claim_retry_bucket;
+
 mod finalization;
 pub use finalization::FencedFinalization;
 
@@ -885,99 +888,6 @@ async fn list_claimable_retry_counts(
     Ok(query.build_query_scalar::<i32>().fetch_all(pool).await?)
 }
 
-async fn claim_retry_bucket(
-    pool: &PgPool,
-    request: &ClaimRequest,
-    retry_count: i32,
-) -> Result<Option<ClaimedTask>, QueueError> {
-    let lease_token = Uuid::new_v4();
-    let lease_seconds = normalized_lease_seconds(request.lease_duration)?;
-    let mut query = QueryBuilder::<Postgres>::new(
-        r"
-        WITH candidate AS (
-            SELECT id
-            FROM processing_tasks
-            WHERE (
-                (status = 'pending' AND available_at <= timezone('UTC', now()))
-                OR
-                (status = 'processing' AND lease_expires_at IS NOT NULL
-                    AND lease_expires_at <= timezone('UTC', now()))
-            )
-            AND retry_count =
-        ",
-    );
-    query.push_bind(retry_count);
-    query.push(" AND executor_runtime = ");
-    query.push_bind(request.runtime_scope.runtime().as_str());
-    push_optional_claim_filters(&mut query, request);
-    query.push(
-        r"
-            ORDER BY priority DESC,
-                     available_at ASC, created_at ASC, id ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-        )
-        UPDATE processing_tasks AS task
-        SET
-            status = 'processing',
-            started_at = timezone('UTC', now()),
-            locked_at = timezone('UTC', now()),
-            locked_by =
-        ",
-    );
-    query.push_bind(&request.worker_id);
-    query.push(", lease_token = ");
-    query.push_bind(lease_token);
-    query.push(", lease_expires_at = timezone('UTC', now()) + ");
-    query.push_bind(lease_seconds);
-    query.push(
-        r" * interval '1 second',
-            retry_count = CASE
-                WHEN task.status = 'processing'
-                THEN task.retry_count + 1
-                ELSE task.retry_count
-            END
-        FROM candidate
-        WHERE task.id = candidate.id
-        RETURNING
-            task.id::bigint AS id,
-            task.owner_user_id::bigint AS owner_user_id,
-            task.task_type,
-            task.content_id::bigint AS content_id,
-            task.payload,
-            task.retry_count,
-            task.status,
-            task.queue_name,
-            task.executor_runtime,
-            task.executor_version,
-            task.executor_namespace,
-            task.created_at,
-            task.available_at,
-            task.started_at,
-            task.locked_at,
-            task.locked_by,
-            task.lease_token,
-            task.lease_expires_at
-        ",
-    );
-    let mut transaction = pool.begin().await?;
-    let row = query
-        .build_query_as::<ClaimRow>()
-        .fetch_optional(&mut *transaction)
-        .await?;
-    let claim: Option<ClaimedTask> = row.map(TryInto::try_into).transpose()?;
-    if let Some(claim) = &claim {
-        if claim.locked_by != request.worker_id || claim.lease_token.get() != lease_token {
-            return Err(QueueError::ClaimOwnershipMismatch(claim.id));
-        }
-        if !request.runtime_scope.allows(&claim.executor_stamp()?) {
-            return Err(QueueError::ClaimScopeMismatch(claim.id));
-        }
-    }
-    transaction.commit().await?;
-    Ok(claim)
-}
-
 fn push_optional_claim_filters(query: &mut QueryBuilder<Postgres>, request: &ClaimRequest) {
     if let Some(task_type) = request.task_type {
         query.push(" AND task_type = ");
@@ -1310,6 +1220,10 @@ pub enum QueueError {
     #[error("owned task {0} identity is missing or inconsistent")]
     OwnedTaskIdentityMismatch(i64),
 }
+
+#[cfg(test)]
+#[path = "kernel/briefing_claim_tests.rs"]
+mod briefing_claim_tests;
 
 #[cfg(test)]
 mod tests {

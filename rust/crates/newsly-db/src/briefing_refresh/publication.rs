@@ -15,15 +15,26 @@ pub async fn apply_briefing_refresh(
     config: &BriefingRefreshConfig,
 ) -> Result<BriefingRefreshApplyOutcome, BriefingRefreshRepositoryError> {
     let prepared = &publication.prepared;
+    if !crate::news_filter::lock_active_user(transaction, prepared.user_id).await? {
+        return Err(BriefingRefreshRepositoryError::ClaimOwnershipLost);
+    }
     ensure_state(transaction, prepared.user_id, config).await?;
     let current_version = lock_state(transaction, prepared.user_id).await?;
     let version_stale = current_version != prepared.starting_version;
-    let append_current = if version_stale {
+    let mut append_current = if version_stale {
         false
     } else {
         append_publication_is_current(transaction, prepared.user_id, &publication.append_segments)
             .await?
     };
+    if prepared.mode == BriefingRefreshMode::Full && append_current {
+        append_current = full_publication_preserves_coverage(
+            transaction,
+            prepared.user_id,
+            &publication.append_segments,
+        )
+        .await?;
+    }
 
     let mut appended = 0_usize;
     let mut compacted = 0_usize;
@@ -138,6 +149,27 @@ pub async fn apply_briefing_refresh(
     })
 }
 
+async fn full_publication_preserves_coverage(
+    transaction: &mut Transaction<'static, Postgres>,
+    user_id: i64,
+    composed: &[ComposedBriefingAppend],
+) -> Result<bool, sqlx::Error> {
+    let old = sqlx::query_scalar::<_, Value>(
+        "SELECT source_keys::jsonb FROM briefing_segments
+         WHERE user_id::bigint=$1 AND status IN ('active','degraded') FOR UPDATE",
+    )
+    .bind(user_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let old_keys = old.iter().flat_map(json_strings).collect::<Vec<_>>();
+    let eligible = load_eligible_sources_for_keys(transaction, user_id, &old_keys).await?;
+    let replacement = composed
+        .iter()
+        .flat_map(|append| &append.segment.source_keys)
+        .collect::<HashSet<_>>();
+    Ok(eligible.keys().all(|key| replacement.contains(key)))
+}
+
 pub(super) async fn append_publication_is_current(
     transaction: &mut Transaction<'static, Postgres>,
     user_id: i64,
@@ -157,6 +189,22 @@ pub(super) async fn append_publication_is_current(
         return Ok(true);
     }
     let ids = expected.keys().copied().collect::<Vec<_>>();
+    let news_ids = expected
+        .values()
+        .filter(|(kind, _, _)| kind == "news")
+        .map(|(_, id, _)| *id)
+        .collect::<Vec<_>>();
+    sqlx::query(
+        "SELECT id FROM news_items WHERE id::bigint=ANY($1::bigint[]) ORDER BY id FOR SHARE",
+    )
+    .bind(news_ids)
+    .execute(&mut **transaction)
+    .await?;
+    let stale:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM briefing_pending_sources p WHERE p.user_id=$1::bigint AND p.id::bigint=ANY($2::bigint[]) AND p.source_kind='news' AND NOT COALESCE(news_filter_pending_admits($1,p.source_id,p.filter_revision,p.filter_input_hash,p.filter_outcome),false))")
+        .bind(user_id).bind(&ids).fetch_one(&mut **transaction).await?;
+    if stale {
+        return Ok(false);
+    }
     let actual = sqlx::query_as::<_, (i64, String, i64, String)>(
         r#"
         SELECT id::bigint, source_kind, source_id::bigint, lens_key

@@ -156,7 +156,6 @@ pub async fn search_accessible_content(
                 WHERE inbox.content_id = content.id AND inbox.user_id::bigint = $1 AND inbox.status = 'inbox'
             ))
             AND content.status = 'completed'
-            AND (content.classification IS NULL OR content.classification <> 'skip')
             AND (NOT $5 OR read.id IS NULL)
             AND (NOT $6 OR saved.id IS NOT NULL)
             AND (cardinality($7::text[]) = 0 OR (
