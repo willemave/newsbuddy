@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-18 — `main` — Move All News out of the Briefing toolbar
+
+- **Status:** Complete
+- **Scope:** iOS Briefing toolbar and Settings news-filter card.
+- **Decisions:** All News is an unfiltered escape hatch for the news filter, not a Briefing lens; it belongs beside News Filter in Settings. The Briefing empty-state link stays as contextual recovery.
+- **Changes:** Removed the trailing `briefing.all_news` toolbar link; Settings news card now has News Filter and All News (`settings.all_news`) rows.
+- **Validation:** iOS simulator build passes.
+- **Remaining:** None.
+- **Commits:** See git history.
+
 ### 2026-10-17 — `main` — Composition, category coherence and source discovery
 
 - **Status:** Implemented and locally validated; first-run latency target remains open.

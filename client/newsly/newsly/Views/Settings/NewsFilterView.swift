@@ -91,16 +91,30 @@ struct SettingsNewsFilterSection: View {
     @Environment(RootDependencyFactory.self) private var factory
 
     var body: some View {
-        NavigationLink {
-            NewsFilterView(service: factory.newsFilterService)
-        } label: {
-            SettingsRow(icon: "line.3.horizontal.decrease.circle", title: "News Filter") {
-                NavigationChevron()
+        VStack(spacing: 0) {
+            NavigationLink {
+                NewsFilterView(service: factory.newsFilterService)
+            } label: {
+                SettingsRow(icon: "line.3.horizontal.decrease.circle", title: "News Filter") {
+                    NavigationChevron()
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings.news_filter")
+
+            RowDivider(leadingInset: Spacing.rowHorizontal)
+
+            NavigationLink {
+                NewsFilterNewsView(service: factory.newsFilterService, filtered: false)
+            } label: {
+                SettingsRow(icon: "newspaper", title: "All News") {
+                    NavigationChevron()
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings.all_news")
         }
-        .buttonStyle(.plain)
         .settingsCard()
         .padding(.top, 12)
-        .accessibilityIdentifier("settings.news_filter")
     }
 }

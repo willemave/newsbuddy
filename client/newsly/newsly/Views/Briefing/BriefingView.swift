@@ -164,14 +164,6 @@ struct BriefingView: View {
         .screenContainer()
         .topScreenEdgeFade()
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink("All News") {
-                    NewsFilterNewsView(service: dependencyFactory.newsFilterService, filtered: false)
-                }
-                .accessibilityIdentifier("briefing.all_news")
-            }
-        }
         .overlay {
             if let markingCategoryTitle {
                 Color.black.opacity(0.15)
