@@ -21,7 +21,11 @@ final class NewsFilterViewModel {
     }
 
     var isBusy: Bool { isLoading || isSaving || isPreviewing }
-    var canApply: Bool { preference != nil && validationMessage == nil && !isBusy && !needsReload }
+    var hasChanges: Bool {
+        guard let preference else { return false }
+        return text != preference.text || enabled != preference.enabled
+    }
+    var canApply: Bool { hasChanges && validationMessage == nil && !isBusy && !needsReload }
     var canPreview: Bool {
         preference != nil && !isBusy
             && NewsFilterValidation.message(text: text, enabled: true) == nil

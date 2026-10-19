@@ -37,6 +37,19 @@ final class NewsFilterViewModelTests: XCTestCase {
         XCTAssertFalse(model.needsReload)
     }
 
+    func testApplyRequiresChangeFromSavedFilter() async {
+        let service = FakeNewsFilterService()
+        let model = NewsFilterViewModel(service: service)
+        await model.load()
+        XCTAssertFalse(model.canApply)
+        model.enabled = true
+        XCTAssertTrue(model.canApply)
+        model.enabled = false
+        XCTAssertFalse(model.canApply)
+        model.text = "original!"
+        XCTAssertTrue(model.canApply)
+    }
+
     func testBlankEnabledAndOverLimitCannotSave() async {
         let service = FakeNewsFilterService()
         let model = NewsFilterViewModel(service: service)

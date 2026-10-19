@@ -17,7 +17,22 @@ private final class E2ENewsFilterService: NewsFilterServicing {
         return preference
     }
     func preview(text: String) async throws -> APINewsFilterPreviewResponse {
-        APINewsFilterPreviewResponse(items: [])
+        APINewsFilterPreviewResponse(items: [
+            previewItem(1, "NASA confirms Artemis III crew for lunar landing", "matched"),
+            previewItem(2, "Arctic sea ice hits record low for October", "matched"),
+            previewItem(3, "Pop star announces surprise stadium tour", "filtered_out"),
+            previewItem(4, "Late goal sends league leaders through to the final", "filtered_out"),
+        ])
+    }
+    private func previewItem(_ id: Int, _ title: String, _ status: String) -> APINewsFilterNewsItem {
+        APINewsFilterNewsItem(
+            news: APINewsItemSummaryResponse(
+                id: id, contentType: .news, url: "https://example.com/\(id)", sourceUrl: nil, discussionUrl: nil,
+                title: title, source: nil, platform: nil, status: .completed, shortSummary: nil, createdAt: Date(),
+                processedAt: nil, classification: nil, publicationDate: nil, isRead: false, isSavedToKnowledge: false,
+                newsArticleUrl: nil, newsDiscussionUrl: nil, newsKeyPoints: nil, newsSummary: nil, topComment: nil,
+                commentCount: nil),
+            filterStatus: status)
     }
     func news(filtered: Bool, cursor: String?) async throws -> APINewsFilterNewsResponse {
         APINewsFilterNewsResponse(items: [], nextCursor: nil)

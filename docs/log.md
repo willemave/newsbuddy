@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-18 — `main` — News Filter settings screen restyle
+
+- **Status:** Complete
+- **Scope:** iOS News Filter settings screen, its view model, and its E2E visual state.
+- **Decisions:** Replace the stock `Form` with the Settings card idiom (toggle row card, boxed instructions editor with placeholder and counter, Preview/Apply capsule buttons, Browse card). Apply is enabled only when the draft differs from the saved filter, so the primary button never invites a no-op revision.
+- **Changes:** Rewrote `NewsFilterView` layout; added `NewsFilterViewModel.hasChanges`; E2E `news-filter` state now returns sample preview items.
+- **Validation:** Simulator build; `NewsFilterViewModelTests` (7, including new unchanged-draft case) pass; screenshots of idle, disabled-Apply and preview states checked in the `news-filter` visual state.
+- **Remaining:** None.
+- **Commits:** See git history.
+
 ### 2026-10-18 — `main` — Move All News out of the Briefing toolbar
 
 - **Status:** Complete
