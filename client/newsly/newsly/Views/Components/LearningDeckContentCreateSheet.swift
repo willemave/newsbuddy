@@ -9,7 +9,7 @@ struct LearningDeckContentCreateSheet: View {
     let content: ContentDetail
     let focusRecorder: LearningDeckFocusRecorder
     let learningDeckService: LearningDeckService
-    let onOpenDeck: (LearningDeck, URL?) -> Void
+    let onCreated: (LearningDeck) -> Void
     let onNotice: (String, String) -> Void
 
     @State private var isSubmitting = false
@@ -31,16 +31,9 @@ struct LearningDeckContentCreateSheet: View {
         defer { isSubmitting = false }
 
         do {
-            let deck = try await createDeck(for: content, interestsPrompt: interestsPrompt)
-            if deck.viewerAvailable {
-                let url = try await learningDeckService.viewerURL(deckId: deck.id)
-                onOpenDeck(deck, url)
-            } else {
-                // The deck is still generating — open the reader anyway so it can
-                // show live progress and swap in the deck when it's ready, instead
-                // of stranding the user on a dismiss-only alert.
-                onOpenDeck(deck, nil)
-            }
+            // Creation returns the user to where they started; the deck generates in
+            // the background and appears in Knowledge.
+            onCreated(try await createDeck(for: content, interestsPrompt: interestsPrompt))
             return true
         } catch where ClientFailure.classify(error) == .cancelled {
             return false

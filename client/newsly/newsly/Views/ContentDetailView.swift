@@ -81,7 +81,6 @@ private struct ContentDetailContentView: View {
     @State private var activeAlert: ViewAlert?
     @State private var activeReaderContent: ContentDetail?
     @State private var activeBrowserDestination: BrowserDestination?
-    @State private var activeLearningDeckReader: LearningDeckReaderDestination?
     @State private var discussionCoordinator: DiscussionSummaryCoordinator
     @State private var pendingScrollTarget: ContentDetailScrollTarget?
     @State private var detailScrollOffsetY: CGFloat = 0
@@ -369,16 +368,6 @@ private struct ContentDetailContentView: View {
             SafariView(url: destination.url)
                 .ignoresSafeArea()
         }
-        .fullScreenCover(item: $activeLearningDeckReader) { destination in
-            LearningDeckReaderView(
-                deck: destination.deck,
-                viewerURL: destination.url,
-                onClose: {
-                    activeLearningDeckReader = nil
-                }
-            )
-            .ignoresSafeArea(.container)
-        }
     }
 
     private func handleLifecyclePhase(_ phase: AppLifecycle.Phase) {
@@ -624,11 +613,8 @@ private struct ContentDetailContentView: View {
                     content: content,
                     focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
                     learningDeckService: dependencyFactory.learningDeckService,
-                    onOpenDeck: { deck, url in
-                        activeLearningDeckReader = LearningDeckReaderDestination(
-                            deck: deck,
-                            url: url
-                        )
+                    onCreated: { _ in
+                        dependencyFactory.toastService.show("Deck started", type: .info, duration: 2)
                     },
                     onNotice: { title, message in
                         activeAlert = ViewAlert(title: title, message: message)

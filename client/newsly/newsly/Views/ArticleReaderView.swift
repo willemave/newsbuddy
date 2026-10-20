@@ -29,7 +29,6 @@ struct ArticleReaderView: View {
     @State private var webState: ArticleWebView.LoadState = .loading
     @State private var webReloadID = 0
     @State private var showsDeckCreate = false
-    @State private var deckReaderDestination: LearningDeckReaderDestination?
     @State private var deckNotice: ViewAlert?
     @AppStorage("articleReaderBodyFontSize", store: SharedContainer.userDefaults)
     private var storedBodyFontSize: Double = 18
@@ -102,23 +101,16 @@ struct ArticleReaderView: View {
                 content: content,
                 focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
                 learningDeckService: dependencyFactory.learningDeckService,
-                onOpenDeck: { deck, url in
-                    showsDeckCreate = false
-                    deckReaderDestination = LearningDeckReaderDestination(deck: deck, url: url)
+                onCreated: { _ in
+                    dependencyFactory.toastService.show("Deck started", type: .info, duration: 2)
                 },
                 onNotice: { title, message in
                     deckNotice = ViewAlert(title: title, message: message)
                 }
             )
         }
-        .fullScreenCover(item: $deckReaderDestination) { destination in
-            LearningDeckReaderView(
-                deck: destination.deck,
-                viewerURL: destination.url,
-                onClose: { deckReaderDestination = nil }
-            )
-            .ignoresSafeArea(.container)
-        }
+        // The app's toast layer sits under this full-screen cover.
+        .withToast(service: dependencyFactory.toastService)
         .alert(item: $deckNotice) { notice in
             Alert(
                 title: Text(notice.title),
