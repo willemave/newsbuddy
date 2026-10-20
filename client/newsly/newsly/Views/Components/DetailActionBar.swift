@@ -28,93 +28,97 @@ struct DetailActionBar: View {
     let onOpenKnowledgeActions: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            // One reading entry; the reader opens on the original page when no text exists.
-            if canShowReader || externalURL != nil {
-                Button(action: onOpenReader) {
-                    if isLoadingReaderBody {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                            .frame(width: 44, height: 44)
-                    } else {
-                        actionIcon("doc.richtext")
+        // Container spacing below the row spacing: circles stay separate at
+        // rest and only flow together while pressed.
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 6) {
+                // One reading entry; the reader opens on the original page when no text exists.
+                if canShowReader || externalURL != nil {
+                    Button(action: onOpenReader) {
+                        if isLoadingReaderBody {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .frame(width: 44, height: 44)
+                        } else {
+                            actionIcon("doc.richtext")
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .detailActionBarSegment(overlaid: overlaid)
+                    .matchedContentZoomSource(id: content.id, namespace: readerTransitionNamespace)
+                    .accessibilityIdentifier("content.action.reader")
+                    .accessibilityLabel(canShowReader ? readerAccessibilityLabel : "Open original")
                 }
-                .buttonStyle(.plain)
-                .detailActionBarSegment()
-                .matchedContentZoomSource(id: content.id, namespace: readerTransitionNamespace)
-                .accessibilityIdentifier("content.action.reader")
-                .accessibilityLabel(canShowReader ? readerAccessibilityLabel : "Open original")
-            }
 
-            Button(action: onShare) {
-                actionIcon("square.and.arrow.up", verticalOffset: -1)
-            }
-            .detailActionBarSegment()
-            .accessibilityIdentifier("content.action.share")
-
-            if content.contentType == .article || content.contentType == .podcast {
-                Button(action: onDownloadMore) {
-                    actionIcon("tray.and.arrow.down")
+                Button(action: onShare) {
+                    actionIcon("square.and.arrow.up", verticalOffset: -1)
                 }
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.action.download_more")
-                .accessibilityLabel("Download more from this series")
-            }
+                .detailActionBarSegment(overlaid: overlaid)
+                .accessibilityIdentifier("content.action.share")
 
-            if content.contentType == .news {
-                Button(action: onConvertLinkedArticle) {
-                    if isConverting {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                            .frame(width: 44, height: 44)
-                    } else {
-                        knowledgeActionIcon(isSaved: false)
+                if content.contentType == .article || content.contentType == .podcast {
+                    Button(action: onDownloadMore) {
+                        actionIcon("tray.and.arrow.down")
                     }
+                    .detailActionBarSegment(overlaid: overlaid)
+                    .accessibilityIdentifier("content.action.download_more")
+                    .accessibilityLabel("Download more from this series")
                 }
-                .disabled(isConverting)
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.action.convert")
-                .accessibilityLabel("Save linked article to Knowledge")
-            }
 
-            if content.contentType != .news {
-                Button(action: onToggleKnowledgeSave) {
-                    knowledgeActionIcon(isSaved: content.isSavedToKnowledge)
+                if content.contentType == .news {
+                    Button(action: onConvertLinkedArticle) {
+                        if isConverting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .frame(width: 44, height: 44)
+                        } else {
+                            knowledgeActionIcon(isSaved: false)
+                        }
+                    }
+                    .disabled(isConverting)
+                    .detailActionBarSegment(overlaid: overlaid)
+                    .accessibilityIdentifier("content.action.convert")
+                    .accessibilityLabel("Save linked article to Knowledge")
                 }
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.action.knowledge")
-                .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
-            }
 
-            if content.contentType == .article || content.contentType == .podcast {
-                Button(action: onCreateDeck) {
-                    actionIcon("rectangle.on.rectangle")
+                if content.contentType != .news {
+                    Button(action: onToggleKnowledgeSave) {
+                        knowledgeActionIcon(isSaved: content.isSavedToKnowledge)
+                    }
+                    .detailActionBarSegment(overlaid: overlaid)
+                    .accessibilityIdentifier("content.action.knowledge")
+                    .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
                 }
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.action.create_deck")
-                .accessibilityLabel("Create Learning Deck")
-            }
 
-            if supportsPodcastAudio {
-                NarrationPressButton(
-                    isDisabled: isPodcastAudioLoading,
-                    accessibilityLabel: podcastAudioAccessibilityLabel,
-                    onTap: onPodcastAudio,
-                    onSelectPlaybackSpeed: onPodcastAudioSpeed
-                ) {
-                    podcastAudioIcon
+                if content.contentType == .article || content.contentType == .podcast {
+                    Button(action: onCreateDeck) {
+                        actionIcon("rectangle.on.rectangle")
+                    }
+                    .detailActionBarSegment(overlaid: overlaid)
+                    .accessibilityIdentifier("content.action.create_deck")
+                    .accessibilityLabel("Create Learning Deck")
                 }
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.action.podcast_audio")
-            }
 
-            Button(action: onOpenKnowledgeActions) {
-                buddyActionIcon()
+                if supportsPodcastAudio {
+                    NarrationPressButton(
+                        isDisabled: isPodcastAudioLoading,
+                        accessibilityLabel: podcastAudioAccessibilityLabel,
+                        onTap: onPodcastAudio,
+                        onSelectPlaybackSpeed: onPodcastAudioSpeed
+                    ) {
+                        podcastAudioIcon
+                    }
+                    .detailActionBarSegment(overlaid: overlaid, isActive: isPodcastAudioActive)
+                    .accessibilityIdentifier("content.action.podcast_audio")
+                }
+
+                Button(action: onOpenKnowledgeActions) {
+                    buddyActionIcon()
+                }
+                .detailActionBarSegment(overlaid: overlaid)
+                .accessibilityIdentifier("content.action.knowledge_actions")
+                .accessibilityLabel("Knowledge actions")
             }
-            .detailActionBarSegment()
-            .accessibilityIdentifier("content.action.knowledge_actions")
-            .accessibilityLabel("Knowledge actions")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 44)
@@ -135,7 +139,6 @@ struct DetailActionBar: View {
             .renderingMode(.original)
             .scaledToFit()
             .frame(width: 22, height: 22)
-            .appShadow(overlaid ? .overlayText : .none)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
     }
@@ -148,7 +151,6 @@ struct DetailActionBar: View {
         Image(systemName: icon)
             .font(.appSymbol(size: 20, weight: .regular))
             .foregroundColor(overlaid ? .white : .onSurface)
-            .appShadow(overlaid ? .overlayText : .none)
             .offset(y: verticalOffset)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
@@ -166,7 +168,6 @@ struct DetailActionBar: View {
         )
         .contentTransition(.symbolEffect(.replace))
         .animation(AppMotion.subtle, value: isSaved)
-        .appShadow(overlaid ? .overlayText : .none)
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
     }
@@ -186,8 +187,19 @@ struct DetailActionBar: View {
 }
 
 private extension View {
-    func detailActionBarSegment() -> some View {
-        self
-            .contentShape(Rectangle())
+    /// Each action is its own glass circle. Over hero art the glass is
+    /// darkened so white glyphs hold up without drop shadows; playing audio
+    /// takes the accent so the active action reads at a glance.
+    func detailActionBarSegment(overlaid: Bool, isActive: Bool = false) -> some View {
+        let glass: Glass = if isActive {
+            .regular.tint(Color.brandPrimary.opacity(0.35))
+        } else if overlaid {
+            .regular.tint(Color.black.opacity(0.28))
+        } else {
+            .floatingChrome
+        }
+        return self
+            .glassEffect(glass.interactive(), in: .circle)
+            .contentShape(Circle())
     }
 }

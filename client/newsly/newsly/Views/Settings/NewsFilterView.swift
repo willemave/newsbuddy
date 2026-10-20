@@ -128,10 +128,9 @@ struct NewsFilterView: View {
                 } label: {
                     actionLabel(model.isPreviewing ? nil : "Preview")
                         .foregroundStyle(Color.onSurface)
-                        .background(Color.surfaceSecondary, in: Capsule())
                 }
+                .buttonStyle(.glass)
                 .disabled(!model.canPreview)
-                .opacity(model.canPreview || model.isPreviewing ? 1 : 0.4)
                 .accessibilityIdentifier("news_filter.preview")
 
                 Button {
@@ -139,13 +138,13 @@ struct NewsFilterView: View {
                 } label: {
                     actionLabel(model.isSaving ? nil : "Apply")
                         .foregroundStyle(Color.surfacePrimary)
-                        .background(Color.onSurface, in: Capsule())
                 }
+                .buttonStyle(.glassProminent)
+                .tint(Color.onSurface)
                 .disabled(!model.canApply)
-                .opacity(model.canApply || model.isSaving ? 1 : 0.4)
                 .accessibilityIdentifier("news_filter.apply")
             }
-            .buttonStyle(PressableButtonStyle())
+            .buttonBorderShape(.capsule)
 
             Group {
                 if let message = model.message {

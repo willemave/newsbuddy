@@ -303,6 +303,9 @@ private struct BriefingStripPill: View {
             .matchedGeometryEffect(id: selection.id, in: selection.namespace)
             // The selected pill lends its glass to the row's sliding lens.
             .glassEffect(isSelected ? .identity : .floatingChrome.interactive(), in: .capsule)
+            // Glass does not count as hit-testable content, so the whole
+            // capsule needs an explicit shape to stay tappable.
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title), \(unreadCount) unread sources")

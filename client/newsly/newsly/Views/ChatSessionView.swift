@@ -82,15 +82,16 @@ private struct ChatSessionContent: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            chatHeader
-            Divider()
-            messageListView
-                .overlay(alignment: .leading) {
-                    edgeBackSwipeZone
-                }
-        }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Header and composer are bars rather than stacked rows, so messages
+        // scroll beneath both and get the system soft scroll-edge effect.
+        messageListView
+            .overlay(alignment: .leading) {
+                edgeBackSwipeZone
+            }
+            .safeAreaBar(edge: .top, spacing: 0) {
+                chatHeader
+            }
+            .safeAreaBar(edge: .bottom, spacing: 0) {
                 bottomDock
             }
             .offset(x: edgeBackDragOffset)
@@ -181,7 +182,6 @@ private struct ChatSessionContent: View {
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 8)
-        .background(Color.surfacePrimary.opacity(0.98))
         .accessibilityElement(children: .contain)
     }
 

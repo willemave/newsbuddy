@@ -228,6 +228,10 @@ struct BriefingLensPageView: View, Equatable {
     /// this so its first line starts at the chrome's bottom edge and rides it
     /// 1:1 while the chrome collapses.
     let topContentInset: CGFloat
+    /// Status-bar and home-indicator insets. The pager extends under both so
+    /// text runs to the screen edges instead of being clipped by the page
+    /// frame; pages add them back as content insets themselves.
+    var screenEdgeInsets = EdgeInsets()
     let onOpenSource: (String) -> Void
     var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
     let onOpenDiscussion: (APIBriefingSource) -> Void
@@ -240,6 +244,7 @@ struct BriefingLensPageView: View, Equatable {
     let onMarkSegmentSeen: (APIBriefingSegment) -> Void
     let onSetHeaderPinned: (Bool) -> Void
 
+    @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
     @State private var isPinned = false
     @State private var containerHeight: CGFloat = 0
     @State private var hasReportedFirstPassage = false
@@ -270,6 +275,7 @@ struct BriefingLensPageView: View, Equatable {
             && lhs.chromeCollapse === rhs.chromeCollapse
             && lhs.collapsibleChromeHeight == rhs.collapsibleChromeHeight
             && lhs.topContentInset == rhs.topContentInset
+            && lhs.screenEdgeInsets == rhs.screenEdgeInsets
     }
 
     /// One scroll observer owns both chrome movement and read passage. The
@@ -280,6 +286,7 @@ struct BriefingLensPageView: View, Equatable {
         var step = 0
         var containerHeight: CGFloat = 0
         var readOffset: CGFloat = 0
+        var minimizerOffset: CGFloat = 0
     }
 
     private var contentIdentity: BriefingLensContentIdentity {
@@ -298,6 +305,14 @@ struct BriefingLensPageView: View, Equatable {
         )
     }
 
+    private var pageInsets: BriefingPageInsets {
+        briefingPageInsets(
+            topContentInset: topContentInset,
+            readBoundaryY: readBoundaryY,
+            screenEdgeTop: screenEdgeInsets.top
+        )
+    }
+
     /// Guarantees every page can scroll far enough to fully collapse the
     /// chrome, so short pages never rest half-collapsed.
     private var minContentHeight: CGFloat? {
@@ -309,7 +324,8 @@ struct BriefingLensPageView: View, Equatable {
         Group {
             if let error, renderModel?.segments.isEmpty != false {
                 ErrorView(message: error) { onRetry() }
-                    .padding(.top, topContentInset)
+                    .padding(.top, pageInsets.layoutTop)
+                    .padding(.bottom, screenEdgeInsets.bottom)
                     .accessibilityIdentifier("briefing.lens_error.\(lensKey)")
             } else if let firstRunProgress, renderModel?.segments.isEmpty != false {
                 ScrollView {
@@ -317,11 +333,15 @@ struct BriefingLensPageView: View, Equatable {
                         .padding(.top, topContentInset + 24)
                         .padding(.horizontal, Spacing.appHorizontalMargin)
                 }
+                .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
+                // The bar supplies the status-bar part of the top inset.
+                .systemTopScrollEdge(height: screenEdgeInsets.top)
                 .refreshable { await onRefresh() }
             } else if let renderModel, renderModel.segments.isEmpty, !renderModel.hasMore {
                 BriefingLensEmptyView(
                     lensTitle: lensTitle,
                     topContentInset: topContentInset,
+                    screenEdgeInsets: screenEdgeInsets,
                     scrollToTopRequest: scrollToTopRequest,
                     shouldScrollToTop: shouldScrollToTop,
                     onRefresh: onRefresh
@@ -402,8 +422,12 @@ struct BriefingLensPageView: View, Equatable {
                         isEnabled: shouldScrollToTop
                     )
                     .id(contentIdentity)
-                    .contentMargins(.top, topContentInset)
-                    .contentMargins(.bottom, 40)
+                    .contentMargins(.top, pageInsets.contentMarginTop)
+                    .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
+                    // The edge effect spans the status bar and the pinned
+                    // pills. The content margin gives that height back, so the
+                    // total top inset is exactly `pageInsets.layoutTop`.
+                    .systemTopScrollEdge(height: pageInsets.scrollEdgeBar)
                     .refreshable {
                         await onRefresh()
                     }
@@ -418,10 +442,17 @@ struct BriefingLensPageView: View, Equatable {
                             collapse: min(max(pixelAligned, 0), collapsibleChromeHeight),
                             step: Int((offset / Self.scrollStep).rounded(.down)),
                             containerHeight: geometry.containerSize.height,
-                            readOffset: geometry.contentOffset.y
+                            // Measured from below the status bar, as when the
+                            // page frame stopped there, so read passage and the
+                            // read boundary stay in the same coordinates.
+                            readOffset: geometry.contentOffset.y + pageInsets.readOffsetShift,
+                            minimizerOffset: RootTabBarMinimizer.scrolledDistance(in: geometry)
                         )
                     } action: { oldProbe, probe in
                         updateReadViewport(probe)
+                        if isReadTrackingEnabled {
+                            tabBarMinimizer?.record(offset: probe.minimizerOffset, source: lensKey)
+                        }
                         guard oldProbe.collapse != probe.collapse
                                 || oldProbe.step != probe.step
                                 || oldProbe.containerHeight != probe.containerHeight else {
@@ -452,7 +483,8 @@ struct BriefingLensPageView: View, Equatable {
                 .accessibilityIdentifier("briefing.lens_page.\(lensKey)")
             } else {
                 BuddyLoadingView()
-                    .padding(.top, topContentInset)
+                    .padding(.top, pageInsets.layoutTop)
+                    .padding(.bottom, screenEdgeInsets.bottom)
                     .onAppear {
                         onLoad()
                     }
@@ -533,63 +565,6 @@ struct BriefingLensPageView: View, Equatable {
             }
         }
     }
-}
-
-private struct BriefingLensEmptyView: View {
-    let lensTitle: String
-    let topContentInset: CGFloat
-    let scrollToTopRequest: Int
-    let shouldScrollToTop: Bool
-    let onRefresh: () async -> Void
-
-    private static let topAnchor = "briefing.lens_empty.top"
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("YOU'RE CAUGHT UP")
-                        .kicker()
-
-                Text("Nothing unread here.")
-                    .font(.appTitle)
-                    .foregroundStyle(Color.onSurface)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 12)
-
-                Text("New items in \(lensTitle) will appear here as your briefing updates.")
-                    .font(.appBody)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 14)
-
-                Text("Pull down to check again.")
-                    .font(.appCaption)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .padding(.top, 24)
-                }
-                .id(Self.topAnchor)
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-                .padding(.top, 28)
-                .frame(maxWidth: 680, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .contentMargins(.top, topContentInset)
-            .contentMargins(.bottom, 40)
-            .refreshable {
-                await onRefresh()
-            }
-            .scrollsToTopOnRequest(
-                scrollToTopRequest,
-                anchor: Self.topAnchor,
-                using: proxy,
-                isEnabled: shouldScrollToTop
-            )
-        }
-        .accessibilityIdentifier("briefing.lens_empty")
-    }
-
 }
 
 struct BriefingTimelineStamp: Equatable {

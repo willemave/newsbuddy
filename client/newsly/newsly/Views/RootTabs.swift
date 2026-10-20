@@ -114,6 +114,8 @@ struct KnowledgeTab: View {
 struct RootCompactTabBarInset: View {
     let selectedTab: RootTab
     let isVisible: Bool
+    /// Read here rather than at the root, so condensing re-renders only the bar.
+    let minimizer: RootTabBarMinimizer
     let onSelect: (RootTab) -> Void
 
     var body: some View {
@@ -121,6 +123,7 @@ struct RootCompactTabBarInset: View {
             CompactTabBar(
                 items: Self.items,
                 selection: selectedTab,
+                isMinimized: minimizer.isMinimized,
                 onSelect: onSelect
             )
             .background { bottomEdgeFade }

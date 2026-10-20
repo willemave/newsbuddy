@@ -240,12 +240,11 @@ private struct ContentDetailContentView: View {
                     await Task.yield()
                     await requestInitialCommentsScrollIfNeeded(scrollProxy: scrollProxy)
                 }
-                .topScreenEdgeFade(opacity: topEdgeFadeOpacity)
+                .topScreenSoftEdge(opacity: topEdgeFadeOpacity)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { proxy in
                         VStack(alignment: .leading, spacing: 0) {
                             floatingBackButton
-                                .opacity(floatingBackOpacity)
                                 .scaleEffect(floatingBackScale)
                                 .padding(.leading, 16)
                                 .padding(.top, floatingBackTopPadding(for: proxy))
@@ -466,7 +465,10 @@ private struct ContentDetailContentView: View {
     }
 
     private var floatingBackButton: some View {
-        FloatingBackButton(style: .imageOverlay) {
+        // Darkened glass while it sits on hero art; surface glass once the art
+        // has scrolled out from under it. Glass carries its own contrast, so
+        // the button no longer fades as the reader scrolls.
+        FloatingBackButton(style: hasHeroImage && topEdgeFadeOpacity < 0.5 ? .imageOverlay : .surface) {
             detailLogger.info(
                 "[DetailNavigation] backButtonTapped surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public)"
             )
@@ -482,12 +484,6 @@ private struct ContentDetailContentView: View {
         guard distance > 0 else { return 1 }
         let raw = (detailScrollOffsetY - DetailDesign.topEdgeFadeStartOffset) / distance
         return Double(min(max(raw, 0), 1))
-    }
-
-    private var floatingBackOpacity: Double {
-        let progress = floatingBackReductionProgress
-        let opacity = 1 - progress * (1 - DetailDesign.floatingBackMinimumOpacity)
-        return Double(opacity)
     }
 
     private var floatingBackScale: CGFloat {

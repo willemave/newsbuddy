@@ -62,7 +62,6 @@ struct DetailKnowledgeActionsSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.surfacePrimary)
     }
 
     private func errorBanner(_ message: String) -> some View {

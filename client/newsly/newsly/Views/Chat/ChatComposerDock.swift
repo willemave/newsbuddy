@@ -50,17 +50,15 @@ struct ChatComposerDock: View {
                 recordingStatus
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.surfacePrimary)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
-                )
-                .appShadow(.subtle)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        // One glass dock that messages scroll beneath; it warms toward the
+        // destructive tint while recording instead of outlining the field.
+        .glassEffect(
+            isRecording ? .regular.tint(Color.statusDestructive.opacity(0.18)) : .floatingChrome,
+            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
         )
+        .animation(AppMotion.subtle, value: isRecording)
         .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 
@@ -108,14 +106,8 @@ struct ChatComposerDock: View {
                 .scaledToFit()
                 .frame(width: 22, height: 22)
                 .frame(width: 44, height: 44)
-                .background(
-                    Circle()
-                        .fill(Color.surfaceSecondary.opacity(0.72))
-                )
-                .overlay(
-                    Circle()
-                        .stroke(Color.outlineVariant.opacity(0.18), lineWidth: 1)
-                )
+                // A soft fill, not glass: the button sits inside the dock's glass.
+                .background(Circle().fill(Color.onSurface.opacity(0.08)))
         }
         .contentShape(Circle())
         .accessibilityLabel("More actions")
@@ -136,17 +128,7 @@ struct ChatComposerDock: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                // Raised surface plus a hairline, not a filled container: the darkest
-                // container rung sat between paper and border and read as disabled.
-                .background(Color.surfaceSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(
-                            isRecording ? Color.statusDestructive.opacity(0.6) : Color.borderSubtle,
-                            lineWidth: 1
-                        )
-                )
+                // Bare field: the dock's glass is the container.
                 .accessibilityLabel("Message")
                 .accessibilityIdentifier("knowledge.chat_input")
 

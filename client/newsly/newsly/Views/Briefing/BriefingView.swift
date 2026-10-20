@@ -58,6 +58,8 @@ struct BriefingView: View {
     @State private var chromeCollapse = BriefingChromeCollapseModel()
     @State private var mastheadHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
+    @State private var pagerScreenEdgeInsets = EdgeInsets()
+    @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
     @State private var listenPanelFullHeight: CGFloat = 0
     @State private var listenPanelMinimizedHeight: CGFloat = 0
     /// A tap on the minimized player reopens the full card while scrolled;
@@ -289,6 +291,7 @@ struct BriefingView: View {
                             chromeCollapse: chromeCollapse,
                             collapsibleChromeHeight: collapsibleChromeHeight,
                             topContentInset: expandedChromeHeight,
+                            screenEdgeInsets: pagerScreenEdgeInsets,
                             onOpenSource: openSource,
                             onSourceAction: handleSourceAction,
                             onOpenDiscussion: openDiscussion,
@@ -313,10 +316,27 @@ struct BriefingView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                // The page view clips its pages to its own frame, so a pager
+                // inside the safe area cut text off in hard lines under the
+                // status bar and above the home indicator.
+                .ignoresSafeArea(.container, edges: .vertical)
                 .accessibilityIdentifier("briefing.lens_pager")
             }
 
             headerChrome
+        }
+        .onGeometryChange(for: EdgeInsets.self) { proxy in
+            proxy.safeAreaInsets
+        } action: { _, insets in
+            pagerScreenEdgeInsets = insets
+        }
+        // Empty, error and Start Here pages never report a scroll, so a bar
+        // condensed on the previous page would otherwise stay condensed.
+        .onChange(of: viewModel.selectedLensKey) { _, _ in
+            tabBarMinimizer?.expand()
+        }
+        .onChange(of: viewModel.isStartHereSelected) { _, _ in
+            tabBarMinimizer?.expand()
         }
     }
 

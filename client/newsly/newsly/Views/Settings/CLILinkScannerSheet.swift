@@ -40,7 +40,7 @@ struct CLILinkScannerSheet: View {
                             }
                             UIApplication.shared.open(url)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                     }
                     .padding(24)
                 }

@@ -60,7 +60,6 @@ struct DetailShareSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.surfacePrimary)
     }
 }
 
@@ -112,6 +111,5 @@ struct DetailDownloadSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.surfacePrimary)
     }
 }

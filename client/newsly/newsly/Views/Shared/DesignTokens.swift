@@ -499,13 +499,14 @@ extension View {
         self.background(Color.surfacePrimary)
     }
 
-    /// Fade scrolled content out under the status bar instead of letting it collide
-    /// with the clock and Dynamic Island. Solid over the status bar, then a short fade.
-    /// Screens with full-bleed artwork under the status bar drive `opacity` from scroll
-    /// position so the fade only arrives once that artwork is gone.
-    func topScreenEdgeFade(fadeHeight: CGFloat = 14, opacity: Double = 1) -> some View {
+    /// Soften scrolled content under the status bar for screens that hide the
+    /// navigation bar and so get no system scroll-edge effect. A blur that thins
+    /// out downward, approximating the system soft edge rather than a solid band.
+    /// Screens with full-bleed artwork under the status bar drive `opacity` from
+    /// scroll position so the effect only arrives once that artwork is gone.
+    func topScreenSoftEdge(fadeHeight: CGFloat = 28, opacity: Double = 1) -> some View {
         overlay(alignment: .top) {
-            TopScreenEdgeFade(fadeHeight: fadeHeight)
+            TopScreenSoftEdge(fadeHeight: fadeHeight)
                 .opacity(opacity)
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
@@ -561,7 +562,7 @@ private struct AppShadowModifier: ViewModifier {
     }
 }
 
-private struct TopScreenEdgeFade: View {
+private struct TopScreenSoftEdge: View {
     let fadeHeight: CGFloat
 
     // Overlays on ScrollView don't receive safe-area geometry, so read the
@@ -573,17 +574,24 @@ private struct TopScreenEdgeFade: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Color.surfacePrimary
-                .frame(height: topInset)
+        let height = topInset + fadeHeight
+        let fade = LinearGradient(
+            stops: [
+                .init(color: .black, location: 0),
+                .init(color: .black, location: topInset / max(height, 1) * 0.6),
+                .init(color: .black.opacity(0), location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
 
-            LinearGradient(
-                colors: [Color.surfacePrimary, Color.surfacePrimary.opacity(0)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: fadeHeight)
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            // A light dim keeps the clock legible over bright text.
+            Color.surfacePrimary.opacity(0.45)
         }
+        .mask(fade)
+        .frame(height: height)
         .frame(maxWidth: .infinity)
     }
 }

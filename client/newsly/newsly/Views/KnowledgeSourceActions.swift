@@ -181,7 +181,7 @@ struct KnowledgeSourceShortcutButton: View {
                 .font(.appSymbol(size: 12, weight: .semibold))
                 .foregroundStyle(Color.brandPrimary)
                 .frame(width: 30, height: 30)
-                .background(Color.surfaceSecondary, in: Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
                 .frame(width: 36, height: 44)
                 .contentShape(Rectangle())
         }

@@ -101,9 +101,82 @@ private extension DynamicTypeSize {
     }
 }
 
+/// Condenses the floating root bar while the reader scrolls down and restores
+/// it on scroll-up, at the top, or on tab change, like the system tab bar's
+/// minimize-on-scroll. Only the Bool is observed, so per-frame offsets never
+/// invalidate views.
+@MainActor
+@Observable
+final class RootTabBarMinimizer {
+    private(set) var isMinimized = false
+
+    @ObservationIgnored private var lastOffsetBySource: [String: CGFloat] = [:]
+    @ObservationIgnored private var travel: CGFloat = 0
+
+    /// Offsets this close to the top always show the full bar.
+    static let topSlack: CGFloat = 24
+    static let minimizeDistance: CGFloat = 36
+    static let expandDistance: CGFloat = 18
+
+    /// `offset` is distance scrolled from the top of `source`'s content.
+    func record(offset: CGFloat, source: String) {
+        guard offset.isFinite else { return }
+        defer { lastOffsetBySource[source] = offset }
+        guard offset > Self.topSlack else {
+            expand()
+            return
+        }
+        guard let last = lastOffsetBySource[source] else { return }
+        let delta = offset - last
+        guard delta != 0 else { return }
+        if (delta > 0) != (travel > 0) {
+            travel = 0
+        }
+        travel += delta
+        if travel >= Self.minimizeDistance {
+            setMinimized(true)
+        } else if travel <= -Self.expandDistance {
+            setMinimized(false)
+        }
+    }
+
+    func expand() {
+        travel = 0
+        setMinimized(false)
+    }
+
+    /// Distance scrolled from the top, clamped to the scrollable range so the
+    /// rubber-band return after a fling into the end does not read as an
+    /// upward scroll and restore the bar.
+    static func scrolledDistance(
+        contentOffsetY: CGFloat,
+        insetTop: CGFloat,
+        contentHeight: CGFloat,
+        visibleHeight: CGFloat
+    ) -> CGFloat {
+        let maximum = max(contentHeight - visibleHeight, 0)
+        return min(max(contentOffsetY + insetTop, 0), maximum)
+    }
+
+    static func scrolledDistance(in geometry: ScrollGeometry) -> CGFloat {
+        scrolledDistance(
+            contentOffsetY: geometry.contentOffset.y,
+            insetTop: geometry.contentInsets.top,
+            contentHeight: geometry.contentSize.height,
+            visibleHeight: geometry.containerSize.height
+        )
+    }
+
+    private func setMinimized(_ minimized: Bool) {
+        guard isMinimized != minimized else { return }
+        isMinimized = minimized
+    }
+}
+
 /// Floating replacement for the system root tab bar.
 struct CompactTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     struct Item: Identifiable {
         let tab: RootTab
@@ -116,8 +189,12 @@ struct CompactTabBar: View {
 
     let items: [Item]
     let selection: RootTab
+    var isMinimized = false
     let onSelect: (RootTab) -> Void
     @Namespace private var selectionNamespace
+    /// Expanded item height, held while minimized so the bar condenses in
+    /// width only and the root inset (and every screen's insets) stays put.
+    @State private var expandedItemHeight: CGFloat?
 
     var body: some View {
         GlassEffectContainer(spacing: 6) {
@@ -134,7 +211,14 @@ struct CompactTabBar: View {
             AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized),
             value: selection
         )
+        .animation(
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized),
+            value: isMinimized
+        )
         .sensoryFeedback(.impact(weight: .light), trigger: selection)
+        .onChange(of: dynamicTypeSize) { _, _ in
+            expandedItemHeight = nil
+        }
     }
 
     private var tabItems: some View {
@@ -153,14 +237,22 @@ struct CompactTabBar: View {
             VStack(spacing: 2) {
                 Image(systemName: item.icon)
                     .font(.appSymbol(size: 17, weight: .semibold))
-                Text(item.label)
-                    .font(.appCaption2.weight(.semibold))
-                    .lineLimit(1)
-                    .fixedSize()
+                if !isMinimized {
+                    Text(item.label)
+                        .font(.appCaption2.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .top)))
+                }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, isMinimized ? 12 : 16)
             .padding(.vertical, 6)
-            .frame(minWidth: 72, minHeight: 44)
+            .frame(minWidth: isMinimized ? 48 : 72, minHeight: 44)
+            .frame(height: isMinimized ? expandedItemHeight : nil)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _, height in
+                guard !isMinimized, height > 0 else { return }
+                expandedItemHeight = height
+            }
             .foregroundStyle(isSelected ? Color.onSurface : Color.onSurfaceSecondary)
             .background {
                 // A lighter lens inside the clear bar, the way system tab bars

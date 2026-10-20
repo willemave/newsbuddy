@@ -128,12 +128,16 @@ struct NarrationPlaybackControlRow: View {
         .padding(.leading, 10)
         .padding(.trailing, 12)
         .padding(.vertical, 10)
-        .background(Color.surfaceSecondary.opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
+        .glassEffect(
+            .floatingChrome,
+            in: RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+        )
     }
 }
 
-/// Solid accent disc: the one saturated element on any playback surface.
+/// Solid accent disc: the one saturated element on any playback surface. Not
+/// glass: it always sits inside a glass player panel, and glass cannot sample
+/// other glass, so a nested disc read flat and lost its contrast.
 struct NarrationPlayButton: View {
     let snapshot: NarrationPlaybackSnapshot
     var diameter: CGFloat = 44
@@ -204,6 +208,7 @@ struct NarrationSpeedMenu: View {
                 .lineLimit(1)
                 .frame(minWidth: 44, minHeight: 32)
                 .padding(.horizontal, 4)
+                // Stroked, not glass: the menu sits inside glass player panels.
                 .background(
                     Capsule().stroke(Color.outlineVariant.opacity(0.9), lineWidth: 1)
                 )

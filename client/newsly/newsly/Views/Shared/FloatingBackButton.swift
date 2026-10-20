@@ -20,12 +20,11 @@ struct FloatingBackButton: View {
                 .font(.appSymbol(size: 20, weight: .semibold))
                 .foregroundStyle(foregroundStyle)
                 .frame(width: DetailDesign.floatingBackButtonSize, height: DetailDesign.floatingBackButtonSize)
-                .background(backgroundStyle, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(strokeStyle, lineWidth: 1)
-                }
-                .appShadow(shadowStyle)
+                .glassEffect(glass.interactive(), in: .circle)
+                // Glass is not hit-testable content; without this only the
+                // chevron's pixels would take the tap.
+                .contentShape(Circle())
+                .animation(AppMotion.subtle, value: style)
         }
         .buttonStyle(.plain)
         .textSelection(.disabled)
@@ -42,30 +41,14 @@ struct FloatingBackButton: View {
         }
     }
 
-    private var backgroundStyle: Color {
+    /// Over hero artwork the glass is darkened so the white chevron holds up
+    /// on bright images; over the reading surface it uses the shared chrome glass.
+    private var glass: Glass {
         switch style {
         case .imageOverlay:
-            Color(red: 0.07, green: 0.06, blue: 0.05).opacity(0.42)
+            .regular.tint(Color.black.opacity(0.28))
         case .surface:
-            Color.surfacePrimary.opacity(0.72)
-        }
-    }
-
-    private var strokeStyle: Color {
-        switch style {
-        case .imageOverlay:
-            .white.opacity(0.22)
-        case .surface:
-            .outlineVariant.opacity(0.16)
-        }
-    }
-
-    private var shadowStyle: ShadowStyle {
-        switch style {
-        case .imageOverlay:
-            .floating
-        case .surface:
-            .none
+            .floatingChrome
         }
     }
 }

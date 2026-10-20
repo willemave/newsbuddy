@@ -29,7 +29,7 @@ struct SettingsFeedbackSheet: View {
                         .accessibilityLabel("Feedback message")
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
-                        .background(Color.surfaceTertiary, in: RoundedRectangle(cornerRadius: 12))
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                     if message.isEmpty {
                         Text("What should we improve?")

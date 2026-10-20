@@ -34,7 +34,6 @@ enum DetailDesign {
     static let textOnlyBackButtonTopPadding: CGFloat = 8
     static let floatingBackFadeStartOffset: CGFloat = 64
     static let floatingBackFadeEndOffset: CGFloat = 220
-    static let floatingBackMinimumOpacity: CGFloat = 0.62
     static let floatingBackMinimumScale: CGFloat = 0.9
     // Bracket the point where a 320pt hero clears the status bar, so the fade
     // arrives exactly as body text would start colliding with the clock.

@@ -38,8 +38,8 @@ struct MiniSheetHeader: View {
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .frame(width: 44, height: 44)
-                        .background(Color.surfaceTertiary)
-                        .clipShape(Circle())
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .contentShape(Circle())
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Close sheet")

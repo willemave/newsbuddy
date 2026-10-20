@@ -33,6 +33,19 @@ struct SettingsBrandHeader: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
         .padding(.bottom, 4)
+        .background { accentGlow }
+    }
+
+    /// A soft wash of the single brand accent behind the icon. It gives the
+    /// glass cards something to refract as they scroll up past the header.
+    private var accentGlow: some View {
+        Circle()
+            .fill(Color.brandPrimary.opacity(0.22))
+            .frame(width: 280, height: 280)
+            .blur(radius: 72)
+            .offset(y: 40)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var appVersionLabel: String {

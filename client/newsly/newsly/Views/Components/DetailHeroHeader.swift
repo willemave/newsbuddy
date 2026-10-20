@@ -76,8 +76,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
                 .appShadow(.overlayText)
 
                 actionBar(true)
-                    .padding(.leading, -DetailHeroHeaderDesign.actionIconOpticalInset)
-                    .padding(.top, 2)
+                    .padding(.top, 4)
 
                 if showsPodcastPlaybackControls {
                     podcastPlaybackControls()
@@ -131,11 +130,8 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
             .padding(.bottom, 6)
 
             actionBar(false)
-                .padding(
-                    .leading,
-                    DetailHeroHeaderDesign.headerHorizontalPadding - DetailHeroHeaderDesign.actionIconOpticalInset
-                )
-                .padding(.top, 2)
+                .padding(.leading, DetailHeroHeaderDesign.headerHorizontalPadding)
+                .padding(.top, 4)
 
             if showsPodcastPlaybackControls {
                 podcastPlaybackControls()
@@ -143,6 +139,9 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
                     .padding(.top, 4)
             }
         }
+        // The glass circles fill their frames, so they need clearance from
+        // the divider that bare glyphs had built in.
+        .padding(.bottom, 12)
     }
 
     private func titleText(color: Color) -> some View {
@@ -246,5 +245,4 @@ private enum DetailHeroHeaderDesign {
     static let textOnlyTitleTopPadding: CGFloat = 18
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 42
     static let textOnlyStandardHeaderTopSpacer: CGFloat = 48
-    static let actionIconOpticalInset: CGFloat = 12
 }

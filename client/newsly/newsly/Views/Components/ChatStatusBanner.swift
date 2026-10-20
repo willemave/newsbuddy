@@ -48,13 +48,17 @@ struct ChatStatusBanner: View {
         }
         .padding(.horizontal, style == .inline ? 20 : 16)
         .padding(.vertical, style == .inline ? 10 : 12)
-        .background(backgroundColor)
-        .applyBannerStyle(style)
+        // The pulse dims the content, not the glass: opacity on glass flattens
+        // it into a group that stops sampling what sits behind it.
         .opacity(!reduceMotion && isPulsing && style == .inline && isProcessing ? 0.7 : 1.0)
         .animation(
             reduceMotion ? nil : AppMotion.chatStatusPulse,
             value: isPulsing
         )
+        .glassEffect(glass, in: bannerShape)
+        // Glass is not hit-testable content; keep the whole banner tappable.
+        .contentShape(bannerShape)
+        .applyBannerStyle(style)
         .onAppear {
             if !reduceMotion && style == .inline && isProcessing {
                 isPulsing = true
@@ -135,14 +139,19 @@ struct ChatStatusBanner: View {
         return false
     }
 
-    private var backgroundColor: Color {
+    private var bannerShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: style == .inline ? 14 : 16, style: .continuous)
+    }
+
+    private var glass: Glass {
+        // Only a completed session opens on tap, so only it gets the press response.
         switch session.status {
-        case .processing:
-            return Color.surfaceSecondary
         case .completed:
-            return Color.surfaceSecondary
+            return .floatingChrome.interactive()
+        case .processing:
+            return .floatingChrome
         case .failed:
-            return Color.statusDestructive.opacity(0.1)
+            return .regular.tint(Color.statusDestructive.opacity(0.16))
         }
     }
 }
@@ -154,17 +163,10 @@ private extension View {
         switch style {
         case .floating:
             self
-                .cornerRadius(12)
-                .appShadow(.subtle)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 8)
         case .inline:
             self
-                .cornerRadius(10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.outlineVariant, lineWidth: 0.5)
-                )
         }
     }
 }

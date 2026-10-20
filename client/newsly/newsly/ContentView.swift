@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var showSettingsSheet = false
     @State private var isSettingsSheetActive = false
     @State private var compactTabBarHeight: CGFloat = 0
+    @State private var tabBarMinimizer = RootTabBarMinimizer()
 
     @MainActor
     init(session: AuthenticatedSession) {
@@ -69,14 +70,19 @@ struct ContentView: View {
                 )
             }
         }
+        .environment(tabBarMinimizer)
         .environment(
             \.persistentBottomChromeInset,
             isCompactTabBarVisible ? compactTabBarHeight : 0
         )
+        .onChange(of: isCompactTabBarVisible) { _, _ in
+            tabBarMinimizer.expand()
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             RootCompactTabBarInset(
                 selectedTab: tabCoordinator.selectedTab,
                 isVisible: isCompactTabBarVisible,
+                minimizer: tabBarMinimizer,
                 onSelect: selectRootTab
             )
             .onGeometryChange(for: CGFloat.self) { proxy in
@@ -186,6 +192,7 @@ struct ContentView: View {
     }
 
     private func selectRootTab(_ tab: RootTab) {
+        tabBarMinimizer.expand()
         tabCoordinator.select(tab)
     }
 

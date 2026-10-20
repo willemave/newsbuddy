@@ -82,11 +82,11 @@ struct XConnectionAttentionBanner: View {
             }
             .padding(.horizontal, Spacing.rowHorizontal)
             .padding(.vertical, Spacing.rowVertical)
-            .background(
-                Color.statusDestructive.opacity(0.1),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .glassEffect(
+                .regular.tint(Color.statusDestructive.opacity(0.16)).interactive(),
+                in: SettingsCardShape.shape
             )
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(SettingsCardShape.shape)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Spacing.appHorizontalMargin)

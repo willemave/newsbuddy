@@ -63,7 +63,6 @@ struct SettingsView: View {
         }
         .font(.modalBody)
         .background(Color.surfacePrimary.ignoresSafeArea())
-        .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .appNavigationTitle(
             "Settings",
             accessibilityIdentifier: "settings.screen"
@@ -71,15 +70,10 @@ struct SettingsView: View {
         .toolbar {
             if showsDismissButton {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: dismiss.callAsFunction) {
-                        Image(systemName: "xmark")
-                            .font(.appSymbol(size: 14, weight: .semibold))
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .accessibilityLabel("Close Settings")
-                    .accessibilityIdentifier("settings.close")
+                    // The system close role draws the glass xmark button.
+                    Button(role: .close, action: dismiss.callAsFunction)
+                        .accessibilityLabel("Close Settings")
+                        .accessibilityIdentifier("settings.close")
                 }
             }
         }

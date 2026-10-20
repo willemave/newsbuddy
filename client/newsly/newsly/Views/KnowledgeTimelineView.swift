@@ -10,6 +10,7 @@ struct KnowledgeView: View {
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(XConnectionStore.self) private var xConnectionStore
     @Environment(RootDependencyFactory.self) private var dependencyFactory
+    @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
     @AppStorage("knowledge.sourceSwipeHintSeen") private var hasSeenSourceSwipeHint = false
 
     let scrollToTopRequest: Int
@@ -92,6 +93,13 @@ struct KnowledgeView: View {
                 await viewModel.loadNextPage()
             }
             .refreshable { await viewModel.forceReload() }
+            .systemTopScrollEdge()
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                RootTabBarMinimizer.scrolledDistance(in: geometry)
+            } action: { _, offset in
+                guard isVisible else { return }
+                tabBarMinimizer?.record(offset: offset, source: "knowledge")
+            }
             .scrollsToTopOnRequest(
                 scrollToTopRequest,
                 anchor: Self.topAnchor,
@@ -480,35 +488,39 @@ struct KnowledgeView: View {
     }
 
     private var headerActions: some View {
-        HStack(spacing: 2) {
-            Button(action: onSearch) {
-                Image(systemName: "magnifyingglass")
-                    .font(.appSymbol(size: 19, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Search saved knowledge")
-            .accessibilityIdentifier("knowledge.search")
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 10) {
+                Button(action: onSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.appSymbol(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .knowledgeHeaderGlass()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search saved knowledge")
+                .accessibilityIdentifier("knowledge.search")
 
-            Button(action: onOpenSettings) {
-                Image(systemName: "gearshape")
-                    .font(.appSymbol(size: 19, weight: .semibold))
-                    .overlay(alignment: .topTrailing) {
-                        if xConnectionStore.needsAttention {
-                            Circle()
-                                .fill(Color.statusDestructive)
-                                .frame(width: 9, height: 9)
-                                .overlay(Circle().stroke(Color.surfacePrimary, lineWidth: 2))
-                                .offset(x: 3, y: -2)
-                                .accessibilityIdentifier("knowledge.settings.attention")
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.appSymbol(size: 17, weight: .semibold))
+                        .overlay(alignment: .topTrailing) {
+                            if xConnectionStore.needsAttention {
+                                Circle()
+                                    .fill(Color.statusDestructive)
+                                    .frame(width: 9, height: 9)
+                                    .overlay(Circle().stroke(Color.surfacePrimary, lineWidth: 2))
+                                    .offset(x: 3, y: -2)
+                                    .accessibilityIdentifier("knowledge.settings.attention")
+                            }
                         }
-                    }
-                    .frame(width: 44, height: 44)
+                        .frame(width: 44, height: 44)
+                        .knowledgeHeaderGlass()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settings")
+                .accessibilityValue(xConnectionStore.needsAttention ? "Needs attention" : "")
+                .accessibilityIdentifier("knowledge.settings")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
-            .accessibilityValue(xConnectionStore.needsAttention ? "Needs attention" : "")
-            .accessibilityIdentifier("knowledge.settings")
         }
         .foregroundStyle(Color.onSurface)
     }
@@ -609,5 +621,15 @@ struct KnowledgeView: View {
         guard !deck.hasActiveLatestRun, !viewModel.decks.busyDeckIDs.contains(deck.id) else { return }
         guard await viewModel.decks.regenerate(deck) != nil else { return }
         dependencyFactory.toastService.show("Regenerating your deck", type: .info, duration: 3)
+    }
+}
+
+private extension View {
+    /// Masthead actions sit on glass discs, matching Briefing's listen button.
+    /// The explicit shape matters: a plain-style button only hit-tests drawn
+    /// pixels, and the gear's hollow centre used to swallow taps.
+    func knowledgeHeaderGlass() -> some View {
+        glassEffect(.regular.interactive(), in: .circle)
+            .contentShape(Circle())
     }
 }

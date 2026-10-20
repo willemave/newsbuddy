@@ -18,13 +18,13 @@ struct ToastView: View {
             Text(toast.message)
                 .font(.appSubheadline)
                 .foregroundColor(Color.onSurface)
-
-            Spacer()
+                .multilineTextAlignment(.leading)
         }
-        .padding()
-        .background(Color.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .appShadow(.floating)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        // Rounded rectangle, not a capsule: a multi-line toast's half-height
+        // corners would cut into its first and last lines.
+        .glassEffect(.floatingChrome, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal)
     }
 }
