@@ -127,18 +127,17 @@ struct RootCompactTabBarInset: View {
         }
     }
 
-    /// Fades scrolled rows out from just above the floating bar down to the
-    /// screen edge, so content never runs hard into the home-indicator area.
+    /// A short, faint fade hugging the bottom screen edge so text settles into
+    /// the home-indicator area; everything above it stays readable through the
+    /// glass bar.
     private var bottomEdgeFade: some View {
         LinearGradient(
-            stops: [
-                .init(color: Color.surfacePrimary.opacity(0), location: 0),
-                .init(color: Color.surfacePrimary, location: 0.5),
-            ],
+            colors: [Color.surfacePrimary.opacity(0), Color.surfacePrimary.opacity(0.75)],
             startPoint: .top,
             endPoint: .bottom
         )
-        .padding(.top, -24)
+        .frame(height: 24)
+        .frame(maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea(edges: .bottom)
         .allowsHitTesting(false)
     }

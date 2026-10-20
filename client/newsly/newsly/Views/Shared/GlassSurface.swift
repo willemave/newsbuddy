@@ -5,6 +5,15 @@
 
 import SwiftUI
 
+extension Glass {
+    /// Glass for chrome that floats over reading text (root bar, Briefing pills
+    /// and player). Clear glass let body text read straight through labels;
+    /// a surface tint frosts the body while keeping the refraction and rim.
+    static var floatingChrome: Glass {
+        .regular.tint(Color.surfacePrimary.opacity(0.55))
+    }
+}
+
 extension View {
     func glassSurface<S: Shape>(
         in shape: S,

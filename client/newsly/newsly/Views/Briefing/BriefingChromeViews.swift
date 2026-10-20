@@ -7,38 +7,53 @@ struct BriefingTierStrip: View {
     let onSelectNews: () -> Void
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
+    @Namespace private var selectionNamespace
+
+    /// Nil unless a pill in this row is selected: a matched lens with no
+    /// source would stretch over the whole row.
+    private var selectedPillID: String? {
+        if viewModel.isNewsTierSelected { return Self.newsPillID }
+        return viewModel.fixedLenses.first { $0.key == viewModel.selectedLensKey }?.key
+    }
+
+    private static let newsPillID = "briefing.tier.news"
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if !viewModel.newsLenses.isEmpty {
-                    BriefingStripPill(
-                        title: "News",
-                        unreadCount: viewModel.newsUnreadSourceCount,
-                        isSelected: viewModel.isNewsTierSelected,
-                        accessibilityId: "briefing.tier.news",
-                        action: onSelectNews
-                    )
-                }
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    if !viewModel.newsLenses.isEmpty {
+                        BriefingStripPill(
+                            title: "News",
+                            unreadCount: viewModel.newsUnreadSourceCount,
+                            isSelected: viewModel.isNewsTierSelected,
+                            accessibilityId: "briefing.tier.news",
+                            selection: .init(id: Self.newsPillID, namespace: selectionNamespace),
+                            action: onSelectNews
+                        )
+                    }
 
-                ForEach(viewModel.fixedLenses, id: \.key) { lens in
-                    BriefingStripPill(
-                        title: lens.title,
-                        unreadCount: lens.unreadSourceCount,
-                        isSelected: lens.key == viewModel.selectedLensKey,
-                        accessibilityId: "briefing.lens.\(lens.key)",
-                        longPressAction: lens.unreadSourceCount > 0
-                            ? { onRequestMarkAllRead(lens) }
-                            : nil
-                    ) {
-                        onSelectLens(lens.key)
+                    ForEach(viewModel.fixedLenses, id: \.key) { lens in
+                        BriefingStripPill(
+                            title: lens.title,
+                            unreadCount: lens.unreadSourceCount,
+                            isSelected: lens.key == viewModel.selectedLensKey,
+                            accessibilityId: "briefing.lens.\(lens.key)",
+                            selection: .init(id: lens.key, namespace: selectionNamespace),
+                            longPressAction: lens.unreadSourceCount > 0
+                                ? { onRequestMarkAllRead(lens) }
+                                : nil
+                        ) {
+                            onSelectLens(lens.key)
+                        }
                     }
                 }
+                .briefingPillSelectionGlass(id: selectedPillID, in: selectionNamespace)
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
         }
-        .briefingTrailingScrollFade()
+        .briefingStripEdgeFade()
         .accessibilityIdentifier("briefing.lenses")
     }
 }
@@ -50,40 +65,53 @@ struct BriefingFirstRunStrip: View {
     let onSelectStartHere: () -> Void
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
+    @Namespace private var selectionNamespace
+
+    private var selectedPillID: String? {
+        if viewModel.isStartHereSelected { return Self.startHerePillID }
+        return viewModel.orderedLenses.first { $0.key == viewModel.selectedLensKey }?.key
+    }
+
+    private static let startHerePillID = "briefing.start_here"
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                BriefingStripPill(
-                    title: "Welcome",
-                    unreadCount: 0,
-                    isSelected: viewModel.isStartHereSelected,
-                    accessibilityId: "briefing.start_here.pill"
-                ) {
-                    onSelectStartHere()
-                }
-
-                ForEach(viewModel.orderedLenses, id: \.key) { lens in
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
                     BriefingStripPill(
-                        title: lens.title,
-                        unreadCount: lens.unreadSourceCount,
-                        isSelected: lens.key == viewModel.selectedLensKey,
-                        accessibilityId: "briefing.lens.\(lens.key)",
-                        longPressAction: lens.unreadSourceCount > 0
-                            ? { onRequestMarkAllRead(lens) }
-                            : nil
+                        title: "Welcome",
+                        unreadCount: 0,
+                        isSelected: viewModel.isStartHereSelected,
+                        accessibilityId: "briefing.start_here.pill",
+                        selection: .init(id: Self.startHerePillID, namespace: selectionNamespace)
                     ) {
-                        onSelectLens(lens.key)
+                        onSelectStartHere()
                     }
-                    .disabled(lens.tier == .news && lens.segmentCount == 0)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+
+                    ForEach(viewModel.orderedLenses, id: \.key) { lens in
+                        BriefingStripPill(
+                            title: lens.title,
+                            unreadCount: lens.unreadSourceCount,
+                            isSelected: lens.key == viewModel.selectedLensKey,
+                            accessibilityId: "briefing.lens.\(lens.key)",
+                            selection: .init(id: lens.key, namespace: selectionNamespace),
+                            longPressAction: lens.unreadSourceCount > 0
+                                ? { onRequestMarkAllRead(lens) }
+                                : nil
+                        ) {
+                            onSelectLens(lens.key)
+                        }
+                        .disabled(lens.tier == .news && lens.segmentCount == 0)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
+                .briefingPillSelectionGlass(id: selectedPillID, in: selectionNamespace)
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
             .animation(.easeOut(duration: 0.35), value: viewModel.orderedLenses.map(\.key))
         }
-        .briefingTrailingScrollFade()
+        .briefingStripEdgeFade()
         .sensoryFeedback(
             .impact(weight: .light),
             trigger: !viewModel.orderedLenses.isEmpty
@@ -103,26 +131,35 @@ struct BriefingCategoryStrip: View {
     let viewModel: BriefingViewModel
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
+    @Namespace private var selectionNamespace
+
+    private var selectedPillID: String? {
+        viewModel.newsLenses.first { $0.key == viewModel.selectedLensKey }?.key
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(viewModel.newsLenses, id: \.key) { lens in
-                        BriefingStripPill(
-                            title: lens.title,
-                            unreadCount: lens.unreadSourceCount,
-                            isSelected: lens.key == viewModel.selectedLensKey,
-                            accessibilityId: "briefing.lens.\(lens.key)",
-                            minHeight: 30,
-                            longPressAction: lens.unreadSourceCount > 0
-                                ? { onRequestMarkAllRead(lens) }
-                                : nil
-                        ) {
-                            onSelectLens(lens.key)
+                GlassEffectContainer(spacing: 8) {
+                    HStack(spacing: 8) {
+                        ForEach(viewModel.newsLenses, id: \.key) { lens in
+                            BriefingStripPill(
+                                title: lens.title,
+                                unreadCount: lens.unreadSourceCount,
+                                isSelected: lens.key == viewModel.selectedLensKey,
+                                accessibilityId: "briefing.lens.\(lens.key)",
+                                selection: .init(id: lens.key, namespace: selectionNamespace),
+                                minHeight: 30,
+                                longPressAction: lens.unreadSourceCount > 0
+                                    ? { onRequestMarkAllRead(lens) }
+                                    : nil
+                            ) {
+                                onSelectLens(lens.key)
+                            }
+                            .id(lens.key)
                         }
-                        .id(lens.key)
                     }
+                    .briefingPillSelectionGlass(id: selectedPillID, in: selectionNamespace)
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.bottom, 10)
@@ -138,23 +175,69 @@ struct BriefingCategoryStrip: View {
                 }
             }
         }
-        .briefingTrailingScrollFade()
+        .briefingStripEdgeFade()
         .accessibilityIdentifier("briefing.categories")
     }
 }
 
 private extension View {
-    func briefingTrailingScrollFade() -> some View {
-        overlay(alignment: .trailing) {
-            LinearGradient(
-                colors: [Color.surfacePrimary.opacity(0), Color.surfacePrimary],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(width: 24)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+    /// Masks rather than paints: the strip floats over scrolled text, so a
+    /// surface-coloured overlay would show as a solid band. The leading fade is
+    /// narrower than the row margin, so it only touches pills scrolled past it.
+    func briefingStripEdgeFade() -> some View {
+        mask {
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [.black.opacity(0), .black],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 12)
+                Rectangle()
+                LinearGradient(
+                    colors: [.black, .black.opacity(0)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 24)
+            }
         }
+    }
+}
+
+/// Where a pill registers its frame so the row's single selection lens can
+/// glide to it.
+private struct BriefingPillSelectionAnchor {
+    let id: String
+    let namespace: Namespace.ID
+}
+
+/// One tinted glass lens per row, drawn behind the pills and matched to the
+/// selected pill's frame. Moving one shape, rather than re-tinting two pills,
+/// lets the selection slide and merge through its neighbours inside the
+/// row's `GlassEffectContainer` the way system segmented glass does.
+private struct BriefingPillSelectionGlass: ViewModifier {
+    let id: String?
+    let namespace: Namespace.ID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                if let id {
+                    Color.clear
+                        .glassEffect(.regular.tint(Color.onSurface.opacity(0.85)), in: .capsule)
+                        .matchedGeometryEffect(id: id, in: namespace, isSource: false)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized), value: id)
+    }
+}
+
+private extension View {
+    func briefingPillSelectionGlass(id: String?, in namespace: Namespace.ID) -> some View {
+        modifier(BriefingPillSelectionGlass(id: id, namespace: namespace))
     }
 }
 
@@ -163,6 +246,7 @@ private struct BriefingStripPill: View {
     let unreadCount: Int
     let isSelected: Bool
     let accessibilityId: String
+    let selection: BriefingPillSelectionAnchor
     var minHeight: CGFloat = 36
     var longPressAction: (() -> Void)? = nil
     let action: () -> Void
@@ -216,10 +300,9 @@ private struct BriefingStripPill: View {
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
             .frame(minHeight: minHeight)
             .padding(.horizontal, 12)
-            .background(
-                Capsule()
-                    .fill(isSelected ? Color.onSurface : Color.surfaceSecondary)
-            )
+            .matchedGeometryEffect(id: selection.id, in: selection.namespace)
+            // The selected pill lends its glass to the row's sliding lens.
+            .glassEffect(isSelected ? .identity : .floatingChrome.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title), \(unreadCount) unread sources")
@@ -249,7 +332,7 @@ struct BriefingListenButton: View {
             }
             .foregroundStyle(Color.brandPrimary)
             .frame(width: 52, height: 52)
-            .background(Circle().fill(Color.brandPrimary.opacity(0.14)))
+            .glassSurface(in: Circle(), tint: Color.brandPrimary, interactive: true)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -389,13 +472,9 @@ struct BriefingNowPlayingPanel: View {
         .padding(.horizontal, 14)
         .padding(.top, 14)
         .padding(.bottom, 8)
-        .background(
-            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-                .fill(Color.surfaceSecondary)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.35), lineWidth: 0.5)
+        .glassEffect(
+            .floatingChrome,
+            in: RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
         )
     }
 
@@ -525,10 +604,7 @@ struct BriefingNowPlayingPanel: View {
         .padding(.trailing, 2)
         .padding(.top, 4)
         .padding(.bottom, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.surfaceSecondary)
-        )
+        .glassEffect(.floatingChrome, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(alignment: .bottom) {
             // Hairline progress along the bottom edge stands in for the scrubber.
             GeometryReader { geometry in
@@ -546,10 +622,6 @@ struct BriefingNowPlayingPanel: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.35), lineWidth: 0.5)
-        )
     }
 
     private var minimizedDetail: String {

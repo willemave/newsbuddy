@@ -162,7 +162,6 @@ struct BriefingView: View {
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
         .screenContainer()
-        .topScreenEdgeFade()
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if let markingCategoryTitle {
@@ -413,14 +412,6 @@ struct BriefingView: View {
             additionalShrink: listenPanelShrink,
             expandedHeight: $expandedChromeHeight
         )
-        .background(Color.surfacePrimary)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.outlineVariant.opacity(viewModel.isMastheadCompact ? 0.5 : 0))
-                .frame(height: 0.5)
-        }
-        .shadow(color: .black.opacity(viewModel.isMastheadCompact ? 0.12 : 0), radius: 10, y: 5)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.isMastheadCompact)
         .onChange(of: viewModel.isMastheadCompact) { _, isCompact in
             if !isCompact {
                 listenPanelPinnedOpen = false

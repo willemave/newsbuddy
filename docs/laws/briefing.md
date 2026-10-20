@@ -10,7 +10,7 @@ Incremental bounded routing leaves undispatched sources pending rather than assi
 silently dropping them. A Full rebuild keeps undecided sources in general news and
 never retires eligible published coverage absent from its replacement.
 
-Briefing and the Knowledge list share the same bottom-edge fade, kept low behind floating navigation so readable content above it stays clear. The exposed area beneath floating navigation matches the reading surface through the bottom screen edge. Floating root navigation keeps the selected destination as a compact highlighted icon and expands each unselected destination to show its name.
+Briefing and the Knowledge list share the same bottom-edge fade: short, faint, and confined to the bottom screen edge, so content stays readable right up to and through the floating navigation. Floating navigation and the pinned Briefing pills and player are translucent glass that content visibly scrolls beneath; Briefing content runs up under the status bar without a top fade. Floating root navigation keeps the selected destination as a compact highlighted icon and expands each unselected destination to show its name.
 
 B2. Eligible sources are completed, unread articles, podcasts, and canonical ready news that the authenticated user can open directly. Legacy editorial `to_read`/`skip` classification has no eligibility authority; lifecycle failures, skipped processing, archive state, and readiness remain distinct.
 

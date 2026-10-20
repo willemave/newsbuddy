@@ -89,7 +89,6 @@ struct ChatSessionHistoryView: View {
                     }
                     .padding(.vertical, 8)
                 }
-                .topScreenEdgeFade()
                 .refreshable {
                     await viewModel.loadSessions()
                 }

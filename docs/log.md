@@ -27,6 +27,26 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-19 — `main` — Liquid Glass chrome for Briefing and root navigation
+
+- **Status:** Complete
+- **Scope:** iOS floating root tab bar, its bottom-edge fade, Briefing header chrome (tier/category pills, listen button, now-playing card and bar).
+- **Decisions:** User asked for iOS 27-style glass: the tab bar drops its opaque fill (reverses the earlier "text bleeds through" choice at the user's request) and marks selection with a translucent lens; pills are interactive glass (clear idle, cream-tinted selected) grouped in `GlassEffectContainer`s; Briefing's opaque header background, compact hairline/shadow and top status-bar fade are removed so text scrolls under the chrome; the bottom fade shrinks to a 24pt, 75%-max strip at the screen edge. Pill-strip trailing fade is now a mask, since a surface-coloured overlay would show as a band over text. Removed the pre-iOS 26 tab bar fallback (deployment target is 26.1).
+- **Changes:** `AppChrome.swift` (`CompactTabBar`), `RootTabs.swift` (`bottomEdgeFade`), `BriefingChromeViews.swift`, `BriefingView.swift`; `docs/laws/briefing.md` fade/glass sentence.
+- **Validation:** Simulator build succeeded; screenshots against the local API of Briefing at rest, scrolled under the pills/status bar, and Knowledge.
+- **Remaining:** Knowledge, chat history and content detail still use the solid `topScreenEdgeFade`; Maestro visual baselines covering the tab bar and Briefing header will need re-recording.
+- **Commits:** Uncommitted
+
+**Follow-up (same day):**
+- **Decisions:**
+  - Each pill row now draws one tinted glass selection lens, matched to the selected pill's frame; the selected pill itself drops its glass. The lens springs between pills on tap and pager swipe and merges through its neighbours inside the row's `GlassEffectContainer`. A row draws no lens unless one of its own pills is selected; with no matched source, the lens would stretch over the whole row.
+  - Clear glass let body text collide with pill and tab labels, so floating chrome uses a shared `Glass.floatingChrome` (regular glass with a 55% surface tint).
+  - Pill rows fade at both edges with a mask; the 12pt leading fade sits inside the 20pt margin.
+  - The Knowledge composer is glass. Knowledge and chat history drop `topScreenEdgeFade`.
+  - The global navigation bar appearance no longer paints a 92% surface fill, so iOS 26+ draws native glass bar buttons and the soft scroll edge.
+- **Validation:** Simulator build; dark and light screenshots of scrolled Briefing; mid-animation frames show the lens morphing between pills.
+- **Remaining:** Content detail (has unrelated uncommitted edits) still uses `topScreenEdgeFade`, which is now its only caller. Maestro baselines still need re-recording.
+
 ### 2026-10-18 — `main` — News Filter settings screen restyle
 
 - **Status:** Complete
@@ -113,7 +133,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Status:** Complete (pending user sign-off)
 - **Scope:** iOS `DetailActionBar`, `ArticleReaderView`, new `ArticleWebView`, `ContentDetailViewModel.canShowReader`, `ContentDetailView` reader wiring, the `detail-action-bar` E2E state, new `DetailReaderUITests`, law C22.
 - **Decisions:** `SFSafariViewController` allows no custom toolbar buttons. The user chose to replace it on this path with an in-place `WKWebView` mode inside the reader, accepting the loss of Safari Reader, content blockers, and autofill. The detail bar's Safari button is gone. The single `doc.richtext` button always opens the reader, which starts on the web page when no body text exists. The top-trailing button flips Reader ⇄ Web. Both surfaces stay mounted once opened, so scroll position and page state survive flips. A Deck button (both modes) presents `LearningDeckContentCreateSheet` from inside the reader, because a sheet presented from detail would sit behind the full-screen cover. The resulting deck opens over the reader. Podcasts with a stored transcript now use the reader. The other `SafariView` callers (Search, Knowledge preparation status, Briefing) are unchanged.
-- **Changes:** Removed `.accessibilityElement(children: .ignore)` from the reader toolbar, which was replacing button labels and identifiers with SF Symbol names. The toolbar keeps a 50pt minimum height so it doesn't jump between modes. The E2E fixture URL is now `https://example.com/`. The `detail-action-bar` E2E state now renders the podcast and article bars together. Follow-up: article and podcast bars gained a direct Deck button (`content.action.create_deck`, after Save to Knowledge) that opens the existing `learningDeckCreate` sheet. Deck creation stays in the Buddy sheet too. The bar is back to 7 icons (356pt), which fits 390pt phones and overflows about 9pt into the trailing margin on 375pt phones, the same as the old 7-icon article bar. `testDetailDeckButtonOpensDeckCreation` passes.
+- **Changes:** Removed `.accessibilityElement(children: .ignore)` from the reader toolbar, which was replacing button labels and identifiers with SF Symbol names. The toolbar keeps a 50pt minimum height so it doesn't jump between modes. The E2E fixture URL is now `https://example.com/`. The `detail-action-bar` E2E state now renders the podcast and article bars together. Follow-up: article and podcast bars gained a direct Deck button (`content.action.create_deck`, after Save to Knowledge) that opens the existing `learningDeckCreate` sheet. Deck creation stays in the Buddy sheet too. The bar is back to 7 icons (356pt), which fits 390pt phones and overflows about 9pt into the trailing margin on 375pt phones, the same as the old 7-icon article bar. `testDetailDeckButtonOpensDeckCreation` passes. Follow-up (2026-10-18): creating a deck from detail or the reader no longer opens the deck reader. `LearningDeckContentCreateSheet` reports `onCreated`, the sheet dismisses, and both callers show a "Deck started" toast. The reader adds its own `withToast` layer because the root toast sits under its full-screen cover. Removed the now-unused deck-reader covers from detail and the reader. Law K21 is updated.
 - **Validation:** Simulator build. `DetailReaderUITests` covers: one reader entry, no detail Safari action, toolbar order, flip to web and back, text-size control hidden in web mode, and the Deck sheet opening from web mode. All 3 `KnowledgeSourceActivityUITests` pass. Checked screenshots of the text, web, and deck-sheet states.
 - **Remaining:** None. Full run of `newslyTests` plus `DetailReaderUITests` after the final polish: 729 passed, 0 failed.
 - **Commits:** Uncommitted

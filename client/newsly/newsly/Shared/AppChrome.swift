@@ -57,10 +57,10 @@ enum AppChrome {
         UITabBar.appearance().scrollEdgeAppearance = tabAppearance
         UITabBar.appearance().tintColor = chromeAccent
 
+        // No bar fill: on iOS 26+ the system draws glass bar buttons and a soft
+        // scroll-edge effect itself, and a painted background hides both.
         let navigationAppearance = UINavigationBarAppearance()
         navigationAppearance.configureWithTransparentBackground()
-        navigationAppearance.backgroundColor = surface.withAlphaComponent(0.92)
-        navigationAppearance.shadowColor = ReaderPalette.selectedUIColor(\.outlineVariant)
         navigationAppearance.titleTextAttributes = [
             .foregroundColor: UIColor.appOnSurface,
             .font: UIFontMetrics(forTextStyle: .headline).scaledFont(
@@ -120,12 +120,10 @@ struct CompactTabBar: View {
     @Namespace private var selectionNamespace
 
     var body: some View {
-        Group {
-            if #available(iOS 26.0, *) {
-                liquidGlassBar
-            } else {
-                fallbackBar
-            }
+        GlassEffectContainer(spacing: 6) {
+            tabItems
+                .padding(5)
+                .glassEffect(.floatingChrome.interactive(), in: .capsule)
         }
         .frame(maxWidth: 240)
         .padding(.horizontal, Spacing.appHorizontalMargin)
@@ -137,35 +135,6 @@ struct CompactTabBar: View {
             value: selection
         )
         .sensoryFeedback(.impact(weight: .light), trigger: selection)
-    }
-
-    @available(iOS 26.0, *)
-    private var liquidGlassBar: some View {
-        GlassEffectContainer(spacing: 6) {
-            tabItems
-                .padding(5)
-                .background(barFill)
-                .glassEffect(.regular, in: .capsule)
-        }
-    }
-
-    private var fallbackBar: some View {
-        tabItems
-            .padding(5)
-            .background(barFill)
-            .overlay {
-                Capsule().stroke(Color.outlineVariant.opacity(0.4), lineWidth: 0.5)
-            }
-            .appShadow(.floating)
-    }
-
-    /// Opaque, not translucent. Thin material let scrolled body text read straight
-    /// through the bar, and tinting the glass did not fix it — glass keeps sampling
-    /// its backdrop, and the capsule rim refracts content regardless of tint. On
-    /// iOS 26 the glass layer still sits behind this fill, so the bar keeps the
-    /// glass rim and highlight without the text bleeding through.
-    private var barFill: some View {
-        Capsule().fill(Color.surfaceSecondary)
     }
 
     private var tabItems: some View {
@@ -192,11 +161,13 @@ struct CompactTabBar: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
             .frame(minWidth: 72, minHeight: 44)
-            .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurfaceSecondary)
+            .foregroundStyle(isSelected ? Color.onSurface : Color.onSurfaceSecondary)
             .background {
+                // A lighter lens inside the clear bar, the way system tab bars
+                // mark selection, rather than an opaque chip sitting on top.
                 if isSelected {
                     Capsule()
-                        .fill(Color.onSurface)
+                        .fill(Color.onSurface.opacity(0.14))
                         .matchedGeometryEffect(id: "tab.pill", in: selectionNamespace)
                 }
             }

@@ -92,7 +92,6 @@ struct KnowledgeView: View {
                 await viewModel.loadNextPage()
             }
             .refreshable { await viewModel.forceReload() }
-            .topScreenEdgeFade()
             .scrollsToTopOnRequest(
                 scrollToTopRequest,
                 anchor: Self.topAnchor,
@@ -261,11 +260,9 @@ struct KnowledgeView: View {
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
-        .background(Color.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-                .stroke(Color.borderSubtle, lineWidth: 1)
+        .glassEffect(
+            .regular.interactive(),
+            in: RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
         )
         .padding(.horizontal, Spacing.appHorizontalMargin)
     }
