@@ -444,11 +444,20 @@ async fn apply_submission_user_state(
                 timezone('UTC', now()),
                 timezone('UTC', now())
             )
-            ON CONFLICT (user_id, content_id) DO NOTHING
+            ON CONFLICT (user_id, content_id) DO UPDATE
+            SET status = 'inbox', updated_at = EXCLUDED.updated_at
+            WHERE content_status.status = 'archived' AND $3
             ",
         )
         .bind(input.user_id)
         .bind(content.id)
+        // Only the explicit inbox outcome revives an archived membership. Knowledge,
+        // chat, and deck submissions retain their existing action semantics.
+        .bind(
+            !behavior.share_and_chat
+                && !behavior.save_to_knowledge_and_mark_read
+                && !input.deck_source_only,
+        )
         .execute(&mut **transaction)
         .await?;
     }
@@ -603,6 +612,9 @@ pub enum ContentSubmissionRepositoryError {
     #[error("content action persistence failed")]
     ContentAction(#[from] ContentActionRepositoryError),
 }
+
+#[cfg(test)]
+mod readd_tests;
 
 #[cfg(test)]
 mod tests {

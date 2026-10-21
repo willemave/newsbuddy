@@ -7,6 +7,9 @@ use sqlx::{AssertSqlSafe, FromRow, Postgres, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
+#[cfg(test)]
+mod bookmark_reconciliation_tests;
+
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
 pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v11-news-citations";
 const FIXED_LENSES: [(&str, &str, &str, &str, i32); 2] = [

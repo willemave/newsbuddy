@@ -165,6 +165,9 @@ pub(super) async fn execute_tasks_command(
     output: OutputFormat,
 ) -> AnyResult<()> {
     match &args.command {
+        command @ TasksCommand::ReconcileBookmarks { .. } => {
+            super::bookmark_commands::execute(database, command, output).await?;
+        }
         TasksCommand::ReconcileArchive {
             task_ids,
             user_id,

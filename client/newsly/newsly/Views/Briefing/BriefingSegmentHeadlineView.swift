@@ -7,7 +7,8 @@ struct BriefingSegmentHeadline: Equatable {
     let title: String
     let publisher: String?
     let meta: String
-    let createdAt: Date
+    let briefedAt: Date
+    let publishedAt: Date?
 
     init?(segment: APIBriefingSegment, sourcesByKey: [String: APIBriefingSource]) {
         guard segment.sourceKeys.count == 1,
@@ -28,7 +29,16 @@ struct BriefingSegmentHeadline: Equatable {
         self.sourceKey = source.sourceKey
         self.title = title
         self.publisher = source.publisher.flatMap(Self.publisherName)
-        self.createdAt = segment.createdAt
+        self.briefedAt = segment.createdAt
+        self.publishedAt = source.publishedAt
+    }
+
+    var publicationLabel: String? {
+        publishedAt.map { "Published \($0.formatted(.dateTime.month(.abbreviated).day().year()))" }
+    }
+
+    var briefedLabel: String {
+        "Briefed \(briefedAt.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))"
     }
 
     /// Feed titles often append a tagline ("Show — Interviews", "Blog | Network");
@@ -60,10 +70,6 @@ struct BriefingSegmentHeadlineView: View {
     let onOpenSource: (String) -> Void
     var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
 
-    private var timestamp: String {
-        headline.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())
-    }
-
     var body: some View {
         Button {
             onOpenSource(headline.sourceKey)
@@ -74,7 +80,6 @@ struct BriefingSegmentHeadlineView: View {
                         publisher
                         Spacer(minLength: 0)
                         details
-                        timestampText
                     }
                     .fixedSize(horizontal: true, vertical: false)
 
@@ -83,10 +88,20 @@ struct BriefingSegmentHeadlineView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             details
                             Spacer(minLength: 0)
-                            timestampText
                         }
                     }
                 }
+                .padding(.bottom, 5)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    if let publicationLabel = headline.publicationLabel {
+                        Text(publicationLabel)
+                    }
+                    Text(headline.briefedLabel)
+                }
+                .font(.appFootnote)
+                .foregroundStyle(Color.onSurfaceTertiary)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 7)
 
                 Text(headline.title)
@@ -104,7 +119,10 @@ struct BriefingSegmentHeadlineView: View {
         .briefingSourceMenu(sourceKey: headline.sourceKey, onAction: onSourceAction)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            [headline.title, headline.publisher, headline.meta, timestamp]
+            [
+                headline.title, headline.publisher, headline.meta,
+                headline.publicationLabel, headline.briefedLabel
+            ]
                 .compactMap { $0 }
                 .joined(separator: ", ")
         )
@@ -128,14 +146,6 @@ struct BriefingSegmentHeadlineView: View {
         Text(headline.meta)
             .font(.appFootnote)
             .foregroundStyle(Color.onSurfaceTertiary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var timestampText: some View {
-        Text(timestamp)
-            .font(.appFootnote)
-            .foregroundStyle(Color.onSurfaceTertiary)
-            .monospacedDigit()
             .fixedSize(horizontal: false, vertical: true)
     }
 }

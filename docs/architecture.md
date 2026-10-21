@@ -784,6 +784,22 @@ deduplication, synced-item ledger/checkpoints, canonical ingestion, Knowledge
 routing, and reauthentication state. Other scheduled sources follow the same
 durable checkpoint and bounded-provider model.
 
+Pre-Knowledge bookmark imports are reconciled only through the bounded
+`newsly-admin tasks reconcile-bookmarks` operator command. A reviewed exact owner
+and content-ID cohort, import boundary, expected Briefing version and audited batch
+identity are required. The command saves missing Knowledge memberships with the
+original import time before archiving stale inbox memberships, removes pending
+coverage, retires the corresponding single-source passages and advances the
+Briefing version in one transaction. It shares the publication user/state lock
+order using a user `NO KEY UPDATE` lock compatible with foreign-key checks,
+checks every mutation count, rejects mixed-source passages and existing narration, records before-state
+for recovery, and never changes source content, reads or X checkpoints. Replaying
+the same batch is a no-op. This is an explicit historical reconciliation, not a
+classification fallback or an automatic migration. Source publication evidence
+and attribution have one pure projection shared by API, composition and narration;
+import-time fallbacks never become publication dates. Explicit Add to Briefing can
+revive an archived inbox membership; background bookmark sync remains Knowledge-only.
+
 Feed discovery validates RSS and Atom candidates without a VM: public DNS is
 resolved and pinned for dispatch, every redirect is revalidated, candidate
 requests run concurrently under strict time and body bounds, and `feed-rs`

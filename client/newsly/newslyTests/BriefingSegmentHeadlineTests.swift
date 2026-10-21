@@ -17,7 +17,28 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
         XCTAssertEqual(headline.title, "Runway’s WorldPrompt")
         XCTAssertEqual(headline.publisher, "Latent Space")
         XCTAssertEqual(headline.meta, "Article · 12 min read")
-        XCTAssertEqual(headline.createdAt, Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(headline.briefedAt, Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    func testOriginalPublicationDateIsSeparateFromBriefingComposition() throws {
+        let publishedAt = Date(timeIntervalSince1970: 1_680_000_000)
+        let source = makeSource(key: "content:1", contentType: .article, publishedAt: publishedAt)
+        let headline = try XCTUnwrap(makeHeadline(sourceKeys: ["content:1"], sources: [source]))
+
+        XCTAssertEqual(headline.publishedAt, publishedAt)
+        XCTAssertNotEqual(headline.publishedAt, headline.briefedAt)
+        XCTAssertTrue(try XCTUnwrap(headline.publicationLabel).hasPrefix("Published "))
+        XCTAssertTrue(try XCTUnwrap(headline.publicationLabel).contains("2023"))
+        XCTAssertTrue(headline.briefedLabel.hasPrefix("Briefed "))
+    }
+
+    func testUnknownPublicationDateDoesNotUseBriefingDate() throws {
+        let source = makeSource(key: "content:1", contentType: .article)
+        let headline = try XCTUnwrap(makeHeadline(sourceKeys: ["content:1"], sources: [source]))
+
+        XCTAssertNil(headline.publishedAt)
+        XCTAssertNil(headline.publicationLabel)
+        XCTAssertFalse(headline.briefedLabel.isEmpty)
     }
 
     func testPodcastSegmentUsesDurationAndOmitsBlankPublisher() throws {
@@ -96,7 +117,8 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
         title: String = "Title",
         publisher: String? = nil,
         durationSeconds: Int? = nil,
-        readingMinutes: Int? = nil
+        readingMinutes: Int? = nil,
+        publishedAt: Date? = nil
     ) -> APIBriefingSource {
         APIBriefingSource(
             sourceKey: key,
@@ -109,7 +131,7 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
             url: nil,
             imageUrl: nil,
             thumbnailUrl: nil,
-            publishedAt: nil,
+            publishedAt: publishedAt,
             contentType: contentType,
             durationSeconds: durationSeconds,
             readingMinutes: readingMinutes,

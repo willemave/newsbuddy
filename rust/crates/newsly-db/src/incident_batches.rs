@@ -2,6 +2,8 @@
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+pub mod bookmarks;
+
 #[derive(Debug, serde::Serialize)]
 pub struct ArchiveIncidentScope {
     pub task_ids: Vec<i64>,

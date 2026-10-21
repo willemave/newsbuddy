@@ -793,7 +793,11 @@ fn present_content_source(
     read: bool,
     request_id: &str,
 ) -> Result<BriefingSourceDto, ApiError> {
-    let metadata = source.metadata.as_object().cloned().unwrap_or_default();
+    let metadata = source
+        .metadata
+        .as_object()
+        .map(newsly_db::content_metadata::runtime_metadata)
+        .unwrap_or_default();
     let content_type = ContentType::from_str(&source.content_type)
         .map_err(|error| internal_error(error, request_id))?;
     let summary = metadata
@@ -810,7 +814,11 @@ fn present_content_source(
             .title
             .clone()
             .unwrap_or_else(|| format!("Content {}", source.id)),
-        publisher: source.source.as_deref().and_then(clean_text),
+        publisher: newsly_db::content_metadata::source_presentation::content_publisher(
+            &source.url,
+            source.source.as_deref(),
+            &metadata,
+        ),
         summary,
         key_points: Some(key_points),
         url: source
@@ -831,7 +839,12 @@ fn present_content_source(
                     .map(|_| format!("/static/images/thumbnails/{}.png", source.id))
             })
             .map(|url| versioned_image_url(url, version.as_deref())),
-        published_at: source.publication_date.or(Some(source.created_at)),
+        published_at: newsly_db::content_metadata::source_presentation::content_publication_date(
+            &source.url,
+            &metadata,
+            source.created_at,
+            source.publication_date,
+        ),
         duration_seconds: (content_type == ContentType::Podcast)
             .then(|| positive_metadata_number(&metadata, "duration_seconds"))
             .flatten(),
@@ -1461,48 +1474,4 @@ mod warm_progress_tests {
 }
 
 #[cfg(test)]
-mod source_presentation_tests {
-    use super::*;
-    use chrono::{TimeZone, Utc};
-
-    fn content_source(content_type: &str, metadata: Value) -> ContentBriefingSourceProjection {
-        ContentBriefingSourceProjection {
-            id: 7,
-            content_type: content_type.into(),
-            url: "https://example.com/item".into(),
-            source_url: None,
-            title: Some("A Work".into()),
-            source: Some("  Latent Space ".into()),
-            metadata,
-            source_char_count: Some(14_000),
-            created_at: Utc.with_ymd_and_hms(2026, 9, 25, 12, 0, 0).unwrap(),
-            publication_date: None,
-        }
-    }
-
-    #[test]
-    fn article_sources_carry_publisher_and_reading_minutes() {
-        let source = present_content_source(
-            "content:7",
-            &content_source("article", json!({})),
-            false,
-            "r",
-        )
-        .unwrap();
-        assert_eq!(source.publisher.as_deref(), Some("Latent Space"));
-        assert_eq!(source.reading_minutes, Some(12));
-        assert_eq!(source.duration_seconds, None);
-    }
-
-    #[test]
-    fn podcast_sources_carry_duration_but_not_reading_minutes() {
-        let projection = content_source("podcast", json!({"duration_seconds": "3939"}));
-        let source = present_content_source("content:7", &projection, false, "r").unwrap();
-        assert_eq!(source.duration_seconds, Some(3939));
-        assert_eq!(source.reading_minutes, None);
-
-        let projection = content_source("podcast", json!({"duration_seconds": 0}));
-        let source = present_content_source("content:7", &projection, false, "r").unwrap();
-        assert_eq!(source.duration_seconds, None);
-    }
-}
+mod source_presentation_tests;

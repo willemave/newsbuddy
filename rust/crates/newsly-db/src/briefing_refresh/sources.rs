@@ -203,7 +203,10 @@ pub(super) fn source_from_content(
     created_at: NaiveDateTime,
     publication_date: Option<NaiveDateTime>,
 ) -> BriefingRefreshSource {
-    let map = metadata.as_object().cloned().unwrap_or_default();
+    let map = metadata
+        .as_object()
+        .map(crate::content_metadata::runtime_metadata)
+        .unwrap_or_default();
     let summary_value = map.get("summary");
     let summary = summary_value
         .and_then(short_summary)
@@ -215,7 +218,11 @@ pub(super) fn source_from_content(
         kind: "content".to_owned(),
         id,
         title: clean_text(title).unwrap_or_else(|| format!("Content {id}")),
-        source_name: clean_text(source_name).or_else(|| clean_value(map.get("source"))),
+        source_name: crate::content_metadata::source_presentation::content_publisher(
+            url,
+            source_name,
+            &map,
+        ),
         summary,
         key_points,
         url: clean_text(source_url).or_else(|| clean_text(Some(url))),
@@ -233,9 +240,12 @@ pub(super) fn source_from_content(
                     .map(|_| format!("/static/images/thumbnails/{id}.png"))
             })
             .map(|url| versioned_url(url, version.as_deref())),
-        published_at: publication_date
-            .or(Some(created_at))
-            .map(|value| value.and_utc()),
+        published_at: crate::content_metadata::source_presentation::content_publication_date(
+            url,
+            &map,
+            created_at.and_utc(),
+            publication_date.map(|date| date.and_utc()),
+        ),
         briefing_context: briefing_context(&map),
     }
 }
@@ -712,4 +722,52 @@ pub(super) fn percent_encode(value: &str) -> String {
 
 pub(super) fn u64_to_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+#[cfg(test)]
+mod source_presentation_tests {
+    use super::source_from_content;
+    use chrono::DateTime;
+    use serde_json::json;
+
+    #[test]
+    fn composer_snapshot_preserves_original_x_metadata_from_runtime_namespace() {
+        let created = DateTime::parse_from_rfc3339("2026-03-27T12:00:00Z")
+            .unwrap()
+            .naive_utc();
+        let original = DateTime::parse_from_rfc3339("2023-04-01T12:00:00Z").unwrap();
+        let source = source_from_content(
+            1,
+            "article",
+            "https://x.com/writer/status/123",
+            None,
+            Some("Title"),
+            Some("self submission"),
+            &json!({"tweet_created_at":"wrong", "domain":{"tweet_author_username":"writer", "tweet_created_at":"2023-04-01T12:00:00Z"}}),
+            created,
+            Some(created),
+        );
+        assert_eq!(source.published_at, Some(original.into()));
+        assert_eq!(source.source_name.as_deref(), Some("@writer"));
+    }
+
+    #[test]
+    fn composer_snapshot_keeps_linked_article_identity_and_unknown_publication_explicit() {
+        let created = DateTime::parse_from_rfc3339("2026-03-27T12:00:00Z")
+            .unwrap()
+            .naive_utc();
+        let source = source_from_content(
+            1,
+            "article",
+            "https://publisher.example/article",
+            Some("https://x.com/writer/status/123"),
+            Some("Title"),
+            Some("Publisher"),
+            &json!({"tweet_created_at":"2023-04-01T12:00:00Z", "tweet_author_username":"writer"}),
+            created,
+            Some(created),
+        );
+        assert_eq!(source.published_at, None);
+        assert_eq!(source.source_name.as_deref(), Some("Publisher"));
+    }
 }

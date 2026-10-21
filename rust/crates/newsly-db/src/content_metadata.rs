@@ -1,5 +1,7 @@
 //! Canonical runtime view and readability rules for persisted content metadata.
 
+pub mod source_presentation;
+
 use serde_json::{Map, Value};
 
 const PROCESSING_FIELDS: &[&str] = &[

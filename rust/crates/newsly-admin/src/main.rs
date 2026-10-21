@@ -9,6 +9,7 @@ use newsly_db::{Database, DatabaseConfig, OwnershipRepository};
 use newsly_domain::{OwnershipTarget, OwnershipVersion, ResourceKey, ResourceKind};
 use secrecy::SecretString;
 use serde::Serialize;
+mod bookmark_commands;
 mod database;
 mod e2e;
 mod evals;
@@ -192,6 +193,25 @@ struct TasksArgs {
 
 #[derive(Debug, Subcommand)]
 enum TasksCommand {
+    /// Reconcile exact reviewed legacy X imports into Knowledge; preview unless --apply is supplied.
+    ReconcileBookmarks {
+        #[arg(long)]
+        user_id: i64,
+        #[arg(long, value_delimiter = ',', required = true)]
+        content_ids: Vec<i64>,
+        #[arg(long)]
+        imported_before: chrono::NaiveDateTime,
+        #[arg(long)]
+        expected_version: i64,
+        #[arg(long)]
+        batch_id: uuid::Uuid,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        apply: bool,
+    },
     /// Dry-run by default. Cancel reviewed accidental feed work without deleting content or reads.
     ReconcileArchive {
         #[arg(long, value_delimiter = ',', required = true)]
@@ -240,6 +260,7 @@ enum TasksCommand {
 impl TasksCommand {
     const fn name(&self) -> &'static str {
         match self {
+            Self::ReconcileBookmarks { .. } => "tasks.reconcile-bookmarks",
             Self::ReconcileArchive { .. } => "tasks.reconcile-archive",
             Self::ArtworkBackfill { .. } => "tasks.artwork-backfill",
             Self::Failures { .. } => "tasks.failures",
@@ -843,6 +864,41 @@ impl FromStr for TargetArg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bookmark_reconciliation_previews_by_default_and_requires_explicit_scope() {
+        let args = [
+            "newsly-admin",
+            "tasks",
+            "reconcile-bookmarks",
+            "--user-id",
+            "1",
+            "--content-ids",
+            "28547,28548",
+            "--imported-before",
+            "2026-05-10T00:00:00",
+            "--expected-version",
+            "5",
+            "--batch-id",
+            "aabfae23-b7bd-4c36-92ea-6922bbc9d4e0",
+            "--actor",
+            "operator",
+            "--reason",
+            "reviewed cohort",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.command.name(), "tasks.reconcile-bookmarks");
+        assert!(matches!(
+            cli.command,
+            Command::Tasks(TasksArgs {
+                command: TasksCommand::ReconcileBookmarks { apply: false, .. }
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["newsly-admin", "tasks", "reconcile-bookmarks", "--apply"])
+                .is_err()
+        );
+    }
 
     #[test]
     fn output_is_a_true_global_option_and_db_names_match_the_operator_contract() {
