@@ -245,6 +245,7 @@ struct BriefingLensPageView: View, Equatable {
     let onSetHeaderPinned: (Bool) -> Void
 
     @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPinned = false
     @State private var containerHeight: CGFloat = 0
     @State private var hasReportedFirstPassage = false
@@ -286,7 +287,8 @@ struct BriefingLensPageView: View, Equatable {
         var step = 0
         var containerHeight: CGFloat = 0
         var readOffset: CGFloat = 0
-        var minimizerOffset: CGFloat = 0
+        /// Distance from the top of content, clamped to the scrollable range.
+        var scrolledDistance: CGFloat = 0
     }
 
     private var contentIdentity: BriefingLensContentIdentity {
@@ -308,7 +310,6 @@ struct BriefingLensPageView: View, Equatable {
     private var pageInsets: BriefingPageInsets {
         briefingPageInsets(
             topContentInset: topContentInset,
-            readBoundaryY: readBoundaryY,
             screenEdgeTop: screenEdgeInsets.top
         )
     }
@@ -424,10 +425,19 @@ struct BriefingLensPageView: View, Equatable {
                     .id(contentIdentity)
                     .contentMargins(.top, pageInsets.contentMarginTop)
                     .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
-                    // The edge effect spans the status bar and the pinned
-                    // pills. The content margin gives that height back, so the
-                    // total top inset is exactly `pageInsets.layoutTop`.
+                    // The edge effect spans the status bar. The content margin
+                    // gives that height back, so the total top inset is
+                    // exactly `pageInsets.layoutTop`.
                     .systemTopScrollEdge(height: pageInsets.scrollEdgeBar)
+                    // A scroll that stops with the pills part-way off screen
+                    // finishes the move, so they never rest half hidden.
+                    .onScrollPhaseChange { _, phase in
+                        guard phase == .idle else { return }
+                        chromeCollapse.settlePinnedChrome(
+                            forLens: lensKey,
+                            animation: AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized)
+                        )
+                    }
                     .refreshable {
                         await onRefresh()
                     }
@@ -446,13 +456,23 @@ struct BriefingLensPageView: View, Equatable {
                             // page frame stopped there, so read passage and the
                             // read boundary stay in the same coordinates.
                             readOffset: geometry.contentOffset.y + pageInsets.readOffsetShift,
-                            minimizerOffset: RootTabBarMinimizer.scrolledDistance(in: geometry)
+                            scrolledDistance: RootTabBarMinimizer.scrolledDistance(in: geometry)
                         )
                     } action: { oldProbe, probe in
                         updateReadViewport(probe)
                         if isReadTrackingEnabled {
-                            tabBarMinimizer?.record(offset: probe.minimizerOffset, source: lensKey)
+                            tabBarMinimizer?.record(offset: probe.scrolledDistance, source: lensKey)
                         }
+                        // Before the guard below: once the masthead has fully
+                        // collapsed, `collapse` stops changing, but the pills
+                        // still follow every frame of scroll.
+                        chromeCollapse.trackPinnedChrome(
+                            forLens: lensKey,
+                            scrolled: probe.scrolledDistance,
+                            mastheadHeight: collapsibleChromeHeight,
+                            pinnedHeight: (readBoundaryY ?? 0) + BriefingPinnedChromeBacking.fadeHeight,
+                            reveal: AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized)
+                        )
                         guard oldProbe.collapse != probe.collapse
                                 || oldProbe.step != probe.step
                                 || oldProbe.containerHeight != probe.containerHeight else {

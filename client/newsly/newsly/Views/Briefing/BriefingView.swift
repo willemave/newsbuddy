@@ -59,6 +59,7 @@ struct BriefingView: View {
     @State private var mastheadHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
     @State private var pagerScreenEdgeInsets = EdgeInsets()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
     @State private var listenPanelFullHeight: CGFloat = 0
     @State private var listenPanelMinimizedHeight: CGFloat = 0
@@ -113,7 +114,9 @@ struct BriefingView: View {
         viewModel.firstRun == nil && viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
     }
 
-    /// Only the masthead collapses; the tier and category strips stay pinned.
+    /// Only the masthead collapses with the offset; the tier and category
+    /// strips and the player scroll away past it and return on any upward
+    /// scroll (`briefingPinnedChromeHide`).
     private var collapsibleChromeHeight: CGFloat {
         mastheadHeight
     }
@@ -332,8 +335,10 @@ struct BriefingView: View {
         }
         // Empty, error and Start Here pages never report a scroll, so a bar
         // condensed on the previous page would otherwise stay condensed.
-        .onChange(of: viewModel.selectedLensKey) { _, _ in
+        .onChange(of: viewModel.selectedLensKey) { _, key in
             tabBarMinimizer?.expand()
+            // A page reached by swipe or tap starts with its pills in view.
+            if let key { chromeCollapse.revealPinnedChrome(forLens: key) }
         }
         .onChange(of: viewModel.isStartHereSelected) { _, _ in
             tabBarMinimizer?.expand()
@@ -405,8 +410,12 @@ struct BriefingView: View {
                     )
                 }
             }
+            .animation(headerAnimation, value: viewModel.selectedLensKey)
 
             if showsCategoryStrip {
+                // Leaves instantly: the pages re-inset in the same frame, so a
+                // fade-out overlapped the text that had already moved up beneath
+                // it. Arrival can fade because the space is reserved first.
                 BriefingCategoryStrip(
                     viewModel: viewModel,
                     onSelectLens: { key in
@@ -416,6 +425,11 @@ struct BriefingView: View {
                     },
                     onRequestMarkAllRead: presentMarkAllReadPrompt
                 )
+                .animation(headerAnimation, value: viewModel.selectedLensKey)
+                .transition(.asymmetric(
+                    insertion: .opacity.animation(headerAnimation),
+                    removal: .identity
+                ))
             }
 
             VStack(spacing: 0) {
@@ -424,6 +438,7 @@ struct BriefingView: View {
                 }
                 refreshStatus
             }
+            .animation(headerAnimation, value: viewModel.selectedLensKey)
         }
         .measureBriefingExpandedChromeHeight(
             model: chromeCollapse,
@@ -437,8 +452,22 @@ struct BriefingView: View {
                 listenPanelPinnedOpen = false
             }
         }
-        .animation(.smooth(duration: 0.28), value: viewModel.selectedLensKey)
+        .background(alignment: .top) {
+            BriefingPinnedChromeBacking(
+                model: chromeCollapse,
+                lensKey: activeCollapseLensKey,
+                mastheadHeight: mastheadHeight
+            )
+        }
+        .briefingPinnedChromeHide(model: chromeCollapse, lensKey: activeCollapseLensKey)
+        // No header-wide animation: an animated update keeps a removed view on
+        // screen until it finishes, so the category strip lingered over text
+        // that had already moved up. Only the pill tints and player animate.
         .zIndex(1)
+    }
+
+    private var headerAnimation: Animation {
+        AppMotion.respectingReduceMotion(reduceMotion, .smooth(duration: 0.28))
     }
 
     private var mastheadListenAccessory: AnyView? {

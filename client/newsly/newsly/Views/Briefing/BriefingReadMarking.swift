@@ -45,13 +45,15 @@ func briefingSegmentViewportState(
 /// the pager beneath expanded chrome. Add that stable inset back so the final
 /// segment can cross the boundary without measuring the scroll view's frame.
 /// Top insets for a lens page whose pager extends under the status bar.
-/// The page adds the status bar back itself, and a near-invisible scroll-edge
-/// bar takes part of that inset so the system soft edge covers the status bar
-/// and the pinned chrome.
+/// The page adds the status bar back itself; a near-invisible scroll-edge bar
+/// supplies exactly that part so the system soft edge covers the status bar.
+/// The bar never depends on chrome state: resizing it mid-scroll changed the
+/// page's safe area and re-laid out the whole text page, which stuttered.
+/// The pinned chrome carries its own soft backing instead.
 struct BriefingPageInsets: Equatable {
     /// Content starts this far below the top of the full-screen page.
     let layoutTop: CGFloat
-    /// Height of the scroll-edge bar: status bar plus pinned chrome.
+    /// Height of the scroll-edge bar: the status bar.
     let scrollEdgeBar: CGFloat
     /// Added to the raw content offset so read passage keeps measuring from
     /// below the status bar, as when the page frame stopped there.
@@ -63,15 +65,12 @@ struct BriefingPageInsets: Equatable {
 
 func briefingPageInsets(
     topContentInset: CGFloat,
-    readBoundaryY: CGFloat?,
     screenEdgeTop: CGFloat
 ) -> BriefingPageInsets {
     let top = max(screenEdgeTop, 0)
-    let expanded = max(topContentInset, 0)
-    let pinned = min(max(readBoundaryY ?? 0, 0), expanded)
     return BriefingPageInsets(
-        layoutTop: expanded + top,
-        scrollEdgeBar: top + pinned,
+        layoutTop: max(topContentInset, 0) + top,
+        scrollEdgeBar: top,
         readOffsetShift: top
     )
 }

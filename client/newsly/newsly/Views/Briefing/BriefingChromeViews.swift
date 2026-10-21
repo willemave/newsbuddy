@@ -2,53 +2,42 @@ import SwiftUI
 
 /// Top-level pills: one aggregate "News" pill plus every fixed (podcasts /
 /// articles) lens. Lives above the pager so it stays put while pages swipe.
+// Pill rows deliberately use no `GlassEffectContainer`. Inside one, a tint
+// change on the selected pill morphed through its neighbours (an unselected
+// pill flashed bright mid-switch), even with zero merge distance.
+
 struct BriefingTierStrip: View {
     let viewModel: BriefingViewModel
     let onSelectNews: () -> Void
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
-    @Namespace private var selectionNamespace
-
-    /// Nil unless a pill in this row is selected: a matched lens with no
-    /// source would stretch over the whole row.
-    private var selectedPillID: String? {
-        if viewModel.isNewsTierSelected { return Self.newsPillID }
-        return viewModel.fixedLenses.first { $0.key == viewModel.selectedLensKey }?.key
-    }
-
-    private static let newsPillID = "briefing.tier.news"
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    if !viewModel.newsLenses.isEmpty {
-                        BriefingStripPill(
-                            title: "News",
-                            unreadCount: viewModel.newsUnreadSourceCount,
-                            isSelected: viewModel.isNewsTierSelected,
-                            accessibilityId: "briefing.tier.news",
-                            selection: .init(id: Self.newsPillID, namespace: selectionNamespace),
-                            action: onSelectNews
-                        )
-                    }
+            HStack(spacing: 8) {
+                if !viewModel.newsLenses.isEmpty {
+                    BriefingStripPill(
+                        title: "News",
+                        unreadCount: viewModel.newsUnreadSourceCount,
+                        isSelected: viewModel.isNewsTierSelected,
+                        accessibilityId: "briefing.tier.news",
+                        action: onSelectNews
+                    )
+                }
 
-                    ForEach(viewModel.fixedLenses, id: \.key) { lens in
-                        BriefingStripPill(
-                            title: lens.title,
-                            unreadCount: lens.unreadSourceCount,
-                            isSelected: lens.key == viewModel.selectedLensKey,
-                            accessibilityId: "briefing.lens.\(lens.key)",
-                            selection: .init(id: lens.key, namespace: selectionNamespace),
-                            longPressAction: lens.unreadSourceCount > 0
-                                ? { onRequestMarkAllRead(lens) }
-                                : nil
-                        ) {
-                            onSelectLens(lens.key)
-                        }
+                ForEach(viewModel.fixedLenses, id: \.key) { lens in
+                    BriefingStripPill(
+                        title: lens.title,
+                        unreadCount: lens.unreadSourceCount,
+                        isSelected: lens.key == viewModel.selectedLensKey,
+                        accessibilityId: "briefing.lens.\(lens.key)",
+                        longPressAction: lens.unreadSourceCount > 0
+                            ? { onRequestMarkAllRead(lens) }
+                            : nil
+                    ) {
+                        onSelectLens(lens.key)
                     }
                 }
-                .briefingPillSelectionGlass(id: selectedPillID, in: selectionNamespace)
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
@@ -65,47 +54,34 @@ struct BriefingFirstRunStrip: View {
     let onSelectStartHere: () -> Void
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
-    @Namespace private var selectionNamespace
-
-    private var selectedPillID: String? {
-        if viewModel.isStartHereSelected { return Self.startHerePillID }
-        return viewModel.orderedLenses.first { $0.key == viewModel.selectedLensKey }?.key
-    }
-
-    private static let startHerePillID = "briefing.start_here"
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    BriefingStripPill(
-                        title: "Welcome",
-                        unreadCount: 0,
-                        isSelected: viewModel.isStartHereSelected,
-                        accessibilityId: "briefing.start_here.pill",
-                        selection: .init(id: Self.startHerePillID, namespace: selectionNamespace)
-                    ) {
-                        onSelectStartHere()
-                    }
-
-                    ForEach(viewModel.orderedLenses, id: \.key) { lens in
-                        BriefingStripPill(
-                            title: lens.title,
-                            unreadCount: lens.unreadSourceCount,
-                            isSelected: lens.key == viewModel.selectedLensKey,
-                            accessibilityId: "briefing.lens.\(lens.key)",
-                            selection: .init(id: lens.key, namespace: selectionNamespace),
-                            longPressAction: lens.unreadSourceCount > 0
-                                ? { onRequestMarkAllRead(lens) }
-                                : nil
-                        ) {
-                            onSelectLens(lens.key)
-                        }
-                        .disabled(lens.tier == .news && lens.segmentCount == 0)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+            HStack(spacing: 8) {
+                BriefingStripPill(
+                    title: "Welcome",
+                    unreadCount: 0,
+                    isSelected: viewModel.isStartHereSelected,
+                    accessibilityId: "briefing.start_here.pill"
+                ) {
+                    onSelectStartHere()
                 }
-                .briefingPillSelectionGlass(id: selectedPillID, in: selectionNamespace)
+
+                ForEach(viewModel.orderedLenses, id: \.key) { lens in
+                    BriefingStripPill(
+                        title: lens.title,
+                        unreadCount: lens.unreadSourceCount,
+                        isSelected: lens.key == viewModel.selectedLensKey,
+                        accessibilityId: "briefing.lens.\(lens.key)",
+                        longPressAction: lens.unreadSourceCount > 0
+                            ? { onRequestMarkAllRead(lens) }
+                            : nil
+                    ) {
+                        onSelectLens(lens.key)
+                    }
+                    .disabled(lens.tier == .news && lens.segmentCount == 0)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
@@ -131,35 +107,26 @@ struct BriefingCategoryStrip: View {
     let viewModel: BriefingViewModel
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
-    @Namespace private var selectionNamespace
-
-    private var selectedPillID: String? {
-        viewModel.newsLenses.first { $0.key == viewModel.selectedLensKey }?.key
-    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        ForEach(viewModel.newsLenses, id: \.key) { lens in
-                            BriefingStripPill(
-                                title: lens.title,
-                                unreadCount: lens.unreadSourceCount,
-                                isSelected: lens.key == viewModel.selectedLensKey,
-                                accessibilityId: "briefing.lens.\(lens.key)",
-                                selection: .init(id: lens.key, namespace: selectionNamespace),
-                                minHeight: 30,
-                                longPressAction: lens.unreadSourceCount > 0
-                                    ? { onRequestMarkAllRead(lens) }
-                                    : nil
-                            ) {
-                                onSelectLens(lens.key)
-                            }
-                            .id(lens.key)
+                HStack(spacing: 8) {
+                    ForEach(viewModel.newsLenses, id: \.key) { lens in
+                        BriefingStripPill(
+                            title: lens.title,
+                            unreadCount: lens.unreadSourceCount,
+                            isSelected: lens.key == viewModel.selectedLensKey,
+                            accessibilityId: "briefing.lens.\(lens.key)",
+                            minHeight: 30,
+                            longPressAction: lens.unreadSourceCount > 0
+                                ? { onRequestMarkAllRead(lens) }
+                                : nil
+                        ) {
+                            onSelectLens(lens.key)
                         }
+                        .id(lens.key)
                     }
-                    .briefingPillSelectionGlass(id: selectedPillID, in: selectionNamespace)
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.bottom, 10)
@@ -205,48 +172,11 @@ private extension View {
     }
 }
 
-/// Where a pill registers its frame so the row's single selection lens can
-/// glide to it.
-private struct BriefingPillSelectionAnchor {
-    let id: String
-    let namespace: Namespace.ID
-}
-
-/// One tinted glass lens per row, drawn behind the pills and matched to the
-/// selected pill's frame. Moving one shape, rather than re-tinting two pills,
-/// lets the selection slide and merge through its neighbours inside the
-/// row's `GlassEffectContainer` the way system segmented glass does.
-private struct BriefingPillSelectionGlass: ViewModifier {
-    let id: String?
-    let namespace: Namespace.ID
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func body(content: Content) -> some View {
-        content
-            .background {
-                if let id {
-                    Color.clear
-                        .glassEffect(.regular.tint(Color.onSurface.opacity(0.85)), in: .capsule)
-                        .matchedGeometryEffect(id: id, in: namespace, isSource: false)
-                        .allowsHitTesting(false)
-                }
-            }
-            .animation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized), value: id)
-    }
-}
-
-private extension View {
-    func briefingPillSelectionGlass(id: String?, in namespace: Namespace.ID) -> some View {
-        modifier(BriefingPillSelectionGlass(id: id, namespace: namespace))
-    }
-}
-
 private struct BriefingStripPill: View {
     let title: String
     let unreadCount: Int
     let isSelected: Bool
     let accessibilityId: String
-    let selection: BriefingPillSelectionAnchor
     var minHeight: CGFloat = 36
     var longPressAction: (() -> Void)? = nil
     let action: () -> Void
@@ -300,9 +230,14 @@ private struct BriefingStripPill: View {
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
             .frame(minHeight: minHeight)
             .padding(.horizontal, 12)
-            .matchedGeometryEffect(id: selection.id, in: selection.namespace)
-            // The selected pill lends its glass to the row's sliding lens.
-            .glassEffect(isSelected ? .identity : .floatingChrome.interactive(), in: .capsule)
+            // Selection is a fill inside unchanging glass, so a change is a
+            // plain opacity crossfade on the header's curve. Animating the
+            // glass tint itself flashed the outgoing pill and dropped its
+            // label; a lens sliding between pills arrived late.
+            .background {
+                Capsule().fill(Color.onSurface.opacity(isSelected ? 0.85 : 0))
+            }
+            .glassEffect(.floatingChrome.interactive(), in: .capsule)
             // Glass does not count as hit-testable content, so the whole
             // capsule needs an explicit shape to stay tappable.
             .contentShape(Capsule())

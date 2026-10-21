@@ -3,39 +3,32 @@ import XCTest
 
 final class BriefingPageInsetsTests: XCTestCase {
     func testMarginAndBarTogetherEqualLayoutTop() {
-        let insets = briefingPageInsets(topContentInset: 210, readBoundaryY: 96, screenEdgeTop: 62)
+        let insets = briefingPageInsets(topContentInset: 210, screenEdgeTop: 62)
         XCTAssertEqual(insets.layoutTop, 272)
-        XCTAssertEqual(insets.scrollEdgeBar, 158)
+        XCTAssertEqual(insets.scrollEdgeBar, 62)
         XCTAssertEqual(insets.contentMarginTop + insets.scrollEdgeBar, insets.layoutTop)
     }
 
     func testReadOffsetShiftIsTheStatusBar() {
-        let insets = briefingPageInsets(topContentInset: 210, readBoundaryY: 96, screenEdgeTop: 62)
+        let insets = briefingPageInsets(topContentInset: 210, screenEdgeTop: 62)
         XCTAssertEqual(insets.readOffsetShift, 62)
         // At rest the raw offset is -layoutTop; shifted it matches the old -topContentInset.
         XCTAssertEqual(-insets.layoutTop + insets.readOffsetShift, -210)
     }
 
-    func testMissingOrNegativeBoundaryCoversOnlyTheStatusBar() {
+    func testScrollEdgeBarIgnoresChromeSize() {
+        // Resizing the bar mid-scroll re-laid out the page, so it depends only
+        // on the status bar.
         XCTAssertEqual(
-            briefingPageInsets(topContentInset: 210, readBoundaryY: nil, screenEdgeTop: 62).scrollEdgeBar,
-            62
+            briefingPageInsets(topContentInset: 120, screenEdgeTop: 62).scrollEdgeBar,
+            briefingPageInsets(topContentInset: 400, screenEdgeTop: 62).scrollEdgeBar
         )
-        XCTAssertEqual(
-            briefingPageInsets(topContentInset: 210, readBoundaryY: -5, screenEdgeTop: 62).scrollEdgeBar,
-            62
-        )
-    }
-
-    func testBoundaryBeyondExpandedChromeIsCapped() {
-        let insets = briefingPageInsets(topContentInset: 120, readBoundaryY: 400, screenEdgeTop: 62)
-        XCTAssertEqual(insets.scrollEdgeBar, 182)
-        XCTAssertEqual(insets.contentMarginTop, 0)
     }
 
     func testStandalonePageWithoutScreenEdgesKeepsOldInsets() {
-        let insets = briefingPageInsets(topContentInset: 210, readBoundaryY: 96, screenEdgeTop: 0)
+        let insets = briefingPageInsets(topContentInset: 210, screenEdgeTop: 0)
         XCTAssertEqual(insets.layoutTop, 210)
         XCTAssertEqual(insets.readOffsetShift, 0)
+        XCTAssertEqual(insets.contentMarginTop, 210)
     }
 }

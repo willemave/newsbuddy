@@ -27,6 +27,56 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-21 — `main` — Smooth Briefing quick-return
+
+- **Status:** Complete
+- **Scope:** `BriefingChromeCollapse.swift`, `BriefingLensContentViews.swift`, `BriefingReadMarking.swift` (`briefingPageInsets`), `BriefingView.swift`; tests `BriefingPinnedChromeTests`, `BriefingPageInsetsTests`.
+- **Decisions:**
+  - Measured a fixed scroll sequence (down, small up, down, ×3) with a temporary CADisplayLink probe. Quick-return dropped 80–108 frames (3.0–4.0s). With it disabled the sequence dropped 11 (0.4s); opacity removal alone made no difference.
+  - Cause: the half-hidden flag resized each page's scroll-edge bar. That changed the page's safe area, and on reveal it did so inside the spring, so the whole text page re-laid out every frame.
+  - The page's scroll edge now covers only the status bar and never depends on chrome state, so `briefingPageInsets` dropped `readBoundaryY`. The soft blur behind the pills moved into the header as `BriefingPinnedChromeBacking` (material plus 45% surface, faded 18pt below the header), so it slides away with the pills at no layout cost.
+  - The backing fades in over the last 24pt of the masthead collapse; at rest a material band read lighter than the page. The hide distance includes its 18pt tail, so no faint band lingers.
+  - A scroll that ends with the pills part-hidden settles them (`onScrollPhaseChange` to idle): fully hidden if at least half hidden and far enough past the masthead, otherwise shown.
+  - Removed the header opacity fade, since opacity on glass flattens it.
+- **Validation:** Scroll sequence after the fix: 11–14 dropped frames (0.41–0.50s), at the no-quick-return baseline. Screenshots: no band at rest, clean edge with the pills hidden, pills back on upward scroll. Tests: 95 pass (`BriefingPinnedChromeTests`, `BriefingPageInsetsTests`, `BriefingReadMarkingTests`, `BriefingViewModelTests`).
+- **Remaining:** The News ⇄ Podcasts switch still drops about 58ms per switch in the simulator (pre-glass: about 33ms); see the 2026-10-20 entry. Check on device.
+- **Commits:** See git history.
+
+### 2026-10-20 — `main` — Briefing pills scroll away and quick-return
+
+- **Status:** Complete
+- **Scope:** `BriefingChromeCollapse.swift` (model, `briefingPinnedChromeStep`, `briefingPinnedChromeHide`), `BriefingLensContentViews.swift`, `BriefingView.swift`, `docs/laws/briefing.md`; new `BriefingPinnedChromeTests`.
+- **Decisions:**
+  - Past the masthead the pills and player hide 1:1 with downward scroll, up to their height. Any upward scroll of 8pt or more snaps them back (spring; instant with Reduce Motion). The masthead is untouched, so it still returns only at the top.
+  - The hide amount is capped by the distance scrolled past the masthead, so the chrome is always present where it insets the text. Input is the clamped scrolled distance, so a bounce at the end of content doesn't trigger a reveal.
+  - The header slides with `offset`, so the measured chrome height, page insets and read boundary are unchanged. It is masked at its own top edge to slide under the status bar, and hit testing is disabled once more than half hidden so it can't swallow taps on the text it uncovered.
+  - Per-frame hide values are read only by the header modifier. Pages observe only a half-hidden flag, used to shrink the scroll-edge bar to the status bar so the soft edge doesn't blur text in the clear.
+  - Read passage deliberately keeps the pills' resting edge.
+  - Hide resets on lens selection and on document replacement.
+  - Tracking runs before the page's collapse/step guard, because `collapse` stops changing once the masthead is fully collapsed.
+- **Validation:** Simulator screenshots: hidden after scrolling down, pills back with masthead still hidden after a mid-page upward scroll, masthead back at the top. `BriefingPinnedChromeTests` (7) and the Briefing read-marking, page-inset and view-model tests pass (92).
+- **Remaining:** Feel-check the reveal spring on device.
+- **Commits:** See git history.
+
+### 2026-10-20 — `main` — Smooth Briefing tier-switch animation
+
+- **Status:** Complete
+- **Scope:** `BriefingChromeViews.swift` pill strips, `BriefingView.swift` header animation.
+- **Decisions:**
+  - Frame-by-frame video of News ⇄ Podcasts showed three visible glitches:
+    - The sliding selection lens (`matchedGeometryEffect`) arrived after the row had re-laid out, so the selected label went dark first.
+    - Tint changes inside a `GlassEffectContainer` morphed through neighbouring pills and flashed the outgoing one, even at zero merge spacing.
+    - The header-wide `.animation(value: selectedLensKey)` kept the removed category strip on screen while the pages had already moved up under it.
+  - Fixes:
+    - Remove the sliding lens and the pill-row glass containers.
+    - Selection is now a fill crossfading inside unchanging per-pill glass.
+    - Animation is scoped to the tier strip, the category strip and the player only.
+    - The category strip is removed instantly and fades in on insertion.
+  - Instrumented with a temporary CADisplayLink probe (since removed), comparing variants. Dropped-frame time per switch in the simulator stayed about 52–59ms after the fix, versus about 33ms on the pre-glass commit `9e95f57a`. Single changes did not isolate the remainder: restoring an opaque tab bar or header, removing the pill glass or the strip fade masks, keeping a constant edge bar, or using the old clipped pager each left it at 46–58ms. The Time Profiler showed page text resolution (`Text.resolveAttributedString`) and render commits, which predate glass. Simulator glass rendering may not reflect device cost.
+- **Validation:** Video contact sheets before and after. Briefing view-model, read-marking, page-inset and minimizer tests (99) pass; module-size guardrail OK.
+- **Remaining:** Check the switch on device. If frames still drop there, profile with Instruments' Animation Hitches template on hardware.
+- **Commits:** See git history.
+
 ### 2026-10-19 — `main` — Glass sheets, toast and Knowledge controls; oracle review fixes
 
 - **Status:** Complete
