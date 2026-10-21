@@ -326,6 +326,10 @@ struct BriefingView: View {
                 .accessibilityIdentifier("briefing.lens_pager")
             }
 
+            if !viewModel.isStartHereSelected {
+                BriefingStatusBarFade(height: pagerScreenEdgeInsets.top)
+            }
+
             headerChrome
         }
         .onGeometryChange(for: EdgeInsets.self) { proxy in

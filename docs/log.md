@@ -27,6 +27,22 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-21 — `main` — Briefing pills slide fully off screen
+
+- **Status:** Complete
+- **Scope:** `BriefingChromeCollapse.swift`, `BriefingLensContentViews.swift`, `BriefingView.swift`, `BriefingPinnedChromeTests`.
+- **Decisions:**
+  - On device (TestFlight), the quick-return pills had three problems:
+    - The 1:1 per-frame offset judders. It trails the text by a frame, and moving the material blur every frame adds to the cost.
+    - The material backing read as a grey bar.
+    - Clipping at the header's top edge left the category row stranded under the status bar.
+  - Hiding is now a discrete per-lens state. About 24pt of downward travel, once the reader is past both the masthead and the chrome, slides the whole header (offset by its global `maxY` plus the fade tail) fully off the top of the screen through the status bar. About 8pt of upward travel slides it back. Each is one `.smooth(0.32)` animation (none with Reduce Motion), and there is no mask.
+  - Removed: the per-frame hide values, the settle-on-idle logic and the material.
+  - The backing is now a translucent `surfacePrimary` gradient (0.6 → 0.45 → 0), still gated on the masthead collapse, never opaque. `BriefingStatusBarFade` adds the same light fade under the clock so text no longer collides with it (hidden on Start Here).
+- **Validation:** Simulator recording of the slide out through the status bar, the clear text and the slide back in; frame crops confirm no band. The scroll sequence dropped 10 frames (392ms), at the no-quick-return baseline. 90 Briefing tests pass.
+- **Remaining:** Feel-check on device.
+- **Commits:** See git history.
+
 ### 2026-10-21 — `main` — Smooth Briefing quick-return
 
 - **Status:** Complete

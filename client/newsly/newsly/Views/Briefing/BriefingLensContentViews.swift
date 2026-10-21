@@ -245,7 +245,6 @@ struct BriefingLensPageView: View, Equatable {
     let onSetHeaderPinned: (Bool) -> Void
 
     @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPinned = false
     @State private var containerHeight: CGFloat = 0
     @State private var hasReportedFirstPassage = false
@@ -429,15 +428,6 @@ struct BriefingLensPageView: View, Equatable {
                     // gives that height back, so the total top inset is
                     // exactly `pageInsets.layoutTop`.
                     .systemTopScrollEdge(height: pageInsets.scrollEdgeBar)
-                    // A scroll that stops with the pills part-way off screen
-                    // finishes the move, so they never rest half hidden.
-                    .onScrollPhaseChange { _, phase in
-                        guard phase == .idle else { return }
-                        chromeCollapse.settlePinnedChrome(
-                            forLens: lensKey,
-                            animation: AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized)
-                        )
-                    }
                     .refreshable {
                         await onRefresh()
                     }
@@ -464,14 +454,13 @@ struct BriefingLensPageView: View, Equatable {
                             tabBarMinimizer?.record(offset: probe.scrolledDistance, source: lensKey)
                         }
                         // Before the guard below: once the masthead has fully
-                        // collapsed, `collapse` stops changing, but the pills
-                        // still follow every frame of scroll.
+                        // collapsed, `collapse` stops changing, but scroll
+                        // direction still drives the pills.
                         chromeCollapse.trackPinnedChrome(
                             forLens: lensKey,
                             scrolled: probe.scrolledDistance,
                             mastheadHeight: collapsibleChromeHeight,
-                            pinnedHeight: (readBoundaryY ?? 0) + BriefingPinnedChromeBacking.fadeHeight,
-                            reveal: AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized)
+                            pinnedHeight: readBoundaryY ?? 0
                         )
                         guard oldProbe.collapse != probe.collapse
                                 || oldProbe.step != probe.step
