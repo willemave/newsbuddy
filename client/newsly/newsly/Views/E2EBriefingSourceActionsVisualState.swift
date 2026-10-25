@@ -52,10 +52,16 @@ struct E2EBriefingSourceActionsVisualState: View {
     private var lens: APIBriefingLensResponse {
         let source = APIBriefingSource(
             sourceKey: sourceKey, kind: tier == .news ? "news" : "content", id: 42,
-            title: title, publisher: "Newsly", aggregator: nil, summary: nil, keyPoints: nil, url: nil,
+            title: title, publisher: "Newsly", aggregator: tier == .news ? "hackernews" : nil,
+            summary: nil, keyPoints: nil, url: nil,
             imageUrl: nil, thumbnailUrl: nil, publishedAt: nil,
             contentType: tier == .news ? .news : (tier == .audio ? .podcast : .article),
-            durationSeconds: nil, readingMinutes: nil, discussion: nil
+            durationSeconds: nil, readingMinutes: nil,
+            discussion: tier == .news ? APIBriefingDiscussion(
+                platform: "hackernews", commentCount: 128, summaryStatus: "not_ready",
+                overview: nil, topCommentAuthor: nil, topCommentText: nil,
+                externalUrl: nil, updatedAt: nil
+            ) : nil
         )
         let segment = APIBriefingSegment(
             id: 42, createdAt: Date(), status: "active", narrationText: "",

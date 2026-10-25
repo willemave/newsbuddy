@@ -13,7 +13,7 @@ enum BriefingAggregatorBadge {
     ]
 
     static func monogram(for aggregator: String) -> String? {
-        let key = aggregator.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let key = aggregator.lowercased()
         if let known = knownMonograms[key] {
             return known
         }

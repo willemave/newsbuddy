@@ -3882,3 +3882,14 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Scope:** User authorized committing and pushing all repository changes, including assistant-tool work, Briefing source badges/metadata, Learning Deck portrait layout and the existing unpushed commit.
 - **Commit-hook correction:** Moved the existing authorized Briefing source-loading function unchanged into `briefing/source_loading.rs` so the Briefing changes satisfy the module-size ratchet. The repository size guard and formatting/diff checks pass; focused Briefing repository tests and warning-denied DB Clippy pass.
 - **Delivery:** Commit all tracked and untracked source changes and push `main` to `origin`. This push triggers the configured Docker build/deploy workflow. Prior focused validation is recorded above; the full release gate and paid live smoke have not been run in this chat.
+
+### 2026-10-24 — `main` — Briefing aggregator marks and comment badge cleanup
+
+- **Status:** Complete
+- **Scope:** Briefing news source contract (`aggregator`), news source projection, iOS passage rendering, source-actions fixture, Briefing law B14.
+- **Decisions:** The API exposes the raw `news_items.platform` key; iOS owns the presentation monogram (HN, Tm, Mm, Mg, X, r/; otherwise the first two letters, e.g. Br/Fi/Sc). The mark is a single tinted template attachment (faint fill + letters) sized from the Dynamic Type-scaled body font, carries the link's attributes so it opens the same source, and is glued to the title with a narrow no-break space. Discussion badges drop the parentheses around the count.
+- **Changes:** Most of this slice landed in `67f649c9` via the concurrent full-checkout commit; the follow-up adds an HN aggregator and 128-comment discussion to the `briefing-source-actions` fixture, plus the B14 rule. Cleanup removed duplicate normalization: the API passes the canonical platform key through and the client only lowercases it for lookup.
+- **Validation:** Contract regeneration and drift check; Clippy (`-D warnings`) for contracts/db/api; focused iOS Briefing unit tests and `BriefingSourceActionsUITests` pass; local API shows memeorandum/finurls/sciurls aggregators and the simulator renders the marks on real lenses. `newsly-api` unit tests were blocked by an unrelated in-flight `scraper_configs.rs` test edit at the time.
+- **Remaining:** None.
+- **Commits:** `67f649c9` (bulk); follow-up committed separately.
+
