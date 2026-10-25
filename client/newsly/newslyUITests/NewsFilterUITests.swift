@@ -26,12 +26,24 @@ final class NewsFilterUITests: XCTestCase {
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         XCTAssertEqual(editor.value as? String,
             "Include space exploration and climate research. Exclude celebrity news and sports.")
-        XCTAssertTrue(app.switches["news_filter.enabled"].exists)
+        let enabled = app.switches["news_filter.enabled"]
+        XCTAssertTrue(enabled.exists)
+        let apply = app.buttons["news_filter.apply"]
+        XCTAssertFalse(apply.isEnabled)
         app.buttons["news_filter.preview"].tap()
-        XCTAssertTrue(app.staticTexts["news_filter.message"].waitForExistence(timeout: 3))
-        XCTAssertEqual(app.staticTexts["news_filter.message"].label, "No recent News is ready to preview.")
-        app.buttons["news_filter.apply"].tap()
-        XCTAssertEqual(app.staticTexts["news_filter.message"].label,
+        XCTAssertTrue(app.staticTexts[
+            "NASA confirms Artemis III crew for lunar landing, Matches your filter"
+        ].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts[
+            "Pop star announces surprise stadium tour, Filtered out of upcoming Briefings"
+        ].exists)
+        XCTAssertFalse(apply.isEnabled)
+        enabled.tap()
+        XCTAssertTrue(apply.isEnabled)
+        apply.tap()
+        let message = app.staticTexts["news_filter.message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 3))
+        XCTAssertEqual(message.label,
             "Applied to upcoming News additions. Published Briefings stay available.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "News-filter-editor"

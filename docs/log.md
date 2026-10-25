@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `main` — Refresh stale News Filter UI test
+
+- **Status:** Both focused UI tests passed; release gate rerun required before push.
+- **Scope:** Test-only correction found while releasing the OpenRouter deck route; product code and unrelated queue work are unchanged.
+- **Evidence:** Clean-commit release gate passed Rust, Clippy, SQLx, contracts, 214 eval tests, 64 extractor tests and 786 iOS unit tests. One of 17 UI tests failed twice because it expected an empty preview from a fixture that now returns four stories, then attempted Apply without a draft change.
+- **Change:** Assert the matched/excluded preview rows, retain the disabled-Apply assertion until a toggle change, and wait for the apply acknowledgement. Existing Filtered Out navigation coverage remains.
+- **Validation:** XcodeBuildMCP ran both NewsFilterUITests on iPhone 17 / iOS 26.4.1; 2 passed, 0 failed. Failure and corrected result bundles are retained with the release evidence.
+- **Remaining:** Rerun the canonical gate on the final commit before pushing.
+- **Commits:** Included in this commit.
+
 ### 2026-10-25 — `main` — Learning Deck Claude through OpenRouter
 
 - **Status:** Implementation validated locally; clean-commit release gate and push pending.
