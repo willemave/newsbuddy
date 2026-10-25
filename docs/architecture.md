@@ -718,6 +718,12 @@ URLs. `llm_tasks` is canonical for new Learning Deck work. The
 until production counts, backfill verification, and an explicit schema
 migration permit its retirement.
 
+Learning Deck generation defaults to `openrouter:anthropic/claude-sonnet-5.5`, using the
+existing OpenRouter credential and fixed privacy routing. Its requests enable high-effort reasoning
+and retain signed thinking for tool-result replay. OpenRouter Claude requests omit the unsupported
+`parallel_tool_calls` parameter; host tool policy still rejects multiple calls before execution.
+Other OpenRouter workflows retain their default reasoning settings.
+
 Learning Deck generation starts a durable 900-second budget after source preparation,
 configurable through `LEARNING_DECK_GENERATION_TIMEOUT_SECONDS`. Automatic deliveries reuse
 that deadline; a new user-requested generation gets a new task and budget. Model phases stop

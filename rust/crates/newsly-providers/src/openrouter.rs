@@ -11,7 +11,7 @@ pub(crate) fn openrouter_provider_routing() -> Value {
     })
 }
 
-/// Fixed `OpenRouter` routing and reasoning parameters for agent requests.
+/// Fixed `OpenRouter` routing and default reasoning parameters for agent requests.
 pub(crate) fn openrouter_request_parameters() -> Map<String, Value> {
     json!({
         "provider": openrouter_provider_routing(),

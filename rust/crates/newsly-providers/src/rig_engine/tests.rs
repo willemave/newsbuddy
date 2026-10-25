@@ -55,6 +55,54 @@ fn openrouter_account_charge_is_captured_only_when_finite_and_nonnegative() {
 }
 
 #[test]
+fn openrouter_claude_preserves_requested_thinking_and_enforces_privacy() {
+    let model = crate::ModelSpec::parse("openrouter:anthropic/claude-sonnet-5.5").unwrap();
+    let requested = json!({
+        "reasoning": {"enabled": true},
+        "provider": {"allow_fallbacks": true, "zdr": false},
+        "parallel_tool_calls": false,
+    });
+    let parameters =
+        super::RigAgentEngine::provider_parameters(&model, requested.as_object().unwrap(), false)
+            .unwrap();
+
+    assert_eq!(parameters["reasoning"], json!({"enabled": true}));
+    assert!(parameters.get("parallel_tool_calls").is_none());
+    assert_eq!(
+        parameters["provider"],
+        crate::openrouter::openrouter_provider_routing()
+    );
+}
+
+#[test]
+fn other_model_routes_keep_their_reasoning_and_parallel_call_defaults() {
+    let requested = serde_json::Map::new();
+    for allow_parallel in [false, true] {
+        for model in [
+            "openai:gpt-6.1-sol",
+            "openrouter:deepseek/deepseek-v4-flash",
+        ] {
+            let model = crate::ModelSpec::parse(model).unwrap();
+            let parameters =
+                super::RigAgentEngine::provider_parameters(&model, &requested, allow_parallel)
+                    .unwrap();
+            assert_eq!(parameters["parallel_tool_calls"], json!(allow_parallel));
+            if model.provider == crate::ModelProvider::OpenRouter {
+                assert_eq!(
+                    parameters["reasoning"],
+                    json!({"enabled": false, "exclude": true})
+                );
+            } else {
+                assert!(parameters.get("reasoning").is_none());
+                assert!(parameters.get("provider").is_none());
+            }
+        }
+    }
+    let direct = crate::ModelSpec::parse("anthropic:claude-sonnet-5-5").unwrap();
+    assert!(super::RigAgentEngine::provider_parameters(&direct, &requested, false).is_none());
+}
+
+#[test]
 fn reasoning_item_identity_and_order_survive_newsly_transcript_round_trip() {
     let original = vec![AssistantContent::Reasoning(Reasoning {
         id: Some("rs_reasoning_item".to_owned()),

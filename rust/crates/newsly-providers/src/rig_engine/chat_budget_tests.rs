@@ -60,6 +60,39 @@ fn budget(tokens: u64) -> ChatBudget {
         final_answer_reserve: Duration::from_secs(30),
     }
 }
+
+#[tokio::test]
+async fn openrouter_claude_keeps_reasoning_and_serial_tool_policy_through_the_loop() {
+    let mut request = request(3);
+    request.model_spec = "openrouter:anthropic/claude-sonnet-5.5".into();
+    request.tool_policy.require_tool = false;
+    request
+        .provider_parameters
+        .insert("reasoning".into(), serde_json::json!({"enabled": true}));
+    let (outcome, requests) = run(request.clone(), vec![tool(1), answer()], None).await;
+    assert_eq!(outcome.unwrap().tool_call_count, 1);
+    assert_eq!(requests.len(), 2);
+    for sent in &requests {
+        let parameters = sent.additional_params.as_ref().unwrap();
+        assert_eq!(
+            parameters["reasoning"],
+            serde_json::json!({"enabled": true})
+        );
+        assert!(parameters.get("parallel_tool_calls").is_none());
+    }
+
+    let parallel = CompletionResponse::new(
+        vec![tool(1).choice[0].clone(), tool(2).choice[0].clone()],
+        Usage::default(),
+        "openrouter",
+    );
+    let (outcome, _) = run(request, vec![parallel], None).await;
+    assert!(
+        matches!(outcome, Err(AgentRuntimeError::InvalidRequest(message))
+        if message.contains("parallel tool calls"))
+    );
+}
+
 fn tool(index: u32) -> CompletionResponse {
     CompletionResponse::new(
         vec![AssistantContent::ToolCall(RigToolCall {

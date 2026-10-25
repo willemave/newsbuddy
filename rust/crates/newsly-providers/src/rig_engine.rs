@@ -159,7 +159,7 @@ impl RigAgentEngine {
                     ToolChoice::Auto
                 }),
                 additional_params: Self::provider_parameters(
-                    model_spec.provider,
+                    &model_spec,
                     &request.provider_parameters,
                     request.tool_policy.allow_parallel_calls,
                 ),
@@ -475,20 +475,32 @@ impl RigAgentEngine {
     }
 
     fn provider_parameters(
-        provider: ModelProvider,
+        model: &ModelSpec,
         requested: &Map<String, Value>,
         allow_parallel_calls: bool,
     ) -> Option<Value> {
         let mut parameters = requested.clone();
-        if matches!(provider, ModelProvider::OpenAi | ModelProvider::OpenRouter) {
+        if matches!(
+            model.provider,
+            ModelProvider::OpenAi | ModelProvider::OpenRouter
+        ) {
             parameters.insert(
                 "parallel_tool_calls".to_owned(),
                 Value::Bool(allow_parallel_calls),
             );
         }
-        if provider == ModelProvider::OpenRouter {
+        if model.provider == ModelProvider::OpenRouter {
             for (key, value) in openrouter_request_parameters() {
-                parameters.insert(key, value);
+                if key == "reasoning" {
+                    parameters.entry(key).or_insert(value);
+                } else {
+                    parameters.insert(key, value);
+                }
+            }
+            if model.model.starts_with("anthropic/") {
+                // Claude endpoints reject this OpenAI parameter when require_parameters is
+                // enabled. The tool policy still rejects multiple calls before execution.
+                parameters.remove("parallel_tool_calls");
             }
         }
         (!parameters.is_empty()).then_some(Value::Object(parameters))

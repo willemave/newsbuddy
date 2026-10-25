@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `main` — Learning Deck Claude through OpenRouter
+
+- **Status:** Implementation validated locally; clean-commit release gate and push pending.
+- **Scope:** Move Learning Deck Sonnet 5.5 from exhausted direct Anthropic billing to the existing OpenRouter account; preserve unrelated deck-queue changes and explicit model overrides.
+- **Decisions:** Keep the fixed privacy route. Allow request-owned reasoning settings, enable/preserve high-effort Claude thinking for tool replay, and omit OpenRouter Claude's unsupported parallel-call parameter while retaining host enforcement. Parse model configuration once into the existing typed model spec. Explicit Opus 5.5 planning review confirmed an env-only switch cannot work on the current image.
+- **Evidence:** Production-key canaries reproduced HTTP 404 for `parallel_tool_calls` and HTTP 400 for reasoning disabled. Corrected HTTP tool/continuation checks passed; a temporary Rust adapter canary then generated 386 reasoning tokens, executed one tool and successfully replayed into its second response. Six successful live responses cost $0.012066 total; only synthetic prompts were sent. Evidence is under `test-results/openrouter-deck-routing-20261025/`; the temporary example was removed.
+- **Validation:** 207 provider tests passed (one unrelated live test ignored), 30 deck tests passed, and final warning-denied all-target Clippy passed for providers/workers. Formatting, module-size guard and diff checks passed. Opus 5.5 implementation review and follow-up found no remaining blocker; its material live-thinking-replay gap is verified through the Rust adapter, and its model-normalization/test-coverage findings are addressed.
+- **Remaining:** Production needs the normal release workflow because the deployed adapter cannot express the compatible request; no production configuration, queue, or runtime change has been made. Full deck/E2B smoke remains a release requirement, including observation for model-returned parallel tool calls.
+- **Commits:** Included in this commit.
+
 ### 2026-10-22 — `main` — Learning Deck chat as an edge-attached sheet; portrait fill investigation
 
 - **Status:** Complete (chat); portrait slide fill is investigated only, awaiting a decision.

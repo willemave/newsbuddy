@@ -191,7 +191,7 @@ impl LearningDeckAgentRuntime {
             last_candidate: None,
             last_digest: None,
         };
-        let mut outcome = empty_outcome(&self.config.model_spec);
+        let mut outcome = empty_outcome(&self.config.model_spec.canonical());
         let mut validation = None;
         let mut interrupted = false;
         if let Some(key) = draft_key {
@@ -245,7 +245,7 @@ impl LearningDeckAgentRuntime {
                         .events
                         .push("initial_phase_deadline", error.log_payload());
                     interrupted = true;
-                    empty_outcome(&self.config.model_spec)
+                    empty_outcome(&self.config.model_spec.canonical())
                 }
                 Err(error) => return Err(error),
             };
