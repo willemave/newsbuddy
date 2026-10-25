@@ -13,11 +13,22 @@ impl AgentEventSink for Events {
         Ok(())
     }
 }
-#[derive(Debug)]
-struct Tools;
+#[derive(Debug, Default)]
+struct Tools {
+    calls: Mutex<Vec<String>>,
+}
 impl ToolExecutor for Tools {
     fn execute(&self, call: NewslyToolCall, _: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
         Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("start:{}", call.id));
+            tokio::task::yield_now().await;
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("finish:{}", call.id));
             let content = call.arguments.get("result_bytes").and_then(Value::as_u64)
                 .map_or_else(|| serde_json::json!({"confirmed":true}), |size| serde_json::json!({"source_evidence": "e".repeat(usize::try_from(size).expect("fixture size"))}));
             Ok(ToolOutput {
@@ -86,11 +97,101 @@ async fn openrouter_claude_keeps_reasoning_and_serial_tool_policy_through_the_lo
         Usage::default(),
         "openrouter",
     );
-    let (outcome, _) = run(request, vec![parallel], None).await;
+    let (outcome, _) = run(request.clone(), vec![parallel.clone()], None).await;
     assert!(
         matches!(outcome, Err(AgentRuntimeError::InvalidRequest(message))
         if message.contains("parallel tool calls"))
     );
+
+    request.tool_policy.allow_parallel_calls = true;
+    let (outcome, requests, calls) = run_observed(request, vec![parallel, answer()], None).await;
+    let outcome = outcome.expect("Claude batches execute serially");
+    assert_eq!(outcome.tool_call_count, 2);
+    assert_eq!(
+        calls,
+        [
+            "start:call_1",
+            "finish:call_1",
+            "start:call_2",
+            "finish:call_2"
+        ]
+    );
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|sent| {
+        sent.additional_params
+            .as_ref()
+            .unwrap()
+            .get("parallel_tool_calls")
+            .is_none()
+    }));
+    let history_results = requests[1]
+        .chat_history
+        .iter()
+        .filter_map(|message| {
+            if let Message::User { content } = message {
+                Some(content.iter())
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .filter_map(|content| {
+            if let UserContent::ToolResult(result) = content {
+                Some(result.call.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(history_results, ["call_1", "call_2"]);
+    // Both assistant calls must be followed by their own ordered tool results.
+    let results = outcome
+        .transcript
+        .messages
+        .iter()
+        .flat_map(|message| &message.parts)
+        .filter_map(|part| {
+            if let MessagePart::Request(RequestPart::ToolResult { tool_call_id, .. }) = part {
+                Some(tool_call_id.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(results, ["call_1", "call_2"]);
+}
+
+#[tokio::test]
+async fn invalid_tool_batch_is_rejected_before_any_execution() {
+    let mut request = request(3);
+    request.tool_policy.allow_parallel_calls = true;
+    let mut disallowed = tool(2).choice[0].clone();
+    if let AssistantContent::ToolCall(call) = &mut disallowed {
+        call.function.name = "forbidden".into();
+    }
+    let batch = CompletionResponse::new(
+        vec![tool(1).choice[0].clone(), disallowed],
+        Usage::default(),
+        "openai",
+    );
+    let (outcome, _, calls) = run_observed(request.clone(), vec![batch], None).await;
+    assert!(
+        matches!(outcome, Err(AgentRuntimeError::InvalidRequest(message)) if message.contains("disallowed tool forbidden"))
+    );
+    assert!(calls.is_empty());
+
+    request.limits.tool_call_limit = 2;
+    let batch = CompletionResponse::new(
+        vec![tool(2).choice[0].clone(), tool(3).choice[0].clone()],
+        Usage::default(),
+        "openai",
+    );
+    let (outcome, _, calls) = run_observed(request, vec![tool(1), batch], None).await;
+    assert!(matches!(
+        outcome,
+        Err(AgentRuntimeError::ToolCallLimitExceeded)
+    ));
+    assert_eq!(calls, ["start:call_1", "finish:call_1"]);
 }
 
 fn tool(index: u32) -> CompletionResponse {
@@ -121,6 +222,19 @@ async fn run(
     Result<AgentOutcome, AgentRuntimeError>,
     Vec<CompletionRequest>,
 ) {
+    let (outcome, requests, _) = run_observed(request, responses, budget).await;
+    (outcome, requests)
+}
+async fn run_observed(
+    request: AgentRequest,
+    responses: Vec<CompletionResponse>,
+    budget: Option<ChatBudget>,
+) -> (
+    Result<AgentOutcome, AgentRuntimeError>,
+    Vec<CompletionRequest>,
+    Vec<String>,
+) {
+    let tools = Arc::new(Tools::default());
     let requests = Arc::new(Mutex::new(Vec::new()));
     let model = RigModel::Fake {
         responses: Mutex::new(responses.into()),
@@ -135,14 +249,15 @@ async fn run(
     let result = engine
         .run_inner(
             request,
-            Arc::new(Tools),
+            tools.clone(),
             Arc::new(Events),
             budget,
             Some(model),
         )
         .await;
     let captured = std::mem::take(&mut *requests.lock().expect("requests"));
-    (result, captured)
+    let calls = std::mem::take(&mut *tools.calls.lock().unwrap());
+    (result, captured, calls)
 }
 #[tokio::test]
 async fn more_than_eight_productive_requests_complete() {

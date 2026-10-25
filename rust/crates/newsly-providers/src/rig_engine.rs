@@ -296,16 +296,23 @@ impl RigAgentEngine {
                             .to_owned(),
                     ));
                 }
-                for call in calls {
+                // Reject an invalid batch before any tool can cause side effects.
+                for call in &calls {
                     if !request.tool_policy.allowed.contains(&call.function.name) {
                         return Err(AgentRuntimeError::InvalidRequest(format!(
                             "model requested disallowed tool {}",
                             call.function.name
                         )));
                     }
-                    if tool_call_count >= request.limits.tool_call_limit {
-                        return Err(AgentRuntimeError::ToolCallLimitExceeded);
-                    }
+                }
+                let remaining = request
+                    .limits
+                    .tool_call_limit
+                    .saturating_sub(tool_call_count);
+                if calls.len() > remaining as usize {
+                    return Err(AgentRuntimeError::ToolCallLimitExceeded);
+                }
+                for call in calls {
                     tool_call_count = tool_call_count.saturating_add(1);
                     let call_id = call.id.as_str().to_owned();
                     events.publish(AgentEvent::ToolCallStarted {

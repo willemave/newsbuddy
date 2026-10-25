@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `main` — Accept Claude deck tool batches
+
+- **Status:** Fix implemented; final release validation pending.
+- **Scope:** Complete OpenRouter deck compatibility after the full live smoke rejected a multi-tool Claude response.
+- **Decisions:** Opus 5.5 confirmed the existing host executes batches sequentially and deck tools do not mutate product state. Enable batches only for decks; preflight every tool name and the remaining call budget before any execution. Keep signed thinking, fixed privacy routing, per-call accounting, cancellation and host artifact validation.
+- **Evidence:** On `09495836`, all deterministic release checks passed, including 803 native tests and AXe; live direct/share chat passed, but deck task 6 failed with the parallel-tool policy error. Docker disk exhaustion was resolved using only rebuildable cache and unused smoke images.
+- **Validation:** All 16 focused provider-loop tests passed, including serial execution, ordered replay, false-policy rejection, disallowed batches and remaining-budget rejection. Formatting and module-size guard passed. Explicit Opus 5.5 final review found no material issue. The canonical clean-commit gate and live deck/E2B smoke remain required before push.
+- **Remaining:** Commit and push only after final validation; unrelated durable queue work stays uncommitted.
+- **Commits:** Included in this commit.
+
 ### 2026-10-25 — `main` — Refresh stale News Filter UI test
 
 - **Status:** Both focused UI tests passed; release gate rerun required before push.

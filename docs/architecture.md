@@ -721,7 +721,9 @@ migration permit its retirement.
 Learning Deck generation defaults to `openrouter:anthropic/claude-sonnet-5.5`, using the
 existing OpenRouter credential and fixed privacy routing. Its requests enable high-effort reasoning
 and retain signed thinking for tool-result replay. OpenRouter Claude requests omit the unsupported
-`parallel_tool_calls` parameter; host tool policy still rejects multiple calls before execution.
+`parallel_tool_calls` parameter. Decks accept tool batches, preflight the whole batch against
+the allowlist and remaining tool budget, then execute calls sequentially in response order.
+Dependent calls must wait for their inputs. Other workflows keep their existing batch policy.
 Other OpenRouter workflows retain their default reasoning settings.
 
 Learning Deck generation starts a durable 900-second budget after source preparation,
