@@ -50,6 +50,9 @@ final class BriefingSegmentRenderModel: Identifiable {
             sourcesByKey: segmentSourcesByKey
         )
         self.discussionChipsByBlockIndex = discussionChipsByBlockIndex
+        let aggregatorMonograms = segmentSourcesByKey.compactMapValues { source in
+            source.aggregator.flatMap(BriefingAggregatorBadge.monogram(for:))
+        }
         let textBuilder = BriefingAttributedTextBuilder()
         self.passageContentByBlockIndex = Dictionary(
             uniqueKeysWithValues: segment.blocks.enumerated().compactMap { index, block in
@@ -58,7 +61,8 @@ final class BriefingSegmentRenderModel: Identifiable {
                     index,
                     textBuilder.build(
                         paragraphs: block.paragraphs ?? [],
-                        discussionChips: discussionChipsByBlockIndex[index] ?? [:]
+                        discussionChips: discussionChipsByBlockIndex[index] ?? [:],
+                        aggregatorMonograms: aggregatorMonograms
                     )
                 )
             }

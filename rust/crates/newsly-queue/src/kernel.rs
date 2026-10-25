@@ -345,33 +345,8 @@ impl QueueKernel {
     ) -> Result<Option<FencedFinalization>, QueueError> {
         let resolved = ResolvedFinalization::from_result(claim, result, max_retries)?;
         let mut transaction = self.pool.begin().await?;
-        let owned_task_id = sqlx::query_scalar::<_, i64>(
-            r"
-            SELECT id::bigint
-            FROM processing_tasks
-            WHERE
-                id::bigint = $1
-                AND status = 'processing'
-                AND locked_by = $2
-                AND lease_token = $3
-                AND lease_expires_at > timezone('UTC', now())
-                AND retry_count = $4
-                AND executor_runtime = $5
-                AND executor_version = $6
-                AND executor_namespace = $7
-            FOR UPDATE
-            ",
-        )
-        .bind(claim.id)
-        .bind(&claim.locked_by)
-        .bind(claim.lease_token.get())
-        .bind(claim.retry_count)
-        .bind(claim.executor_runtime.as_str())
-        .bind(claim.executor_version)
-        .bind(&claim.executor_namespace)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if owned_task_id.is_none() {
+        let owned = self.lock_live_claim(&mut transaction, claim).await?;
+        if !owned {
             transaction.rollback().await?;
             warn!(
                 task_id = claim.id,
@@ -386,6 +361,44 @@ impl QueueKernel {
             claim: claim.clone(),
             resolved,
         }))
+    }
+
+    /// Lock the exact unexpired queue lease before a short product mutation.
+    ///
+    /// # Errors
+    /// Returns database errors; a stale claim returns false without authorizing writes.
+    pub async fn lock_live_claim(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        claim: &ClaimedTask,
+    ) -> Result<bool, QueueError> {
+        let owned_task_id = sqlx::query_scalar::<_, i64>(
+            r"
+            SELECT id::bigint
+            FROM processing_tasks
+            WHERE
+                id::bigint = $1
+                AND status = 'processing'
+                AND locked_by = $2
+                AND lease_token = $3
+                AND lease_expires_at > timezone('UTC', clock_timestamp())
+                AND retry_count = $4
+                AND executor_runtime = $5
+                AND executor_version = $6
+                AND executor_namespace = $7
+            FOR UPDATE
+            ",
+        )
+        .bind(claim.id)
+        .bind(&claim.locked_by)
+        .bind(claim.lease_token.get())
+        .bind(claim.retry_count)
+        .bind(claim.executor_runtime.as_str())
+        .bind(claim.executor_version)
+        .bind(&claim.executor_namespace)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        Ok(owned_task_id.is_some())
     }
 
     /// Deletes pending account-owned work and reports whether any other account task is still
@@ -1224,6 +1237,10 @@ pub enum QueueError {
 #[cfg(test)]
 #[path = "kernel/briefing_claim_tests.rs"]
 mod briefing_claim_tests;
+
+#[cfg(test)]
+#[path = "kernel/live_claim_tests.rs"]
+mod live_claim_tests;
 
 #[cfg(test)]
 mod tests {

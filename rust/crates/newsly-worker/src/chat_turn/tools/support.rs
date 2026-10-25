@@ -6,55 +6,39 @@ use newsly_contracts::{
 use newsly_domain::AggregatorKey;
 use sha1::{Digest, Sha1};
 
-pub(super) fn assistant_feed_option(
-    suggestion: newsly_db::NewOnboardingSuggestion,
-    activity: Option<newsly_providers::FeedPublishingActivity>,
-) -> Option<AssistantFeedOption> {
-    let feed_url = suggestion
-        .feed_url
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty() && value.chars().count() <= 2_048)?;
-    let site_url = suggestion
-        .site_url
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty() && value.chars().count() <= 2_048)
-        .unwrap_or_else(|| feed_url.clone());
-    let feed_type = match suggestion.suggestion_type.as_str() {
-        "atom" => FeedType::Atom,
-        "substack" => FeedType::Substack,
-        "podcast_rss" => FeedType::PodcastRss,
-        _ => return None,
+pub(super) fn assistant_feed_option(source: newsly_providers::ResolvedFeed) -> AssistantFeedOption {
+    use newsly_providers::{SourceKind, ValidatedFeedFormat};
+    let feed_type =
+        crate::share_actions::workflows::validated_feed_type(&source.feed, Some(source.kind));
+    let feed_url = source.feed.effective_url.clone();
+    let site_url = source.site_url;
+    let feed_format = match source.feed.format {
+        ValidatedFeedFormat::Rss => FeedFormat::Rss,
+        ValidatedFeedFormat::Atom => FeedFormat::Atom,
     };
-    let title = suggestion
-        .title
-        .as_deref()
-        .and_then(|value| bounded_text(value, 300))
+    let title = bounded_text(&source.title, 300)
         .or_else(|| feed_host_label(&site_url))
         .unwrap_or_else(|| feed_url.clone());
-    let rationale = suggestion
-        .rationale
-        .as_deref()
-        .and_then(|value| bounded_text(value, 600));
-    let id = option_id(&feed_url);
-    let feed_format =
-        if feed_type == FeedType::Atom || feed_url.to_ascii_lowercase().contains("atom") {
-            FeedFormat::Atom
-        } else {
-            FeedFormat::Rss
-        };
-    Some(AssistantFeedOption {
-        id,
+    let activity = if source.kind == SourceKind::Podcast {
+        source.feed.podcast_publishing_activity
+    } else {
+        source.feed.publishing_activity
+    };
+    AssistantFeedOption {
+        id: option_id(&feed_url),
         title,
         site_url: site_url.clone(),
         feed_url,
         feed_type,
         feed_format,
         description: None,
-        rationale,
+        rationale: Some(
+            "Resolved and validated from publisher or podcast directory evidence".into(),
+        ),
         evidence_url: Some(site_url),
         is_subscribed: false,
-        publishing_activity: activity.map(feed_activity),
-    })
+        publishing_activity: Some(feed_activity(activity)),
+    }
 }
 
 fn feed_activity(activity: newsly_providers::FeedPublishingActivity) -> AssistantSourceActivity {
@@ -169,15 +153,6 @@ fn feed_host_label(value: &str) -> Option<String> {
         .filter(|host| !host.is_empty())
 }
 
-pub(super) fn looks_like_podcast_query(value: &str) -> bool {
-    let value = value.to_ascii_lowercase();
-    [
-        "podcast", "podcasts", "episode", "episodes", "show", "shows",
-    ]
-    .into_iter()
-    .any(|hint| value.contains(hint))
-}
-
 pub(super) fn bounded_query(value: &str) -> Result<&str, AgentRuntimeError> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > 2_000 {
@@ -190,14 +165,12 @@ pub(super) fn bounded_query(value: &str) -> Result<&str, AgentRuntimeError> {
 }
 
 pub(super) fn valid_url(value: &str) -> Result<String, AgentRuntimeError> {
-    let parsed = reqwest::Url::parse(value.trim())
-        .map_err(|_| AgentRuntimeError::Tool("URL is invalid".to_owned()))?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err(AgentRuntimeError::Tool(
-            "URL must use http or https".to_owned(),
-        ));
-    }
-    Ok(parsed.to_string())
+    let parsed = newsly_extraction::PublicUrl::parse(value.trim()).map_err(|_| {
+        AgentRuntimeError::Tool(
+            "URL must be a public HTTP(S) address without credentials".to_owned(),
+        )
+    })?;
+    Ok(parsed.as_str().to_owned())
 }
 
 pub(super) fn clean(value: Option<String>) -> Option<String> {
@@ -228,16 +201,21 @@ mod activity_tests {
             observed_year_count: Some(12),
             undated_count: 2,
         };
-        let suggestion = newsly_db::NewOnboardingSuggestion {
-            suggestion_type: "podcast_rss".to_owned(),
-            title: Some("Podcast".to_owned()),
-            site_url: Some("https://example.com".to_owned()),
-            feed_url: Some("https://example.com/feed".to_owned()),
-            subreddit: None,
-            rationale: None,
-            score: None,
+        let source = newsly_providers::ResolvedFeed {
+            title: "Podcast".into(),
+            site_url: "https://example.com".into(),
+            kind: newsly_providers::SourceKind::Podcast,
+            feed: newsly_providers::ValidatedFeed {
+                effective_url: "https://example.com/feed".into(),
+                format: newsly_providers::ValidatedFeedFormat::Atom,
+                has_audio_entries: true,
+                publishing_activity: activity.clone(),
+                podcast_publishing_activity: activity,
+            },
         };
-        let card = assistant_feed_option(suggestion, Some(activity)).unwrap();
+        let card = assistant_feed_option(source);
+        assert_eq!(card.feed_format, FeedFormat::Atom);
+        assert_eq!(card.feed_type, FeedType::PodcastRss);
         let activity = card.publishing_activity.unwrap();
         assert_eq!(activity.basis, SourceActivityBasis::FeedSnapshot);
         assert_eq!(activity.observed_count, Some(3));
@@ -246,6 +224,42 @@ mod activity_tests {
         let item = activity.latest_item.unwrap();
         assert_eq!(item.published_at, Some(checked_at));
         assert_eq!(item.collected_at, None);
+    }
+
+    #[test]
+    fn publication_card_uses_verified_format_and_only_labels_substack_hosts() {
+        let now = chrono::Utc::now();
+        let activity = newsly_providers::FeedPublishingActivity {
+            checked_at: now,
+            window_start: now,
+            year_window_start: now,
+            window_end: now,
+            latest_item: None,
+            observed_count: None,
+            observed_year_count: None,
+            undated_count: 0,
+        };
+        for (url, expected_type) in [
+            ("https://publisher.example/feed.atom", FeedType::Atom),
+            ("https://writer.substack.com/feed", FeedType::Substack),
+            ("https://substack.com.example/feed", FeedType::Atom),
+        ] {
+            let source = newsly_providers::ResolvedFeed {
+                title: "Publication".into(),
+                site_url: "https://publisher.example".into(),
+                kind: newsly_providers::SourceKind::Publication,
+                feed: newsly_providers::ValidatedFeed {
+                    effective_url: url.into(),
+                    format: newsly_providers::ValidatedFeedFormat::Rss,
+                    has_audio_entries: true,
+                    publishing_activity: activity.clone(),
+                    podcast_publishing_activity: activity.clone(),
+                },
+            };
+            let card = assistant_feed_option(source);
+            assert_eq!(card.feed_type, expected_type);
+            assert_eq!(card.feed_format, FeedFormat::Rss);
+        }
     }
 
     #[test]

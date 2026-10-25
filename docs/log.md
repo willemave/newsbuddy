@@ -27,6 +27,26 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-22 — `main` — Learning Deck chat as an edge-attached sheet; portrait fill investigation
+
+- **Status:** Complete (chat); portrait slide fill is investigated only, awaiting a decision.
+- **Scope:** iOS `LearningDeckReaderView`, `LearningDeckChatPanel`, `LearningDeckChatComposer`, `LearningDeckReaderSurfaces`.
+- **Decisions:** Portrait deck chat is a full-width sheet with top-only rounded corners whose surface runs through the home indicator; content stays above it. Removed the card inset, stroke, two hairlines, and glass rims inside the opaque sheet (flat fills for the field, send, voice, and chips; plain slide label). The landscape sheet uses `presentationBackground` now that the panel draws no background of its own.
+- **Investigation (not changed):** Measured production decks 31–33 at 440×956 in Chromium. The shell's fixed 720×1280 portrait canvas on a ~9:19.5 phone scales by width (0.608) and letterboxes 89pt top and bottom, so the canvas covers at most 81% of the screen before any chrome. Content then uses 11–30% (deck 31), 35–74% (deck 33), or a stretched 73% with landscape-shaped 4-column diagrams (deck 32) of the screen height. The validator records `vertical_occupancy` but never enforces it, and the shell is baked into stored `index.html`, so a shell change affects only new decks.
+- **Validation:** Simulator screenshots of peek, compact, focus, and keyboard states; `LearningDeckChatLayoutUITests`, `LearningDeckChatFlyoverInteractionTests`, `LearningDeckReaderViewModelTests` (19/19 passed).
+- **Remaining:** Choose the portrait-fill fix (phone-aspect canvas plus enforced occupancy, and/or a serve-time shell for existing decks).
+- **Commits:** Uncommitted
+
+### 2026-10-22 — `main` — Learning Deck portrait prompt and Claude Sonnet 5.5 default
+
+- **Status:** Complete in code; not deployed or live-verified.
+- **Scope:** `rust/assets/prompts/learning_decks/agent.md`, `newsly-worker` learning-deck agent default and limits, law P29, model audit table.
+- **Decisions:** Production generated every deck with `gpt-6-luna` (no `LEARNING_DECK_MODEL` override; usage rows confirm). Default is now `anthropic:claude-sonnet-5-5`. Rig 0.42 only defaults Anthropic `max_tokens` for Claude 4.x names, so the deck agent sets the model's 128K output maximum instead of an app-level cap. Server-side refusal fallbacks are not enabled: Rig's Anthropic content enum has no catch-all and would fail to parse `fallback` blocks; a refusal ends the run as a visible failed deck. Agent history is append-only (repairs append), so preserved thinking holds.
+- **Prompt:** Replaced the 70–85% occupancy rule, which produced `space-between` layouts with dead middles, with a Portrait Phone Layout section: portrait type minimums on the 720px canvas, top 110px/bottom 120px reader-control safe areas, fill height with content instead of spacing, vertical diagram reflow, split instead of shrink, and the `html.newsly-learning-deck-portrait` hook the viewer already sets.
+- **Validation:** `cargo fmt --check`, warning-denied Clippy for `newsly-worker`, `learning_deck` tests (29 passed). A live Sonnet 5.5 tool-loop probe through `RigAgentEngine` failed only because the local Anthropic key has no credit; production has made no Anthropic calls since 2026-05-04.
+- **Remaining:** Confirm production Anthropic billing before deploying; run one live deck after deploy. Anthropic token usage is unpriced (the pricing trigger only handles OpenAI/OpenRouter). Validator still does not enforce portrait type size or occupancy.
+- **Commits:** Uncommitted
+
 ### 2026-10-21 — `main` — Briefing pills slide fully off screen
 
 - **Status:** Complete
@@ -3831,3 +3851,34 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Cause and correction:** Browser validation gave the snapshot-sealing command a clone of the token used by the subsequent Chromium command. Collecting and dropping the seal's process stream cancels that token by design, so Chromium immediately rejected it. The seal now owns a child token; parent cancellation still stops the entire validation. Durable generation, phase, lease and retry budgets are unchanged.
 - **Independent review:** Explicit Claude Opus 5.5 confirmed the source-level cause, minimal correction and absence of adjacent repeated-token misuse. It recommended the existing live matrix as the regression test because a unit test would require a new fake envd server or only mirror cancellation primitives. No new test-only abstraction was introduced.
 - **Remaining:** Commit the correction, rerun the complete gate including the live deck and grounded-chat paths, then push/deploy only the exact passing SHA. No production change has occurred.
+
+### 2026-10-24 — `main` — Simplify chat tools and retire dedicated research
+
+- **Status:** Local implementation and scoped validation complete; no commit, push or deployment.
+- **Scope:** Retire dedicated Deep Research creation/execution while retaining historical reads; one canonical chat tool set; shared podcast source resolution and guarded inert web reading; lazy sandbox filesystem execution; chat-owned execution budgets and truthful committed-action fallback.
+- **Decisions:** Keep source discovery and product mutations on the host. Reuse guarded feed validation and Apple directory transport; do not run profile-oriented newsletter discovery for a named show. Chat writes lock the exact queue claim before the message-generation fence, and only confirmed commits enter fallback output. Shared structured-provider retry semantics remain unchanged. Preserve unrelated Learning Deck edits.
+- **Validation:** Final provider/runtime suites passed (199 provider tests plus 3 runtime tests; 1 live test ignored), 17 worker chat tests, 4 isolated queue-fence tests, 2 PostgreSQL tooling tests, 3 API retirement/model tests, 7 native tests with app/ShareExtension build, and 22 Python eval tests passed. Warning-denied all-target Clippy passed for the affected seven Rust crates; formatting, module-size/iOS-wire guards, regenerated contracts/drift, Ruff and MyPy passed. The real PostgreSQL regression commits a subscription, publishes its fallback through the fenced finalizer, and proves replay leaves exactly one config/backfill and no invented usage.
+- **Independent review:** Claude Opus 5.5 planning and implementation reviews confirmed the lease/HTTP/accounting boundaries. Verified corrections cover realistic long-context token estimates, bounded final-only previews for 100/500 KB read results near budget exhaustion, parsed feed-title/author identity rather than third-party page titles, source-scope validation, active activity guidance, legacy source provenance, retired-session controls and human-readable confirmations. Subscription cards reflect committed follow state.
+- **Limits:** Initial chat defaults are 32 model requests, 64 tool calls, an estimated 256,000-token allowance, 300 seconds total and a 30-second final-response reserve; token estimates are not dollar guarantees. No paid model/E2B canaries, full release gate, commit, push, deployment or production mutation ran.
+
+### 2026-10-24 — `main` — Chat tool cleanup
+
+- **Scope:** Review the chat/tool implementation above with three read-only cleanup reviewers; preserve unrelated Learning Deck work.
+- **Changes:** Replace synthetic legacy tool-call encoding/parsing with direct mutation arguments; remove unused research-response/publication fields, unused event forwarding and an unreachable output check. Keep source status and reference deduplication typed, summarize the action ledger without cloning it, share inert-page whitespace normalization, and remove the retired gateway's fake eval credential.
+- **Boundaries:** Tool contracts, budget semantics, lazy sandbox execution, exact-lease mutation fences and historical research reads are unchanged. Retain the content-authorization preflight rather than widen mutation behavior during cleanup.
+- **Validation:** Passed 17 worker chat tests (including isolated PostgreSQL fallback publication), 200 provider tests plus 3 runtime tests (1 live test ignored), 3 DB retirement tests and 22 Python chat evaluation tests. Warning-denied all-target Clippy passed for worker/providers/DB; Ruff, MyPy, formatting, module-size/iOS-wire guards and diff checks passed. No commit, push, deployment or production mutation.
+
+### 2026-10-24 — `main` — Resolve strict chat-tool review findings
+
+- **Scope:** Fix the six verified review findings and the committed-action regression coverage gap; preserve unrelated Learning Deck work and concurrent Briefing edits. No commit, push or deployment.
+- **Changes:** One typed host/sandbox tool catalog feeds routing, schemas, execution and read/cache policy. Typed source/state/action receipts retain identity and subscription outcomes through fallback rendering, including `topics_updated`. The neutral resolver returns flat verified feeds, preserves parsed format/activity, validates directory candidates before web fallback and caches validations within each bounded attempt. News queries use explicit SQL fragments and canonical visibility; obsolete legacy tool repositories are removed. Content mutation authorization runs as one repository-owned batch inside the existing exact-lease transaction. One backend retirement classifier and matching native rules cover model/provider/session markers before send acceptance.
+- **Regression proof:** The actual executor now drives subscription/topic updates through committed receipts, the production model-error completion decision and the real fenced finalizer. Separate tests reject success after cancellation or a failed mutation. Source tests exercise stale-directory fallback and validation caching without network calls.
+- **Follow-up identity fixes:** Exact references retain their owned configuration, canonical redirect targets reconcile rather than duplicate, and native creation shares direct-feed URL identity and advisory locking with chat. Server-owned historical URL aliases survive settings edits and preserve exact source search/history, while remaining absent from API responses and subscription identity matching. Resolver limits report unchecked work explicitly. Shared URL normalization also drives card follow state.
+- **Validation:** Provider/domain/runtime suites (202/20/3), 8 focused resolver checks, 23 worker chat tests, 16 Share Action tests, 3 aggregator-demand tests, focused isolated PostgreSQL subscription/search/history/stats/authorization/visibility tests, 4 retirement API tests, 2 scraper-response API tests and 8 native tests passed. Final warning-denied all-target Clippy passed for all eight affected Rust crates; formatting, diff and iOS-wire checks passed. Explicit Claude Opus 5.5 implementation and alias-boundary reviews found no remaining blocker.
+- **Gate boundary:** The whole-checkout module-size guard reports one unrelated concurrent Briefing violation (`rust/crates/newsly-db/src/briefing.rs`, 1277 lines versus its 1274-line cap); scoped chat modules satisfy their limits. No paid application-model/E2B canary, full release gate, commit, push, deployment or production mutation.
+
+### 2026-10-24 — `main` — Commit and push the complete checkout
+
+- **Scope:** User authorized committing and pushing all repository changes, including assistant-tool work, Briefing source badges/metadata, Learning Deck portrait layout and the existing unpushed commit.
+- **Commit-hook correction:** Moved the existing authorized Briefing source-loading function unchanged into `briefing/source_loading.rs` so the Briefing changes satisfy the module-size ratchet. The repository size guard and formatting/diff checks pass; focused Briefing repository tests and warning-denied DB Clippy pass.
+- **Delivery:** Commit all tracked and untracked source changes and push `main` to `origin`. This push triggers the configured Docker build/deploy workflow. Prior focused validation is recorded above; the full release gate and paid live smoke have not been run in this chat.

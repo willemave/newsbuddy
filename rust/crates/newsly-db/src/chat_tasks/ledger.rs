@@ -1,9 +1,9 @@
-//! Attempt-owned LLM ledger transitions and best-effort usage accounting.
+//! Attempt-owned LLM ledger transitions. Model usage is recorded at response observation.
 
 use super::{
-    Acquire, ChatTaskRepositoryError, ChatTurnKind, ChatTurnProcessingContext, ChatTurnPublication,
+    ChatTaskRepositoryError, ChatTurnKind, ChatTurnProcessingContext, ChatTurnPublication,
     Postgres, Transaction,
-    context::{i64_bound, status_entry},
+    context::status_entry,
     json,
     preparation::{canonical_provider, validate_positive},
 };
@@ -276,87 +276,5 @@ pub(super) async fn fail_chat_llm_task(
     .bind(entry)
     .execute(&mut **transaction)
     .await?;
-    Ok(())
-}
-
-pub(super) async fn record_chat_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    publication: &ChatTurnPublication<'_>,
-) -> Result<(), ChatTaskRepositoryError> {
-    let usage = publication.usage;
-    if usage.request_count == 0
-        && usage.input_tokens == 0
-        && usage.output_tokens == 0
-        && usage.reasoning_tokens == 0
-    {
-        return Ok(());
-    }
-    let metadata = json!({
-        "session_type": publication.snapshot.context.session.session_type,
-        "cached_input_tokens": usage.cached_input_tokens,
-        "cache_write_tokens": usage.cache_write_tokens,
-        "reasoning_tokens": usage.reasoning_tokens,
-    });
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id,
-            task_id, content_id, session_id, message_id, user_id,
-            input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens,
-            request_count, currency, metadata, created_at
-        )
-        SELECT
-            $1, $2, 'chat', $3, $4, $5,
-            $6::bigint::integer, $7::bigint::integer, $8::bigint::integer,
-            $9::bigint::integer, account.id,
-            $10::bigint::integer, $11::bigint::integer, $12::bigint::integer,
-            $13::bigint::integer, $14::bigint::integer, $15::bigint::integer,
-            'USD', $16, timezone('UTC', clock_timestamp())
-        FROM users AS account
-        WHERE account.id::bigint = $17 AND account.is_active = TRUE
-        "#,
-    )
-    .bind(publication.model_provider)
-    .bind(publication.model_name)
-    .bind(format!("chat.{}", publication.usage_source))
-    .bind(publication.usage_source)
-    .bind(publication.provider_response_id)
-    .bind(publication.snapshot.queue_task_id)
-    .bind(publication.snapshot.context.session.content_id)
-    .bind(publication.snapshot.session_id)
-    .bind(publication.snapshot.message_id)
-    .bind(i64_bound(usage.input_tokens))
-    .bind(i64_bound(usage.output_tokens))
-    .bind(i64_bound(
-        usage.input_tokens.saturating_add(usage.output_tokens),
-    ))
-    .bind(i64_bound(usage.cached_input_tokens))
-    .bind(i64_bound(usage.cache_write_tokens))
-    .bind(i64_bound(usage.request_count))
-    .bind(metadata)
-    .bind(publication.snapshot.user_id)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-pub(super) async fn record_chat_usage_best_effort(
-    transaction: &mut Transaction<'_, Postgres>,
-    publication: &ChatTurnPublication<'_>,
-) -> Result<(), ChatTaskRepositoryError> {
-    let mut savepoint = transaction.begin().await?;
-    if let Err(error) = record_chat_usage(&mut savepoint, publication).await {
-        savepoint.rollback().await?;
-        tracing::warn!(
-            queue_task_id = publication.snapshot.queue_task_id,
-            message_id = publication.snapshot.message_id,
-            provider = publication.model_provider,
-            model = publication.model_name,
-            error = %error,
-            "chat usage persistence degraded without blocking terminal publication"
-        );
-        return Ok(());
-    }
-    savepoint.commit().await?;
     Ok(())
 }

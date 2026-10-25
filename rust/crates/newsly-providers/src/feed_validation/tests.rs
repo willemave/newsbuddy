@@ -408,3 +408,15 @@ fn shared_item_evidence_distinguishes_episodes_articles_and_homepages() {
         None
     );
 }
+
+#[test]
+fn podcast_discovery_retains_channel_authors_for_identity_resolution() {
+    let feed=feed_rs::parser::parse(br#"<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel><title>More or Less</title><link>https://moreorlesspod.com</link><description>Tech</description><itunes:author>Dave Morin, Jessica Lessin, Brit Morin, and Sam Lessin</itunes:author><item><guid>episode</guid><title>Episode</title><enclosure url="https://example.com/audio.mp3" type="audio/mpeg" length="10"/></item></channel></rss>"#.as_slice()).unwrap();
+    let observed = super::publishing_activity(&feed, true, checked_at());
+    let evidence = super::podcast_discovery_evidence(&feed, &observed);
+    assert_eq!(evidence.title.as_deref(), Some("More or Less"));
+    assert_eq!(
+        evidence.authors,
+        ["Dave Morin, Jessica Lessin, Brit Morin, and Sam Lessin"]
+    );
+}

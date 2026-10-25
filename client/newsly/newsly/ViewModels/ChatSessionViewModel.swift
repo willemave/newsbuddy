@@ -465,10 +465,6 @@ final class ChatSessionViewModel {
         self.session = updatedSession
     }
 
-    var canStartDeepResearch: Bool {
-        session?.canStartDeepResearch ?? false
-    }
-
     private func applyDetail(_ detail: ChatSessionDetail) {
         let signpostState = chatPerfSignposter.beginInterval("reconcile-detail")
         defer { chatPerfSignposter.endInterval("reconcile-detail", signpostState) }

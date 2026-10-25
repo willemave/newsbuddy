@@ -56,24 +56,6 @@ pub(super) fn assistant_instruction(section_name: &str) -> Result<&'static str, 
     section(ASSISTANT_PROMPT, section_name)
 }
 
-pub(super) fn deep_research_context(
-    snapshot: &ChatTaskSnapshot,
-    content_body: Option<&str>,
-) -> Option<String> {
-    if let Some(context) = snapshot
-        .context
-        .session
-        .context_snapshot
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return Some(truncate(context, 40_000));
-    }
-    let context = article_context(snapshot, content_body);
-    (!context.is_empty()).then(|| truncate(&context, 40_000))
-}
-
 fn article_context(snapshot: &ChatTaskSnapshot, content_body: Option<&str>) -> String {
     let mut lines = Vec::new();
     if let Some(topic) = clean(snapshot.context.session.topic.as_deref()) {

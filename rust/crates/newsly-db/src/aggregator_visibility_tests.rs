@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::chat_tooling::list_unread_chat_news;
+use crate::chat_tooling::search_chat_news_page;
 use crate::content_read::{NewsReadFilter, list_visible_news_items};
 use crate::learning_decks::find_visible_news_item_for_learning_deck;
 use crate::news_actions::mark_visible_news_items_read;
@@ -65,16 +65,19 @@ async fn visible_ids(pool: &PgPool, user_id: i64, candidates: &[i64]) -> BTreeSe
     let unread = get_unread_counts(pool, user_id).await.unwrap().news;
     assert_eq!(usize::try_from(unread).unwrap(), feed.len(), "unread count");
 
-    let chat = list_unread_chat_news(pool, user_id, 50).await.unwrap();
+    let chat = search_chat_news_page(pool, user_id, "", true, None, 50, 0)
+        .await
+        .unwrap();
     assert_eq!(
-        usize::try_from(chat.total_count).unwrap(),
+        usize::try_from(chat["total_count"].as_i64().unwrap()).unwrap(),
         feed.len(),
         "chat count"
     );
-    let chat_ids = chat
-        .items
-        .into_iter()
-        .map(|item| item.news_item_id)
+    let chat_ids = chat["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["news_item_id"].as_i64().unwrap())
         .collect::<BTreeSet<_>>();
     assert_eq!(chat_ids, feed, "chat search");
 
@@ -301,11 +304,17 @@ async fn aggregator_subscription_creates_reactivates_and_narrows_topics(pool: Pg
     );
 
     let narrowed = apply(Some(&["cs.CL"])).await;
+    assert_eq!(narrowed.mutation, FeedSubscriptionMutation::TopicsUpdated);
+    assert_eq!(narrowed.config.id, created.config.id);
+    let unchanged = apply(Some(&["cs.CL"])).await;
     assert_eq!(
-        narrowed.mutation,
+        unchanged.mutation,
         FeedSubscriptionMutation::AlreadySubscribed
     );
-    assert_eq!(narrowed.config.id, created.config.id);
+    let cleared = apply(Some(&[])).await;
+    assert_eq!(cleared.mutation, FeedSubscriptionMutation::TopicsUpdated);
+    let narrowed = apply(Some(&["cs.CL"])).await;
+    assert_eq!(narrowed.mutation, FeedSubscriptionMutation::TopicsUpdated);
     assert_eq!(
         visible_ids(&pool, user_id, &candidates).await,
         BTreeSet::from([language])

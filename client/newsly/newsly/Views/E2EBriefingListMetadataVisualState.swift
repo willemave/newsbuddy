@@ -59,7 +59,7 @@ struct E2EBriefingListMetadataVisualState: View {
                 title: tier == .audio
                     ? "Inside-Out AI: A conversation about rebuilding the guest experience"
                     : "Inside-Out AI: Rebuilding Airbnb Behind the Scenes and Across the Guest Experience",
-                publisher: publishers[index], summary: nil, keyPoints: nil, url: nil,
+                publisher: publishers[index], aggregator: nil, summary: nil, keyPoints: nil, url: nil,
                 imageUrl: nil, thumbnailUrl: nil, publishedAt: index == 0 ? ServerDate.parse("2023-04-01T12:00:00Z") : nil,
                 contentType: tier == .audio ? .podcast : .article,
                 durationSeconds: tier == .audio ? 3_939 : nil,

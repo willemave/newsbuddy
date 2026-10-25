@@ -219,14 +219,15 @@ def run_suite(
         "suite_sha256": hashlib.sha256(suite_path.read_bytes()).hexdigest(),
         "scenario_sha256": hashlib.sha256(scenario.model_dump_json().encode()).hexdigest(),
         "candidate_turns": turns,
-        "max_candidate_requests_per_turn": int(
-            CHAT_RUNTIME_LIMITS["LLM_TASK_SANDBOX_REQUEST_LIMIT"]
-        ),
-        "max_candidate_tool_calls_per_turn": int(
-            CHAT_RUNTIME_LIMITS["LLM_TASK_SANDBOX_TOOL_CALL_LIMIT"]
-        ),
+        "max_candidate_requests_per_turn": int(CHAT_RUNTIME_LIMITS["CHAT_REQUEST_LIMIT"]),
+        "max_candidate_tool_calls_per_turn": int(CHAT_RUNTIME_LIMITS["CHAT_TOOL_CALL_LIMIT"]),
         "max_candidate_output_tokens_per_request": int(
             CHAT_RUNTIME_LIMITS["CHAT_OUTPUT_TOKEN_LIMIT"]
+        ),
+        "max_candidate_tokens_per_turn": int(CHAT_RUNTIME_LIMITS["CHAT_TOKEN_BUDGET"]),
+        "candidate_timeout_seconds": int(CHAT_RUNTIME_LIMITS["CHAT_TIMEOUT_SECONDS"]),
+        "candidate_final_answer_reserve_seconds": int(
+            CHAT_RUNTIME_LIMITS["CHAT_FINAL_ANSWER_RESERVE_SECONDS"]
         ),
         "candidate_runtime_limits": CHAT_RUNTIME_LIMITS,
         "judge_requests": len(cases),

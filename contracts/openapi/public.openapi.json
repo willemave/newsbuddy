@@ -3826,7 +3826,7 @@
             }
           },
           "400": {
-            "description": "Invalid assistant context",
+            "description": "Invalid assistant context or retired Deep Research session",
             "content": {
               "application/json": {
                 "schema": {
@@ -4118,7 +4118,7 @@
             }
           },
           "400": {
-            "description": "Invalid session request",
+            "description": "Invalid session request or retired Deep Research provider",
             "content": {
               "application/json": {
                 "schema": {
@@ -4508,7 +4508,7 @@
             }
           },
           "400": {
-            "description": "Invalid provider",
+            "description": "Invalid or retired provider",
             "content": {
               "application/json": {
                 "schema": {
@@ -4803,7 +4803,7 @@
             }
           },
           "400": {
-            "description": "Invalid chat message",
+            "description": "Invalid chat message or retired Deep Research session",
             "content": {
               "application/json": {
                 "schema": {
@@ -13201,6 +13201,7 @@
           "id",
           "title",
           "publisher",
+          "aggregator",
           "summary",
           "key_points",
           "url",
@@ -13233,6 +13234,13 @@
               "null"
             ],
             "description": "Publication or show name for article and podcast sources."
+          },
+          "aggregator": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Aggregator platform key that surfaced a news source, such as\n`hackernews` or `techmeme`; absent for library content."
           },
           "summary": {
             "type": [

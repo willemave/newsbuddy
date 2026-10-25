@@ -206,6 +206,9 @@ pub struct BriefingSourceDto {
     pub title: String,
     /// Publication or show name for article and podcast sources.
     pub publisher: Option<String>,
+    /// Aggregator platform key that surfaced a news source, such as
+    /// `hackernews` or `techmeme`; absent for library content.
+    pub aggregator: Option<String>,
     pub summary: Option<String>,
     pub key_points: Option<Vec<String>>,
     pub url: Option<String>,

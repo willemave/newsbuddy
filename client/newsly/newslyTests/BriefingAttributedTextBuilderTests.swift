@@ -313,7 +313,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             ]
         )
 
-        let badgeRange = (result.plainText as NSString).range(of: "(\u{FFFC}\u{202F}64)")
+        let badgeRange = (result.plainText as NSString).range(of: "\u{FFFC}\u{202F}64")
         XCTAssertEqual(
             linkRanges(
                 in: result.attributedText,
@@ -321,6 +321,60 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             ),
             [badgeRange]
         )
+    }
+
+    func testBuildPrefixesNewsLinksWithLinkedAggregatorBadge() {
+        let builder = BriefingAttributedTextBuilder()
+        let result = builder.build(
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Read [Story](news://briefing/news/8) and ",
+                            sourceKey: nil,
+                            insightId: nil
+                        ),
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "Other",
+                            sourceKey: "news:9",
+                            insightId: nil
+                        ),
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "Mine",
+                            sourceKey: "content:3",
+                            insightId: nil
+                        )
+                    ]
+                )
+            ],
+            aggregatorMonograms: ["news:8": "HN", "news:9": "Tm"]
+        )
+
+        XCTAssertEqual(
+            result.plainText,
+            "Read \u{FFFC}\u{202F}Story and \u{FFFC}\u{202F}OtherMine"
+        )
+        let storyBadge = (result.plainText as NSString).range(of: "\u{FFFC}\u{202F}Story")
+        var linkedRange = NSRange()
+        let link = result.attributedText.attribute(
+            .link,
+            at: storyBadge.location,
+            longestEffectiveRange: &linkedRange,
+            in: NSRange(location: 0, length: result.attributedText.length)
+        ) as? URL
+        XCTAssertEqual(link?.absoluteString, "newsly://briefing/news/8")
+        XCTAssertEqual(linkedRange, storyBadge)
+    }
+
+    func testAggregatorMonogramsUseKnownMarksAndFallBackToTwoLetters() {
+        XCTAssertEqual(BriefingAggregatorBadge.monogram(for: "hackernews"), "HN")
+        XCTAssertEqual(BriefingAggregatorBadge.monogram(for: "Techmeme"), "Tm")
+        XCTAssertEqual(BriefingAggregatorBadge.monogram(for: "reddit"), "r/")
+        XCTAssertEqual(BriefingAggregatorBadge.monogram(for: "sciurls"), "Sc")
+        XCTAssertNil(BriefingAggregatorBadge.monogram(for: " "))
     }
 
     func testBriefingSourceLinkKeysIncludesStoredMarkdownSourceLinks() {
@@ -370,7 +424,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             ]
         )
 
-        let badgeRange = (result.plainText as NSString).range(of: "(\u{FFFC}\u{202F}128)")
+        let badgeRange = (result.plainText as NSString).range(of: "\u{FFFC}\u{202F}128")
         XCTAssertEqual(
             linkRanges(
                 in: result.attributedText,
@@ -501,6 +555,7 @@ final class BriefingRenderModelTests: XCTestCase {
             id: 2,
             title: "Story",
             publisher: nil,
+            aggregator: nil,
             summary: nil,
             keyPoints: nil,
             url: nil,
@@ -559,6 +614,7 @@ final class BriefingRenderModelTests: XCTestCase {
                     id: source.id,
                     title: source.title,
                     publisher: source.publisher,
+                    aggregator: source.aggregator,
                     summary: source.summary,
                     keyPoints: source.keyPoints,
                     url: source.url,

@@ -24,24 +24,19 @@ extension View {
         )
     }
 
-    func learningDeckReaderInputSurface(isFocused: Bool) -> some View {
-        let tint = isFocused ? Color.brandPrimary : Color.surfaceContainerHighest
-        let opacity = isFocused ? 0.14 : 0.18
-        return glassSurface(
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous),
-            tint: tint,
-            opacity: opacity,
-            interactive: true
+    // Controls inside the opaque chat sheet use flat fills: glass rims read as
+    // extra borders there.
+    func learningDeckChatFieldSurface(isFocused: Bool) -> some View {
+        background(
+            isFocused ? Color.brandPrimary.opacity(0.08) : Color.surfaceSecondary,
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
         )
     }
 
-    func learningDeckReaderSendSurface(isEnabled: Bool) -> some View {
-        let tint = isEnabled ? Color.chatUserBubble : Color.surfaceContainer
-        return glassSurface(
-            in: Circle(),
-            tint: tint,
-            opacity: isEnabled ? 0.3 : 0.16,
-            interactive: isEnabled
+    func learningDeckChatSendSurface(isEnabled: Bool) -> some View {
+        background(
+            isEnabled ? Color.chatUserBubble : Color.surfaceSecondary,
+            in: Circle()
         )
     }
 }

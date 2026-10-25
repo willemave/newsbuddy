@@ -383,7 +383,3 @@ pub(super) fn status_entry(status: &str, workflow_state: &str, note: &str) -> Va
         "created_at": Utc::now().naive_utc().format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
     })
 }
-
-pub(super) fn i64_bound(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
-}

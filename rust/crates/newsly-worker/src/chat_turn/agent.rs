@@ -4,16 +4,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError, MessagePart, MessageRole,
-    NewslyMessage, NewslyTranscript, RequestPart, ResponseContract, ToolPolicy,
+    AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError, ChatBudget, MessagePart,
+    MessageRole, NewslyMessage, NewslyTranscript, RequestPart, ResponseContract, ToolPolicy,
 };
 use newsly_db::ChatTaskSnapshot;
 use newsly_e2b::{DirectE2bProvider, E2bError};
 use newsly_providers::{
     FeedValidationError, FeedValidator, IntegrationTokenCipher, ModelProvider, ModelSpec,
-    OnboardingGateway, OnboardingGatewayError, ProviderCredentials, RigAgentEngine,
+    ProviderCredentials, RigAgentEngine, SourceResolutionError, SourceResolver,
 };
-use newsly_queue::QueueKernel;
+use newsly_queue::{ClaimedTask, QueueKernel};
 use secrecy::SecretString;
 use serde_json::{Map, Value};
 use sqlx::PgPool;
@@ -30,6 +30,9 @@ use crate::task_sandbox::{
 use crate::task_tools::ExaSearchClient;
 
 use super::events::ChatEvents;
+#[path = "agent/fallback.rs"]
+mod fallback;
+use fallback::action_fallback;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ChatAgentRunKind {
@@ -53,8 +56,8 @@ pub struct ChatAgentConfig {
     pub max_output_chars: usize,
     pub history_message_limit: i64,
     pub output_token_limit: u64,
-    pub deep_research_poll_interval: Duration,
-    pub deep_research_max_polls: u32,
+    pub cumulative_token_limit: u64,
+    pub final_answer_reserve: Duration,
 }
 
 impl ChatAgentConfig {
@@ -62,20 +65,28 @@ impl ChatAgentConfig {
         let shared = ShareActionAgentConfig::from_env()?;
         let history_message_limit = bounded_i64("CHAT_HISTORY_MESSAGE_LIMIT", 200, 2, 200)?;
         let output_token_limit = bounded_u64("CHAT_OUTPUT_TOKEN_LIMIT", 8_000, 256, 100_000)?;
-        let deep_research_poll_seconds =
-            bounded_u64("DEEP_RESEARCH_POLL_INTERVAL_SECONDS", 2, 1, 60)?;
-        let deep_research_max_polls = bounded_u64("DEEP_RESEARCH_MAX_POLLS", 300, 1, 3_600)?;
+        let request_limit = bounded_u64("CHAT_REQUEST_LIMIT", 32, 2, 100)?;
+        let tool_call_limit = bounded_u64("CHAT_TOOL_CALL_LIMIT", 64, 1, 1_000)?;
+        let cumulative_token_limit = bounded_u64("CHAT_TOKEN_BUDGET", 256_000, 16_000, 10_000_000)?;
+        let timeout_seconds = bounded_u64("CHAT_TIMEOUT_SECONDS", 300, 60, 900)?;
+        let reserve_seconds = bounded_u64("CHAT_FINAL_ANSWER_RESERVE_SECONDS", 30, 1, 60)?;
+        if reserve_seconds >= timeout_seconds {
+            return Err(ChatAgentBuildError::Invalid(
+                "CHAT_FINAL_ANSWER_RESERVE_SECONDS",
+            ));
+        }
         Ok((
             Self {
-                sandbox_timeout: shared.sandbox_timeout,
-                request_limit: shared.request_limit,
-                tool_call_limit: shared.tool_call_limit,
+                sandbox_timeout: Duration::from_secs(timeout_seconds),
+                request_limit: u32::try_from(request_limit)
+                    .map_err(|_| ChatAgentBuildError::Invalid("CHAT_REQUEST_LIMIT"))?,
+                tool_call_limit: u32::try_from(tool_call_limit)
+                    .map_err(|_| ChatAgentBuildError::Invalid("CHAT_TOOL_CALL_LIMIT"))?,
                 max_output_chars: shared.max_output_chars,
                 history_message_limit,
                 output_token_limit,
-                deep_research_poll_interval: Duration::from_secs(deep_research_poll_seconds),
-                deep_research_max_polls: u32::try_from(deep_research_max_polls)
-                    .map_err(|_| ChatAgentBuildError::Invalid("DEEP_RESEARCH_MAX_POLLS"))?,
+                cumulative_token_limit,
+                final_answer_reserve: Duration::from_secs(reserve_seconds),
             },
             shared,
         ))
@@ -89,7 +100,7 @@ pub struct ChatAgentRuntime {
     provider: Arc<DirectE2bProvider>,
     lifecycle: TaskSandboxOwner,
     exa: ExaSearchClient,
-    onboarding: OnboardingGateway,
+    source_resolver: SourceResolver,
     feed_validator: FeedValidator,
     body_store: ContentBodyStore,
     credentials: ProviderCredentials,
@@ -118,7 +129,7 @@ impl ChatAgentRuntime {
             exa_endpoint().map_err(|_| ChatAgentBuildError::Invalid("EXA_API_BASE_URL"))?;
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
-        let onboarding = OnboardingGateway::from_env()?;
+        let source_resolver = SourceResolver::from_env()?;
         let feed_validator = FeedValidator::new();
         let credentials = ProviderCredentials::from_env();
         let cipher = secret_env("X_TOKEN_ENCRYPTION_KEY")
@@ -131,7 +142,7 @@ impl ChatAgentRuntime {
             provider,
             lifecycle,
             exa,
-            onboarding,
+            source_resolver,
             feed_validator,
             body_store: ContentBodyStore::from_env()?,
             credentials,
@@ -164,6 +175,7 @@ impl ChatAgentRuntime {
         snapshot: &ChatTaskSnapshot,
         kind: ChatAgentRunKind,
         cancellation: CancellationToken,
+        claim: ClaimedTask,
     ) -> Result<ChatAgentRun, ChatAgentError> {
         let content_body = self.content_body(snapshot).await?;
         let (instruction, allowed_tools) = match kind {
@@ -183,19 +195,21 @@ impl ChatAgentRuntime {
         let deadline = Instant::now()
             .checked_add(self.config.sandbox_timeout)
             .ok_or(ChatAgentError::Deadline)?;
+        let tool_cancellation = cancellation.child_token();
         let tools = Arc::new(ChatToolExecutor::new(
             ChatToolDependencies {
                 pool: self.pool.clone(),
                 queue: self.queue.clone(),
+                claim,
                 provider: Arc::clone(&self.provider),
                 lifecycle: self.lifecycle.clone(),
                 exa: self.exa.clone(),
-                onboarding: self.onboarding.clone(),
+                source_resolver: self.source_resolver.clone(),
                 feed_validator: self.feed_validator.clone(),
                 body_store: self.body_store.clone(),
                 max_output_chars: self.config.max_output_chars,
-                deadline,
-                cancellation: cancellation.child_token(),
+                deadline: deadline - self.config.final_answer_reserve,
+                cancellation: tool_cancellation.clone(),
             },
             snapshot.clone(),
         ));
@@ -235,7 +249,15 @@ impl ChatAgentRuntime {
             provider_parameters: Map::new(),
         };
 
-        let execution = engine.run(request, tools.clone(), events.clone());
+        let execution = engine.run_chat(
+            request,
+            tools.clone(),
+            events.clone(),
+            ChatBudget {
+                cumulative_token_limit: self.config.cumulative_token_limit,
+                final_answer_reserve: self.config.final_answer_reserve,
+            },
+        );
         tokio::pin!(execution);
         let result = tokio::select! {
             result = &mut execution => result.map_err(ChatAgentError::Agent),
@@ -245,27 +267,18 @@ impl ChatAgentRuntime {
                 Err(ChatAgentError::Cancelled)
             }
         };
-        let cleanup = tools.close().await;
-        events.finish().await;
-        if let Err(error) = cleanup {
-            tracing::error!(error = %error, "chat sandbox cleanup remains pending");
-        }
-        let outcome = result?;
-        if outcome.output_text.trim().is_empty() {
-            return Err(ChatAgentError::EmptyOutput);
-        }
-        let turn_transcript = turn_transcript(snapshot, history_message_count, &outcome)?;
-        let model_provider = ModelSpec::parse(&outcome.model_name)?
-            .provider
-            .as_str()
-            .to_owned();
-        Ok(ChatAgentRun {
-            render_metadata: tools.render_metadata(),
-            tool_names: events.tool_names(),
-            turn_transcript,
-            model_provider,
-            outcome,
-        })
+        finish_run(
+            ChatRunCompletion {
+                snapshot,
+                history_message_count,
+                tools,
+                events,
+                cancellation,
+                tool_cancellation,
+            },
+            result,
+        )
+        .await
     }
 
     fn credentials_for(
@@ -289,6 +302,67 @@ impl ChatAgentRuntime {
         }
         Ok(credentials)
     }
+}
+
+struct ChatRunCompletion<'a> {
+    snapshot: &'a ChatTaskSnapshot,
+    history_message_count: usize,
+    tools: Arc<ChatToolExecutor>,
+    events: Arc<ChatEvents>,
+    cancellation: CancellationToken,
+    tool_cancellation: CancellationToken,
+}
+
+async fn finish_run(
+    completion: ChatRunCompletion<'_>,
+    result: Result<AgentOutcome, ChatAgentError>,
+) -> Result<ChatAgentRun, ChatAgentError> {
+    let ChatRunCompletion {
+        snapshot,
+        history_message_count,
+        tools,
+        events,
+        cancellation,
+        tool_cancellation,
+    } = completion;
+    let cleanup = tools.close().await;
+    events.finish().await;
+    if let Err(error) = cleanup {
+        tracing::error!(error = %error, "chat sandbox cleanup remains pending");
+    }
+    if cancellation.is_cancelled() || tool_cancellation.is_cancelled() {
+        return Err(ChatAgentError::Cancelled);
+    }
+    let outcome = match result {
+        Ok(outcome) if !outcome.output_text.trim().is_empty() => outcome,
+        result => {
+            let Some(summary) = tools.fallback_summary() else {
+                return result.and_then(|_| Err(ChatAgentError::EmptyOutput));
+            };
+            tracing::warn!(
+                message_id = snapshot.message_id,
+                "chat completed committed actions with a host-generated confirmation"
+            );
+            return action_fallback(
+                snapshot,
+                summary,
+                tools.render_metadata(),
+                events.tool_names(),
+            );
+        }
+    };
+    let turn_transcript = turn_transcript(snapshot, history_message_count, &outcome)?;
+    let model_provider = ModelSpec::parse(&outcome.model_name)?
+        .provider
+        .as_str()
+        .to_owned();
+    Ok(ChatAgentRun {
+        render_metadata: tools.render_metadata(),
+        tool_names: events.tool_names(),
+        turn_transcript,
+        model_provider,
+        outcome,
+    })
 }
 
 #[derive(Debug)]
@@ -447,7 +521,7 @@ pub enum ChatAgentBuildError {
     #[error(transparent)]
     Lifecycle(#[from] TaskSandboxError),
     #[error(transparent)]
-    Onboarding(#[from] OnboardingGatewayError),
+    SourceResolution(#[from] SourceResolutionError),
     #[error(transparent)]
     FeedValidation(#[from] FeedValidationError),
     #[error("chat body storage configuration failed: {0}")]

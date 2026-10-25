@@ -7,6 +7,9 @@ pub(super) const DEFAULT_GENERATION_SECONDS: u64 = 900;
 pub(super) const SANDBOX_CLEANUP_GRACE: Duration = Duration::from_secs(60);
 const INITIAL_RESERVE: Duration = Duration::from_secs(180);
 const REPAIR_RESERVE: Duration = Duration::from_secs(120);
+// Anthropic requires an explicit per-turn ceiling. Use the model maximum rather than an app-level
+// cap: one turn may write a whole deck file.
+const OUTPUT_TOKEN_LIMIT: u64 = 128_000;
 
 /// One deadline, restored from the durable task clock on every queue delivery.
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +44,7 @@ pub(super) fn learning_deck_agent_limits(tool_call_limit: u32, deadline: Duratio
     AgentLimits {
         request_limit: None,
         tool_call_limit,
-        output_token_limit: None,
+        output_token_limit: Some(OUTPUT_TOKEN_LIMIT),
         deadline,
     }
 }

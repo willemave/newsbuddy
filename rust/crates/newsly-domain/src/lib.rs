@@ -4,6 +4,8 @@
 
 mod aggregators;
 pub use aggregators::{AGGREGATOR_KEY_NAMES, AggregatorKey};
+mod chat;
+pub use chat::is_retired_deep_research;
 mod ids;
 mod narration;
 pub use narration::{

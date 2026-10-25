@@ -43,3 +43,11 @@ CH20. New OpenAI chat sessions and missing-model chat fallbacks use GPT-6.1 Sol.
 CH21. Content retrieval applies source ownership and read/saved filters before paging. Ambiguous followed-source names are surfaced explicitly. Saved content can be browsed without an exact keyword, empty search results remain empty, and returned counts describe the same accessible set as the page.
 
 CH22. Content-grounded chat titles use the first nonblank summary title, feed-preview title, stored title, or short summary, including an artifact overview. Display titles collapse whitespace and bound long text with an ellipsis. New screen-context snapshots contain source context without an account ID line.
+
+CH23. Dedicated Deep Research is retired. New research uses ordinary chat and its standard tools. Historical research conversations remain readable, while retired-session writes and pending dedicated research attempts cannot start or resume provider work. Retirement markers in the provider, session type, or model identify a read-only conversation before a send is accepted.
+
+CH24. A confirmed chat action remains a completed action if subsequent answer generation fails. The assistant may confirm only committed outcomes; failed or ambiguous commits cannot be reported as successes. Confirmations distinguish a changed topic filter from an unchanged existing follow. Cancellation and lease loss remain distinct from completion. Retrying an action reconciles its current authoritative state without duplicating downstream work.
+
+CH25. Ordinary chat can search and read public pages, resolve named sources, inspect subscriptions, and act on authorized library items through host tools. Bash and filesystem tools execute only in the task sandbox, acquired lazily. Saved Knowledge, inbox content, and News retain explicit search scopes and typed identities.
+
+CH26. Chat has its own bounded execution budget and reserves an opportunity for a final answer. A budget stop preserves confirmed outcomes and exposes unfinished work truthfully. Other workflows retain their own execution and validation policies.

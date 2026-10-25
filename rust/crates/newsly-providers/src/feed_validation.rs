@@ -51,7 +51,8 @@ pub struct ValidatedFeed {
 /// Bounded publisher text used as evidence, never as instructions or verified spoken language.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct FeedDiscoveryEvidence {
-    title: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) authors: Vec<String>,
     description: Option<String>,
     declared_language: Option<String>,
     recent_episode_titles: Vec<String>,
@@ -390,6 +391,12 @@ fn podcast_discovery_evidence(
         .map(|title| title.chars().take(120).collect())
         .collect();
     FeedDiscoveryEvidence {
+        authors: feed
+            .authors
+            .iter()
+            .take(8)
+            .map(|author| author.name.chars().take(240).collect())
+            .collect(),
         title: feed
             .title
             .as_ref()

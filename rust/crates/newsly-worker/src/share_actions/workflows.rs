@@ -156,7 +156,7 @@ pub fn build_host_action(
             })?;
             let url = normalized_http_url(&validated.effective_url)?;
             ShareActionHostInput::Feed(FeedActionInput {
-                feed_type: Some(validated_scraper_type(validated)),
+                feed_type: Some(validated_feed_type(validated, None).as_str().to_owned()),
                 feed_format: Some(validated.format.as_str().to_owned()),
                 url,
                 title: clean(result.title.clone()),
@@ -192,7 +192,7 @@ pub fn build_host_action(
                     })?;
                     let url = normalized_http_url(&validated.effective_url)?;
                     BriefingActionInput::Feed(FeedActionInput {
-                        feed_type: Some(validated_scraper_type(validated)),
+                        feed_type: Some(validated_feed_type(validated, None).as_str().to_owned()),
                         feed_format: Some(validated.format.as_str().to_owned()),
                         url,
                         title: clean(title.clone()),
@@ -239,7 +239,7 @@ pub(super) fn build_verified_source_action(
                 title: None,
                 platform: None,
                 instruction: input_optional_text(task, "instruction"),
-                feed_type: Some(validated_scraper_type(feed)),
+                feed_type: Some(validated_feed_type(feed, None).as_str().to_owned()),
                 feed_format: Some(feed.format.as_str().to_owned()),
             };
             match task.mode.as_str() {
@@ -516,17 +516,22 @@ fn feed_json(input: &FeedActionInput) -> Map<String, Value> {
     value
 }
 
-pub(crate) fn validated_scraper_type(validated: &ValidatedFeed) -> String {
-    if validated.has_audio_entries {
-        "podcast_rss".to_owned()
+pub(crate) fn validated_feed_type(
+    validated: &ValidatedFeed,
+    kind: Option<newsly_providers::SourceKind>,
+) -> newsly_contracts::FeedType {
+    use newsly_contracts::FeedType;
+    use newsly_providers::SourceKind;
+    if kind == Some(SourceKind::Podcast) || (kind.is_none() && validated.has_audio_entries) {
+        FeedType::PodcastRss
     } else if Url::parse(&validated.effective_url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
         .is_some_and(|host| host == "substack.com" || host.ends_with(".substack.com"))
     {
-        "substack".to_owned()
+        FeedType::Substack
     } else {
-        "atom".to_owned()
+        FeedType::Atom
     }
 }
 

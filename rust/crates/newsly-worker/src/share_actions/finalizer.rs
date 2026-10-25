@@ -238,7 +238,7 @@ impl ShareActionApplicator<'_> {
             }
             ("subscribe_to_feed", ShareActionHostInput::Feed(input)) => {
                 let subscription =
-                    apply_validated_feed_action(transaction, self.queue, task.user_id, input)
+                    apply_validated_feed_action(transaction, self.queue, task.user_id, input, None)
                         .await?;
                 let mut result = feed_subscription_fields(subscription);
                 result.insert("outcome".to_owned(), Value::from("completed"));
@@ -246,9 +246,14 @@ impl ShareActionApplicator<'_> {
             }
             ("add_to_briefing", ShareActionHostInput::Briefing(target)) => match target {
                 BriefingActionInput::Feed(input) => {
-                    let subscription =
-                        apply_validated_feed_action(transaction, self.queue, task.user_id, input)
-                            .await?;
+                    let subscription = apply_validated_feed_action(
+                        transaction,
+                        self.queue,
+                        task.user_id,
+                        input,
+                        None,
+                    )
+                    .await?;
                     let resolved_url = subscription.feed_url.clone();
                     let mut result = feed_subscription_fields(subscription);
                     result.insert("resolved_kind".to_owned(), Value::from("feed"));
@@ -471,7 +476,7 @@ fn feed_subscription_fields(subscription: AppliedShareFeedSubscription) -> Map<S
         ("subscribed".to_owned(), Value::Bool(true)),
         (
             "subscription_outcome".to_owned(),
-            Value::from(subscription.outcome),
+            Value::from(subscription.mutation.as_str()),
         ),
         ("config_id".to_owned(), Value::from(subscription.config_id)),
         ("feed_url".to_owned(), Value::from(subscription.feed_url)),

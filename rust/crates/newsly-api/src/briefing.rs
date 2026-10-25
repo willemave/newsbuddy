@@ -819,6 +819,7 @@ fn present_content_source(
             source.source.as_deref(),
             &metadata,
         ),
+        aggregator: None,
         summary,
         key_points: Some(key_points),
         url: source
@@ -871,6 +872,12 @@ fn present_news_source(
         id: source.id,
         title: news_title(&metadata, source.summary_text.as_deref(), source.id),
         publisher: None,
+        aggregator: source
+            .platform
+            .as_deref()
+            .map(str::trim)
+            .filter(|platform| !platform.is_empty())
+            .map(str::to_owned),
         summary: source.summary_text.as_deref().and_then(clean_text),
         key_points: Some(json_string_values(&source.summary_key_points)),
         url: source

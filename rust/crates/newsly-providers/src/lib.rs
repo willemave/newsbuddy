@@ -25,14 +25,16 @@ mod news_filter;
 mod news_item;
 mod object_storage;
 mod onboarding_flow;
-mod openai_background;
 mod openai_transcription;
 mod openrouter;
 mod openrouter_embeddings;
+mod podcast_directory;
 mod provider_env;
 mod public_http;
+mod public_web;
 mod rig_engine;
 mod scraping;
+mod source_resolution;
 mod summarization;
 mod token_cipher;
 mod x_oauth;
@@ -106,10 +108,6 @@ pub use onboarding_flow::{
     OnboardingExaUsage, OnboardingGateway, OnboardingGatewayError, OnboardingLaneTarget,
     OnboardingSuggestionSeed,
 };
-pub use openai_background::{
-    BackgroundBuiltInTools, BackgroundProviderError, BackgroundResponseStatus, BackgroundUsage,
-    OpenAiBackgroundGateway, OpenAiBackgroundRequest, OpenAiBackgroundResult, OpenAiGatewayError,
-};
 pub use openai_transcription::{
     AudioDurationSource, OpenAiTranscriptionError, OpenAiTranscriptionGateway,
     TranscriptionChunkUsage, TranscriptionResult, TranscriptionUsageObserver,
@@ -141,3 +139,9 @@ pub use object_storage::{
 pub use object_storage::{ObjectStorageBackend, ObjectStorageConfigError};
 
 pub use object_storage::{LocalObjectSlice, MAX_SOURCE_BODY_BYTES, read_local_object};
+
+pub use public_web::{PublicWebLink, PublicWebPage, PublicWebPageError, read_public_web_page};
+pub use source_resolution::{
+    ResolvedFeed, SourceKind, SourceResolution, SourceResolutionError, SourceResolutionStatus,
+    SourceResolver,
+};

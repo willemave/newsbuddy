@@ -353,8 +353,16 @@ impl ConfigIndex {
                     .and_then(|value| value.get("feed_url"))
                     .and_then(Value::as_str)
             });
-            if let Some(feed_url) = normalized_feed_url(feed_url) {
-                by_feed_url.entry(feed_url).or_default().push(config.id);
+            for feed_url in feed_url
+                .into_iter()
+                .chain(crate::feed_url_aliases(&config.config))
+            {
+                if let Some(feed_url) = normalized_feed_url(Some(feed_url)) {
+                    let owners = by_feed_url.entry(feed_url).or_default();
+                    if !owners.contains(&config.id) {
+                        owners.push(config.id);
+                    }
+                }
             }
             let mut labels = Vec::with_capacity(3);
             labels.extend(config.display_name.iter().cloned());
@@ -566,6 +574,28 @@ mod tests {
         assert_eq!(
             index.match_values(Some(12), Some("https://example.com/feed"), Some("Shared")),
             Some(12)
+        );
+    }
+    #[test]
+    fn config_index_keeps_feed_alias_history_without_ambiguous_ownership() {
+        let config = ScraperConfigProjection {
+            id: 11,
+            user_id: 7,
+            scraper_type: "atom".into(),
+            display_name: None,
+            feed_url: Some("https://example.test/new".into()),
+            config: json!({"feed_url_aliases":["https://example.test/old","https://example.test/old"]}),
+            is_active: true,
+            created_at: Utc::now(),
+        };
+        let index = ConfigIndex::new(&[config]);
+        assert_eq!(
+            index.match_values(None, Some("https://example.test/old"), None),
+            Some(11)
+        );
+        assert_eq!(
+            index.match_values(None, Some("https://example.test/new"), None),
+            Some(11)
         );
     }
 }

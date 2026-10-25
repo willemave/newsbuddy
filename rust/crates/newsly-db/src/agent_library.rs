@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
-use sqlx::{FromRow, PgPool};
+use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,6 +202,58 @@ pub async fn find_agent_knowledge_items(
     user_id: i64,
     content_ids: &[i64],
 ) -> Result<Vec<AgentKnowledgeItem>, AgentLibraryRepositoryError> {
+    find_agent_readable_items(pool, user_id, content_ids, true).await
+}
+
+const READABLE_CONTENT_PREDICATE: &str = r#"(saved.id IS NOT NULL OR (NOT $3::boolean AND EXISTS (
+            SELECT 1 FROM content_status inbox WHERE inbox.user_id = account.id
+              AND inbox.content_id = content.id AND inbox.status = 'inbox'
+          )))"#;
+
+/// Reauthorizes a mutation batch inside the caller's transaction and locks its content rows.
+///
+/// Missing or unauthorized ids are omitted. Callers must verify that every requested id was
+/// returned before mutating any item. Rows are locked and returned in ascending content-id order.
+/// Acquire queue and message fences before calling this.
+pub async fn lock_authorized_content(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
+    content_ids: &[i64],
+) -> Result<Vec<i64>, AgentLibraryRepositoryError> {
+    if user_id <= 0 || content_ids.len() > 20 || content_ids.iter().any(|id| *id <= 0) {
+        return Err(AgentLibraryRepositoryError::InvalidInput);
+    }
+    if content_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(sqlx::query_scalar::<_, i64>(AssertSqlSafe(format!(
+        r#"
+        SELECT content.id::bigint
+        FROM users AS account
+        JOIN contents AS content ON TRUE
+        LEFT JOIN content_knowledge_saves AS saved
+          ON saved.user_id = account.id AND saved.content_id = content.id
+        WHERE account.id::bigint = $1::bigint AND account.is_active
+          AND content.id::bigint = ANY($2::bigint[])
+          AND {READABLE_CONTENT_PREDICATE}
+        ORDER BY content.id
+        FOR SHARE OF content
+        "#
+    )))
+    .bind(user_id)
+    .bind(content_ids)
+    .bind(false)
+    .fetch_all(&mut **transaction)
+    .await?)
+}
+
+/// Reauthorizes each content body against the current inbox or saved overlay.
+pub async fn find_agent_readable_items(
+    pool: &PgPool,
+    user_id: i64,
+    content_ids: &[i64],
+    saved_only: bool,
+) -> Result<Vec<AgentKnowledgeItem>, AgentLibraryRepositoryError> {
     if user_id <= 0
         || content_ids.is_empty()
         || content_ids.len() > 20
@@ -219,7 +271,7 @@ pub async fn find_agent_knowledge_items(
             Option<String>,
             Option<String>,
         ),
-    >(
+    >(AssertSqlSafe(format!(
         r#"
         SELECT
             content.id::bigint,
@@ -233,10 +285,9 @@ pub async fn find_agent_knowledge_items(
             COALESCE(rendered.storage_key, source.storage_key),
             NULLIF(BTRIM(content.search_text), '')
         FROM users AS account
-        JOIN content_knowledge_saves AS saved
-          ON saved.user_id = account.id
-        JOIN contents AS content
-          ON content.id = saved.content_id
+        JOIN contents AS content ON TRUE
+        LEFT JOIN content_knowledge_saves AS saved
+          ON saved.user_id = account.id AND saved.content_id = content.id
         LEFT JOIN content_bodies AS rendered
           ON rendered.content_id = content.id AND rendered.variant = 'rendered'
         LEFT JOIN content_bodies AS source
@@ -244,11 +295,13 @@ pub async fn find_agent_knowledge_items(
         WHERE account.id::bigint = $1
           AND account.is_active = TRUE
           AND content.id::bigint = ANY($2)
+          AND {READABLE_CONTENT_PREDICATE}
         ORDER BY array_position($2::bigint[], content.id::bigint)
-        "#,
-    )
+        "#
+    )))
     .bind(user_id)
     .bind(content_ids)
+    .bind(saved_only)
     .fetch_all(pool)
     .await?;
     Ok(rows
@@ -389,6 +442,74 @@ mod tests {
         assert_eq!(
             chat.saved_at,
             Utc.with_ymd_and_hms(2026, 9, 15, 13, 45, 0).single()
+        );
+    }
+}
+
+#[cfg(test)]
+mod content_authorization_tests {
+    use super::*;
+
+    #[sqlx::test(migrations = false)]
+    async fn mutation_batch_and_body_reads_share_current_authorization(pool: PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        sqlx::raw_sql(
+            r#"
+            INSERT INTO users (id, apple_id, email, is_active, is_admin) VALUES
+                (9401, 'content-auth-one', 'one@content-auth.test', true, false),
+                (9402, 'content-auth-two', 'two@content-auth.test', true, false);
+            INSERT INTO contents (id, content_type, url, status, is_aggregate, content_metadata) VALUES
+                (9401, 'article', 'https://content-auth.test/inbox', 'completed', false, '{}'),
+                (9402, 'article', 'https://content-auth.test/saved', 'completed', false, '{}'),
+                (9403, 'article', 'https://content-auth.test/private', 'completed', false, '{}');
+            INSERT INTO content_status(user_id, content_id, status) VALUES
+                (9401, 9401, 'inbox'), (9401, 9402, 'archived'), (9402, 9403, 'inbox');
+            INSERT INTO content_knowledge_saves(user_id, content_id) VALUES (9401, 9402);
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let ids = [9403, 9402, 9401, 9499];
+        let readable = find_agent_readable_items(&pool, 9401, &ids, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            readable
+                .iter()
+                .map(|item| item.content_id)
+                .collect::<Vec<_>>(),
+            vec![9402, 9401]
+        );
+        let mut tx = pool.begin().await.unwrap();
+        assert_eq!(
+            lock_authorized_content(&mut tx, 9401, &ids).await.unwrap(),
+            vec![9401, 9402]
+        );
+        assert!(
+            lock_authorized_content(&mut tx, 9401, &[])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        tx.rollback().await.unwrap();
+        sqlx::query("UPDATE users SET is_active = false WHERE id = 9401")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        assert!(
+            lock_authorized_content(&mut tx, 9401, &ids)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        tx.rollback().await.unwrap();
+        assert!(
+            find_agent_readable_items(&pool, 9401, &ids, false)
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 }

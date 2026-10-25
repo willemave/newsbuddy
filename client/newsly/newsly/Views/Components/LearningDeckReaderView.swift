@@ -7,8 +7,6 @@ import SwiftUI
 import UIKit
 
 private enum LearningDeckReaderLayout {
-    static let flyoverHorizontalInset: CGFloat = 16
-    static let flyoverBottomInset: CGFloat = 10
     static let landscapeHorizontalSafeReserve: CGFloat = 76
 }
 
@@ -122,6 +120,7 @@ private struct LearningDeckReaderContent: View {
             )
             .presentationDetents([.medium, .fraction(0.75), .large])
             .presentationDragIndicator(.visible)
+            .presentationBackground(Color.surfacePrimary)
         }
     }
 
@@ -154,7 +153,14 @@ private struct LearningDeckReaderContent: View {
     private func portraitChatFlyover(geometry: GeometryProxy) -> some View {
         let bottomInset = containerBottomInset
         let keyboardIsPresented = geometry.safeAreaInsets.bottom > bottomInset
+        let sheetShape = UnevenRoundedRectangle(
+            topLeadingRadius: CornerRadius.card,
+            topTrailingRadius: CornerRadius.card,
+            style: .continuous
+        )
 
+        // A full-width sheet attached to the bottom edge: content stays above the
+        // home indicator while the surface runs through it.
         return LearningDeckChatFlyover(
             viewModel: viewModel,
             feedOptionActionModel: feedOptionActionModel,
@@ -167,20 +173,13 @@ private struct LearningDeckReaderContent: View {
                 isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
             )
         )
-        .clipShape(
-            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 0.5)
+        .padding(.bottom, keyboardIsPresented ? 0 : bottomInset)
+        .background {
+            sheetShape
+                .fill(Color.surfacePrimary)
+                .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: -4)
+                .ignoresSafeArea(edges: .bottom)
         }
-        .appShadow(.floating)
-        .padding(.horizontal, LearningDeckReaderLayout.flyoverHorizontalInset)
-        .padding(
-            .bottom,
-            (keyboardIsPresented ? 0 : min(geometry.safeAreaInsets.bottom, bottomInset))
-                + LearningDeckReaderLayout.flyoverBottomInset
-        )
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 

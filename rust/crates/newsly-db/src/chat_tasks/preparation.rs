@@ -407,7 +407,6 @@ pub(super) async fn prepare_linked_turn(
         context,
         history,
         llm_task_id,
-        deep_research_response_id: message.deep_research_response_id,
         encrypted_provider_key,
         content,
         workspace_path: llm_task_id.map_or_else(
@@ -454,8 +453,7 @@ pub(super) async fn load_message_for_update(
             processing_context::jsonb AS processing_context,
             status,
             error,
-            stream_generation,
-            deep_research_response_id
+            stream_generation
         FROM chat_messages
         WHERE id::bigint = $1
         FOR UPDATE

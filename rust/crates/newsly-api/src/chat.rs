@@ -195,7 +195,7 @@ pub(super) async fn list_sessions_page(
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = CreateChatSessionResponse),
-        (status = 400, description = "Invalid session request", body = newsly_contracts::ErrorEnvelope),
+        (status = 400, description = "Invalid session request or retired Deep Research provider", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Linked resource not found", body = newsly_contracts::ErrorEnvelope),
         (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
@@ -220,11 +220,7 @@ pub(super) async fn create_session(
         ));
     }
     let (provider, model) = resolve_model(payload.llm_provider, payload.llm_model_hint.as_deref());
-    let session_type = if payload.llm_provider == Some(LlmProvider::DeepResearch) {
-        "deep_research"
-    } else {
-        "knowledge_chat"
-    };
+    let session_type = "knowledge_chat";
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = create_chat_session(
@@ -305,7 +301,7 @@ pub(super) async fn get_session(
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = ChatSessionSummaryDto),
-        (status = 400, description = "Invalid provider", body = newsly_contracts::ErrorEnvelope),
+        (status = 400, description = "Invalid or retired provider", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 403, description = "Not authorized", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Session not found", body = newsly_contracts::ErrorEnvelope),
@@ -326,12 +322,7 @@ pub(super) async fn update_session(
     let session_id = positive_path(path, "session_id", &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_update_request(&payload, &request_id)?;
-    if payload.llm_provider == Some(LlmProvider::DeepResearch) {
-        return Err(bad_request(
-            "Deep research must be started as a dedicated deep research session",
-            &request_id,
-        ));
-    }
+    require_writable_session(&state, current_user.id, session_id, &request_id).await?;
     let resolved = payload
         .llm_provider
         .map(|provider| resolve_model(Some(provider), payload.llm_model_hint.as_deref()));
@@ -401,7 +392,7 @@ pub(super) async fn delete_session(
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = SendMessageResponse),
-        (status = 400, description = "Invalid chat message", body = newsly_contracts::ErrorEnvelope),
+        (status = 400, description = "Invalid chat message or retired Deep Research session", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 403, description = "Not authorized", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Session not found", body = newsly_contracts::ErrorEnvelope),
@@ -422,6 +413,7 @@ pub(super) async fn send_message(
     let session_id = positive_path(path, "session_id", &request_id)?;
     let Json(payload) = decode_json(payload, &request_id)?;
     validate_message(&payload.message, &request_id)?;
+    require_writable_session(&state, current_user.id, session_id, &request_id).await?;
     let mut transaction =
         crate::write_support::begin_fenced(state.database.pool(), &stamp, &request_id).await?;
     let outcome = stage_chat_message(
@@ -461,7 +453,7 @@ pub(super) async fn send_message(
     security(("HTTPBearer" = [])),
     responses(
         (status = 200, description = "Successful Response", body = AssistantTurnResponse),
-        (status = 400, description = "Invalid assistant context", body = newsly_contracts::ErrorEnvelope),
+        (status = 400, description = "Invalid assistant context or retired Deep Research session", body = newsly_contracts::ErrorEnvelope),
         (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
         (status = 403, description = "Not authorized", body = newsly_contracts::ErrorEnvelope),
         (status = 404, description = "Session or news item not found", body = newsly_contracts::ErrorEnvelope),
@@ -480,6 +472,9 @@ pub(super) async fn create_assistant_turn(
     let request_id = request_id_from_headers(&headers);
     let Json(mut payload) = decode_json(payload, &request_id)?;
     normalize_and_validate_assistant(&mut payload, &request_id)?;
+    if let Some(session_id) = payload.session_id {
+        require_writable_session(&state, current_user.id, session_id, &request_id).await?;
+    }
     let context = payload.screen_context;
     let screen_context = AssistantScreenContext {
         screen_type: context.screen_type,
@@ -628,6 +623,11 @@ fn validate_create_request(
         "initial_message",
         request_id,
     )?;
+    reject_retired_research(
+        payload.llm_provider,
+        payload.llm_model_hint.as_deref(),
+        request_id,
+    )?;
     reject_google_model(payload.llm_model_hint.as_deref(), request_id)
 }
 
@@ -639,6 +639,11 @@ fn validate_update_request(
         payload.llm_model_hint.as_deref(),
         100,
         "llm_model_hint",
+        request_id,
+    )?;
+    reject_retired_research(
+        payload.llm_provider,
+        payload.llm_model_hint.as_deref(),
         request_id,
     )?;
     reject_google_model(payload.llm_model_hint.as_deref(), request_id)
@@ -749,6 +754,28 @@ fn validate_len(value: &str, max: usize, field: &str, request_id: &str) -> Resul
     }
 }
 
+fn reject_retired_research(
+    provider: Option<LlmProvider>,
+    model_hint: Option<&str>,
+    request_id: &str,
+) -> Result<(), ApiError> {
+    if provider == Some(LlmProvider::DeepResearch)
+        || newsly_domain::is_retired_deep_research(None, None, model_hint)
+    {
+        return Err(retired_research(request_id));
+    }
+    Ok(())
+}
+
+fn retired_research(request_id: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "deep_research_retired",
+        "Deep Research has been retired. Start a regular chat to research a topic.",
+        request_id,
+    )
+}
+
 fn reject_google_model(model_hint: Option<&str>, request_id: &str) -> Result<(), ApiError> {
     let is_google = model_hint.is_some_and(|value| {
         let normalized = value.trim().to_ascii_lowercase();
@@ -777,7 +804,6 @@ fn resolve_model(
                 "openai" => "openai",
                 "anthropic" => "anthropic",
                 "openrouter" => "openrouter",
-                "deep_research" => "deep_research",
                 _ => provider,
             };
             return (resolved_provider, model_hint.to_owned());
@@ -787,7 +813,6 @@ fn resolve_model(
     let model = match provider {
         "anthropic" => "anthropic:claude-opus-4-6",
         "openrouter" => "openrouter:deepseek/deepseek-v4-flash",
-        "deep_research" => "deep_research:o4-mini-deep-research-2025-06-26",
         _ => newsly_db::DEFAULT_CHAT_MODEL,
     };
     (provider, model.to_owned())
@@ -840,6 +865,33 @@ fn mutation_result(outcome: ChatMutationOutcome, request_id: &str) -> Result<(),
         ChatMutationOutcome::NotFound => Err(not_found("Session not found", request_id)),
         ChatMutationOutcome::Forbidden => Err(forbidden_session(request_id)),
     }
+}
+
+async fn require_writable_session(
+    state: &AppState,
+    user_id: i64,
+    session_id: i64,
+    request_id: &str,
+) -> Result<(), ApiError> {
+    let session = require_session_summary(state, user_id, session_id, request_id).await?;
+    reject_retired_session(
+        &session.llm_provider,
+        session.session_type.as_deref(),
+        &session.llm_model,
+        request_id,
+    )
+}
+
+fn reject_retired_session(
+    provider: &str,
+    session_type: Option<&str>,
+    model: &str,
+    request_id: &str,
+) -> Result<(), ApiError> {
+    if newsly_domain::is_retired_deep_research(Some(provider), session_type, Some(model)) {
+        return Err(retired_research(request_id));
+    }
+    Ok(())
 }
 
 async fn require_session_summary(
@@ -913,47 +965,4 @@ fn queue_error(error: QueueError, request_id: &str) -> ApiError {
 }
 
 #[cfg(test)]
-mod model_selection_tests {
-    use super::*;
-
-    #[test]
-    fn assistant_context_normalizes_before_durable_staging() {
-        let mut payload: AssistantTurnRequest = serde_json::from_value(serde_json::json!({
-            "message":"Explain", "screen_context":{
-                "screen_type":" ","screen_title":" Reader ","selected_topic":" ",
-                "query":" q ","note":" note ","assistant_action":" explain ",
-                "visible_content_ids":[0,-1,2,2],"visible_news_item_ids":[-3,4]
-            }
-        }))
-        .unwrap();
-        normalize_and_validate_assistant(&mut payload, "request").unwrap();
-        assert_eq!(payload.screen_context.screen_type, "unknown");
-        assert_eq!(
-            payload.screen_context.screen_title.as_deref(),
-            Some("Reader")
-        );
-        assert_eq!(payload.screen_context.selected_topic, None);
-        assert_eq!(payload.screen_context.visible_content_ids, vec![2, 2]);
-        assert_eq!(payload.screen_context.visible_news_item_ids, vec![4]);
-        assert_eq!(
-            payload.screen_context.assistant_action.as_deref(),
-            Some("explain")
-        );
-    }
-
-    #[test]
-    fn openai_chat_defaults_to_sol_and_preserves_explicit_selection() {
-        assert_eq!(
-            resolve_model(None, None),
-            ("openai", "openai:gpt-6.1-sol".to_owned())
-        );
-        assert_eq!(
-            resolve_model(Some(LlmProvider::Openai), Some("openai:gpt-5.6-terra")),
-            ("openai", "openai:gpt-5.6-terra".to_owned())
-        );
-        assert_eq!(
-            resolve_model(Some(LlmProvider::Anthropic), None),
-            ("anthropic", "anthropic:claude-opus-4-6".to_owned())
-        );
-    }
-}
+mod model_selection_tests;

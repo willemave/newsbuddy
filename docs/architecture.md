@@ -685,8 +685,7 @@ does not block publication.
 Chat commands are accepted once and then observed through durable message/task
 identities. Tool progress is separate from confirmed transcript text. Queue
 lease plus chat stream generation fence every partial and final publication.
-Provider response IDs support resumable operations without replaying accepted
-work.
+Provider response IDs remain in per-response accounting and transcript provenance.
 HTTP-staged turns and worker-created Dig Deeper turns use one typed durable-context
 constructor and Serde encoding; legacy decoding does not define new turn payloads.
 
@@ -747,9 +746,7 @@ resume, checking, repair, retry, and publication while keeping the public runnin
 observes for roughly sixteen minutes, then offers a read-only status refresh instead of an
 indefinite spinner or automatic new generation.
 
-Deep research uses provider-native background response create/retrieve/cancel
-behind a dedicated gateway. Its resumable identity is durable; SDK objects are
-not.
+Dedicated Deep Research is retired. The API retains legacy enum decoding and historical reads, rejects retired create/write requests, and the worker settles old queued turns without invoking a provider. Ordinary chat owns research through its standard host tools. The API owns decode-only research labels until minimum-supported clients no longer send them and retained histories can be read without them; legacy database fields await a separate audited retention/schema contraction. No dedicated provider execution or aggregate billing path remains.
 
 ### 8.5 Onboarding, integrations, and discovery
 
@@ -807,10 +804,18 @@ parses inert bytes. E2B remains the boundary for browser, shell, and
 model-authored execution, where network policy is restored to deny-by-default
 on success, failure, timeout, or cancellation.
 
+Chat exposes one canonical tool vocabulary for scoped content search/read, desired read/saved state, inbox submission, source inspection/subscription and public web access. A typed catalog owns tool identity, schemas and execution policy; routing and dispatch use that catalog. The neutral source resolver uses the shared Apple show search/lookup transport, guarded publisher-page feed hints, and the existing feed validator; it does not invoke the onboarding profile recommender or a second selection model. Directory candidates are validated before deciding whether web discovery is needed. Flat verified-source results retain format, kind and activity through card rendering. Public pages are inert bounded text and links behind the DNS-pinned public HTTP boundary.
+
+Each chat mutation locks the exact live queue claim before checking message generation and account/session ownership, then commits product state and records its typed confirmed result in the executor. Repository-owned batch authorization checks content access inside that transaction. Confirmations distinguish unchanged follows from topic-filter updates. Later model failures can publish a normal host-generated confirmation via the existing exact-lease success finalizer. No response ID or usage is invented: per-response usage remains independently recorded. Cancellation never converts into success. Idempotent product operations reconcile retries after an uncertain commit.
+
+Direct-feed follows and native feed creation share canonical URL identity and transaction advisory locks across direct scraper types. An exact subscription reference preserves its owned configuration through validation and reconciles an already configured redirect target. The configuration repository retains prior validated URLs for historical source attribution, carries them across settings edits, and strips client-supplied history. These aliases are omitted from API responses and never merge subscription identities; chat search and source history share their attribution reader.
+
+Chat has independent request, estimated cumulative token, tool-call and elapsed-time limits. The token allowance uses observed provider usage plus a pre-dispatch estimate, not a guaranteed billing ceiling. The Rig chat entry point alone reserves a tool-free final response; existing structured-generation retry limits are unchanged. The defaults are `CHAT_REQUEST_LIMIT=32`, `CHAT_TOKEN_BUDGET=256000`, `CHAT_TOOL_CALL_LIMIT=64`, `CHAT_TIMEOUT_SECONDS=300`, and `CHAT_FINAL_ANSWER_RESERVE_SECONDS=30`; existing `CHAT_OUTPUT_TOKEN_LIMIT` remains 8000. These are initial tunable guardrails, not a measured optimum. Oversized tool results may be replaced by explicit bounded partial previews only in the final provider request, while the original authorized result stays in the canonical transcript. Tool work has an earlier deadline than answer generation. Shell and filesystem tools lazily acquire the canonical sandbox, and typed-only turns perform no sandbox operation.
+
 Chat source-discovery cards retain an optional measured activity snapshot. Feed
 validation computes latest publication evidence and deduplicated observed
-90/365-day counts from the same bounded parse; paired discovery normalization
-passes that evidence to chat without changing persisted onboarding suggestions.
+90/365-day counts from the same bounded parse; verified-source results pass that
+evidence directly to chat without creating onboarding suggestions.
 Built-in aggregators use one shared global-corpus query for separately labeled
 collection counts and latest collected item. Neither snapshot proves complete
 publisher output. The wire shape retains its check date, evidence basis, and

@@ -232,6 +232,7 @@ final class BriefingViewModelRetentionTests: XCTestCase {
                     id: 9,
                     title: "Unrelated",
                     publisher: nil,
+                    aggregator: nil,
                     summary: nil,
                     keyPoints: nil,
                     url: nil,

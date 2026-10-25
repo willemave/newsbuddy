@@ -6,7 +6,6 @@
 //! applies the terminal transcript inside its exact lease fence.
 
 mod agent;
-mod deep_research;
 mod events;
 mod finalizer;
 mod handler;
@@ -16,8 +15,6 @@ mod tools;
 
 pub use agent::{ChatAgentBuildError, ChatAgentConfig, ChatAgentRuntime};
 pub use handler::{ChatPartitionHandler, ChatTaskServices};
-
-pub(super) const DEEP_RESEARCH_MODEL: &str = "o4-mini-deep-research-2025-06-26";
 
 pub(super) fn usage_source(snapshot: &newsly_db::ChatTaskSnapshot) -> String {
     match snapshot.context.kind {

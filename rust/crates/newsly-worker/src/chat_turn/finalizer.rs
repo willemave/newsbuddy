@@ -19,17 +19,11 @@ pub(super) struct ChatSuccessFinalizer {
     tool_names: Vec<String>,
     model_provider: String,
     model_name: String,
-    provider_response_id: Option<String>,
     usage: ProviderUsage,
-    usage_source: String,
 }
 
 impl ChatSuccessFinalizer {
-    pub(super) fn new(
-        snapshot: ChatTaskSnapshot,
-        completed: CompletedChatWork,
-        usage_source: String,
-    ) -> Self {
+    pub(super) fn new(snapshot: ChatTaskSnapshot, completed: CompletedChatWork) -> Self {
         Self {
             snapshot,
             transcript: completed.transcript,
@@ -38,9 +32,7 @@ impl ChatSuccessFinalizer {
             tool_names: completed.tool_names,
             model_provider: completed.model_provider,
             model_name: completed.model_name,
-            provider_response_id: completed.provider_response_id,
             usage: completed.usage,
-            usage_source,
         }
     }
 }
@@ -61,9 +53,7 @@ impl TaskFinalizer for ChatSuccessFinalizer {
                     tool_names: &self.tool_names,
                     model_provider: &self.model_provider,
                     model_name: &self.model_name,
-                    provider_response_id: self.provider_response_id.as_deref(),
                     usage: &self.usage,
-                    usage_source: &self.usage_source,
                 },
             )
             .await?;

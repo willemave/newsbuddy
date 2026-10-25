@@ -27,8 +27,6 @@ pub(super) struct LaneEvidence {
     pub(super) validated_feeds: HashMap<String, ValidatedFeed>,
 }
 
-const ITUNES_SEARCH_URL: &str = "https://itunes.apple.com/search";
-const ITUNES_LOOKUP_URL: &str = "https://itunes.apple.com/lookup";
 const REDDIT_TOKEN_URL: &str = "https://www.reddit.com/api/v1/access_token";
 const REDDIT_SEARCH_URL: &str = "https://oauth.reddit.com/subreddits/search";
 const DEFAULT_REDDIT_USER_AGENT: &str = "Newsly/1.0 (onboarding discovery)";
@@ -166,33 +164,14 @@ impl OnboardingGateway {
     }
 
     async fn podcast_directory_term(&self, term: &str) -> Vec<WebResult> {
-        let limit = PODCASTS_PER_TERM.to_string();
-        let response = self
-            .client
-            .get(ITUNES_SEARCH_URL)
-            .timeout(DIRECTORY_TIMEOUT)
-            .query(&[
-                ("media", "podcast"),
-                ("entity", "podcast"),
-                ("limit", limit.as_str()),
-                ("term", term),
-            ])
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status);
-        let rows = match response {
-            Ok(response) => match response.json::<ItunesResponse>().await {
-                Ok(body) => body.results,
+        let rows =
+            match crate::podcast_directory::search(&self.client, term, PODCASTS_PER_TERM).await {
+                Ok(rows) => rows,
                 Err(error) => {
-                    tracing::warn!(error = %error, term, "podcast directory response was invalid");
+                    tracing::warn!(error = %error, term, "podcast directory search failed");
                     return Vec::new();
                 }
-            },
-            Err(error) => {
-                tracing::warn!(error = %error, term, "podcast directory search failed");
-                return Vec::new();
-            }
-        };
+            };
         rows.into_iter()
             .filter_map(|row| podcast_directory_result(row, term))
             .collect()
@@ -209,20 +188,8 @@ impl OnboardingGateway {
             return;
         }
         let ids = ids.into_iter().collect::<Vec<_>>().join(",");
-        let response = self
-            .client
-            .get(ITUNES_LOOKUP_URL)
-            .timeout(DIRECTORY_TIMEOUT)
-            .query(&[("id", ids.as_str()), ("entity", "podcast")])
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status);
-        let rows = match response {
-            Ok(response) => response
-                .json::<ItunesResponse>()
-                .await
-                .map(|body| body.results)
-                .unwrap_or_default(),
+        let rows = match crate::podcast_directory::lookup(&self.client, &ids).await {
+            Ok(rows) => rows,
             Err(error) => {
                 tracing::warn!(error = %error, "podcast directory lookup failed");
                 return;
@@ -328,23 +295,7 @@ impl OnboardingGateway {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ItunesResponse {
-    #[serde(default)]
-    results: Vec<ItunesPodcast>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ItunesPodcast {
-    collection_id: Option<u64>,
-    collection_name: Option<String>,
-    artist_name: Option<String>,
-    feed_url: Option<String>,
-    collection_view_url: Option<String>,
-    primary_genre_name: Option<String>,
-    track_count: Option<u64>,
-}
+use crate::podcast_directory::{ItunesPodcast, apple_podcast_id};
 
 #[derive(Debug, Deserialize)]
 struct RedditToken {
@@ -520,16 +471,6 @@ fn explicit_feed_url(result: &WebResult) -> Option<String> {
                 });
             explicit.then(|| url.to_string())
         })
-}
-
-fn apple_podcast_id(url: &str) -> Option<String> {
-    let url = reqwest::Url::parse(url).ok()?;
-    if url.host_str()? != "podcasts.apple.com" {
-        return None;
-    }
-    let segment = url.path_segments()?.next_back()?;
-    let id = segment.strip_prefix("id")?;
-    (!id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())).then(|| id.to_owned())
 }
 
 #[cfg(test)]

@@ -52,7 +52,7 @@ struct E2EBriefingSourceActionsVisualState: View {
     private var lens: APIBriefingLensResponse {
         let source = APIBriefingSource(
             sourceKey: sourceKey, kind: tier == .news ? "news" : "content", id: 42,
-            title: title, publisher: "Newsly", summary: nil, keyPoints: nil, url: nil,
+            title: title, publisher: "Newsly", aggregator: nil, summary: nil, keyPoints: nil, url: nil,
             imageUrl: nil, thumbnailUrl: nil, publishedAt: nil,
             contentType: tier == .news ? .news : (tier == .audio ? .podcast : .article),
             durationSeconds: nil, readingMinutes: nil, discussion: nil

@@ -33,7 +33,7 @@ choose another model.
 | News enrichment and relevant links | GPT-6 Luna | `NEWS_PROCESSING_MODEL`, `NEWS_LINK_SELECTION_MODEL`; `news_item.rs` |
 | Briefing composition, dig and lens/category naming | GPT-6 Luna | `BRIEFING_MODEL`, `BRIEFING_CATEGORY_NAMING_MODEL`; `briefing_composition.rs`, `briefing_dig.rs` |
 | Onboarding discovery | GPT-6 Luna | `onboarding_model.rs`; fixed low effort, priority tier, storage disabled |
-| Learning Deck generation | GPT-6 Luna | `LEARNING_DECK_MODEL`; `newsly-worker/src/learning_deck/agent.rs` |
+| Learning Deck generation | Claude Sonnet 5.5 (since 2026-10-22) | `LEARNING_DECK_MODEL`; `newsly-worker/src/learning_deck/agent.rs` |
 | Share-action execution | GPT-6 Luna | `LLM_TASK_MODEL`; `newsly-worker/src/share_actions/agent.rs` |
 | Tweet suggestions and discussion summaries | GPT-6 Luna | `TWEET_SUGGESTION_MODEL`, `DISCUSSION_SUMMARY_MODEL`; `content_misc.rs` |
 | Narration script generation | GPT-6 Luna | `AUDIO_EPISODE_MODEL`; `newsly-worker/src/config.rs` |

@@ -420,10 +420,30 @@ async fn find_subscription_candidate(
     canonical_feed_url: &str,
     request_id: &str,
 ) -> Result<Option<ScraperConfigProjection>, ApiError> {
-    let allowed_types = vec![scraper_type.to_owned()];
+    let direct_feed = newsly_db::DIRECT_FEED_SCRAPER_TYPES.contains(&scraper_type);
+    let canonical_feed_url = if direct_feed {
+        newsly_db::canonical_direct_feed_url(canonical_feed_url)
+    } else {
+        canonicalize_feed_url(canonical_feed_url)
+    };
+    let allowed_types = if direct_feed {
+        newsly_db::DIRECT_FEED_SCRAPER_TYPES
+            .iter()
+            .map(|kind| (*kind).to_owned())
+            .collect()
+    } else {
+        vec![scraper_type.to_owned()]
+    };
     let candidates = load_scraper_configs(state.database.pool(), user_id, Some(&allowed_types))
         .await
         .map_err(|error| internal_error(error, request_id))?;
+    if direct_feed {
+        return Ok(newsly_db::matching_direct_subscription(
+            candidates,
+            scraper_type,
+            &canonical_feed_url,
+        ));
+    }
     Ok(candidates.into_iter().find(|candidate| {
         candidate
             .feed_url
@@ -835,7 +855,8 @@ fn config_response(
     config: ScraperConfigProjection,
     stats: Option<&ScraperConfigStatsProjection>,
 ) -> ScraperConfigResponse {
-    let config_data = config.config.as_object().cloned().unwrap_or_default();
+    let mut config_data = config.config.as_object().cloned().unwrap_or_default();
+    config_data.remove(newsly_db::FEED_URL_ALIASES_KEY);
     ScraperConfigResponse {
         id: config.id,
         scraper_type: config.scraper_type,
@@ -898,6 +919,33 @@ fn not_found_error(message: impl Into<String>, request_id: &str) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn responses_keep_feed_history_aliases_private() {
+        let response = config_response(
+            ScraperConfigProjection {
+                id: 1,
+                user_id: 2,
+                scraper_type: "atom".into(),
+                display_name: Some("Example".into()),
+                feed_url: Some("https://example.test/feed".into()),
+                config: json!({"feed_url":"https://example.test/feed", "limit":3,"feed_url_aliases":["http://example.test/feed"]}),
+                is_active: true,
+                created_at: chrono::Utc::now(),
+            },
+            None,
+        );
+        assert!(
+            !response
+                .config
+                .contains_key(newsly_db::FEED_URL_ALIASES_KEY)
+        );
+        assert_eq!(
+            response.feed_url.as_deref(),
+            Some("https://example.test/feed")
+        );
+        assert_eq!(response.limit, Some(3));
+    }
 
     #[test]
     fn aggregator_subscription_config_is_keyed_by_the_card_feed_url() {

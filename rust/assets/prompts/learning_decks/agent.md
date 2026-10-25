@@ -158,14 +158,8 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
   `r-stretch` for large diagrams/media/code panes, and `r-stack` for layered visual comparisons.
 - Set `scrollActivationWidth: null` in `Reveal.initialize(...)` so phone-width viewers stay in
   slide mode and previous/next controls work.
-- Treat iPhone portrait as a primary Learning Deck surface, not a scaled landscape fallback. Author
-  one semantic composition that supports a $portrait_canvas portrait canvas and a $landscape_canvas landscape
-  canvas. In portrait, reflow wide rows and split layouts into vertical sequences; enlarge teaching
-  objects instead of preserving their landscape width.
-- On ordinary teaching slides, use roughly 70–85% of the usable portrait height. Do not concentrate
-  all content in the upper third. Keep titles to at most three lines, give the main diagram, table,
-  excerpt, or argument most of the remaining height, and reserve the bottom 72px for viewer controls
-  and the collapsed chat flyover.
+- Author one semantic composition that supports a $portrait_canvas portrait canvas and a
+  $landscape_canvas landscape canvas. Follow the Portrait Phone Layout section below.
 - Avoid fixed positioning and fixed-width structures that cannot reflow. Add portrait-specific CSS
   for every custom diagram. If a complex slide cannot remain readable in both orientations, split it
   into additional slides instead of shrinking it.
@@ -177,6 +171,31 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
 - Add citations or compact source labels on slides where claims depend on specific sources.
 - Use `data-background-*`, auto-animate, and speaker notes sparingly. They should clarify a
   relationship or presentation beat, not compensate for weak slide structure.
+
+## Portrait Phone Layout
+
+Most readers hold an iPhone upright. The viewer scales the $portrait_canvas canvas to the phone's
+width, so one canvas pixel is about 0.55–0.6 points on screen, and it sets
+`html.newsly-learning-deck-portrait` while the phone is upright. Scope portrait CSS to that class;
+landscape and desktop keep their own scale. Design every portrait slide for that reading distance:
+
+- Type on the portrait canvas: slide titles 60–76px, body text and diagram labels at least 30px,
+  captions and secondary notes at least 24px, eyebrows, mono labels, and citations at least 20px.
+  Anything smaller is unreadable on a phone.
+- The reader draws its controls over the canvas. Keep text and diagram parts out of the top 110px
+  (close button, slide counter, overview button) and the bottom 120px (chat bar). Backgrounds and
+  rules may run behind them.
+- Fill the height with teaching content, not empty space. Read top to bottom as one column: title,
+  the main diagram, table, excerpt, or argument at full width, then at most one takeaway and a
+  citation. When a slide looks sparse, enlarge the main object, add an annotation or worked example,
+  or merge it with the next slide. Never push blocks apart with `justify-content: space-between`,
+  `flex: 1` spacers, `margin-top: auto`, or fixed-height rows; keep gaps between blocks under about
+  56px.
+- Reflow diagrams vertically: one node or step per row at full width with connectors pointing down.
+  Do not keep three or more boxes side by side in portrait, and do not shrink a landscape diagram to
+  fit.
+- If a slide cannot meet these sizes inside the safe area, split it instead of shrinking it. Title
+  plates may center their content but must still use display-sized type.
 
 Write a complete deck and source notes early, then improve them in place so interrupted work can
 resume. Call `validate_deck` with `{}` to run the canonical hosted-viewer checks at 390 × 844 portrait

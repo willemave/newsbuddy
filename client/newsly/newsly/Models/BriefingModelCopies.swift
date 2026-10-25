@@ -67,6 +67,7 @@ extension APIBriefingSource {
             id: id,
             title: title,
             publisher: publisher,
+            aggregator: aggregator,
             summary: summary,
             keyPoints: keyPoints,
             url: url,

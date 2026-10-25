@@ -10,7 +10,7 @@ use chrono::Utc;
 use newsly_agent_runtime::{MessagePart, NewslyTranscript, ProviderUsage, RequestPart};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use sqlx::{Acquire, FromRow, Postgres, Transaction};
+use sqlx::{FromRow, Postgres, Transaction};
 use thiserror::Error;
 
 use crate::chat_transcripts::{ChatTranscriptError, decode_transcript, processing_transcript};
@@ -87,7 +87,6 @@ pub struct ChatTaskSnapshot {
     pub context: ChatTurnProcessingContext,
     pub history: NewslyTranscript,
     pub llm_task_id: Option<i64>,
-    pub deep_research_response_id: Option<String>,
     pub encrypted_provider_key: Option<String>,
     pub content: Option<ChatContentMaterial>,
     pub workspace_path: String,
@@ -339,9 +338,7 @@ pub struct ChatTurnPublication<'a> {
     pub tool_names: &'a [String],
     pub model_provider: &'a str,
     pub model_name: &'a str,
-    pub provider_response_id: Option<&'a str>,
     pub usage: &'a ProviderUsage,
-    pub usage_source: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,7 +386,6 @@ struct MessageRow {
     status: String,
     error: Option<String>,
     stream_generation: Option<i32>,
-    deep_research_response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -444,9 +440,7 @@ mod publication;
 
 use preparation::{validate_bounded_text, validate_optional_text, validate_positive};
 
-pub use advisory::{
-    persist_deep_research_response_id, write_chat_partial, write_chat_tool_progress,
-};
+pub use advisory::{write_chat_partial, write_chat_tool_progress};
 pub use ledger::cancel_chat_llm_task_attempt;
 pub use preparation::prepare_chat_task;
 pub use publication::{fail_chat_turn, publish_chat_turn};

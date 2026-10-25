@@ -26,7 +26,8 @@ struct BriefingAttributedTextBuilder {
 
     func build(
         paragraphs: [APIBriefingParagraph],
-        discussionChips: [String: BriefingDiscussionChip] = [:]
+        discussionChips: [String: BriefingDiscussionChip] = [:],
+        aggregatorMonograms: [String: String] = [:]
     ) -> Result {
         let output = NSMutableAttributedString()
         let baseFont = Self.passageBodyFont()
@@ -56,12 +57,21 @@ struct BriefingAttributedTextBuilder {
                 let text = Self.sanitizedRunText(for: run, at: runIndex, in: runs)
                 guard !text.isEmpty else { continue }
                 if run.kind == .source_link {
+                    if let sourceKey = run.sourceKey {
+                        appendAggregatorBadge(
+                            for: sourceKey,
+                            monograms: aggregatorMonograms,
+                            attributes: attributes,
+                            to: output
+                        )
+                    }
                     output.append(NSAttributedString(string: text, attributes: attributes))
                 } else {
                     appendText(
                         text,
                         attributes: attributes,
                         discussionChips: discussionChips,
+                        aggregatorMonograms: aggregatorMonograms,
                         emittedChipSourceKeys: &emittedChipSourceKeys,
                         paragraphStyle: paragraphStyle,
                         to: output
@@ -78,6 +88,25 @@ struct BriefingAttributedTextBuilder {
         }
 
         return Result(attributedText: output, plainText: output.string)
+    }
+
+    /// Prefixes a news link with its aggregator monogram. The badge carries the
+    /// link's attributes so it opens the same source and wraps with the title.
+    private func appendAggregatorBadge(
+        for sourceKey: String,
+        monograms: [String: String],
+        attributes: [NSAttributedString.Key: Any],
+        to output: NSMutableAttributedString
+    ) {
+        guard let monogram = monograms[sourceKey],
+              let font = attributes[.font] as? UIFont
+        else { return }
+        let attachment = BriefingAggregatorBadge.attachment(monogram: monogram, alignedTo: font)
+        let badge = NSMutableAttributedString(attachment: attachment)
+        badge.addAttributes(attributes, range: NSRange(location: 0, length: badge.length))
+        // Narrow no-break space separates the badge without letting it orphan.
+        badge.append(NSAttributedString(string: "\u{202F}", attributes: attributes))
+        output.append(badge)
     }
 
     private func discussionChipText(
@@ -100,9 +129,6 @@ struct BriefingAttributedTextBuilder {
         let badgeStart = output.length
 
         let count = chip.commentCount.flatMap { $0 > 0 ? $0 : nil }
-        if count != nil {
-            output.append(NSAttributedString(string: "(", attributes: attributes))
-        }
 
         let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
         if let icon = UIImage(systemName: "bubble.left.and.bubble.right.fill", withConfiguration: symbolConfiguration)?
@@ -124,7 +150,7 @@ struct BriefingAttributedTextBuilder {
         if let count {
             // Narrow no-break space keeps the icon and count together.
             output.append(NSAttributedString(
-                string: "\u{202F}\(Self.compactCount(count)))",
+                string: "\u{202F}\(Self.compactCount(count))",
                 attributes: attributes
             ))
         }
@@ -143,6 +169,7 @@ struct BriefingAttributedTextBuilder {
         _ text: String,
         attributes: [NSAttributedString.Key: Any],
         discussionChips: [String: BriefingDiscussionChip],
+        aggregatorMonograms: [String: String],
         emittedChipSourceKeys: inout Set<String>,
         paragraphStyle: NSParagraphStyle,
         to output: NSMutableAttributedString
@@ -172,6 +199,12 @@ struct BriefingAttributedTextBuilder {
                 var linkAttributes = attributes
                 linkAttributes[.link] = url
                 linkAttributes[.foregroundColor] = UIColor.appAccent
+                appendAggregatorBadge(
+                    for: sourceKey,
+                    monograms: aggregatorMonograms,
+                    attributes: linkAttributes,
+                    to: output
+                )
                 output.append(NSAttributedString(
                     string: nsText.substring(with: match.range(at: 1)),
                     attributes: linkAttributes

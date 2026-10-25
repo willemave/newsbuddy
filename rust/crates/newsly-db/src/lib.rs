@@ -96,7 +96,7 @@ pub use adoption::{
 pub use agent_library::{
     AgentKnowledgeItem, AgentLibraryBodyPointer, AgentLibraryContentProjection,
     AgentLibraryRepositoryError, find_agent_knowledge_items, find_agent_library_content,
-    list_agent_library_content,
+    find_agent_readable_items, list_agent_library_content, lock_authorized_content,
 };
 pub use agent_usage::{AgentUsageRepositoryError, NewAgentModelUsage, record_agent_model_usage};
 pub use api_keys::{
@@ -157,14 +157,13 @@ pub use chat_tasks::{
     ChatTaskPreparationOutcome, ChatTaskRejection, ChatTaskRepositoryError, ChatTaskSnapshot,
     ChatTerminalMutationOutcome, ChatToolProgress, ChatTurnKind, ChatTurnProcessingContext,
     ChatTurnPublication, ChatTurnSessionSnapshot, PrepareChatTask, QueuedChatTaskKind,
-    cancel_chat_llm_task_attempt, fail_chat_turn, persist_deep_research_response_id,
-    prepare_chat_task, publish_chat_turn, write_chat_partial, write_chat_tool_progress,
+    cancel_chat_llm_task_attempt, fail_chat_turn, prepare_chat_task, publish_chat_turn,
+    write_chat_partial, write_chat_tool_progress,
 };
 pub use chat_tooling::{
-    ChatArticleConversionSource, ChatContentFilters, ChatContentHit, ChatContentPage, ChatNewsHit,
-    ChatToolRepositoryError, ChatUnreadNewsPage, create_deep_research_handoff,
-    list_unread_chat_news, prepare_chat_article_conversion, search_accessible_content,
-    search_agent_knowledge, search_chat_news,
+    ChatContentFilters, ChatContentHit, ChatContentPage, ChatNewsHit, ChatSource,
+    ChatToolRepositoryError, find_chat_source, list_chat_sources, read_chat_news,
+    search_accessible_content, search_agent_knowledge, search_chat_news_page, set_chat_news_read,
 };
 pub use chat_transcript_audit::{
     ChatTranscriptBackfillError, ChatTranscriptBackfillPage, ChatTranscriptCompatibility,
@@ -330,11 +329,13 @@ pub use scrape::{
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
 pub use scraper_configs::{
-    AppliedFeedSubscription, FeedSubscriptionMutation, NewScraperConfig, ScraperConfigPatch,
+    AppliedFeedSubscription, DIRECT_FEED_SCRAPER_TYPES, FEED_URL_ALIASES_KEY,
+    FeedSubscriptionMutation, FeedSubscriptionReference, NewScraperConfig, ScraperConfigPatch,
     ScraperConfigProjection, ScraperConfigRepositoryError, apply_aggregator_subscription,
-    apply_validated_feed_subscription, canonicalize_feed_url, create_scraper_config,
-    delete_scraper_config, find_scraper_config, list_scraper_configs,
-    scraper_config_identity_exists, update_scraper_config,
+    apply_validated_feed_subscription, canonical_direct_feed_url, canonicalize_feed_url,
+    create_scraper_config, delete_scraper_config, feed_url_aliases, find_scraper_config,
+    list_scraper_configs, matching_direct_subscription, scraper_config_identity_exists,
+    update_scraper_config,
 };
 pub use scraper_stats::{
     ScraperConfigStatsProjection, ScraperStatsRepositoryError, get_scraper_config_stats,

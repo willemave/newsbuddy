@@ -215,15 +215,16 @@ struct ChatSessionSummary: Identifiable, Hashable {
         }
     }
 
-    /// Whether this is a deep research session
-    var isDeepResearch: Bool {
-        sessionType == "deep_research" || llmProvider.lowercased() == "deep_research"
+    /// Historical Deep Research transcripts remain readable after retirement.
+    var isRetiredDeepResearch: Bool {
+        let normalizedProvider = llmProvider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedType = sessionType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedModel = llmModel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedProvider == "deep_research"
+            || normalizedType == "deep_research"
+            || normalizedModel.hasPrefix("deep_research:")
+            || normalizedModel.contains("deep-research")
     }
-
-    var canStartDeepResearch: Bool {
-        !isDeepResearch
-    }
-
 }
 
 struct ChatSessionListResponse {

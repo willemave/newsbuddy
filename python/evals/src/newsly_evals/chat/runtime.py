@@ -19,14 +19,16 @@ import httpx
 
 from newsly_evals.chat.stubs import StubServer
 
-# Match ChatAgentConfig/ShareActionAgentConfig defaults; keep these visible in run.json.
+# Match chat-owned product defaults; keep these visible in run.json.
 CHAT_RUNTIME_LIMITS = {
     "CHAT_HISTORY_MESSAGE_LIMIT": "200",
     "CHAT_OUTPUT_TOKEN_LIMIT": "8000",
-    "LLM_TASK_SANDBOX_REQUEST_LIMIT": "8",
-    "LLM_TASK_SANDBOX_TOOL_CALL_LIMIT": "32",
+    "CHAT_REQUEST_LIMIT": "32",
+    "CHAT_TOKEN_BUDGET": "256000",
+    "CHAT_FINAL_ANSWER_RESERVE_SECONDS": "30",
+    "CHAT_TOOL_CALL_LIMIT": "64",
+    "CHAT_TIMEOUT_SECONDS": "300",
     "LLM_TASK_SANDBOX_MAX_OUTPUT_CHARS": "20000",
-    "LLM_TASK_SANDBOX_TIMEOUT_SECONDS": "300",
 }
 
 
@@ -164,6 +166,8 @@ class LocalRuntime:
                 "no_proxy": "localhost,127.0.0.1,::1",
                 "CHAT_HISTORY_MESSAGE_LIMIT": "30",
                 "CHAT_OUTPUT_TOKEN_LIMIT": "2000",
+                "CHAT_REQUEST_LIMIT": "6",
+                "CHAT_TOOL_CALL_LIMIT": "12",
                 "LLM_TASK_SANDBOX_REQUEST_LIMIT": "6",
                 "LLM_TASK_SANDBOX_TOOL_CALL_LIMIT": "12",
                 "MAX_TASK_RETRIES": "0",
@@ -175,8 +179,6 @@ class LocalRuntime:
                 env.update(
                     {"OPENROUTER_BASE_URL": self.stubs.url + "/", "OPENROUTER_API_KEY": "eval-stub"}
                 )
-            # The chat worker initializes this unrelated gateway even for non-OpenAI candidates.
-            env.setdefault("OPENAI_API_KEY", "eval-unconfigured")
             migration = subprocess.run(
                 [str(self.binary_dir / "newsly-db"), "migrate", "--maintenance-barrier-confirmed"],
                 env=env,

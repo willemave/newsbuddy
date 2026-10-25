@@ -31,10 +31,13 @@ The local role must be able to create/drop databases and install the normal migr
 Ordinary `KEY=value` and quoted values are supported in the env file; shell expansion is not.
 
 Omit `--case` to run all 12 cases; repeat it to select several. The current suite requires
-13 candidate turns and 12 judge invocations. Each candidate turn uses the product defaults: eight model
-requests, 32 tool calls and 8,000 output tokens per request; queue retries are disabled. `--max-turns`
-defaults to 20 and `--timeout` to 180 seconds per candidate turn or judge call. This bounds
-work, not dollar spend: the public API does not expose sufficient usage for a monetary cap.
+13 candidate turns and 12 judge invocations. Each candidate turn uses the chat-owned product defaults:
+32 model requests, 64 tool calls, an estimated 256,000-token turn allowance, and 8,000 output tokens per request.
+The worker has a 300-second deadline with 30 seconds reserved for its final answer; queue retries
+are disabled. `--max-turns` defaults to 20 and `--timeout` to 360 seconds per candidate turn or
+judge call, leaving polling time beyond the worker's deadline. This bounds
+work, not an exact token or dollar ceiling: provider tokenization differs from pre-dispatch estimates.
+For dollar spend, the public API does not expose sufficient usage for a monetary cap.
 The CLI prints routing and planned call counts before starting. Selecting a provider/model
 and running this command makes real model calls through that provider, including paid routes.
 

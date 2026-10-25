@@ -218,7 +218,7 @@ def test_content_grade_and_judge_input_are_independent_of_tool_choice() -> None:
     suite, scenario = load_suite(SUITE)
     prompts = []
     checks = []
-    for tool in ("search_subscription_feeds", "search_content", "find_feed_options"):
+    for tool in ("list_sources", "search_content", "resolve_source"):
         turn = traced_turn(tool)
         turn["answer"] = "\n".join(
             f"[{item.title}]({item.url.replace('{namespace}', 'test-run')})"
@@ -264,9 +264,9 @@ def test_subscription_cards_fail_even_when_text_and_tool_look_correct() -> None:
 
 
 def test_tool_evidence_ignores_previous_turn_and_candidate_claims() -> None:
-    turn = traced_turn("search_subscription_feeds")
+    turn = traced_turn("list_sources")
     turn["answer"] = "Executed 1 tool call:\n• search_content"
-    assert tool_evidence(turn)["counts"] == {"search_subscription_feeds": 1}
+    assert tool_evidence(turn)["counts"] == {"list_sources": 1}
     turn["messages"][-1]["content"] = "Unknown summary format"
     assert tool_evidence(turn)["complete"] is False
     turn["messages"] = []
@@ -286,7 +286,7 @@ def test_judge_sees_separate_subscription_entities_and_visible_cards() -> None:
 
 def test_report_shows_final_answer_tools_and_subscription_cards(tmp_path: Path) -> None:
     turn = traced_turn(
-        "find_feed_options",
+        "resolve_source",
         feed_options=[
             {"title": "Invest Like the Best", "feed_url": "https://feeds.example.test/best.xml"}
         ],
@@ -294,7 +294,7 @@ def test_report_shows_final_answer_tools_and_subscription_cards(tmp_path: Path) 
     report(tmp_path, [{"id": "case", "status": "fail", "expects": "Episodes", "turns": [turn]}])
     text = (tmp_path / "report.md").read_text()
     assert "### Final answer\n\nFinal answer text" in text
-    assert "find_feed_options ×1" in text
+    assert "resolve_source ×1" in text
     assert "### Subscription cards" in text
     assert "https://feeds.example.test/best.xml" in text
 

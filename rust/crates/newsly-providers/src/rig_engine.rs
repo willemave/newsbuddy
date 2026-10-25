@@ -3,9 +3,9 @@ use std::sync::Arc;
 use chrono::Utc;
 use newsly_agent_runtime::{
     AgentEvent, AgentEventSink, AgentModelUsageObservation, AgentOutcome, AgentRequest,
-    AgentRuntimeError, AssistantPart, MessagePart, MessageRole, NewslyMessage, ProviderUsage,
-    ReasoningContentKind, RequestPart, ResponseContract, ToolCall as NewslyToolCall, ToolExecutor,
-    TranscriptFinishReason,
+    AgentRuntimeError, AssistantPart, ChatBudget, MessagePart, MessageRole, NewslyMessage,
+    ProviderUsage, ReasoningContentKind, RequestPart, ResponseContract, ToolCall as NewslyToolCall,
+    ToolExecutor, TranscriptFinishReason,
 };
 use reqwest::Client;
 use rig_core::client::CompletionClient;
@@ -26,6 +26,8 @@ use crate::{
     ModelProvider, ModelSpec, ProviderCredentials, openrouter::openrouter_request_parameters,
 };
 
+mod chat_budget;
+use chat_budget::{CHAT_FINAL_ANSWER_INSTRUCTION, ChatBudgetState, normalize_final_response};
 mod openai_response;
 mod structured;
 pub(crate) use structured::{RunStructuredError, StructuredRunRequest};
@@ -55,8 +57,13 @@ impl RigAgentEngine {
         request: AgentRequest,
         tools: Arc<dyn ToolExecutor>,
         events: Arc<dyn AgentEventSink>,
+        budget: Option<ChatBudget>,
+        model_override: Option<RigModel>,
     ) -> Result<AgentOutcome, AgentRuntimeError> {
         request.limits.validate()?;
+        let mut chat_budget = budget
+            .map(|budget| ChatBudgetState::new(budget, &request))
+            .transpose()?;
         request.tool_policy.validate(&request.tools)?;
         request.transcript.validate().map_err(|error| {
             AgentRuntimeError::InvalidRequest(format!("invalid Newsly transcript: {error}"))
@@ -69,7 +76,10 @@ impl RigAgentEngine {
 
         let model_spec = ModelSpec::parse(&request.model_spec)
             .map_err(|error| AgentRuntimeError::InvalidRequest(error.to_string()))?;
-        let model = self.model(&model_spec)?;
+        let model = match model_override {
+            Some(model) => model,
+            None => self.model(&model_spec)?,
+        };
         let model_name = model_spec.canonical();
         let mut history = rig_history_from_transcript(&request.transcript)?;
         history.retain(|message| !matches!(message, Message::System { .. }));
@@ -118,26 +128,36 @@ impl RigAgentEngine {
 
         loop {
             enforce_request_limit(request_count, request.limits.request_limit)?;
-            request_count = request_count.saturating_add(1);
-            events.publish(AgentEvent::ModelRequestStarted {
-                sequence: request_count,
-            })?;
-
-            let completion_request = CompletionRequest {
+            let final_answer = match &chat_budget {
+                Some(budget) => budget.final_answer(
+                    &request,
+                    request_count,
+                    tool_call_count,
+                    &history,
+                    &rig_tools,
+                )?,
+                None => false,
+            };
+            if final_answer {
+                history.push(Message::user(CHAT_FINAL_ANSWER_INSTRUCTION));
+            }
+            let mut completion_request = CompletionRequest {
                 model: None,
                 preamble: None,
                 chat_history: history.clone(),
                 documents: Vec::new(),
+                // Keep definitions for provider validation of historical tool blocks.
+                // ToolChoice::None disables new calls in the final answer.
                 tools: rig_tools.clone(),
                 temperature: None,
                 max_tokens: request.limits.output_token_limit,
-                tool_choice: (!rig_tools.is_empty()).then_some(
-                    if request.tool_policy.require_tool && tool_call_count == 0 {
-                        ToolChoice::Required
-                    } else {
-                        ToolChoice::Auto
-                    },
-                ),
+                tool_choice: (!rig_tools.is_empty()).then_some(if final_answer {
+                    ToolChoice::None
+                } else if request.tool_policy.require_tool && tool_call_count == 0 {
+                    ToolChoice::Required
+                } else {
+                    ToolChoice::Auto
+                }),
                 additional_params: Self::provider_parameters(
                     model_spec.provider,
                     &request.provider_parameters,
@@ -150,7 +170,31 @@ impl RigAgentEngine {
                 .validate_message_content()
                 .map_err(|error| AgentRuntimeError::InvalidRequest(error.to_string()))?;
 
-            let response = model.complete(completion_request).await?;
+            let estimated_tokens = chat_budget
+                .as_ref()
+                .map(|budget| budget.prepare_dispatch(&mut completion_request, final_answer))
+                .transpose()?;
+            request_count = request_count.saturating_add(1);
+            events.publish(AgentEvent::ModelRequestStarted {
+                sequence: request_count,
+            })?;
+
+            let mut response = if final_answer {
+                let budget = chat_budget
+                    .as_ref()
+                    .expect("final answer requires chat budget");
+                tokio::time::timeout(
+                    budget.final_request_timeout(),
+                    model.complete(completion_request),
+                )
+                .await
+                .map_err(|_| AgentRuntimeError::DeadlineExceeded)??
+            } else {
+                model.complete(completion_request).await?
+            };
+            if let Some(budget) = &mut chat_budget {
+                budget.observe(&response, estimated_tokens.unwrap_or_default());
+            }
             let response_usage = provider_usage(&response);
             usage.add_assign(&response_usage);
             events.publish(AgentEvent::Usage {
@@ -186,7 +230,11 @@ impl RigAgentEngine {
             }
 
             let provider_finish_reason = response.finish_reason();
-            let finish_reason = transcript_finish_reason(provider_finish_reason.as_ref());
+            let finish_reason = if final_answer && normalize_final_response(&mut response)? {
+                TranscriptFinishReason::Stop
+            } else {
+                transcript_finish_reason(provider_finish_reason.as_ref())
+            };
             if response
                 .choice
                 .iter()
@@ -321,7 +369,12 @@ impl RigAgentEngine {
                 continue;
             }
 
-            if request.tool_policy.require_tool && tool_call_count == 0 {
+            if final_answer && text.trim().is_empty() {
+                return Err(AgentRuntimeError::ChatBudgetExhausted(
+                    "final response contained no answer".to_owned(),
+                ));
+            }
+            if !final_answer && request.tool_policy.require_tool && tool_call_count == 0 {
                 return Err(AgentRuntimeError::Validation(
                     "the response completed without the required tool call".to_owned(),
                 ));
@@ -456,13 +509,38 @@ impl RigAgentEngine {
         events: Arc<dyn AgentEventSink>,
     ) -> Result<AgentOutcome, AgentRuntimeError> {
         let deadline = request.limits.deadline;
-        tokio::time::timeout(deadline, self.run_inner(request, tools, events))
+        tokio::time::timeout(deadline, self.run_inner(request, tools, events, None, None))
             .await
             .map_err(|_| AgentRuntimeError::DeadlineExceeded)?
+    }
+
+    /// Runs chat with a reserved, tool-free final response inside the original absolute limits.
+    ///
+    /// # Errors
+    /// Returns ordinary runtime errors, or `ChatBudgetExhausted` when no safe dispatch remains.
+    pub async fn run_chat(
+        &self,
+        request: AgentRequest,
+        tools: Arc<dyn ToolExecutor>,
+        events: Arc<dyn AgentEventSink>,
+        budget: ChatBudget,
+    ) -> Result<AgentOutcome, AgentRuntimeError> {
+        let deadline = request.limits.deadline;
+        tokio::time::timeout(
+            deadline,
+            self.run_inner(request, tools, events, Some(budget), None),
+        )
+        .await
+        .map_err(|_| AgentRuntimeError::DeadlineExceeded)?
     }
 }
 
 enum RigModel {
+    #[cfg(test)]
+    Fake {
+        responses: std::sync::Mutex<std::collections::VecDeque<CompletionResponse>>,
+        requests: Arc<std::sync::Mutex<Vec<CompletionRequest>>>,
+    },
     OpenAi {
         client: openai::Client,
         model: String,
@@ -528,6 +606,18 @@ impl RigModel {
         request: CompletionRequest,
     ) -> Result<CompletionResponse, AgentRuntimeError> {
         let response = match self {
+            #[cfg(test)]
+            Self::Fake {
+                responses,
+                requests,
+            } => {
+                requests.lock().expect("request lock").push(request);
+                return responses
+                    .lock()
+                    .expect("response lock")
+                    .pop_front()
+                    .ok_or_else(|| AgentRuntimeError::Provider("fake exhausted".to_owned()));
+            }
             Self::OpenAi { client, model } => {
                 return openai_response::complete(client, model, request).await;
             }
@@ -884,77 +974,7 @@ fn enforce_request_limit(
 }
 
 #[cfg(test)]
-mod tests {
-    use newsly_agent_runtime::AgentRuntimeError;
-    use rig_core::completion::{AssistantContent, CompletionResponse, Usage};
-    use rig_core::message::{Reasoning, ReasoningContent};
-    use serde_json::json;
+mod tests;
 
-    use super::{
-        assistant_content, enforce_request_limit, newsly_assistant_parts,
-        provider_reported_cost_usd, response_reports_usage,
-    };
-
-    #[test]
-    fn finite_request_limit_stops_the_rig_loop_at_the_bound() {
-        assert!(enforce_request_limit(1, Some(2)).is_ok());
-        assert!(matches!(
-            enforce_request_limit(2, Some(2)),
-            Err(AgentRuntimeError::RequestLimitExceeded)
-        ));
-    }
-
-    #[test]
-    fn absent_request_limit_never_stops_the_rig_loop_by_count() {
-        assert!(enforce_request_limit(u32::MAX, None).is_ok());
-    }
-
-    #[test]
-    fn usage_is_observed_only_for_complete_provider_counters() {
-        let valid = CompletionResponse::new(Vec::new(), Usage::default(), "openai").with_raw(
-            json!({"usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}}),
-        );
-        let empty = CompletionResponse::new(Vec::new(), Usage::default(), "openai")
-            .with_raw(json!({"usage": {}}));
-        let malformed = CompletionResponse::new(Vec::new(), Usage::default(), "anthropic")
-            .with_raw(json!({"usage": {"input_tokens": "10", "output_tokens": 2}}));
-        let google = CompletionResponse::new(Vec::new(), Usage::default(), "gemini")
-            .with_raw(json!({"usageMetadata": {"promptTokenCount": 10, "totalTokenCount": 10}}));
-
-        assert!(response_reports_usage(&valid));
-        assert!(!response_reports_usage(&empty));
-        assert!(!response_reports_usage(&malformed));
-        assert!(response_reports_usage(&google));
-    }
-
-    #[test]
-    fn openrouter_account_charge_is_captured_only_when_finite_and_nonnegative() {
-        let charged = CompletionResponse::new(Vec::new(), Usage::default(), "openrouter")
-            .with_raw(json!({"usage": {"cost": 0.0042}}));
-        let negative = CompletionResponse::new(Vec::new(), Usage::default(), "openrouter")
-            .with_raw(json!({"usage": {"cost": -0.0042}}));
-        let other_provider = CompletionResponse::new(Vec::new(), Usage::default(), "openai")
-            .with_raw(json!({"usage": {"cost": 0.0042}}));
-
-        let cost = provider_reported_cost_usd(&charged).expect("valid account charge");
-        assert!((cost - 0.0042).abs() < f64::EPSILON);
-        assert_eq!(provider_reported_cost_usd(&negative), None);
-        assert_eq!(provider_reported_cost_usd(&other_provider), None);
-    }
-
-    #[test]
-    fn reasoning_item_identity_and_order_survive_newsly_transcript_round_trip() {
-        let original = vec![AssistantContent::Reasoning(Reasoning {
-            id: Some("rs_reasoning_item".to_owned()),
-            content: vec![
-                ReasoningContent::Summary("short summary".to_owned()),
-                ReasoningContent::Encrypted("encrypted payload".to_owned()),
-            ],
-        })];
-
-        let durable = newsly_assistant_parts(&original);
-        let replayed = assistant_content(&durable).expect("durable reasoning should replay");
-
-        assert_eq!(replayed, original);
-    }
-}
+#[cfg(test)]
+mod chat_budget_tests;

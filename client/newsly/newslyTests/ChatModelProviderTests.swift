@@ -7,11 +7,34 @@ final class ChatModelProviderTests: XCTestCase {
         XCTAssertFalse(ChatModelProvider.selectableProviders.contains(.deep_research))
     }
 
+    func testHistoricalDeepResearchProviderRemainsDecodable() throws {
+        let provider = try JSONDecoder().decode(
+            ChatModelProvider.self,
+            from: Data(#""deep_research""#.utf8)
+        )
+        XCTAssertEqual(provider, .deep_research)
+        XCTAssertEqual(provider.displayName, "Deep Research")
+    }
+
     func testTweetProvidersUseSharedSelectableProviders() {
         XCTAssertEqual(
             ChatModelProvider.tweetProviders,
             ChatModelProvider.selectableProviders
         )
+    }
+
+    func testHistoricalResearchSessionsRemainReadOnlyForEveryMarker() {
+        let sessions: [ChatSessionSummary] = [
+            .fixture(sessionType: " DEEP_RESEARCH "),
+            .fixture(llmProvider: " Deep_Research\n"),
+            .fixture(llmModel: "openai:o4-mini-deep-research"),
+            .fixture(llmModel: " OPENAI:O4-MINI-DEEP-RESEARCH-2025-06-26 "),
+            .fixture(llmModel: " DEEP_RESEARCH:o4-mini ")
+        ]
+        for session in sessions {
+            XCTAssertTrue(session.isRetiredDeepResearch)
+        }
+        XCTAssertFalse(ChatSessionSummary.fixture().isRetiredDeepResearch)
     }
 
     func testGoogleIsNotDecodable() {

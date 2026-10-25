@@ -21,7 +21,7 @@ struct LearningDeckChatComposer: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .learningDeckReaderInputSurface(isFocused: isInputFocused)
+                    .learningDeckChatFieldSurface(isFocused: isInputFocused)
                     .submitLabel(.send)
                     .onSubmit(sendMessage)
                     .accessibilityIdentifier("learning_deck.chat.input")
@@ -43,7 +43,7 @@ struct LearningDeckChatComposer: View {
                     .animation(AppMotion.subtle, value: sendButtonDisabled)
                     .animation(AppMotion.subtle, value: viewModel.isSending)
                     .frame(width: 44, height: 44)
-                    .learningDeckReaderSendSurface(isEnabled: !sendButtonDisabled)
+                    .learningDeckChatSendSurface(isEnabled: !sendButtonDisabled)
                     .contentShape(Circle())
                 }
                 .buttonStyle(PressableButtonStyle())
@@ -88,7 +88,7 @@ struct LearningDeckChatVoiceButton: View {
                 }
             }
             .frame(width: 44, height: 44)
-            .learningDeckReaderCircleSurface(tint: Color.brandPrimary, isEnabled: true)
+            .background(Color.surfaceSecondary, in: Circle())
             .contentShape(Circle())
         }
         .buttonStyle(.plain)

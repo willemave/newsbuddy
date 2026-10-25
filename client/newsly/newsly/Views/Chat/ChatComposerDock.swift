@@ -9,7 +9,6 @@ struct ChatComposerDock: View {
     @Binding var inputText: String
     let isInputFocused: FocusState<Bool>.Binding
     let session: ChatSessionSummary?
-    let canStartDeepResearch: Bool
     let isSending: Bool
     let isRecording: Bool
     let isTranscribing: Bool
@@ -17,7 +16,6 @@ struct ChatComposerDock: View {
     let voiceDictationAvailable: Bool
     let onShowHistory: (() -> Void)?
     let onSwitchProvider: (ChatModelProvider) -> Void
-    let onStartDeepResearch: () -> Void
     let onToggleVoiceRecording: () -> Void
     let onSend: () -> Void
 
@@ -38,14 +36,19 @@ struct ChatComposerDock: View {
     }
 
     private var showsMoreActionsMenu: Bool {
-        onShowHistory != nil ||
-        session != nil ||
-        canStartDeepResearch
+        onShowHistory != nil || session != nil
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            inputRow
+            if session?.isRetiredDeepResearch == true {
+                Text("Deep Research has been retired. Start a regular chat to research a topic.")
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .padding(8)
+            } else {
+                inputRow
+            }
             if showsRecordingStatus {
                 recordingStatus
             }
@@ -73,7 +76,7 @@ struct ChatComposerDock: View {
                 }
             }
 
-            if let session {
+            if let session, !session.isRetiredDeepResearch {
                 Section("Model") {
                     Label("Current: \(session.providerDisplayName)", systemImage: session.providerIconFallback)
                         .foregroundStyle(Color.onSurfaceSecondary)
@@ -86,15 +89,6 @@ struct ChatComposerDock: View {
                         }
                         .disabled(provider.rawValue == session.llmProvider)
                     }
-                }
-            }
-
-            if canStartDeepResearch {
-                Section("Actions") {
-                    Button(action: onStartDeepResearch) {
-                        Label("Deep Research", systemImage: "magnifyingglass.circle.fill")
-                    }
-                    .disabled(isSending)
                 }
             }
         } label: {
@@ -255,7 +249,6 @@ private struct ChatComposerDockPreviewHost: View {
             inputText: $inputText,
             isInputFocused: $isInputFocused,
             session: ChatPreviewFixtures.session,
-            canStartDeepResearch: true,
             isSending: false,
             isRecording: false,
             isTranscribing: false,
@@ -263,7 +256,6 @@ private struct ChatComposerDockPreviewHost: View {
             voiceDictationAvailable: true,
             onShowHistory: {},
             onSwitchProvider: { _ in },
-            onStartDeepResearch: {},
             onToggleVoiceRecording: {},
             onSend: {}
         )

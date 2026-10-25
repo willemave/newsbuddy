@@ -114,6 +114,14 @@ impl AgentLimits {
     }
 }
 
+/// Opt-in chat stopping policy. Tokens are an estimated dispatch allowance, not a billing cap:
+/// provider tokenization differs and counters arrive after a response, possibly above the estimate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatBudget {
+    pub cumulative_token_limit: u64,
+    pub final_answer_reserve: Duration,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentOutcome {
     pub output_text: String,
@@ -209,6 +217,8 @@ pub enum AgentRuntimeError {
     DeadlineExceeded,
     #[error("agent request limit exceeded")]
     RequestLimitExceeded,
+    #[error("chat budget exhausted: {0}")]
+    ChatBudgetExhausted(String),
     #[error("agent tool-call limit exceeded")]
     ToolCallLimitExceeded,
     #[error("provider execution failed: {0}")]

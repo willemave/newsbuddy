@@ -62,23 +62,6 @@ pub async fn enqueue_new_demand(
     Ok(())
 }
 
-/// Chat subscriptions use the same audience fence and durable work as HTTP writes.
-pub async fn subscribe_aggregator(
-    pool: &sqlx::PgPool,
-    queue: &QueueKernel,
-    user_id: i64,
-    key: newsly_domain::AggregatorKey,
-    topics: Option<&[&str]>,
-) -> Result<newsly_db::AppliedFeedSubscription> {
-    let mut transaction = pool.begin().await?;
-    let before = snapshot(&mut transaction).await?;
-    let applied =
-        newsly_db::apply_aggregator_subscription(&mut transaction, user_id, key, topics).await?;
-    enqueue_new_demand(&mut transaction, queue, &before).await?;
-    transaction.commit().await?;
-    Ok(applied)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,27 +179,37 @@ mod chat_tests {
         let user_id:i64=sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('chat-demand','chat-demand@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
         let item_id:i64=sqlx::query_scalar("INSERT INTO news_items(ingest_key,visibility_scope,platform,status,raw_metadata,ingested_at,created_at) VALUES('chat-denied','global','brutalist','ready',$1,timezone('UTC',now()),timezone('UTC',now())) RETURNING id::bigint").bind(json!({"aggregator":{"topic":"science","topics":["science"]},"article_extraction":{"error_code":newsly_db::aggregator_corpus::FIRECRAWL_NO_DEMAND_ERROR_CODE}})).fetch_one(&pool).await.unwrap();
         let queue = QueueKernel::new(pool.clone());
-        let created = subscribe_aggregator(
-            &pool,
-            &queue,
+        let mut transaction = pool.begin().await.unwrap();
+        let before = snapshot(&mut transaction).await.unwrap();
+        let created = newsly_db::apply_aggregator_subscription(
+            &mut transaction,
             user_id,
             AggregatorKey::Brutalist,
             Some(&["science"]),
         )
         .await
         .unwrap();
+        enqueue_new_demand(&mut transaction, &queue, &before)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
         assert_eq!(created.mutation.as_str(), "created");
         let replay:i64=sqlx::query_scalar("SELECT count(*) FROM processing_tasks WHERE task_type='enrich_news_item_article' AND payload::jsonb->>'news_item_id'=$1").bind(item_id.to_string()).fetch_one(&pool).await.unwrap();
         assert_eq!(replay, 1);
-        subscribe_aggregator(
-            &pool,
-            &queue,
+        let mut transaction = pool.begin().await.unwrap();
+        let before = snapshot(&mut transaction).await.unwrap();
+        newsly_db::apply_aggregator_subscription(
+            &mut transaction,
             user_id,
             AggregatorKey::Brutalist,
             Some(&["science", "politics"]),
         )
         .await
         .unwrap();
+        enqueue_new_demand(&mut transaction, &queue, &before)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
         let fetches: i64 =
             sqlx::query_scalar("SELECT count(*) FROM processing_tasks WHERE task_type='scrape'")
                 .fetch_one(&pool)
@@ -237,10 +230,20 @@ mod chat_tests {
         .execute(&pool)
         .await
         .unwrap();
-        let reactivated =
-            subscribe_aggregator(&pool, &queue, user_id, AggregatorKey::Brutalist, None)
-                .await
-                .unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        let before = snapshot(&mut transaction).await.unwrap();
+        let reactivated = newsly_db::apply_aggregator_subscription(
+            &mut transaction,
+            user_id,
+            AggregatorKey::Brutalist,
+            None,
+        )
+        .await
+        .unwrap();
+        enqueue_new_demand(&mut transaction, &queue, &before)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
         assert_eq!(reactivated.mutation.as_str(), "reactivated");
         let pending: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM processing_tasks WHERE task_type='scrape' AND status='pending'",

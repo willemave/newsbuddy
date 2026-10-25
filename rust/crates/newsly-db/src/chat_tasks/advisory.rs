@@ -1,4 +1,4 @@
-//! Generation-fenced partial text, tool progress, and resumable response identities.
+//! Generation-fenced partial text and tool progress.
 
 use super::{
     ChatAdvisoryWriteOutcome, ChatTaskRepositoryError, ChatToolProgress, MessageRow, Postgres,
@@ -108,49 +108,6 @@ pub async fn write_chat_tool_progress(
     .execute(&mut **transaction)
     .await?;
     Ok(ChatAdvisoryWriteOutcome::Applied)
-}
-
-/// Compare-and-set a newly created OpenAI background response identity before polling.
-pub async fn persist_deep_research_response_id(
-    transaction: &mut Transaction<'_, Postgres>,
-    message_id: i64,
-    stream_generation: i32,
-    response_id: &str,
-) -> Result<Option<String>, ChatTaskRepositoryError> {
-    validate_bounded_text(response_id, 1, 255, "deep_research_response_id")?;
-    let row = sqlx::query_as::<_, (String, Option<i32>, Option<String>)>(
-        r#"
-        SELECT status, stream_generation, deep_research_response_id
-        FROM chat_messages
-        WHERE id::bigint = $1
-        FOR UPDATE
-        "#,
-    )
-    .bind(message_id)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    let Some((status, generation, existing)) = row else {
-        return Ok(None);
-    };
-    if status != "processing" || generation != Some(stream_generation) {
-        return Ok(None);
-    }
-    if let Some(existing) = existing {
-        return Ok(Some(existing));
-    }
-    sqlx::query(
-        r#"
-        UPDATE chat_messages
-        SET deep_research_response_id = $3
-        WHERE id::bigint = $1 AND stream_generation = $2 AND status = 'processing'
-        "#,
-    )
-    .bind(message_id)
-    .bind(stream_generation)
-    .bind(response_id)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(Some(response_id.to_owned()))
 }
 
 pub(super) async fn initialize_stream_attempt(

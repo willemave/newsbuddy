@@ -28,7 +28,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     run.add_argument("--model", required=True, help="Candidate provider:model")
     run.add_argument("--judge-model", required=True, help="Locally authenticated Codex CLI model")
     run.add_argument("--case", action="append", default=[], dest="cases")
-    run.add_argument("--timeout", type=float, default=180)
+    run.add_argument("--timeout", type=float, default=360)
     run.add_argument("--max-turns", type=int, default=20)
     run.add_argument(
         "--keep-database", action="store_true", help="Keep DB after stopping processes"

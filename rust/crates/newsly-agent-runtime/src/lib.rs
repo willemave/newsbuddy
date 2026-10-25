@@ -10,8 +10,8 @@ mod transcript;
 
 pub use engine::{
     AgentEvent, AgentEventSink, AgentLimits, AgentModelUsageObservation, AgentOutcome,
-    AgentRequest, AgentRuntimeError, BoxToolFuture, ResponseContract, ToolCall, ToolDefinition,
-    ToolExecutor, ToolOutput, ToolPolicy,
+    AgentRequest, AgentRuntimeError, BoxToolFuture, ChatBudget, ResponseContract, ToolCall,
+    ToolDefinition, ToolExecutor, ToolOutput, ToolPolicy,
 };
 pub use transcript::{
     AssistantPart, LegacyHistoryError, MessagePart, MessageRole, NEWSLY_TRANSCRIPT_VERSION,

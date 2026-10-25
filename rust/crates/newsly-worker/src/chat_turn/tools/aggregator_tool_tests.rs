@@ -1,11 +1,12 @@
 use super::*;
+use newsly_contracts::FeedType;
 
 #[test]
 fn feed_discovery_names_every_catalog_aggregator() {
     let definitions = ChatToolExecutor::definitions();
     let discovery = definitions
         .iter()
-        .find(|definition| definition.name == "find_feed_options")
+        .find(|definition| definition.name == "resolve_source")
         .unwrap();
     for key in AggregatorKey::ALL {
         assert!(
@@ -17,7 +18,7 @@ fn feed_discovery_names_every_catalog_aggregator() {
     assert!(
         definitions
             .iter()
-            .any(|definition| definition.name == "subscribe_to_aggregator")
+            .any(|definition| definition.name == "subscribe_to_source")
     );
 }
 

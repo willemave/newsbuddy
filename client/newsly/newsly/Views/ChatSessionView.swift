@@ -248,7 +248,6 @@ private struct ChatSessionContent: View {
             inputText: $viewModel.inputText,
             isInputFocused: $isInputFocused,
             session: viewModel.session,
-            canStartDeepResearch: viewModel.canStartDeepResearch,
             isSending: viewModel.isSending,
             isRecording: viewModel.isRecording,
             isTranscribing: viewModel.isTranscribing,
@@ -256,7 +255,6 @@ private struct ChatSessionContent: View {
             voiceDictationAvailable: viewModel.voiceDictationAvailable,
             onShowHistory: onShowHistory,
             onSwitchProvider: switchProvider,
-            onStartDeepResearch: startDeepResearch,
             onToggleVoiceRecording: toggleVoiceRecording,
             onSend: sendMessage
         )
@@ -280,10 +278,6 @@ private extension ChatSessionContent {
 
     func digDeeper(into selectedText: String) {
         viewModel.performDigDeeper(into: selectedText)
-    }
-
-    func startDeepResearch() {
-        Task { await switchToProvider(.deep_research) }
     }
 
     func toggleVoiceRecording() { viewModel.performToggleVoiceRecording() }

@@ -190,7 +190,7 @@ final class BriefingSourceActionViewModelTests: XCTestCase {
     private func source(kind: String) -> APIBriefingSource {
         APIBriefingSource(
             sourceKey: "\(kind):7", kind: kind, id: 7, title: "Source",
-            publisher: nil, summary: nil, keyPoints: nil, url: nil, imageUrl: nil,
+            publisher: nil, aggregator: nil, summary: nil, keyPoints: nil, url: nil, imageUrl: nil,
             thumbnailUrl: nil, publishedAt: nil, contentType: .news,
             durationSeconds: nil, readingMinutes: nil, discussion: nil
         )

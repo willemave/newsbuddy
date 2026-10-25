@@ -90,12 +90,6 @@ struct LearningDeckChatFlyover: View {
                 peekBar
             }
         }
-        .background(Color.surfacePrimary.opacity(0.98))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.outlineVariant.opacity(0.24))
-                .frame(height: 0.5)
-        }
     }
 
     private var peekBar: some View {
@@ -187,12 +181,6 @@ struct LearningDeckChatPanel: View {
 
     var body: some View {
         expandedPanel
-            .background(Color.surfacePrimary.opacity(0.98))
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.outlineVariant.opacity(0.24))
-                    .frame(height: 0.5)
-            }
             .scrollDismissesKeyboard(.interactively)
     }
 
@@ -351,6 +339,9 @@ struct LearningDeckChatPanel: View {
                     }
                 }
             }
+            // Let chips scroll out to the sheet edges instead of clipping at the margin.
+            .contentMargins(.horizontal, Spacing.appHorizontalMargin, for: .scrollContent)
+            .padding(.horizontal, -Spacing.appHorizontalMargin)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("learning_deck.chat.empty")
@@ -366,7 +357,7 @@ struct LearningDeckChatPanel: View {
                 .lineLimit(1)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .learningDeckReaderCapsuleSurface(tint: Color.surfaceSecondary, isEnabled: true)
+                .background(Color.surfaceSecondary, in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(PressableButtonStyle())
@@ -400,10 +391,8 @@ private struct LearningDeckChatSlidePill: View {
         Text(label)
             .font(.terracottaBodySmall)
             .foregroundStyle(Color.onSurfaceSecondary)
+            .monospacedDigit()
             .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .learningDeckReaderCapsuleSurface(tint: Color.surfaceSecondary, isEnabled: false)
     }
 }
 

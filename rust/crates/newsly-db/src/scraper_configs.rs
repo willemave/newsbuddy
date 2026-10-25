@@ -4,7 +4,47 @@ use serde_json::Value;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
-const DIRECT_FEED_SCRAPER_TYPES: [&str; 3] = ["substack", "atom", "podcast_rss"];
+/// Private attribution history; never used to decide subscription identity.
+pub const FEED_URL_ALIASES_KEY: &str = "feed_url_aliases";
+
+pub fn feed_url_aliases(config: &Value) -> impl Iterator<Item = &str> {
+    config
+        .get(FEED_URL_ALIASES_KEY)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+fn carry_feed_url_aliases(
+    mut config: Value,
+    previous: &Value,
+    old_url: Option<&str>,
+    new_url: Option<&str>,
+) -> Value {
+    let mut aliases = Vec::new();
+    for alias in feed_url_aliases(previous) {
+        if !aliases.iter().any(|stored| stored == alias) {
+            aliases.push(alias.to_owned());
+        }
+    }
+    if let (Some(old), Some(new)) = (old_url, new_url)
+        && canonical_direct_feed_url(old) != canonical_direct_feed_url(new)
+        && url::Url::parse(old).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+        && !aliases.iter().any(|alias| alias == old)
+    {
+        aliases.push(old.to_owned());
+    }
+    if let Some(object) = config.as_object_mut() {
+        object.remove(FEED_URL_ALIASES_KEY);
+        if !aliases.is_empty() {
+            object.insert(FEED_URL_ALIASES_KEY.to_owned(), Value::from(aliases));
+        }
+    }
+    config
+}
+
+pub const DIRECT_FEED_SCRAPER_TYPES: [&str; 3] = ["substack", "atom", "podcast_rss"];
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct ScraperConfigProjection {
@@ -41,6 +81,7 @@ pub enum FeedSubscriptionMutation {
     Created,
     Reactivated,
     AlreadySubscribed,
+    TopicsUpdated,
 }
 
 impl FeedSubscriptionMutation {
@@ -49,6 +90,7 @@ impl FeedSubscriptionMutation {
             Self::Created => "created",
             Self::Reactivated => "reactivated",
             Self::AlreadySubscribed => "already_exists",
+            Self::TopicsUpdated => "topics_updated",
         }
     }
 
@@ -57,170 +99,25 @@ impl FeedSubscriptionMutation {
     }
 }
 
+/// An owned subscription selected before external feed validation.
+#[derive(Debug, Clone)]
+pub struct FeedSubscriptionReference {
+    pub id: i64,
+    pub feed_url: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppliedFeedSubscription {
     pub config: ScraperConfigProjection,
     pub mutation: FeedSubscriptionMutation,
 }
 
-/// Activates an already host-validated RSS, Atom, or podcast feed.
-///
-/// Network validation belongs in the caller's external-work phase. This operation only locks the
-/// durable user/config rows and returns the exact mutation so the caller can enqueue an initial
-/// backfill in the same transaction.
-pub async fn apply_validated_feed_subscription(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-    scraper_type: &str,
-    feed_format: &str,
-    display_name: Option<&str>,
-    feed_url: &str,
-) -> Result<AppliedFeedSubscription, ScraperConfigRepositoryError> {
-    let scraper_type = scraper_type.trim();
-    if !DIRECT_FEED_SCRAPER_TYPES.contains(&scraper_type) {
-        return Err(ScraperConfigRepositoryError::UnsupportedFeedType(
-            scraper_type.to_owned(),
-        ));
-    }
-    let feed_format = feed_format.trim();
-    if !matches!(feed_format, "rss" | "atom") {
-        return Err(ScraperConfigRepositoryError::UnsupportedFeedFormat(
-            feed_format.to_owned(),
-        ));
-    }
-    let feed_url = canonicalize_feed_url(feed_url);
-    if feed_url.is_empty() {
-        return Err(ScraperConfigRepositoryError::InvalidFeedUrl);
-    }
-    lock_active_user(transaction, user_id).await?;
-
-    let candidates = subscription_candidates(transaction, user_id, scraper_type).await?;
-    if let Some(existing) = candidates.into_iter().find(|candidate| {
-        candidate
-            .feed_url
-            .as_deref()
-            .or_else(|| candidate.config.get("feed_url").and_then(Value::as_str))
-            .is_some_and(|value| canonicalize_feed_url(value) == feed_url)
-    }) {
-        let mutation = if existing.is_active {
-            FeedSubscriptionMutation::AlreadySubscribed
-        } else {
-            FeedSubscriptionMutation::Reactivated
-        };
-        let config = normalize_subscription_config(&existing.config, &feed_url, feed_format);
-        let updated = sqlx::query_as::<_, ScraperConfigProjection>(
-            r"
-            UPDATE user_scraper_configs
-            SET
-                display_name = CASE
-                    WHEN NULLIF(display_name, '') IS NULL THEN NULLIF(left($3, 255), '')
-                    ELSE display_name
-                END,
-                feed_url = $4,
-                config = $5,
-                is_active = TRUE,
-                updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1 AND user_id::bigint = $2
-            RETURNING
-                id::bigint AS id,
-                user_id::bigint AS user_id,
-                scraper_type,
-                display_name,
-                feed_url,
-                config,
-                is_active,
-                timezone('UTC', created_at) AS created_at
-            ",
-        )
-        .bind(existing.id)
-        .bind(user_id)
-        .bind(display_name)
-        .bind(&feed_url)
-        .bind(config)
-        .fetch_one(&mut **transaction)
-        .await?;
-        return Ok(AppliedFeedSubscription {
-            config: updated,
-            mutation,
-        });
-    }
-
-    let config = normalize_subscription_config(&Value::Null, &feed_url, feed_format);
-    let inserted = sqlx::query_as::<_, ScraperConfigProjection>(
-        r"
-        INSERT INTO user_scraper_configs (
-            user_id, scraper_type, display_name, feed_url, config, is_active,
-            created_at, updated_at
-        )
-        VALUES (
-            $1::bigint::integer, $2, NULLIF(left($3, 255), ''), $4, $5, TRUE,
-            timezone('UTC', now()), timezone('UTC', now())
-        )
-        ON CONFLICT (user_id, scraper_type, feed_url) DO NOTHING
-        RETURNING
-            id::bigint AS id,
-            user_id::bigint AS user_id,
-            scraper_type,
-            display_name,
-            feed_url,
-            config,
-            is_active,
-            timezone('UTC', created_at) AS created_at
-        ",
-    )
-    .bind(user_id)
-    .bind(scraper_type)
-    .bind(display_name)
-    .bind(&feed_url)
-    .bind(config)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    if let Some(config) = inserted {
-        return Ok(AppliedFeedSubscription {
-            config,
-            mutation: FeedSubscriptionMutation::Created,
-        });
-    }
-
-    let config = subscription_candidates(transaction, user_id, scraper_type)
-        .await?
-        .into_iter()
-        .find(|candidate| candidate.feed_url.as_deref() == Some(feed_url.as_str()))
-        .ok_or(ScraperConfigRepositoryError::LostSubscriptionRace)?;
-    if !config.is_active {
-        let normalized = normalize_subscription_config(&config.config, &feed_url, feed_format);
-        let config = sqlx::query_as::<_, ScraperConfigProjection>(
-            r"
-            UPDATE user_scraper_configs
-            SET is_active = TRUE, feed_url = $2, config = $3,
-                updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1
-            RETURNING
-                id::bigint AS id,
-                user_id::bigint AS user_id,
-                scraper_type,
-                display_name,
-                feed_url,
-                config,
-                is_active,
-                timezone('UTC', created_at) AS created_at
-            ",
-        )
-        .bind(config.id)
-        .bind(&feed_url)
-        .bind(normalized)
-        .fetch_one(&mut **transaction)
-        .await?;
-        return Ok(AppliedFeedSubscription {
-            config,
-            mutation: FeedSubscriptionMutation::Reactivated,
-        });
-    }
-    Ok(AppliedFeedSubscription {
-        mutation: FeedSubscriptionMutation::AlreadySubscribed,
-        config,
-    })
-}
+#[path = "scraper_configs/direct_feeds.rs"]
+mod direct_feeds;
+pub use direct_feeds::{
+    apply_validated_feed_subscription, canonical_direct_feed_url, matching_direct_subscription,
+};
+use direct_feeds::{lock_direct_feed_identity, subscription_feed_url};
 
 /// Follows a catalog aggregator, or reactivates the user's existing subscription to it.
 ///
@@ -235,7 +132,7 @@ pub async fn apply_aggregator_subscription(
 ) -> Result<AppliedFeedSubscription, ScraperConfigRepositoryError> {
     lock_active_user(transaction, user_id).await?;
     let feed_url = format!("aggregator://{}", key.as_str());
-    let existing = subscription_candidates(transaction, user_id, "aggregator")
+    let existing = subscription_candidates(transaction, user_id, &["aggregator"])
         .await?
         .into_iter()
         .find(|candidate| candidate.feed_url.as_deref() == Some(feed_url.as_str()));
@@ -245,11 +142,14 @@ pub async fn apply_aggregator_subscription(
         topics,
     );
     if let Some(existing) = existing {
-        let mutation = if existing.is_active {
-            FeedSubscriptionMutation::AlreadySubscribed
-        } else {
-            FeedSubscriptionMutation::Reactivated
-        };
+        let mutation =
+            if existing.is_active && existing.config.get("topics") != config.get("topics") {
+                FeedSubscriptionMutation::TopicsUpdated
+            } else if existing.is_active {
+                FeedSubscriptionMutation::AlreadySubscribed
+            } else {
+                FeedSubscriptionMutation::Reactivated
+            };
         let config = sqlx::query_as::<_, ScraperConfigProjection>(
             r"
             UPDATE user_scraper_configs
@@ -348,7 +248,7 @@ async fn lock_active_user(
 async fn subscription_candidates(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
-    scraper_type: &str,
+    scraper_types: &[&str],
 ) -> Result<Vec<ScraperConfigProjection>, sqlx::Error> {
     sqlx::query_as::<_, ScraperConfigProjection>(
         r"
@@ -362,13 +262,13 @@ async fn subscription_candidates(
             is_active,
             timezone('UTC', created_at) AS created_at
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = $2
+        WHERE user_id::bigint = $1 AND scraper_type = ANY($2::text[])
         ORDER BY id
         FOR UPDATE
         ",
     )
     .bind(user_id)
-    .bind(scraper_type)
+    .bind(scraper_types)
     .fetch_all(&mut **transaction)
     .await
 }
@@ -488,16 +388,26 @@ pub async fn scraper_config_identity_exists(
     scraper_type: &str,
     canonical_feed_url: &str,
 ) -> Result<bool, ScraperConfigRepositoryError> {
-    let canonical_feed_url = canonicalize_feed_url(canonical_feed_url);
+    let direct = DIRECT_FEED_SCRAPER_TYPES.contains(&scraper_type);
+    let types = if direct {
+        DIRECT_FEED_SCRAPER_TYPES.to_vec()
+    } else {
+        vec![scraper_type]
+    };
+    let canonical_feed_url = if direct {
+        canonical_direct_feed_url(canonical_feed_url)
+    } else {
+        canonicalize_feed_url(canonical_feed_url)
+    };
     let candidates = sqlx::query_as::<_, IdentityCandidate>(
         r"
         SELECT id::bigint AS id, feed_url, config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = $2
+        WHERE user_id::bigint = $1 AND scraper_type = ANY($2::text[])
         ",
     )
     .bind(user_id)
-    .bind(scraper_type)
+    .bind(types)
     .fetch_all(pool)
     .await?;
     Ok(candidates.iter().any(|candidate| {
@@ -505,7 +415,13 @@ pub async fn scraper_config_identity_exists(
             .feed_url
             .as_deref()
             .or_else(|| candidate.config.get("feed_url").and_then(Value::as_str));
-        stored.is_some_and(|value| canonicalize_feed_url(value) == canonical_feed_url)
+        stored.is_some_and(|value| {
+            (if direct {
+                canonical_direct_feed_url(value)
+            } else {
+                canonicalize_feed_url(value)
+            }) == canonical_feed_url
+        })
     }))
 }
 
@@ -518,16 +434,32 @@ pub async fn create_scraper_config(
     transaction: &mut Transaction<'_, Postgres>,
     config: &NewScraperConfig<'_>,
 ) -> Result<ScraperConfigProjection, ScraperConfigRepositoryError> {
+    let direct = DIRECT_FEED_SCRAPER_TYPES.contains(&config.scraper_type);
+    let types = if direct {
+        DIRECT_FEED_SCRAPER_TYPES.to_vec()
+    } else {
+        vec![config.scraper_type]
+    };
+    if direct {
+        lock_active_user(transaction, config.user_id).await?;
+        lock_direct_feed_identity(
+            transaction,
+            config.user_id,
+            &canonical_direct_feed_url(config.feed_url),
+        )
+        .await?;
+    }
     let candidates = sqlx::query_as::<_, IdentityCandidate>(
         r"
         SELECT id::bigint AS id, feed_url, config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = $2
+        WHERE user_id::bigint = $1 AND scraper_type = ANY($2::text[])
+        ORDER BY id
         FOR UPDATE
         ",
     )
     .bind(config.user_id)
-    .bind(config.scraper_type)
+    .bind(types)
     .fetch_all(&mut **transaction)
     .await?;
     if candidates.iter().any(|candidate| {
@@ -535,7 +467,13 @@ pub async fn create_scraper_config(
             .feed_url
             .as_deref()
             .or_else(|| candidate.config.get("feed_url").and_then(Value::as_str));
-        stored.is_some_and(|value| canonicalize_feed_url(value) == config.feed_url)
+        stored.is_some_and(|value| {
+            if direct {
+                canonical_direct_feed_url(value) == canonical_direct_feed_url(config.feed_url)
+            } else {
+                canonicalize_feed_url(value) == config.feed_url
+            }
+        })
     }) {
         return Err(ScraperConfigRepositoryError::AlreadyExists);
     }
@@ -577,7 +515,12 @@ pub async fn create_scraper_config(
     .bind(config.scraper_type)
     .bind(config.display_name)
     .bind(config.feed_url)
-    .bind(config.config)
+    .bind(carry_feed_url_aliases(
+        config.config.clone(),
+        &Value::Null,
+        None,
+        None,
+    ))
     .bind(config.is_active)
     .fetch_one(&mut **transaction)
     .await;
@@ -621,10 +564,27 @@ pub async fn update_scraper_config(
     if locked.scraper_type != expected_scraper_type {
         return Err(ScraperConfigRepositoryError::ChangedDuringPrepare);
     }
-    if patch.display_name.is_none() && patch.config.is_none() && patch.is_active.is_none() {
+    if patch.display_name.is_none()
+        && patch.feed_url.is_none()
+        && patch.config.is_none()
+        && patch.is_active.is_none()
+    {
         return Ok(locked);
     }
 
+    let old_url = subscription_feed_url(&locked);
+    let feed_url = patch.feed_url.map(|next| {
+        old_url
+            .filter(|old| canonical_direct_feed_url(old) == canonical_direct_feed_url(next))
+            .unwrap_or(next)
+    });
+    let config = (patch.config.is_some() || feed_url.is_some()).then(|| {
+        let mut config = patch.config.unwrap_or(&locked.config).clone();
+        if let (Some(object), Some(url)) = (config.as_object_mut(), feed_url) {
+            object.insert("feed_url".into(), Value::from(url));
+        }
+        carry_feed_url_aliases(config, &locked.config, old_url, feed_url)
+    });
     sqlx::query_as::<_, ScraperConfigProjection>(
         r"
         UPDATE user_scraper_configs
@@ -649,8 +609,8 @@ pub async fn update_scraper_config(
     .bind(config_id)
     .bind(user_id)
     .bind(patch.display_name)
-    .bind(patch.feed_url)
-    .bind(patch.config)
+    .bind(feed_url)
+    .bind(config)
     .bind(patch.is_active)
     .fetch_one(&mut **transaction)
     .await
@@ -842,3 +802,7 @@ mod tests {
         transaction.commit().await.unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "scraper_configs/direct_subscription_tests.rs"]
+mod direct_subscription_tests;

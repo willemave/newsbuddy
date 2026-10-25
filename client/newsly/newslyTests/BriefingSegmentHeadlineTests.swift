@@ -126,6 +126,7 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
             id: 1,
             title: title,
             publisher: publisher,
+            aggregator: nil,
             summary: nil,
             keyPoints: nil,
             url: nil,

@@ -21,7 +21,7 @@ pub(crate) struct SubmittedShareContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppliedShareFeedSubscription {
     pub config_id: i64,
-    pub outcome: &'static str,
+    pub mutation: newsly_db::FeedSubscriptionMutation,
     pub feed_url: String,
     pub feed_type: String,
     pub feed_format: String,
@@ -164,6 +164,7 @@ pub(crate) async fn apply_validated_feed_action(
     queue: &QueueKernel,
     user_id: i64,
     input: &FeedActionInput,
+    reference: Option<&newsly_db::FeedSubscriptionReference>,
 ) -> Result<AppliedShareFeedSubscription, ShareSubmissionError> {
     let feed_type = input
         .feed_type
@@ -180,6 +181,7 @@ pub(crate) async fn apply_validated_feed_action(
         feed_format,
         input.title.as_deref(),
         &input.url,
+        reference,
     )
     .await?;
     let backfill_task_id = if applied.mutation.needs_backfill() {
@@ -207,7 +209,7 @@ pub(crate) async fn apply_validated_feed_action(
     };
     Ok(AppliedShareFeedSubscription {
         config_id: applied.config.id,
-        outcome: applied.mutation.as_str(),
+        mutation: applied.mutation,
         feed_url: applied.config.feed_url.unwrap_or_else(|| input.url.clone()),
         feed_type: applied.config.scraper_type,
         feed_format: feed_format.to_owned(),

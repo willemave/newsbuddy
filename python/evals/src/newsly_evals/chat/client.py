@@ -19,7 +19,7 @@ class CandidateTurnError(RuntimeError):
 
 
 class ChatClient:
-    def __init__(self, base_url: str, user_id: int, *, timeout: float = 180) -> None:
+    def __init__(self, base_url: str, user_id: int, *, timeout: float = 360) -> None:
         self.client = httpx.Client(
             base_url=local_url(base_url, {"http", "https"}),
             timeout=15,

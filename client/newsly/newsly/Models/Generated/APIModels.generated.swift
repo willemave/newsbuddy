@@ -2674,6 +2674,7 @@ struct APIBriefingSource: Codable {
     let id: Int
     let title: String
     let publisher: String?
+    let aggregator: String?
     let summary: String?
     let keyPoints: [String]?
     let url: String?
@@ -2692,6 +2693,7 @@ struct APIBriefingSource: Codable {
         id: Int,
         title: String,
         publisher: String?,
+        aggregator: String?,
         summary: String?,
         keyPoints: [String]?,
         url: String?,
@@ -2709,6 +2711,7 @@ struct APIBriefingSource: Codable {
         self.id = id
         self.title = title
         self.publisher = publisher
+        self.aggregator = aggregator
         self.summary = summary
         self.keyPoints = keyPoints
         self.url = url
@@ -2728,6 +2731,7 @@ struct APIBriefingSource: Codable {
         case id = "id"
         case title = "title"
         case publisher = "publisher"
+        case aggregator = "aggregator"
         case summary = "summary"
         case keyPoints = "key_points"
         case url = "url"
@@ -2748,6 +2752,7 @@ struct APIBriefingSource: Codable {
         id = try container.decode(Int.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         publisher = try container.decode(String?.self, forKey: .publisher)
+        aggregator = try container.decode(String?.self, forKey: .aggregator)
         summary = try container.decode(String?.self, forKey: .summary)
         keyPoints = try container.decode([String]?.self, forKey: .keyPoints)
         url = try container.decode(String?.self, forKey: .url)
@@ -2775,6 +2780,7 @@ struct APIBriefingSource: Codable {
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
         try container.encode(publisher, forKey: .publisher)
+        try container.encode(aggregator, forKey: .aggregator)
         try container.encode(summary, forKey: .summary)
         try container.encode(keyPoints, forKey: .keyPoints)
         try container.encode(url, forKey: .url)

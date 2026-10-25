@@ -3,7 +3,7 @@ use newsly_db::ShareActionAgentSnapshot;
 use newsly_providers::{ValidatedFeed, ValidatedFeedFormat};
 use serde_json::{Map, Value};
 
-use super::{ShareActionHostInput, build_host_action, validated_scraper_type};
+use super::{ShareActionHostInput, build_host_action, validated_feed_type};
 
 #[test]
 fn presentation_uses_the_shared_url_without_agent_output() {
@@ -144,7 +144,10 @@ fn parsed_audio_evidence_wins_over_a_substack_host() {
         publishing_activity: empty_activity(),
         podcast_publishing_activity: empty_activity(),
     };
-    assert_eq!(validated_scraper_type(&validated), "podcast_rss");
+    assert_eq!(
+        validated_feed_type(&validated, None).as_str(),
+        "podcast_rss"
+    );
 }
 
 fn snapshot(mode: &str) -> ShareActionAgentSnapshot {

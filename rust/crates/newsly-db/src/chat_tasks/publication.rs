@@ -3,7 +3,7 @@
 use super::{
     ChatTaskRejection, ChatTaskRepositoryError, ChatTerminalMutationOutcome, ChatTurnPublication,
     Postgres, Transaction, Utc,
-    ledger::{complete_chat_llm_task, fail_chat_llm_task, record_chat_usage_best_effort},
+    ledger::{complete_chat_llm_task, fail_chat_llm_task},
 };
 
 /// Publish one completed turn inside the queue kernel's exact lease-fenced transaction.
@@ -98,10 +98,6 @@ pub async fn publish_chat_turn(
     .await?;
     if let Some(llm_task_id) = snapshot.llm_task_id {
         complete_chat_llm_task(transaction, llm_task_id, publication).await?;
-    }
-    if snapshot.context.kind == super::ChatTurnKind::DeepResearch {
-        // Background Responses do not run through the Rig per-response event ledger.
-        record_chat_usage_best_effort(transaction, publication).await?;
     }
     Ok(ChatTerminalMutationOutcome::Applied)
 }

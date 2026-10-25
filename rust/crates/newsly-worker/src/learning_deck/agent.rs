@@ -41,7 +41,7 @@ mod session;
 #[path = "agent/validation.rs"]
 mod validation;
 
-const DEFAULT_MODEL_SPEC: &str = "openai:gpt-6-luna";
+const DEFAULT_MODEL_SPEC: &str = "anthropic:claude-sonnet-5-5";
 const INPUT_SOURCE_TEXT: &str = "input/source.txt";
 const INPUT_SOURCE_SNAPSHOT: &str = "input/source-snapshot.json";
 const INPUT_INTERESTS: &str = "input/interests.txt";

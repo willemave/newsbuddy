@@ -33,6 +33,8 @@ macro_rules! string_enum {
     };
 }
 
+// DeepResearch remains decodable for installed clients and historical data.
+// Chat write boundaries reject it with deep_research_retired.
 string_enum!(LlmProvider {
     Openai => "openai",
     Anthropic => "anthropic",
