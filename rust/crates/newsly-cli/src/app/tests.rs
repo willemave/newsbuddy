@@ -61,7 +61,7 @@ async fn invalid_arguments_exit_with_an_error_on_stderr() {
     )
     .await;
 
-    assert_ne!(exit, 0);
+    assert_eq!(exit, 2);
     assert!(stdout.is_empty());
     assert!(String::from_utf8_lossy(&stderr).contains("unexpected argument"));
 }

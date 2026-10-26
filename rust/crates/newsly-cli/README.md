@@ -6,9 +6,8 @@ It is an HTTP client and never connects directly to PostgreSQL. Operational
 health, ownership, usage, and repair commands belong to the separate
 `newsly-admin` binary.
 
-The Rust implementation preserves the existing binary name, commands, config
-files and environment aliases, JSON/text output contract, QR login, and library
-manifest format.
+The Rust implementation uses the `newsbuddy` binary name and saved config
+files, JSON/text output contract, QR login, and library manifest format.
 
 ## Install from source
 
@@ -38,6 +37,28 @@ brew upgrade newsbuddy
 Version 0.2.0 replaces the Go implementation with this Rust CLI. CLI releases
 use `cli-v<version>` tags and a matching tap update; backend deployment does not
 publish a CLI release.
+
+### Upgrading to 0.3.0
+
+- Use `NEWSBUDDY_CONFIG`, `NEWSBUDDY_SERVER`, and `NEWSBUDDY_API_KEY` for environment
+  overrides. `NEWSBUDDY_CONFIG_PATH` and the legacy `NEWSLY_AGENT_*` aliases are
+  no longer read. Existing config files keep their format and default location.
+- Remove `--content-type` from `content submit` and `content summarize`; the
+  server determines the content type.
+- Remove the redundant `--wait` flag from `jobs wait`; that command always waits.
+  `--wait-interval` and `--wait-timeout` remain supported.
+- Argument errors now print a usage error on stderr and exit with status 2
+  (previously 1), without a JSON error envelope on stdout. This includes invalid
+  limits, durations, output formats, feed types, and unknown flags. Help prints
+  to stdout and exits 0. Accepted feed types remain `atom`, `substack`, and
+  `podcast_rss`.
+- Library sync reads `.newsbuddy-manifest.json` only. If an older library has
+  only `.newsly-agent-manifest.json`, rename it to `.newsbuddy-manifest.json`
+  before syncing to preserve tracking of its downloaded files. Keep an existing
+  `.newsbuddy-manifest.json` when both files are present.
+
+This release also preserves structured server error messages for missing
+resources and validates job wait intervals before making a request.
 
 ## Get the last ten favorited articles
 

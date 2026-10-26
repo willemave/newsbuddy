@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `release/cli-0.3.0` — Newsbuddy CLI 0.3.0 release
+
+- **Status:** Complete; CLI tag, GitHub release, and Homebrew tap published.
+- **Scope:** Standalone Rust user CLI version, upgrade notes, tagged source archive, and external Homebrew tap.
+- **Decisions:** Use 0.3.0 for the previously committed removal of legacy environment aliases and redundant flags. Base the release on remote `main` so unrelated unpublished Learning Deck work stays local. Publish only the CLI tag and tap; do not push source `main` or deploy the backend.
+- **Changes:** Bumped the CLI package version and documented environment/argument/manifest migration and current Homebrew installation. Pinned argument-error status 2 in existing coverage and corrected the external formula test accordingly after Opus 5.5 review.
+- **Validation:** 52 CLI unit tests and four process-level groups passed, along with warning-denied all-target Clippy, workspace formatting, and diff whitespace checks. Opus 5.5 final verification found no release blockers after the formula exit-code and release-isolation corrections. Final tagged archive installation/smoke and checksum verification passed. Hosted macOS Homebrew source build, version 0.3.0, formula tests, and completions passed in run `40254273093`; exact tested tap commit was promoted to `main`. Tracked archive inventory contains no environment or private-key files.
+- **Remaining:** None for publication. Local Homebrew binary was not upgraded; source `main` was not pushed and backend deployment was not triggered. Evidence is under `test-results/cli-homebrew-0.3.0/`.
+- **Commits:** Published CLI tag `cli-v0.3.0` at `c71b81f8aa4f832065354b6fa4fec5b809f3ea10`; tap `main` at `acb2d6e27aadf4a20bacc72125f94a2aaca77583`. Local release-alignment commit contains this completed receipt.
+
 ### 2026-10-25 — `main` — Learning Deck review fixes: delivery contract and reservation index
 
 - **Status:** Complete locally; uncommitted and not deployed.
