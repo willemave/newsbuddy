@@ -153,10 +153,17 @@ cd newsbuddy
 cargo install --locked --path rust/crates/newsly-cli
 ```
 
-The Homebrew formula lives in the independently released
-`willemave/newsbuddy` tap. Verify that the current formula packages the Rust
-`newsbuddy` binary before relying on it; the source install above always builds
-the checked-out revision.
+The Rust CLI is also available from the independently released
+`willemave/newsbuddy` Homebrew tap:
+
+```bash
+brew install willemave/newsbuddy/newsbuddy
+# Existing installations:
+brew update && brew upgrade newsbuddy
+```
+
+See the [CLI upgrade notes](rust/crates/newsly-cli/README.md#upgrading-to-030)
+for changes to legacy environment aliases and command flags in 0.3.0.
 
 ```bash
 # Authenticate — scan the QR code in the app to approve, no password needed

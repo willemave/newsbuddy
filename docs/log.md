@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `release/cli-0.3.0` — Newsbuddy CLI 0.3.0 release
+
+- **Status:** Prepared locally; publication pending.
+- **Scope:** Standalone Rust user CLI version, upgrade notes, tagged source archive, and external Homebrew tap.
+- **Decisions:** Use 0.3.0 for the previously committed removal of legacy environment aliases and redundant flags. Base the release on remote `main` so unrelated unpublished Learning Deck work stays local. Publish only the CLI tag and tap; do not push source `main` or deploy the backend.
+- **Changes:** Bumped the CLI package version and documented environment/argument/manifest migration and current Homebrew installation. Pinned argument-error status 2 in existing coverage and corrected the external formula test accordingly after Opus 5.5 review.
+- **Validation:** 52 CLI unit tests and four process-level groups passed, along with warning-denied all-target Clippy, workspace formatting, and diff whitespace checks. Opus 5.5 final verification found no release blockers after the formula exit-code and release-isolation corrections. Tracked archive inventory contains no environment or private-key files.
+- **Remaining:** Final tagged source archive installation, publication, and hosted macOS Homebrew installation before tap promotion; publication evidence will be recorded under `test-results/cli-homebrew-0.3.0/`.
+- **Commits:** Release commit containing this entry.
+
 ### 2026-10-25 — `main` — Accept Claude deck tool batches
 
 - **Status:** Fix implemented; final release validation pending.
