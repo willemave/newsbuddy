@@ -332,25 +332,13 @@ async fn share_extension_to_learning_deck(
     let deck_id = positive_result_id(&action.action_result, "learning_deck_id")?;
     let content_id = positive_result_id(&action.action_result, "content_id")?;
 
-    let conflict_source_url = active_deck_conflict_source_url(&config.source_url);
-    let active_conflict = auth
-        .primary
-        .post_expect_status(
-            "/api/learning/decks",
-            &json!({
-                "url": conflict_source_url,
-                "interests_prompt": interests_prompt
-            }),
-            StatusCode::CONFLICT,
-        )
-        .await?;
-    let active_conflict: ErrorEnvelope = serde_json::from_value(active_conflict)
-        .context("active Learning Deck conflict did not return ErrorEnvelope")?;
-    ensure!(
-        active_conflict.code == "invalid_state",
-        "active Learning Deck conflict returned code {}",
-        active_conflict.code
-    );
+    let queued_deck = verify_distinct_deck_admission_and_deletion(
+        &auth.primary,
+        &config.source_url,
+        &interests_prompt,
+        deck_id,
+    )
+    .await?;
 
     let deck = wait_for_deck(config, &auth.primary, deck_id).await?;
     require_hidden(
@@ -380,7 +368,8 @@ async fn share_extension_to_learning_deck(
             ("share_task_id", json!(completed.task_id)),
             ("learning_deck_id", json!(deck_id)),
             ("content_id", json!(content_id)),
-            ("active_conflict_code", json!(active_conflict.code)),
+            ("queued_learning_deck_id", json!(queued_deck.id)),
+            ("queued_learning_deck_status", json!(queued_deck.status)),
             (
                 "latest_successful_run_id",
                 json!(deck.latest_successful_run_id),
@@ -393,6 +382,55 @@ async fn share_extension_to_learning_deck(
             ),
         ]),
     ))
+}
+
+async fn verify_distinct_deck_admission_and_deletion(
+    api: &SmokeApi,
+    source_url: &Url,
+    interests_prompt: &str,
+    deck_id: i64,
+) -> Result<LearningDeckResponse> {
+    let queued_deck = api
+        .post_expect_status(
+            "/api/learning/decks",
+            &json!({
+                "url": distinct_deck_source_url(source_url),
+                "interests_prompt": interests_prompt
+            }),
+            StatusCode::ACCEPTED,
+        )
+        .await?;
+    let queued_deck: LearningDeckResponse = serde_json::from_value(queued_deck)
+        .context("queued Learning Deck did not return LearningDeckResponse")?;
+    ensure!(
+        queued_deck.id != deck_id,
+        "distinct source reused the original Learning Deck"
+    );
+    // Cancel immediately to avoid another provider run. The first deck may have
+    // finished between requests, so the response can already show active progress.
+    api.delete_expect_status(
+        &format!("/api/learning/decks/{}", queued_deck.id),
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
+    ensure!(
+        queued_deck.status.is_some_and(|status| matches!(
+            status,
+            newsly_contracts::LearningDeckStatus::Queued
+                | newsly_contracts::LearningDeckStatus::Preparing
+                | newsly_contracts::LearningDeckStatus::Generating
+                | newsly_contracts::LearningDeckStatus::Validating
+                | newsly_contracts::LearningDeckStatus::Publishing
+        )),
+        "second Learning Deck was not queued or active: {:?}",
+        queued_deck.status
+    );
+    require_hidden(
+        api.get_status(&format!("/api/learning/decks/{}", queued_deck.id))
+            .await?,
+        "deleted queued Learning Deck",
+    )?;
+    Ok(queued_deck)
 }
 
 async fn validate_deck_artifacts_and_sharing(
@@ -612,7 +650,7 @@ async fn wait_for_deck(
     .await
 }
 
-fn active_deck_conflict_source_url(source_url: &Url) -> &'static str {
+fn distinct_deck_source_url(source_url: &Url) -> &'static str {
     const CANDIDATES: [(&str, &str); 2] = [
         (
             "ch04-02-references-and-borrowing.md",
@@ -627,7 +665,7 @@ fn active_deck_conflict_source_url(source_url: &Url) -> &'static str {
         .into_iter()
         .find(|(filename, _)| !source_url.path().ends_with(filename))
         .map(|(_, url)| url)
-        .expect("conflict source candidates are distinct")
+        .expect("queued deck source candidates are distinct")
 }
 
 async fn send_and_wait(
@@ -781,7 +819,7 @@ mod tests {
     use serde_json::{Map, json};
     use url::Url;
 
-    use super::{active_deck_conflict_source_url, positive_result_id};
+    use super::{distinct_deck_source_url, positive_result_id};
 
     #[test]
     fn action_identity_extraction_requires_positive_integer() {
@@ -794,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn active_deck_conflict_source_is_distinct_from_smoke_source() {
+    fn queued_deck_source_is_distinct_from_smoke_source() {
         for source in [
             "https://raw.githubusercontent.com/rust-lang/book/main/src/ch04-01-what-is-ownership.md",
             "https://raw.githubusercontent.com/rust-lang/book/main/src/ch04-02-references-and-borrowing.md",
@@ -802,7 +840,7 @@ mod tests {
         ] {
             let source = Url::parse(source).unwrap();
             assert!(
-                !active_deck_conflict_source_url(&source)
+                !distinct_deck_source_url(&source)
                     .ends_with(source.path_segments().unwrap().next_back().unwrap())
             );
         }

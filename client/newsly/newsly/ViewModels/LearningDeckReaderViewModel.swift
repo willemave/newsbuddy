@@ -103,7 +103,7 @@ final class LearningDeckReaderViewModel {
     var isStatusObservationPaused = false
     var viewerFailureKind: LearningDeckViewerFailureKind?
     var isRetryingGeneration = false
-    var generationStatusLabel = "Preparing your deck"
+    var generationStatusLabel: String
     var generationNote: String?
 
     var viewerResolutionFailed: Bool {
@@ -154,6 +154,8 @@ final class LearningDeckReaderViewModel {
         viewerPollAttemptLimit: Int = 321
     ) {
         self.deck = deck
+        self.generationStatusLabel = deck.statusLabel
+        self.generationNote = nonEmptyTrimmed(deck.latestNote)
         self.chatService = chatService
         self.messageCompletionRegistry = messageCompletionRegistry
         self.deckService = deckService
@@ -294,6 +296,12 @@ final class LearningDeckReaderViewModel {
             }
         } catch where ClientFailure.classify(error) == .cancelled {
             isResolvingViewer = false
+        } catch LearningDeckStatusRegistryError.queuedObservationPaused {
+            isResolvingViewer = false
+            viewerFailureKind = nil
+            isStatusObservationPaused = true
+            generationStatusLabel = LearningDeckRunStatus.queued.displayLabel
+            generationNote = "Your deck is queued. Status updates are paused. Refresh to check its progress."
         } catch LearningDeckStatusRegistryError.timeout {
             isResolvingViewer = false
             viewerFailureKind = nil

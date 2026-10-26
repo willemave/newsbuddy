@@ -8,7 +8,7 @@ use newsly_db::{
     mark_share_action_failed, persist_share_action_agent_output, request_share_action,
 };
 use newsly_domain::sha256_hex;
-use newsly_queue::{EnqueueRequest, QueueKernel, TaskResult, TaskType};
+use newsly_queue::{EnqueueRequest, LlmTaskDeliveryKind, QueueKernel, TaskResult};
 use reqwest::Url;
 use serde_json::{Map, Value, json};
 use sqlx::{Postgres, Transaction};
@@ -445,20 +445,17 @@ impl ShareActionApplicator<'_> {
         .await?;
         let deck_id = match outcome {
             CreateLearningDeckOutcome::AttemptCreated { deck_id, task_id } => {
-                let mut request = EnqueueRequest::new(TaskType::RunLlmTask);
-                request.payload = json!({"llm_task_id": task_id, "user_id": task.user_id})
-                    .as_object()
-                    .cloned();
-                request.owner_user_id = Some(task.user_id);
+                let request = EnqueueRequest::run_llm_task(
+                    task_id,
+                    task.user_id,
+                    LlmTaskDeliveryKind::LearningDeck,
+                );
                 self.queue
                     .enqueue_many_in_transaction(transaction, vec![request])
                     .await?;
                 deck_id
             }
             CreateLearningDeckOutcome::ExistingActiveAttempt { deck_id } => deck_id,
-            CreateLearningDeckOutcome::AnotherDeckActive => {
-                return Err(ShareActionFinalizationError::AnotherDeckActive);
-            }
         };
         Ok(Map::from_iter([
             ("learning_deck_id".to_owned(), Value::from(deck_id)),
@@ -802,8 +799,6 @@ pub enum ShareActionFinalizationError {
     Json(#[from] serde_json::Error),
     #[error("Share Action {0} has the wrong typed input")]
     WrongInput(String),
-    #[error("another Learning Deck generation is active")]
-    AnotherDeckActive,
     #[error("GitHub URL must include an owner and repository")]
     InvalidGithubUrl,
 }

@@ -1239,6 +1239,10 @@ pub enum QueueError {
 mod briefing_claim_tests;
 
 #[cfg(test)]
+#[path = "kernel/learning_deck_claim_tests.rs"]
+mod learning_deck_claim_tests;
+
+#[cfg(test)]
 #[path = "kernel/live_claim_tests.rs"]
 mod live_claim_tests;
 

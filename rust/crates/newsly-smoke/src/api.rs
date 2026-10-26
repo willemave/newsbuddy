@@ -63,6 +63,21 @@ impl SmokeApi {
         self.send_json::<(), T>(Method::DELETE, path, None).await
     }
 
+    pub(crate) async fn delete_expect_status(
+        &self,
+        path: &str,
+        expected: StatusCode,
+    ) -> Result<()> {
+        let response = self.request(Method::DELETE, path)?.send().await?;
+        let status = response.status();
+        if status != expected {
+            let body = response.text().await?;
+            let bounded = body.chars().take(MAX_ERROR_BODY_CHARS).collect::<String>();
+            bail!("DELETE {path} returned {status}, expected {expected}: {bounded}");
+        }
+        Ok(())
+    }
+
     pub(crate) async fn post_expect_status<B: Serialize>(
         &self,
         path: &str,

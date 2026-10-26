@@ -285,6 +285,49 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         XCTAssertTrue(service.createRequests.isEmpty)
     }
 
+    func testQueuedViewerRemainsQueuedWhenObservationPausesAndRefreshesWithoutRetry() async {
+        let queued = makeLearningDeck(runStatus: .queued)
+        let ready = makeLearningDeck(
+            viewerAvailable: true,
+            latestSuccessfulRunId: 1,
+            runStatus: .completed
+        )
+        let expectedURL = URL(string: "https://example.com/queued-deck")!
+        let service = MockLearningDeckService(
+            fetchResults: [.success(queued), .success(ready)],
+            viewerURLs: [expectedURL]
+        )
+        let viewModel = LearningDeckReaderViewModel(
+            lifecycle: makeActiveLearningDeckLifecycle(),
+            deck: queued,
+            chatService: NoopLearningDeckReaderChatService(),
+            messageCompletionRegistry: ChatMessageCompletionRegistry(
+                statusService: NoopLearningDeckReaderChatService()
+            ),
+            deckService: service,
+            transcriptionService: TestUnavailableSpeechTranscriber(),
+            viewerPollIntervalNanoseconds: 1_000_000,
+            viewerPollAttemptLimit: 1
+        )
+
+        XCTAssertEqual(viewModel.generationStatusLabel, "Queued")
+        viewModel.prepareViewer(initialURL: nil)
+
+        let paused = await waitUntil { viewModel.isStatusObservationPaused }
+        XCTAssertTrue(paused)
+        XCTAssertFalse(viewModel.isResolvingViewer)
+        XCTAssertFalse(viewModel.viewerResolutionFailed)
+        XCTAssertEqual(viewModel.generationStatusLabel, "Queued")
+        XCTAssertEqual(service.fetchCallCount, 1)
+
+        viewModel.retryViewerResolution()
+        let resolved = await waitUntil { viewModel.resolvedViewerURL == expectedURL }
+        XCTAssertTrue(resolved)
+        XCTAssertEqual(service.fetchCallCount, 2)
+        XCTAssertEqual(service.retryCallCount, 0)
+        XCTAssertTrue(service.createRequests.isEmpty)
+    }
+
     func testViewerResolutionStopsRetryingTerminalURLFailure() async {
         let ready = makeLearningDeck(
             viewerAvailable: true,

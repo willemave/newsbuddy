@@ -17,9 +17,9 @@ pub use kernel::{
     QueueKernel,
 };
 pub use model::{
-    ClaimedTask, EnqueueRequest, FinalizationOutcome, OwnedWorkPlan, PayloadError, QueueModelError,
-    ResolvedFinalization, TaskQueue, TaskResult, TaskSpec, TaskStatus, TaskTransition, TaskType,
-    UnknownQueueValue,
+    ClaimedTask, EnqueueRequest, FinalizationOutcome, LlmTaskDeliveryKind, OwnedWorkPlan,
+    PayloadError, QueueModelError, ResolvedFinalization, TaskQueue, TaskResult, TaskSpec,
+    TaskStatus, TaskTransition, TaskType, UnknownQueueValue,
 };
 pub use notifications::{QueueNotificationHub, QueueNotificationWaiter, QueueWakeOutcome};
 

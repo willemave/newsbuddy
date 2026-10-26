@@ -284,7 +284,7 @@ final class LearningDecksViewModel {
             errorMessage = nil
         } catch where ClientFailure.classify(error) == .cancelled {
             return
-        } catch LearningDeckStatusRegistryError.timeout {
+        } catch is LearningDeckStatusRegistryError {
             return
         } catch {
             errorMessage = error.localizedDescription

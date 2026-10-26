@@ -12,7 +12,7 @@ K5. Knowledge combines saved items, chats, Learning Decks, and narrations in one
 
 K6. A Learning Deck keeps one explicit source identity, its notes, and its attribution. Source text is read within a 20 MiB budget; an oversized source fails explicitly and is never silently truncated. A URL submitted for a deck becomes saved source material and stays out of unread Briefing. A source saved only for a deck is prepared as readable text without an editorial summary or content artwork; a later ordinary submission may promote the same source to full content processing.
 
-K7. At most one deck generation is active per user, and rerunning the same source reuses its deck identity.
+K7. A user can queue multiple Learning Decks durably, with at most one deck executing at a time. Waiting decks show Queued and survive app closure or worker restart. Requests for the same source reuse its deck identity and any unfinished attempt. Independent ready decks may proceed while another waits for source material before generation starts. Once generation begins, its attempt keeps the user's execution slot through automatic retries so a later deck cannot consume its remaining generation budget. Failed or deleted work cannot block the remaining queue. Queue wait consumes neither the generation budget nor the client's separate bounded observation budget for generation. Pausing observation of a waiting deck preserves its Queued status and offers a read-only status refresh.
 
 K8. A deck becomes viewable after a successful artifact exists. A failed rerun cannot invalidate an earlier successful artifact.
 

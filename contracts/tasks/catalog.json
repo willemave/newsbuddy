@@ -147,7 +147,7 @@
     {
       "dedupe_by_content": false,
       "payload_schema": "tasks/run_llm_task.schema.json",
-      "payload_schema_sha256": "ccfec97dc428186578483f7515d0ce17a603a8c60bd77d1a0c9baeab2dca27c8",
+      "payload_schema_sha256": "ea8e0f06949a37153fb18e121802c5c7d34b53dd7764a20a6822952640d00535",
       "queue": "llm",
       "requires_owner": true,
       "task_type": "run_llm_task"

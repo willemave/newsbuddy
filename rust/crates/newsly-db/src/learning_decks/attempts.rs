@@ -1,7 +1,7 @@
 //! Stable deck upserts and canonical LLM-task attempt creation or retry.
 
 use super::{
-    ACTIVE_ATTEMPT_STATUSES, ActiveAttemptRow, AttemptStateRow, CreateLearningDeckOutcome,
+    ACTIVE_ATTEMPT_STATUSES, AttemptStateRow, CreateLearningDeckOutcome,
     LearningDeckRepositoryError, LearningDeckSourceProjection, Map, Postgres,
     RetryLearningDeckOutcome, Transaction, Utc, Value,
     canonical::persisted_source_with_canonical_rebind,
@@ -9,7 +9,7 @@ use super::{
     json,
 };
 
-/// Creates or updates the stable deck and creates one LLM-task attempt when no attempt is active.
+/// Creates or updates the stable deck and queues an attempt unless this deck already has one.
 ///
 /// # Errors
 ///
@@ -23,12 +23,11 @@ pub async fn create_or_rerun_learning_deck(
     sandbox_root: &str,
 ) -> Result<CreateLearningDeckOutcome, LearningDeckRepositoryError> {
     let deck_id = upsert_learning_deck(transaction, user_id, source).await?;
-    if let Some(active) = active_learning_deck_attempt(transaction, user_id).await? {
-        return Ok(if active.subject_id == Some(deck_id) {
-            CreateLearningDeckOutcome::ExistingActiveAttempt { deck_id }
-        } else {
-            CreateLearningDeckOutcome::AnotherDeckActive
-        });
+    if active_learning_deck_attempt(transaction, user_id, deck_id)
+        .await?
+        .is_some()
+    {
+        return Ok(CreateLearningDeckOutcome::ExistingActiveAttempt { deck_id });
     }
     let task_id = insert_learning_deck_attempt(
         transaction,
@@ -73,19 +72,16 @@ pub async fn retry_learning_deck(
         return Ok(RetryLearningDeckOutcome::DeckNotFound);
     }
 
-    if let Some(active) = active_learning_deck_attempt(transaction, user_id).await? {
+    if let Some(active) = active_learning_deck_attempt(transaction, user_id, deck_id).await? {
         let is_retry = active
-            .input_json
             .as_object()
             .and_then(|input| input.get("retry_of_attempt_id"))
             .and_then(Value::as_i64)
             .is_some();
-        return Ok(if active.subject_id == Some(deck_id) && is_retry {
+        return Ok(if is_retry {
             RetryLearningDeckOutcome::ExistingActiveRetry { deck_id }
-        } else if active.subject_id == Some(deck_id) {
-            RetryLearningDeckOutcome::NoFailedAttempt
         } else {
-            RetryLearningDeckOutcome::AnotherDeckActive
+            RetryLearningDeckOutcome::NoFailedAttempt
         });
     }
 
@@ -119,7 +115,7 @@ pub async fn retry_learning_deck(
 #[must_use]
 pub fn is_active_learning_deck_conflict(error: &LearningDeckRepositoryError) -> bool {
     matches!(error, LearningDeckRepositoryError::Sqlx(sqlx::Error::Database(database))
-        if database.constraint() == Some("uq_llm_tasks_learning_deck_user_active"))
+        if database.constraint() == Some("uq_llm_tasks_learning_deck_subject_active"))
 }
 
 pub(super) async fn upsert_learning_deck(
@@ -258,21 +254,22 @@ pub(super) async fn upsert_learning_deck(
 pub(super) async fn active_learning_deck_attempt(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
-) -> Result<Option<ActiveAttemptRow>, sqlx::Error> {
-    sqlx::query_as::<_, ActiveAttemptRow>(
+    deck_id: i64,
+) -> Result<Option<Value>, sqlx::Error> {
+    sqlx::query_scalar(
         r#"
-        SELECT subject_id::bigint AS subject_id, input_json
+        SELECT input_json
         FROM llm_tasks
         WHERE user_id::bigint = $1
           AND task_kind = 'learning_deck'
+          AND subject_id::bigint = $3
           AND status = ANY($2)
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
         FOR UPDATE
         "#,
     )
     .bind(user_id)
     .bind(ACTIVE_ATTEMPT_STATUSES)
+    .bind(deck_id)
     .fetch_optional(&mut **transaction)
     .await
 }
@@ -338,7 +335,7 @@ pub(super) async fn insert_learning_deck_attempt(
     .bind(Value::Array(vec![status_history_entry(
         "queued",
         "queued",
-        "LLM task created",
+        "Learning Deck queued",
         now,
     )]))
     .bind(now.naive_utc())

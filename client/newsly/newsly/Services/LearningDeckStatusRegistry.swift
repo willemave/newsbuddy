@@ -36,9 +36,13 @@ struct LearningDeckStatusPollingPolicy: Sendable, Equatable {
 
 enum LearningDeckStatusRegistryError: LocalizedError, Equatable {
     case timeout
+    case queuedObservationPaused
 
     var errorDescription: String? {
-        "Your deck is still being prepared."
+        switch self {
+        case .timeout: "Your deck is still being prepared."
+        case .queuedObservationPaused: "Your deck is still queued."
+        }
     }
 }
 
@@ -193,15 +197,28 @@ actor LearningDeckStatusRegistry {
     }
 
     private func poll(deckId: Int, generation: UUID) async {
-        for requestIndex in 0..<policy.maximumRequestCount {
+        var requestIndex = 0
+        var hasStartedGeneration = false
+        var latestStatus: LearningDeckRunStatus?
+        while requestIndex < policy.maximumRequestCount {
             do {
                 try Task.checkCancellation()
                 guard observerStore.isActive(key: deckId, generation: generation) else { return }
                 let deck = try await fetchDeck(deckId)
+                latestStatus = deck.latestRun?.status ?? deck.status
                 await notifyUpdate(deckId: deckId, generation: generation, deck: deck)
                 if !deck.hasActiveLatestRun {
                     finish(deckId: deckId, generation: generation, result: .success(deck))
                     return
+                }
+                // Queue wait and source preparation must not consume this deck's
+                // generation observation budget. Reset only once to remain bounded.
+                let isGenerating = latestStatus == .generating
+                    || latestStatus == .validating
+                    || latestStatus == .publishing
+                if isGenerating, !hasStartedGeneration {
+                    hasStartedGeneration = true
+                    requestIndex = 0
                 }
             } catch where ClientFailure.classify(error) == .cancelled {
                 return
@@ -217,7 +234,11 @@ actor LearningDeckStatusRegistry {
                 finish(
                     deckId: deckId,
                     generation: generation,
-                    result: .failure(LearningDeckStatusRegistryError.timeout)
+                    result: .failure(
+                        latestStatus == .queued
+                            ? LearningDeckStatusRegistryError.queuedObservationPaused
+                            : LearningDeckStatusRegistryError.timeout
+                    )
                 )
                 return
             }
@@ -229,6 +250,7 @@ actor LearningDeckStatusRegistry {
                 finish(deckId: deckId, generation: generation, result: .failure(error))
                 return
             }
+            requestIndex += 1
         }
     }
 

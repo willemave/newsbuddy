@@ -1,4 +1,4 @@
-//! Atomic claim updates and bounded retry of per-owner Briefing claim conflicts.
+//! Atomic claim updates and bounded retry of per-owner execution conflicts.
 
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
@@ -20,8 +20,13 @@ pub(super) async fn claim_retry_bucket(
         match claim_retry_bucket_once(pool, request, retry_count).await {
             Err(QueueError::Sqlx(sqlx::Error::Database(error)))
                 if error.code().as_deref() == Some("23505")
-                    && error.constraint()
-                        == Some("uq_processing_tasks_briefing_owner_processing") => {}
+                    && matches!(
+                        error.constraint(),
+                        Some(
+                            "uq_processing_tasks_briefing_owner_processing"
+                                | "uq_processing_tasks_learning_deck_owner_processing"
+                        )
+                    ) => {}
             result => return result,
         }
     }
@@ -35,25 +40,7 @@ async fn claim_retry_bucket_once(
 ) -> Result<Option<ClaimedTask>, QueueError> {
     let lease_token = Uuid::new_v4();
     let lease_seconds = normalized_lease_seconds(request.lease_duration)?;
-    let mut query = QueryBuilder::<Postgres>::new(
-        r"
-        WITH candidate AS (
-            SELECT id FROM processing_tasks AS candidate_task
-            WHERE (
-                (status = 'pending' AND available_at <= timezone('UTC', now()))
-                OR
-                (status = 'processing' AND lease_expires_at IS NOT NULL
-                    AND lease_expires_at <= timezone('UTC', now()))
-            )
-            AND (candidate_task.task_type <> 'briefing_refresh' OR NOT EXISTS (
-                SELECT 1 FROM processing_tasks AS other
-                WHERE other.owner_user_id = candidate_task.owner_user_id
-                  AND other.task_type = 'briefing_refresh' AND other.status = 'processing'
-                  AND other.id <> candidate_task.id
-            ))
-            AND retry_count =
-        ",
-    );
+    let mut query = QueryBuilder::<Postgres>::new(CANDIDATE_PREFIX_SQL);
     query.push_bind(retry_count);
     query.push(" AND executor_runtime = ");
     query.push_bind(request.runtime_scope.runtime().as_str());
@@ -132,3 +119,37 @@ async fn claim_retry_bucket_once(
     transaction.commit().await?;
     Ok(claim)
 }
+
+const CANDIDATE_PREFIX_SQL: &str = r"
+        WITH candidate AS (
+            SELECT id FROM processing_tasks AS candidate_task
+            WHERE (
+                (status = 'pending' AND available_at <= timezone('UTC', now()))
+                OR
+                (status = 'processing' AND lease_expires_at IS NOT NULL
+                    AND lease_expires_at <= timezone('UTC', now()))
+            )
+            AND (candidate_task.task_type <> 'briefing_refresh' OR NOT EXISTS (
+                SELECT 1 FROM processing_tasks AS other
+                WHERE other.owner_user_id = candidate_task.owner_user_id
+                  AND other.task_type = 'briefing_refresh' AND other.status = 'processing'
+                  AND other.id <> candidate_task.id
+            ))
+            AND (candidate_task.task_type <> 'run_llm_task'
+                OR candidate_task.payload ->> 'task_kind' IS DISTINCT FROM 'learning_deck'
+                OR NOT EXISTS (
+                    SELECT 1 FROM processing_tasks AS other
+                    WHERE other.owner_user_id = candidate_task.owner_user_id
+                      AND other.task_type = 'run_llm_task'
+                      AND other.payload ->> 'task_kind' = 'learning_deck'
+                      AND (
+                          other.status = 'processing'
+                          OR (other.status = 'pending' AND EXISTS (
+                              SELECT 1 FROM learning_deck_generation_state AS generation
+                              WHERE generation.llm_task_id::text = other.payload ->> 'llm_task_id'
+                          ))
+                      )
+                      AND other.id <> candidate_task.id
+                ))
+            AND retry_count =
+        ";

@@ -5,7 +5,7 @@ use newsly_db::{
     LlmTaskDispatchKind, LlmTaskDispatchRepositoryError, UnsupportedLlmTaskOutcome,
     classify_llm_task, fail_unsupported_llm_task,
 };
-use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
+use newsly_queue::{LlmTaskDeliveryKind, OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -64,20 +64,9 @@ impl RunLlmTaskHandler {
                 false,
             ));
         }
-        let kind = match self.classify(task_id, user_id).await {
+        let kind = match classify_delivery(&self.pool, task_id, user_id, &plan.payload).await {
             Ok(kind) => kind,
-            Err(LlmTaskDispatchRepositoryError::Sqlx(error)) => {
-                return HandlerExecution::from_result(TaskResult::fail(
-                    Some(error.to_string()),
-                    true,
-                ));
-            }
-            Err(error) => {
-                return HandlerExecution::from_result(TaskResult::fail(
-                    Some(error.to_string()),
-                    false,
-                ));
-            }
+            Err(result) => return HandlerExecution::from_result(result),
         };
         match kind {
             LlmTaskDispatchKind::Terminal => HandlerExecution::from_result(TaskResult::ok()),
@@ -94,17 +83,43 @@ impl RunLlmTaskHandler {
             }
         }
     }
+}
 
-    async fn classify(
-        &self,
-        task_id: i64,
-        user_id: i64,
-    ) -> Result<LlmTaskDispatchKind, LlmTaskDispatchRepositoryError> {
-        let mut transaction = self.pool.begin().await?;
+// Complete the bounded database/category check before dispatch can reach a provider executor.
+async fn classify_delivery(
+    pool: &PgPool,
+    task_id: i64,
+    user_id: i64,
+    payload: &serde_json::Map<String, Value>,
+) -> Result<LlmTaskDispatchKind, TaskResult> {
+    let classification = async {
+        let mut transaction = pool.begin().await?;
         let kind = classify_llm_task(&mut transaction, task_id, user_id).await?;
         transaction.commit().await?;
-        Ok(kind)
+        Ok::<_, LlmTaskDispatchRepositoryError>(kind)
     }
+    .await;
+    let kind = classification.map_err(|error| match error {
+        LlmTaskDispatchRepositoryError::Sqlx(error) => {
+            TaskResult::fail(Some(error.to_string()), true)
+        }
+        error => TaskResult::fail(Some(error.to_string()), false),
+    })?;
+    let expected = match &kind {
+        LlmTaskDispatchKind::LearningDeck => Some(LlmTaskDeliveryKind::LearningDeck),
+        LlmTaskDispatchKind::ShareAction => Some(LlmTaskDeliveryKind::ShareAction),
+        LlmTaskDispatchKind::Terminal | LlmTaskDispatchKind::Unsupported { .. } => None,
+    };
+    if let Some(expected) = expected
+        && payload.get("task_kind").and_then(Value::as_str) != Some(expected.as_str())
+    {
+        // Durable data must agree with the category used by the queue's owner fence.
+        return Err(TaskResult::fail(
+            Some("LLM task delivery category does not match its workflow".to_owned()),
+            false,
+        ));
+    }
+    Ok(kind)
 }
 
 impl TaskHandler for RunLlmTaskHandler {
@@ -164,3 +179,7 @@ fn positive_payload_id(payload: &serde_json::Map<String, Value>, field: &str) ->
         .and_then(Value::as_i64)
         .filter(|value| *value > 0)
 }
+
+#[cfg(test)]
+#[path = "run_llm_task_tests.rs"]
+mod tests;

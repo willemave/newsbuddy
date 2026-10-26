@@ -14,7 +14,7 @@ async fn fixture(pool: &PgPool) -> LearningDeckGenerationClaimFence {
         .await
         .unwrap();
     let token = Uuid::new_v4();
-    let processing: i64 = sqlx::query_scalar("INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,payload,locked_by,locked_at,lease_token,lease_expires_at,executor_runtime,executor_version,executor_namespace) VALUES('run_llm_task','llm','processing',$1,$2,'test',timezone('UTC',now()),$3,timezone('UTC',now())+interval '5 minutes','rust',1,'run_llm_task') RETURNING id::bigint").bind(user).bind(json!({"llm_task_id":task,"user_id":user})).bind(token).fetch_one(pool).await.unwrap();
+    let processing: i64 = sqlx::query_scalar("INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,payload,locked_by,locked_at,lease_token,lease_expires_at,executor_runtime,executor_version,executor_namespace) VALUES('run_llm_task','llm','processing',$1,$2,'test',timezone('UTC',now()),$3,timezone('UTC',now())+interval '5 minutes','rust',1,'run_llm_task') RETURNING id::bigint").bind(user).bind(json!({"llm_task_id":task,"user_id":user,"task_kind":"learning_deck"})).bind(token).fetch_one(pool).await.unwrap();
     LearningDeckGenerationClaimFence {
         processing_task_id: processing,
         user_id: user,
@@ -157,7 +157,7 @@ async fn retry_and_input_changes_never_reset_budget_or_accept_stale_writes(pool:
     ).bind(fence.llm_task_id).fetch_one(&pool).await.unwrap();
     fence.llm_task_id = new_task;
     sqlx::query("UPDATE processing_tasks SET payload=$1 WHERE id=$2")
-        .bind(json!({"llm_task_id":new_task,"user_id":fence.user_id}))
+        .bind(json!({"llm_task_id":new_task,"user_id":fence.user_id,"task_kind":"learning_deck"}))
         .bind(fence.processing_task_id)
         .execute(&pool)
         .await
@@ -219,7 +219,7 @@ async fn identity_payload_and_lifecycle_fence_writes(pool: PgPool) {
                 .unwrap()
         );
     }
-    let original_payload = json!({"llm_task_id":fence.llm_task_id,"user_id":fence.user_id});
+    let original_payload = json!({"llm_task_id":fence.llm_task_id,"user_id":fence.user_id,"task_kind":"learning_deck"});
     sqlx::query("UPDATE processing_tasks SET payload='{}'")
         .execute(&pool)
         .await

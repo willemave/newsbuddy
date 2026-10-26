@@ -76,6 +76,11 @@ string_enum!(TaskType {
     DeleteUserAccount => "delete_user_account",
 });
 
+string_enum!(LlmTaskDeliveryKind {
+    ShareAction => "share_action",
+    LearningDeck => "learning_deck",
+});
+
 string_enum!(TaskQueue {
     Content => "content",
     Media => "media",
@@ -204,6 +209,23 @@ impl TaskType {
             Self::RunLlmTask => {
                 required_integer(&payload, self, "user_id", true)?;
                 required_integer(&payload, self, "llm_task_id", false)?;
+                let field = "task_kind";
+                payload
+                    .get(field)
+                    .ok_or(PayloadError::MissingField {
+                        task_type: self,
+                        field,
+                    })?
+                    .as_str()
+                    .ok_or(PayloadError::WrongType {
+                        task_type: self,
+                        field,
+                    })?
+                    .parse::<LlmTaskDeliveryKind>()
+                    .map_err(|_| PayloadError::OutOfRange {
+                        task_type: self,
+                        field,
+                    })?;
             }
             Self::SyncIntegration => {
                 required_integer(&payload, self, "user_id", true)?;
@@ -345,6 +367,18 @@ pub struct EnqueueRequest {
 }
 
 impl EnqueueRequest {
+    /// Builds the canonical owner-scoped delivery for an LLM workflow.
+    pub fn run_llm_task(task_id: i64, user_id: i64, kind: LlmTaskDeliveryKind) -> Self {
+        let mut request = Self::new(TaskType::RunLlmTask);
+        request.owner_user_id = Some(user_id);
+        request.payload = Some(Map::from_iter([
+            ("llm_task_id".to_owned(), Value::from(task_id)),
+            ("user_id".to_owned(), Value::from(user_id)),
+            ("task_kind".to_owned(), Value::from(kind.as_str())),
+        ]));
+        request
+    }
+
     pub const fn new(task_type: TaskType) -> Self {
         Self {
             priority: 0,

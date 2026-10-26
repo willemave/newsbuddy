@@ -140,7 +140,7 @@ struct TaskRow {
     input_json: Value,
     workspace_path: Option<String>,
     subject_id: Option<i64>,
-    created_at: NaiveDateTime,
+    started_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -376,7 +376,9 @@ pub async fn settle_learning_deck_source_missing(
     if active {
         set_preparing(transaction, task.id, deck.id, waiting_message).await?;
         return Ok(LearningDeckSourceSettlement::Deferred {
-            retry_delay_seconds: source_wait_delay_seconds(task.created_at.and_utc()),
+            retry_delay_seconds: source_wait_delay_seconds(
+                task.started_at.map_or_else(Utc::now, |time| time.and_utc()),
+            ),
             message: waiting_message.to_owned(),
         });
     }
@@ -592,7 +594,7 @@ async fn load_task_for_update(
             input_json,
             workspace_path,
             subject_id::bigint AS subject_id,
-            created_at
+            started_at
         FROM llm_tasks
         WHERE id::bigint = $1
         FOR UPDATE
@@ -844,9 +846,9 @@ fn source_body_fallback(content_type: &str, metadata: &Map<String, Value>) -> Op
     })
 }
 
-fn source_wait_delay_seconds(created_at: DateTime<Utc>) -> i64 {
+fn source_wait_delay_seconds(started_at: DateTime<Utc>) -> i64 {
     let age_seconds = Utc::now()
-        .signed_duration_since(created_at)
+        .signed_duration_since(started_at)
         .num_seconds()
         .max(0);
     let step = u32::try_from((age_seconds / 300).min(4)).unwrap_or(4);

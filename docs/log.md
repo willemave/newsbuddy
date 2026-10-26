@@ -27,6 +27,25 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `main` — Learning Deck review fixes: delivery contract and reservation index
+
+- **Status:** Complete locally; uncommitted and not deployed.
+- **Scope:** Queue-owned LLM delivery construction/validation, supported legacy delivery backfill, and generation-state lookup indexing.
+- **Decisions:** Keep the existing queue/task type. Require a typed share-action or deck category, backfill supported pending/processing deliveries under the existing maintenance barrier, and keep canonical dispatcher validation as a backstop. Add the exact text-expression index rather than casting untrusted JSON identifiers. Opus 5.5 reviewed the contract/backfill plan.
+- **Changes:** Added one shared delivery constructor and enum; migrated every production payload builder; declared the required category in the task schema and normalization with synchronized corpus hashes. Dispatch verifies both workflow kinds against the ledger. The maintenance backfill includes live and terminal Share Action ledgers with active deliveries. Added the matching generation-state index and populated EXPLAIN regression; malformed legacy jobs settle without dispatch.
+- **Validation:** 68 targeted Rust tests passed: 38 queue/contract, 11 migration (including indexed EXPLAIN over 10,000 generations), 12 deck persistence, and seven dispatcher/worker regressions. Warning-denied Clippy for all affected API/worker/DB/queue targets, public contract drift, formatting, module-size guardrails, and diff whitespace passed. Opus 5.5 final verification found no blocking issues.
+- **Remaining:** None within the fix scope. Release still requires the maintenance cutover and live provider/E2B smoke; no commit, deployment, or paid smoke was performed.
+- **Commits:** Uncommitted.
+
+### 2026-10-25 — `main` — Learning Deck queue cleanup
+
+- **Status:** Complete locally; behavior unchanged.
+- **Scope:** Current deck queue diff; reviewed backend and Swift code with parallel read-only agents.
+- **Changes:** Removed the single-field active-attempt wrapper and ordering/limit made redundant by per-deck uniqueness; consolidated worker test deck/delivery/claim setup. Reused the canonical Queued label, removed its overwritten initial status default, and aligned polling test names with generation phases.
+- **Validation:** Five isolated PostgreSQL deck-admission/retry tests, three worker dispatcher/deletion integration tests, and 16 focused iOS registry/reader tests passed. Warning-denied Clippy for all DB/worker targets, Rust formatting, module-size guardrails, and diff whitespace checks passed.
+- **Remaining:** None within cleanup scope. Retry reservation and migration safeguards are unchanged; no commit or deployment.
+- **Commits:** Uncommitted.
+
 ### 2026-10-25 — `main` — Accept Claude deck tool batches
 
 - **Status:** Fix implemented; final release validation pending.
@@ -56,6 +75,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** 207 provider tests passed (one unrelated live test ignored), 30 deck tests passed, and final warning-denied all-target Clippy passed for providers/workers. Formatting, module-size guard and diff checks passed. Opus 5.5 implementation review and follow-up found no remaining blocker; its material live-thinking-replay gap is verified through the Rust adapter, and its model-normalization/test-coverage findings are addressed.
 - **Remaining:** Production needs the normal release workflow because the deployed adapter cannot express the compatible request; no production configuration, queue, or runtime change has been made. Full deck/E2B smoke remains a release requirement, including observation for model-returned parallel tool calls.
 - **Commits:** Included in this commit.
+
+### 2026-10-24 — `main` — Durable Learning Deck queue
+
+- **Status:** Complete locally; uncommitted and not deployed.
+- **Scope:** Learning Deck admission/retry, durable queue claims, migration, shared dispatcher, iOS status observation, and smoke expectations.
+- **Decisions:** Accept multiple decks using existing attempts and deliveries; retain one unfinished attempt per deck and one processing delivery per user. Readiness ordering allows another deck during source waits before generation starts; a started attempt reserves its user slot through automatic retry backoff to protect its original budget. Keep the existing public Queued status and bounded, separate queue/execution observation windows. Opus 5.5 reviewed the design and implementation; its retry-budget finding is addressed with the existing generation-state reservation, without a second queue or oldest-attempt dispatch gate.
+- **Changes:** Replaced per-user admission rejection with per-deck deduplication. Added category-fenced queue exclusion/index, marker backfill with maintenance cutover guard, fail-closed dispatch for unmarked decks, and source-wait age measured from preparation. Waiting decks retain Queued when observation pauses.
+- **Validation:** 40 focused iOS XCTest cases, 3 smoke unit tests, 12 deck persistence tests, 9 migration tests, 34 queue tests, 29 deck worker tests, and 3 dispatcher integration tests passed. Formatting, warning-denied Clippy for all targets of the affected API/DB/queue/worker/smoke crates, architecture guard (including migration/deployment shell tests), public contract drift, module sizes, and diff whitespace passed. Final Opus 5.5 verification confirmed retry reservation; its duplicate-reservation cutover finding is covered by the strengthened migration guard and rollback regression.
+- **Remaining:** No local implementation work. Release requires the existing maintenance-cutover workflow and live provider/E2B smoke; no commit, deployment, or paid smoke was performed.
+- **Commits:** Uncommitted.
 
 ### 2026-10-22 — `main` — Learning Deck chat as an edge-attached sheet; portrait fill investigation
 
@@ -3923,3 +3952,10 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Remaining:** None.
 - **Commits:** `67f649c9` (bulk); follow-up committed separately.
 
+
+### 2026-10-25 — `main` — Learning Deck queue release
+
+- **Status:** Release authorized; clean-commit validation and production deployment in progress.
+- **Scope:** Commit all current tracked and untracked queue, typed delivery, migration, native polling, regression and documentation changes. Cleanup, strict review and explicit Claude Opus 5.5 verification are complete; focused validation is recorded above.
+- **Deployment:** Run the canonical complete release gate with live provider/E2B smoke for the exact commit, then push that tested SHA and dispatch the required maintenance cutover for migration `20261024000000`. Old writers must stop before migration; the supported deploy path owns backup and restart.
+- **Evidence:** Store exact-commit gate artifacts under `test-results/release-gate/<sha>/`; independently verify the deployed image, migration, public readiness, worker health and fresh task progress. Apple distribution is outside this release.

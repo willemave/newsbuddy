@@ -15,11 +15,11 @@ use newsly_db::{
     insert_share_action_task, load_share_action_action, mark_share_action_applied,
     mark_share_action_applying, mark_share_action_failed,
 };
-use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
+use newsly_queue::{EnqueueRequest, LlmTaskDeliveryKind, QueueKernel};
 use newsly_worker::share_actions::{
     apply_share_action_host_action, parse_stored_host_input, save_immediate_bookmark,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
@@ -109,14 +109,11 @@ pub(super) async fn create_share_action(
     .await
     .map_err(|error| repository_error(error, &request_id))?;
 
-    let mut request = EnqueueRequest::new(TaskType::RunLlmTask);
-    request.payload = json!({
-        "llm_task_id": created.id,
-        "user_id": current_user.id,
-    })
-    .as_object()
-    .cloned();
-    request.owner_user_id = Some(current_user.id);
+    let request = EnqueueRequest::run_llm_task(
+        created.id,
+        current_user.id,
+        LlmTaskDeliveryKind::ShareAction,
+    );
     queue
         .enqueue_many_in_transaction(&mut transaction, vec![request])
         .await
@@ -594,6 +591,8 @@ fn application_error(message: impl Into<String>, request_id: &str) -> ApiError {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]

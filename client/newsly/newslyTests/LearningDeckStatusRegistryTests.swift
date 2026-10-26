@@ -2,6 +2,100 @@ import XCTest
 @testable import newsly
 
 final class LearningDeckStatusRegistryTests: XCTestCase {
+    func testQueuedWaitDoesNotConsumeGenerationObservationBudget() async throws {
+        let source = ScriptedLearningDeckStatusSource(decks: [
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .generating),
+            makeRegistryDeck(status: .publishing),
+            makeRegistryDeck(status: .completed, viewerAvailable: true),
+        ])
+        let registry = LearningDeckStatusRegistry(
+            fetchDeck: { try await source.fetch(deckId: $0) },
+            policy: .fixed(intervalNanoseconds: 1, attemptLimit: 3),
+            sleep: { _ in }
+        )
+
+        let ready = try await registry.waitUntilTerminal(deckId: 41)
+
+        XCTAssertTrue(ready.viewerAvailable)
+        let callCount = await source.callCount
+        XCTAssertEqual(callCount, 5)
+    }
+
+    func testSourcePreparationDoesNotConsumeGenerationObservationBudget() async throws {
+        let source = ScriptedLearningDeckStatusSource(decks: [
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .preparing),
+            makeRegistryDeck(status: .generating),
+            makeRegistryDeck(status: .validating),
+            makeRegistryDeck(status: .completed, viewerAvailable: true),
+        ])
+        let registry = LearningDeckStatusRegistry(
+            fetchDeck: { try await source.fetch(deckId: $0) },
+            policy: .fixed(intervalNanoseconds: 1, attemptLimit: 3),
+            sleep: { _ in }
+        )
+
+        let ready = try await registry.waitUntilTerminal(deckId: 41)
+
+        XCTAssertTrue(ready.viewerAvailable)
+        let callCount = await source.callCount
+        XCTAssertEqual(callCount, 5)
+    }
+
+    func testQueuedObservationStopsWithinBoundAndCanResumeWithoutNewCommand() async throws {
+        let source = ScriptedLearningDeckStatusSource(decks: [
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .completed, viewerAvailable: true),
+        ])
+        let registry = LearningDeckStatusRegistry(
+            fetchDeck: { try await source.fetch(deckId: $0) },
+            policy: .fixed(intervalNanoseconds: 1, attemptLimit: 2),
+            sleep: { _ in }
+        )
+
+        do {
+            _ = try await registry.waitUntilTerminal(deckId: 41)
+            XCTFail("Expected bounded queued observation to pause")
+        } catch LearningDeckStatusRegistryError.queuedObservationPaused {
+            // Queue wait is not a generation timeout or failure.
+        }
+        let pausedCallCount = await source.callCount
+        XCTAssertEqual(pausedCallCount, 2)
+
+        let ready = try await registry.waitUntilTerminal(deckId: 41)
+        XCTAssertTrue(ready.viewerAvailable)
+        let resumedCallCount = await source.callCount
+        XCTAssertEqual(resumedCallCount, 3)
+    }
+
+    func testGenerationReturningToQueueDoesNotRepeatedlyResetObservationBudget() async {
+        let source = ScriptedLearningDeckStatusSource(decks: [
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .generating),
+            makeRegistryDeck(status: .queued),
+            makeRegistryDeck(status: .generating),
+        ])
+        let registry = LearningDeckStatusRegistry(
+            fetchDeck: { try await source.fetch(deckId: $0) },
+            policy: .fixed(intervalNanoseconds: 1, attemptLimit: 3),
+            sleep: { _ in }
+        )
+
+        do {
+            _ = try await registry.waitUntilTerminal(deckId: 41)
+            XCTFail("Expected observation to remain bounded")
+        } catch LearningDeckStatusRegistryError.timeout {
+            // Expected after one queue-to-generation reset.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        let callCount = await source.callCount
+        XCTAssertEqual(callCount, 4)
+    }
+
     func testSimultaneousObserversShareOneFetchSequence() async throws {
         let firstFetchGate = LearningDeckRegistryGate()
         let source = ScriptedLearningDeckStatusSource(

@@ -718,6 +718,34 @@ URLs. `llm_tasks` is canonical for new Learning Deck work. The
 until production counts, backfill verification, and an explicit schema
 migration permit its retirement.
 
+Learning Deck admission creates one canonical `llm_tasks` attempt per deck and one
+`processing_tasks` delivery. The active-attempt unique index is per deck, so distinct
+sources can wait durably while repeated requests reuse the unfinished attempt. Deck
+deliveries carry an internal `task_kind: learning_deck` category. `RunLlmTask`
+deliveries use the queue-owned typed constructor and require a `share_action` or
+`learning_deck` category in their payload contract; enqueue and dispatch preparation
+reject missing, malformed, or unknown categories. Queue claims exclude
+another processing deck for the same owner; a partial unique index closes concurrent
+claim snapshots, with bounded retries only for that named conflict. Expired work
+retains its execution slot until reclaimed under a fresh exact lease. Normal queue
+readiness ordering permits an independent deck to proceed during source waits before
+generation begins. A pending delivery with durable generation state retains the user's
+slot across automatic retry backoff; later decks cannot consume that attempt's remaining
+wall-clock budget. The retry retains its original deadline. Generic completion and
+terminal settlement release the execution slot. A matching expression index on the
+text form of the generation task ID keeps reservation lookups indexed without casting
+untrusted payload IDs.
+Share Action deliveries do not participate in deck exclusion. The dispatcher checks
+that a supported delivery's category agrees with its canonical workflow before any
+provider work; terminal ledgers can still settle without invoking a provider.
+The migration backfills supported pending/processing deck and Share Action deliveries
+from the canonical ledger and requires a maintenance cutover so
+old workers cannot bypass the new claim policy. User retries create fresh typed deliveries;
+historical completed/failed queue records remain readable and are not reset for reuse.
+Rolling back to binaries from before this
+migration is unsupported while deck deliveries remain: those producers omit the category
+and those workers lack the new exclusion and named-conflict retry policy.
+
 Learning Deck generation defaults to `openrouter:anthropic/claude-sonnet-5.5`, using the
 existing OpenRouter credential and fixed privacy routing. Its requests enable high-effort reasoning
 and retain signed thinking for tool-result replay. OpenRouter Claude requests omit the unsupported
@@ -751,8 +779,11 @@ uses those captured bytes with the same viewer transform. Only explicit artifact
 model-repairable. Transport, ownership, and validator infrastructure failures preserve their
 classification and retry the task within the original budget. Stage notes distinguish generation,
 resume, checking, repair, retry, and publication while keeping the public running status. iOS
-observes for roughly sixteen minutes, then offers a read-only status refresh instead of an
-indefinite spinner or automatic new generation.
+observes queue wait and source preparation in one bounded window, then generation in
+a fresh window, each roughly sixteen minutes. Generation receives a fresh window only
+once; repeated requeues do not
+extend it indefinitely. A waiting deck retains its Queued label when observation pauses
+and offers a read-only status refresh. Observation never starts another generation.
 
 Dedicated Deep Research is retired. The API retains legacy enum decoding and historical reads, rejects retired create/write requests, and the worker settles old queued turns without invoking a provider. Ordinary chat owns research through its standard host tools. The API owns decode-only research labels until minimum-supported clients no longer send them and retained histories can be read without them; legacy database fields await a separate audited retention/schema contraction. No dedicated provider execution or aggregate billing path remains.
 

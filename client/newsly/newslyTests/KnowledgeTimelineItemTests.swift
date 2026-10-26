@@ -85,6 +85,23 @@ final class KnowledgeTimelineItemTests: XCTestCase {
         XCTAssertTrue(entry.isBusy)
     }
 
+    func testSavedSourceShowsQueuedDeckDistinctlyFromExecution() throws {
+        let items = KnowledgeTimelineItem.merged(
+            saved: [makeSaved(id: 21, activityDate: now)],
+            chats: [],
+            decks: [
+                makeDeck(id: 41, activityDate: now, sourceContentId: 21, runStatus: .queued)
+            ],
+            narrations: []
+        )
+
+        guard case .saved(let entry) = try XCTUnwrap(items.first) else {
+            return XCTFail("Expected the saved source row")
+        }
+        XCTAssertEqual(entry.statusText, "Deck queued")
+        XCTAssertTrue(entry.isBusy)
+    }
+
     func testSavedSourceCoalescesCompletedArtifactsWithoutBusyIndicator() throws {
         let items = KnowledgeTimelineItem.merged(
             saved: [makeSaved(id: 22, activityDate: now.addingTimeInterval(-30 * 60))],

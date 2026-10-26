@@ -108,7 +108,7 @@
     {
       "category": "tasks",
       "path": "tasks/catalog.json",
-      "sha256": "4fb4d6838897ac5e2066c20ba4ac46c1cd49235a01d9f1da4f64d52316a03afc"
+      "sha256": "a56d886323b7099ad88f6ef9811424f5f3907b392556118611bc3fe3509ff465"
     },
     {
       "category": "tasks",
@@ -198,7 +198,7 @@
     {
       "category": "tasks",
       "path": "tasks/run_llm_task.schema.json",
-      "sha256": "ccfec97dc428186578483f7515d0ce17a603a8c60bd77d1a0c9baeab2dca27c8"
+      "sha256": "ea8e0f06949a37153fb18e121802c5c7d34b53dd7764a20a6822952640d00535"
     },
     {
       "category": "tasks",

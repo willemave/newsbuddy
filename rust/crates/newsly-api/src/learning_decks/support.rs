@@ -25,16 +25,6 @@ pub(super) fn content_task_request(task_type: TaskType, content_id: i64) -> Enqu
     request
 }
 
-pub(super) fn run_llm_task_request(task_id: i64, user_id: i64) -> EnqueueRequest {
-    let mut request = EnqueueRequest::new(TaskType::RunLlmTask);
-    request.payload = Some(Map::from_iter([
-        ("llm_task_id".to_owned(), Value::from(task_id)),
-        ("user_id".to_owned(), Value::from(user_id)),
-    ]));
-    request.owner_user_id = Some(user_id);
-    request
-}
-
 pub(super) fn sandbox_root(request_id: &str) -> Result<String, ApiError> {
     let root = env::var("LLM_TASK_SANDBOX_ROOT").unwrap_or_else(|_| "/data/workspace".to_owned());
     let root = root.trim();
@@ -154,7 +144,7 @@ pub(super) fn create_repository_error(
     if is_active_learning_deck_conflict(&error) {
         deck_error(
             StatusCode::CONFLICT,
-            "A Learning Deck is already generating",
+            "This Learning Deck already has an active generation",
             request_id,
         )
     } else {

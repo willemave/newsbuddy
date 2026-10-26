@@ -16,7 +16,7 @@ use newsly_db::{
     persist_learning_deck_share, prepare_enable_learning_deck_share,
     resolve_content_learning_deck_source, retry_learning_deck as persist_deck_retry,
 };
-use newsly_queue::{QueueKernel, TaskType};
+use newsly_queue::{EnqueueRequest, LlmTaskDeliveryKind, QueueKernel, TaskType};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
@@ -34,7 +34,7 @@ use super::source::{
 };
 use super::support::{
     content_task_request, create_repository_error, deck_error, external_url, queue_error,
-    repository_error, run_llm_task_request, sandbox_root, submission_error, valid_deck_id,
+    repository_error, sandbox_root, submission_error, valid_deck_id,
 };
 
 #[utoipa::path(
@@ -230,17 +230,14 @@ pub(crate) async fn create_deck(
     .map_err(|error| create_repository_error(error, &request_id))?;
     let deck_id = match outcome {
         CreateLearningDeckOutcome::AttemptCreated { deck_id, task_id } => {
-            queue_requests.push(run_llm_task_request(task_id, current_user.id));
+            queue_requests.push(EnqueueRequest::run_llm_task(
+                task_id,
+                current_user.id,
+                LlmTaskDeliveryKind::LearningDeck,
+            ));
             deck_id
         }
         CreateLearningDeckOutcome::ExistingActiveAttempt { deck_id } => deck_id,
-        CreateLearningDeckOutcome::AnotherDeckActive => {
-            return Err(deck_error(
-                StatusCode::CONFLICT,
-                "A Learning Deck is already generating",
-                &request_id,
-            ));
-        }
     };
     if !queue_requests.is_empty() {
         queue
@@ -319,7 +316,11 @@ pub(crate) async fn retry_deck(
             QueueKernel::new(state.database.pool().clone())
                 .enqueue_many_in_transaction(
                     &mut transaction,
-                    vec![run_llm_task_request(task_id, current_user.id)],
+                    vec![EnqueueRequest::run_llm_task(
+                        task_id,
+                        current_user.id,
+                        LlmTaskDeliveryKind::LearningDeck,
+                    )],
                 )
                 .await
                 .map_err(|error| queue_error(error, &request_id))?;
@@ -329,13 +330,6 @@ pub(crate) async fn retry_deck(
             return Err(deck_error(
                 StatusCode::NOT_FOUND,
                 "Learning Deck not found",
-                &request_id,
-            ));
-        }
-        RetryLearningDeckOutcome::AnotherDeckActive => {
-            return Err(deck_error(
-                StatusCode::CONFLICT,
-                "A Learning Deck is already generating",
                 &request_id,
             ));
         }

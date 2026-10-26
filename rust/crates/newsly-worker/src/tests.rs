@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use newsly_domain::{ResourceKey, RuntimeOwner};
 use newsly_queue::{
-    ClaimRequest, ClaimRuntimeScope, EnqueueRequest, QueueKernel, TaskQueue, TaskResult, TaskType,
+    ClaimRequest, ClaimRuntimeScope, EnqueueRequest, LlmTaskDeliveryKind, QueueKernel, TaskQueue,
+    TaskResult, TaskType,
 };
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -279,11 +280,7 @@ async fn terminal_queue_failure_settles_running_llm_ledger(pool: PgPool) {
         worker_with_failing_finalizer(&pool, 0, FinalizerErrorDisposition::Retryable).await;
     let user_id: i64 = sqlx::query_scalar("INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('terminal-ledger', 'ledger@example.test', FALSE, TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
     let llm_id: i64 = sqlx::query_scalar("INSERT INTO llm_tasks (user_id, task_kind, mode, workflow_key, workflow_version, workflow_state, status, approval_policy, allowed_actions, tool_policy, input_json, output_json, artifact_manifest, usage_json, status_history) VALUES ($1::bigint::integer, 'share_action', 'add_content', 'share_action', 1, 'running', 'running', '{}', '[]', '{}', '{}', '{}', '{}', '{}', '[]') RETURNING id::bigint").bind(user_id).fetch_one(&pool).await.unwrap();
-    let mut request = EnqueueRequest::new(TaskType::RunLlmTask);
-    request.owner_user_id = Some(user_id);
-    request.payload = json!({"llm_task_id": llm_id, "user_id": user_id})
-        .as_object()
-        .cloned();
+    let request = EnqueueRequest::run_llm_task(llm_id, user_id, LlmTaskDeliveryKind::ShareAction);
     worker.queue.enqueue(request).await.unwrap();
     let scope = ClaimRuntimeScope::namespaces(
         RuntimeOwner::Rust,
@@ -342,11 +339,7 @@ async fn terminal_queue_failure_settles_running_llm_ledger(pool: PgPool) {
         1
     );
     drop(conn);
-    let mut retry = EnqueueRequest::new(TaskType::RunLlmTask);
-    retry.owner_user_id = Some(user_id);
-    retry.payload = json!({"llm_task_id": llm_id, "user_id": user_id})
-        .as_object()
-        .cloned();
+    let retry = EnqueueRequest::run_llm_task(llm_id, user_id, LlmTaskDeliveryKind::ShareAction);
     worker.queue.enqueue(retry).await.unwrap();
     let mut conn = pool.acquire().await.unwrap();
     assert_eq!(
@@ -541,11 +534,7 @@ async fn deadline_drains_sandbox_allocation_before_finalizing(pool: PgPool) {
     let (mut worker, _) =
         worker_with_failing_finalizer(&pool, 0, FinalizerErrorDisposition::Retryable).await;
     let user_id: i64 = sqlx::query_scalar("INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('allocation', 'allocation@example.test', FALSE, TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
-    let mut request = EnqueueRequest::new(TaskType::RunLlmTask);
-    request.owner_user_id = Some(user_id);
-    request.payload = json!({"llm_task_id": 1, "user_id": user_id})
-        .as_object()
-        .cloned();
+    let request = EnqueueRequest::run_llm_task(1, user_id, LlmTaskDeliveryKind::ShareAction);
     worker.queue.enqueue(request).await.unwrap();
     let cleaned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     worker.handlers = HandlerRegistry::new();
@@ -816,4 +805,60 @@ async fn watchdog_distinguishes_repeated_source_failure_from_a_healthy_empty_che
             .overdue_tasks,
         1
     );
+}
+
+#[sqlx::test]
+async fn malformed_legacy_llm_delivery_terminalizes_without_dispatch(pool: PgPool) {
+    let (mut worker, _) =
+        worker_with_failing_finalizer(&pool, 0, FinalizerErrorDisposition::Retryable).await;
+    let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('legacy-category','legacy-category@example.com',true,false) RETURNING id::bigint")
+        .fetch_one(&pool).await.unwrap();
+    let task: i64 = sqlx::query_scalar("INSERT INTO llm_tasks(user_id,task_kind,mode,workflow_key,workflow_version,workflow_state,status,approval_policy,allowed_actions,tool_policy,input_json,output_json,artifact_manifest,usage_json,status_history) VALUES($1,'share_action','add_content','share_action',1,'running','running','{}','[]','{}','{}','{}','{}','{}','[]') RETURNING id::bigint")
+        .bind(user).fetch_one(&pool).await.unwrap();
+    let delivery = worker
+        .queue
+        .enqueue(EnqueueRequest::run_llm_task(
+            task,
+            user,
+            LlmTaskDeliveryKind::ShareAction,
+        ))
+        .await
+        .unwrap();
+    // Model an orphan/unsupported legacy payload outside the supported migration
+    // backfill. Prepare must reject it and settle both queue and ledger atomically.
+    sqlx::query("UPDATE processing_tasks SET payload=(payload::jsonb-'task_kind')::json WHERE id::bigint=$1")
+        .bind(delivery).execute(&pool).await.unwrap();
+    let dispatched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    worker.handlers = HandlerRegistry::new();
+    worker
+        .handlers
+        .register(DelayedAllocation {
+            cleaned: dispatched.clone(),
+        })
+        .unwrap();
+    let scope = ClaimRuntimeScope::namespaces(
+        RuntimeOwner::Rust,
+        [ResourceKey::new("run_llm_task").unwrap()],
+    )
+    .unwrap();
+    worker.config.claim = ClaimRequest::for_queue("invalid-category", TaskQueue::Llm, scope);
+    assert!(matches!(
+        worker.run_once().await.unwrap(),
+        WorkerAttempt::Failed(_)
+    ));
+    let state: (String, String) =
+        sqlx::query_as("SELECT status,error_message FROM processing_tasks WHERE id::bigint=$1")
+            .bind(delivery)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state.0, "failed");
+    assert!(state.1.contains("missing task_kind"), "{}", state.1);
+    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id::bigint=$1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "failed");
+    assert!(!dispatched.load(std::sync::atomic::Ordering::SeqCst));
 }

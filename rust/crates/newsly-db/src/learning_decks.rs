@@ -106,7 +106,6 @@ pub struct ConvertedNewsSource {
 pub enum CreateLearningDeckOutcome {
     AttemptCreated { deck_id: i64, task_id: i64 },
     ExistingActiveAttempt { deck_id: i64 },
-    AnotherDeckActive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,7 +113,6 @@ pub enum RetryLearningDeckOutcome {
     AttemptCreated { deck_id: i64, task_id: i64 },
     ExistingActiveRetry { deck_id: i64 },
     DeckNotFound,
-    AnotherDeckActive,
     NoFailedAttempt,
 }
 
@@ -200,12 +198,6 @@ struct NewsItemRow {
 }
 
 #[derive(Debug, Clone, FromRow)]
-struct ActiveAttemptRow {
-    subject_id: Option<i64>,
-    input_json: Value,
-}
-
-#[derive(Debug, Clone, FromRow)]
 struct AttemptStateRow {
     id: i64,
     status: String,
@@ -287,3 +279,6 @@ pub use sources::{
     convert_news_item_to_learning_deck_source, find_visible_news_item_for_learning_deck,
     load_submitted_content_learning_deck_source, resolve_content_learning_deck_source,
 };
+
+#[cfg(test)]
+mod attempt_tests;
