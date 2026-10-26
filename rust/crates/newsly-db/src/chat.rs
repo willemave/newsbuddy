@@ -1078,16 +1078,12 @@ fn content_title(content: &ContentPresentationRow) -> String {
 }
 
 pub(crate) fn content_display_title(title: Option<&str>, metadata: &Value) -> Option<String> {
-    let summary = metadata.get("summary");
-    let summary_title = summary
-        .and_then(|value| value.get("title"))
-        .and_then(Value::as_str);
-    let feed_title = summary
-        .and_then(|value| value.get("feed_preview"))
-        .and_then(|value| value.get("title"))
-        .and_then(Value::as_str);
-    first_non_empty([summary_title, feed_title, title])
-        .or_else(|| extract_short_summary(summary))
+    let metadata = metadata
+        .as_object()
+        .map(crate::content_metadata::runtime_metadata)
+        .unwrap_or_default();
+    crate::content_metadata::source_presentation::content_display_title(title, &metadata)
+        .or_else(|| extract_short_summary(metadata.get("summary")))
         .map(|value| summarize_as_title(&value))
 }
 

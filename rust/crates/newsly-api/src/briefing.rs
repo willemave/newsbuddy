@@ -810,10 +810,11 @@ fn present_content_source(
         source_key: source_key.to_owned(),
         kind: "content".to_owned(),
         id: source.id,
-        title: source
-            .title
-            .clone()
-            .unwrap_or_else(|| format!("Content {}", source.id)),
+        title: newsly_db::content_metadata::source_presentation::content_display_title(
+            source.title.as_deref(),
+            &metadata,
+        )
+        .unwrap_or_else(|| format!("Content {}", source.id)),
         publisher: newsly_db::content_metadata::source_presentation::content_publisher(
             &source.url,
             source.source.as_deref(),

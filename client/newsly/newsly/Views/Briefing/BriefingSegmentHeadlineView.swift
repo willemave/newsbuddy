@@ -33,8 +33,14 @@ struct BriefingSegmentHeadline: Equatable {
         self.publishedAt = source.publishedAt
     }
 
-    var publicationLabel: String? {
-        publishedAt.map { "Published \($0.formatted(.dateTime.month(.abbreviated).day().year()))" }
+    var publicationDate: String? {
+        publishedAt.map { Self.shortDate($0) }
+    }
+
+    /// The single visible metadata line beside the kicker. The Briefed time is
+    /// kept for VoiceOver only so the header stays one line.
+    var detailLine: String {
+        [meta, publicationDate].compactMap { $0 }.joined(separator: " · ")
     }
 
     var briefedLabel: String {
@@ -49,6 +55,14 @@ struct BriefingSegmentHeadline: Equatable {
         }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// "Oct 16" within the current year, "Oct 16, 2023" otherwise.
+    static func shortDate(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        guard calendar.isDate(date, equalTo: now, toGranularity: .year) else {
+            return date.formatted(.dateTime.month(.abbreviated).day().year())
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     static func durationLabel(seconds: Int) -> String? {
@@ -76,32 +90,27 @@ struct BriefingSegmentHeadlineView: View {
         } label: {
             VStack(alignment: .leading, spacing: 0) {
                 ViewThatFits(in: .horizontal) {
+                    // One line: details keep their width and a long publisher
+                    // truncates, down to a small minimum.
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        publisher
-                        Spacer(minLength: 0)
+                        if headline.publisher != nil {
+                            publisher
+                                .lineLimit(1)
+                                .frame(minWidth: 0, idealWidth: 64, alignment: .leading)
+                        }
                         details
+                            .lineLimit(1)
+                            .layoutPriority(1)
                     }
-                    .fixedSize(horizontal: true, vertical: false)
 
+                    // Accessibility text sizes and very narrow widths.
                     VStack(alignment: .leading, spacing: 5) {
                         publisher
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            details
-                            Spacer(minLength: 0)
-                        }
+                            .fixedSize(horizontal: false, vertical: true)
+                        details
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.bottom, 5)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    if let publicationLabel = headline.publicationLabel {
-                        Text(publicationLabel)
-                    }
-                    Text(headline.briefedLabel)
-                }
-                .font(.appFootnote)
-                .foregroundStyle(Color.onSurfaceTertiary)
-                .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 7)
 
                 Text(headline.title)
@@ -121,7 +130,7 @@ struct BriefingSegmentHeadlineView: View {
         .accessibilityLabel(
             [
                 headline.title, headline.publisher, headline.meta,
-                headline.publicationLabel, headline.briefedLabel
+                headline.publicationDate.map { "Published \($0)" }, headline.briefedLabel
             ]
                 .compactMap { $0 }
                 .joined(separator: ", ")
@@ -138,15 +147,13 @@ struct BriefingSegmentHeadlineView: View {
                 .font(.editorialMeta)
                 .tracking(1.6)
                 .foregroundStyle(Color.onSurfaceSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var details: some View {
-        Text(headline.meta)
+        Text(headline.detailLine)
             .font(.appFootnote)
             .foregroundStyle(Color.onSurfaceTertiary)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

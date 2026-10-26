@@ -170,7 +170,9 @@ fn narration_source_value(source: &BriefingRefreshSource) -> Value {
     json!({
         "source_key": source.source_key,
         "kind": source.kind,
-        "title": source.title,
+        // The source title is frozen provenance and participates in the audio reuse key.
+        // Chapter display titles use the separate reader headline.
+        "title": source.original_title,
         "source_name": source.source_name,
         "summary": source.summary,
         "key_points": source.key_points,

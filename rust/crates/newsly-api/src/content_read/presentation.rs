@@ -6,6 +6,7 @@ use newsly_contracts::{
     ContentSummaryQuote, ContentSummaryResponse, ContentType, DetectedFeed, NewsItemDetailResponse,
     NewsItemSummaryResponse, SavedSource, SummaryKind, SummaryVersion,
 };
+use newsly_db::content_metadata::source_presentation::{clean_title, content_display_title};
 use newsly_db::{ContentDetailProjection, NewsItemProjection};
 use serde_json::{Map, Number, Value};
 use thiserror::Error;
@@ -816,14 +817,7 @@ fn resolve_content_url(
 }
 
 fn resolve_content_display_title(title: Option<&str>, metadata: &Map<String, Value>) -> String {
-    nested_clean_title(metadata, "summary")
-        .or_else(|| {
-            object_field(metadata, "summary")
-                .and_then(|summary| object_field(summary, "feed_preview"))
-                .and_then(|preview| preview.get("title"))
-                .and_then(value_as_clean_string)
-        })
-        .or_else(|| title.and_then(clean_title))
+    content_display_title(title, metadata)
         .or_else(|| {
             extract_short_summary(object_field(metadata, "summary"))
                 .and_then(|value| summarize_text_as_title(&value))
@@ -1077,43 +1071,6 @@ fn nested_clean_title(metadata: &Map<String, Value>, section: &str) -> Option<St
         .and_then(|value| value.get("title"))
         .and_then(value_as_clean_string)
         .and_then(|value| clean_title(&value))
-}
-
-fn clean_title(value: &str) -> Option<String> {
-    let mut without_tags = String::with_capacity(value.len());
-    let mut inside_tag = false;
-    for character in value.chars() {
-        match character {
-            '<' => inside_tag = true,
-            '>' => inside_tag = false,
-            _ if !inside_tag => without_tags.push(character),
-            _ => {}
-        }
-    }
-    let normalized = without_tags
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if normalized.is_empty() {
-        return None;
-    }
-    let folded = normalized.to_ascii_lowercase();
-    if matches!(
-        folded.as_str(),
-        "na" | "n/a" | "none" | "unknown" | "untitled" | "void" | "access denied"
-    ) || folded.starts_with("just a moment")
-        || folded.starts_with("verification required")
-    {
-        return None;
-    }
-    let mut title = normalized;
-    if title.chars().count() > 500 {
-        let truncated = title.chars().take(500).collect::<String>();
-        title = String::from(truncated.trim_end());
-    }
-    Some(title)
 }
 
 fn summarize_text_as_title(value: &str) -> Option<String> {

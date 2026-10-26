@@ -21,9 +21,7 @@ fn source_titles(
 ) -> Vec<String> {
     if let Some(title) = source_content_id
         .and(snapshot)
-        .and_then(|value| value.get("title"))
-        .and_then(Value::as_str)
-        .and_then(clean_text)
+        .and_then(snapshot_display_title)
     {
         return vec![title];
     }
@@ -33,11 +31,18 @@ fn source_titles(
         .map(|items| {
             items
                 .iter()
-                .filter_map(|item| item.get("title").and_then(Value::as_str))
-                .filter_map(clean_text)
+                .filter_map(Value::as_object)
+                .filter_map(snapshot_display_title)
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn snapshot_display_title(snapshot: &serde_json::Map<String, Value>) -> Option<String> {
+    newsly_db::content_metadata::source_presentation::content_display_title(
+        snapshot.get("title").and_then(Value::as_str),
+        snapshot,
+    )
 }
 
 pub(crate) fn present_audio_episode(
@@ -180,6 +185,31 @@ mod tests {
         assert_eq!(multiple.source_count, 2);
         assert_eq!(multiple.subtitle.as_deref(), Some("Publication"));
         assert_eq!(multiple.read_on_play_content_ids, vec![7, 8]);
+    }
+
+    #[test]
+    fn source_headlines_use_saved_summary_without_rewriting_snapshot() {
+        let snapshot =
+            json!({"title":"Show #123", "summary":{"title":"<b>Reader</b> &amp; headline"}});
+        let single = present_audio_episode(episode(Some(9), snapshot.clone()), "test").unwrap();
+        assert_eq!(single.source_titles, vec!["Reader & headline"]);
+        assert_eq!(snapshot["title"], "Show #123");
+        let multiple = present_audio_episode(
+            episode(
+                None,
+                json!({"items":[
+                    {"title":"Raw title", "summary":{"feed_preview":{"title":"Preview headline"}}},
+                    {"title":"News title", "summary":"News summary text"},
+                    {"title":"Legacy source", "summary":{"overview":null,"key_points":[]}}
+                ]}),
+            ),
+            "test",
+        )
+        .unwrap();
+        assert_eq!(
+            multiple.source_titles,
+            vec!["Preview headline", "News title", "Legacy source"]
+        );
     }
 
     #[test]

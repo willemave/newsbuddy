@@ -224,6 +224,7 @@ async fn adapted_lens_narration_uses_document_chapters_for_articles_and_podcasts
         )
         .await;
         assert_eq!(chapters.len(), 2);
+        let original = chapters[0].clone();
         for chapter in chapters {
             assert!(chapter.title.starts_with("Document "));
             assert_eq!(chapter.source_snapshot["lens_tier"], tier);
@@ -239,6 +240,27 @@ async fn adapted_lens_narration_uses_document_chapters_for_articles_and_podcasts
             );
             assert!(chapter.script_text.is_none());
         }
+        let content_id = original.source_snapshot["read_on_play"]["content_ids"][0]
+            .as_i64()
+            .unwrap();
+        sqlx::query("UPDATE audio_episodes SET status='completed', audio_storage_path='existing.mp3' WHERE id::bigint=$1")
+            .bind(original.id).execute(&pool).await.unwrap();
+        sqlx::query("UPDATE contents SET content_metadata=jsonb_set(content_metadata::jsonb, '{summary,title}', '\"Reader headline\"'::jsonb) WHERE id::bigint=$1")
+            .bind(content_id).execute(&pool).await.unwrap();
+        let replay = prepare(
+            &pool,
+            BriefingNarrationSelection::AdaptedLens(kind.to_owned()),
+        )
+        .await;
+        let reused = replay
+            .iter()
+            .find(|chapter| chapter.id == original.id)
+            .expect("title-only changes reuse audio");
+        assert_eq!(reused.title, "Reader headline");
+        assert_eq!(reused.episode_group_id, original.episode_group_id);
+        assert_eq!(reused.source_snapshot, original.source_snapshot);
+        assert_eq!(reused.status, "completed");
+        assert_eq!(reused.audio_storage_path.as_deref(), Some("existing.mp3"));
     }
 }
 

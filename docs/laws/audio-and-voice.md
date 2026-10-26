@@ -20,4 +20,4 @@ AV9. Manual stop and silence stop produce at most one transcript and one action.
 
 AV10. Dictation follows the same validation and action path as typed input, and typing remains available when voice service fails.
 
-AV11. Audio source IDs and trimmed titles have the same projection across episode and Briefing routes, including single-content and multi-item snapshots. Unknown stored episode kinds or statuses fail an individual lookup; lists omit and log invalid rows without hiding valid episodes or inventing a known kind.
+AV11. Audio source IDs and trimmed titles have the same projection across episode and Briefing audio routes, including single-content and multi-item snapshots. Article and podcast audio display headlines use the same reader-headline policy as Content and Briefing. Audio source snapshots retain their source-provenance titles, and changing article or podcast headline presentation alone never starts a new audio generation. Unknown stored episode kinds or statuses fail an individual lookup; lists omit and log invalid rows without hiding valid episodes or inventing a known kind.

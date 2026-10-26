@@ -980,6 +980,14 @@ consume normalized source values from
 its pruning. Artifact inspection borrows the stored envelope; only detail output
 clones it for serialization. Legacy summaries and news retain their existing
 projection. Installed clients already render and share the canonical artifact.
+`newsly-db::content_metadata::source_presentation` selects reader headlines from
+normalized runtime metadata: summary title, feed-preview title, then stored
+source title. Content views, Briefing rendering/composition, chat context, and new
+audio display titles share that selection; original titles remain stored for
+provenance and in hashed audio source snapshots. `BriefingRefreshSource` carries
+the reader headline separately from that source title so changing headline
+presentation alone reuses an existing audio generation. Summary generation
+normalizes the new feed-preview title to its canonical envelope title. Reads preserve existing artifacts and audio snapshots.
 Dedicated body endpoints return complete stored or fallback text; rendering
 excerpts must not truncate the body used by native full-content sharing.
 `newsly-db::content_metadata` owns runtime content metadata. Per-field writers

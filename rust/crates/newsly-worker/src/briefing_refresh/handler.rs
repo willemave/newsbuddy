@@ -961,6 +961,7 @@ mod tests {
             kind: "news".to_owned(),
             id: 4,
             title: "Title".to_owned(),
+            original_title: "Title".to_owned(),
             source_name: Some("Source".to_owned()),
             summary: Some("Summary".to_owned()),
             key_points: vec!["Point".to_owned()],

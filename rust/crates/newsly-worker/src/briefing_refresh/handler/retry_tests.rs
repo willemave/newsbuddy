@@ -52,6 +52,7 @@ fn unit(title: &str) -> CompositionUnit {
                 kind: "content".to_owned(),
                 id: 1,
                 title: title.to_owned(),
+                original_title: title.to_owned(),
                 source_name: None,
                 summary: Some("Summary".to_owned()),
                 key_points: vec![],

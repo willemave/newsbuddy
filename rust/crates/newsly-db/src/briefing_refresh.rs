@@ -112,6 +112,9 @@ pub struct BriefingRefreshSource {
     pub kind: String,
     pub id: i64,
     pub title: String,
+    /// Source-provenance title captured in narration snapshots; reader headline changes
+    /// must not invalidate an otherwise identical audio generation.
+    pub original_title: String,
     pub source_name: Option<String>,
     pub summary: Option<String>,
     pub key_points: Vec<String>,

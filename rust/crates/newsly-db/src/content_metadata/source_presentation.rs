@@ -1,6 +1,91 @@
-//! Shared source attribution and actual publication dates for Briefing rendering and composition.
+//! Shared Content titles, source attribution, and actual publication dates.
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{Map, Value};
+
+/// Select the reader headline from normalized runtime metadata without changing source provenance.
+/// Generated titles win across reading views, Briefing, composition, and audio display titles.
+pub fn content_display_title(title: Option<&str>, metadata: &Map<String, Value>) -> Option<String> {
+    let summary = metadata.get("summary");
+    [
+        summary
+            .and_then(|value| value.get("title"))
+            .and_then(Value::as_str),
+        summary
+            .and_then(|value| value.get("feed_preview"))
+            .and_then(|value| value.get("title"))
+            .and_then(Value::as_str),
+        title,
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(clean_title)
+}
+
+/// Normalize presentation text while keeping meaningful punctuation and technical qualifiers.
+pub fn clean_title(value: &str) -> Option<String> {
+    let mut without_tags = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find('<') {
+        without_tags.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let Some(end) = rest.find('>') else { break };
+        let name = rest[1..end]
+            .trim()
+            .trim_start_matches('/')
+            .split([' ', '\t', '\n', '\r', '/'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        // Strip title formatting only. Comparisons and technical names such as Vec<T>
+        // are text, not markup, and must survive unchanged.
+        if matches!(
+            name.as_str(),
+            "a" | "b"
+                | "br"
+                | "div"
+                | "em"
+                | "i"
+                | "p"
+                | "s"
+                | "small"
+                | "span"
+                | "strong"
+                | "sub"
+                | "sup"
+                | "u"
+        ) {
+            rest = &rest[end + 1..];
+        } else {
+            without_tags.push('<');
+            rest = &rest[1..];
+        }
+    }
+    without_tags.push_str(rest);
+    let normalized = without_tags
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    let folded = normalized.to_ascii_lowercase();
+    if matches!(
+        folded.as_str(),
+        "na" | "n/a" | "none" | "unknown" | "untitled" | "void" | "access denied"
+    ) || folded.starts_with("just a moment")
+        || folded.starts_with("verification required")
+    {
+        return None;
+    }
+    let mut title = normalized;
+    if title.chars().count() > 500 {
+        let truncated = title.chars().take(500).collect::<String>();
+        title = String::from(truncated.trim_end());
+    }
+    Some(title)
+}
 
 pub fn content_publication_date(
     url: &str,
@@ -98,6 +183,44 @@ fn clean_string(value: Option<&Value>) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reader_titles_prefer_generated_headlines_and_keep_meaningful_qualifiers() {
+        let source = "An 86-minute guide to finding PMF | Rob Snyder (Author, The Power of Pull)";
+        let metadata = json!({"summary": {
+            "title": "  Rob Snyder’s\n playbook for finding product-market fit  ",
+            "feed_preview": {"title": "An alternate preview"}
+        }});
+        assert_eq!(
+            content_display_title(Some(source), metadata.as_object().unwrap()).as_deref(),
+            Some("Rob Snyder’s playbook for finding product-market fit")
+        );
+        let metadata = json!({"summary": {"title":"Access denied", "feed_preview":{"title":"<b>AI research</b> &amp; science (Part 2)"}}});
+        assert_eq!(
+            content_display_title(Some(source), metadata.as_object().unwrap()).as_deref(),
+            Some("AI research & science (Part 2)")
+        );
+        assert_eq!(
+            content_display_title(Some("Results (excluding taxes)"), &Map::new()).as_deref(),
+            Some("Results (excluding taxes)")
+        );
+        assert_eq!(
+            content_display_title(
+                Some("  "),
+                json!({"summary":{"title":"Unknown","feed_preview":{"title":" "}}})
+                    .as_object()
+                    .unwrap()
+            ),
+            None
+        );
+        for title in [
+            "Why 2 < 3 matters",
+            "Vec<T> explained",
+            "Results > expectations",
+        ] {
+            assert_eq!(clean_title(title).as_deref(), Some(title));
+        }
+    }
 
     #[test]
     fn canonical_x_status_uses_original_date_and_author() {

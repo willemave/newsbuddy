@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-10-25 — `main` — Briefing segment headline single-line metadata
+
+- **Status:** Complete
+- **Scope:** `BriefingSegmentHeadlineView.swift`, `BriefingSegmentHeadlineTests.swift`, `docs/laws/briefing.md` (B5).
+- **Decisions:** Article/podcast headline metadata is now one line: publisher kicker, then `Kind · duration/reading time · publication date`. The separate "Published" and "Briefed" lines are gone; the Briefed time stays in the VoiceOver label only. A long publisher truncates first. The line wraps to a stacked layout only when even the details cannot fit (accessibility text sizes or very narrow widths).
+- **Validation:** `BriefingSegmentHeadlineTests` pass (8/8) on the iPhone 17 simulator. Not checked visually: the local DB has no briefing segments.
+- **Follow-up:** The publication date is shorter: the year is left out for dates in the current year (`Oct 16`) and kept for older ones (`Oct 16, 2023`). Law B5 updated to match.
+- **Remaining:** Visual check against real segment data.
+- **Commits:** Uncommitted
+
 ### 2026-10-25 — `release/cli-0.3.0` — Newsbuddy CLI 0.3.0 release
 
 - **Status:** Complete; CLI tag, GitHub release, and Homebrew tap published.
@@ -3969,3 +3979,19 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Scope:** Commit all current tracked and untracked queue, typed delivery, migration, native polling, regression and documentation changes. Cleanup, strict review and explicit Claude Opus 5.5 verification are complete; focused validation is recorded above.
 - **Deployment:** Run the canonical complete release gate with live provider/E2B smoke for the exact commit, then push that tested SHA and dispatch the required maintenance cutover for migration `20261024000000`. Old writers must stop before migration; the supported deploy path owns backup and restart.
 - **Evidence:** Store exact-commit gate artifacts under `test-results/release-gate/<sha>/`; independently verify the deployed image, migration, public readiness, worker health and fresh task progress. Apple distribution is outside this release.
+
+### 2026-10-26 — `main` — Consistent article and podcast headlines
+
+- **Status:** Complete locally; uncommitted and undeployed.
+- **Scope:** Shared reader-title selection across Content, Briefing/composition, chat context, and audio display titles; summary title instructions and preview agreement. Preserve unrelated native metadata changes.
+- **Decisions:** Reuse stored summary titles, then preview titles, then original source titles. Keep original titles for provenance; preserve meaningful punctuation. Do not rewrite stored summaries, regenerate paid artifacts, or change existing audio snapshots. Explicit Opus 5.5 design review supports the existing title order.
+- **Review follow-up:** First Opus 5.5 implementation review verified title selection and identified title-only audio cache churn. Read-only production inventory found one affected completed Content episode and no Briefing audio from the last seven days. Preserve existing audio identities rather than accept duplicate paid generation. Also preserve technical angle brackets and route Knowledge chat material through the shared headline selector.
+- **Audio correction:** Preserve exact prior source-title bytes in content/custom audio snapshots and the normalized original title in Briefing snapshots. Reader headlines remain outside audio identity; isolated PostgreSQL coverage proves completed article/podcast recordings retain their ID, group, snapshot, status and existing file after a title-only change. Source title labels use an already captured summary when available; Briefing snapshot provenance labels remain original. Existing stored figure captions keep their captured titles until normal recomposition.
+- **Validation:** 36 focused Rust checks passed, including the isolated PostgreSQL reuse regression, API snapshot byte fixtures, reader/Briefing/chat/ChatGPT projections and provider generation tests. Warning-denied all-target Clippy for API/DB/providers/worker, formatting, 943-file module-size guard, public-contract drift and diff checks passed. Explicit Opus 5.5 corrective final review found no material blocker and independently reran 11 focused checks, including PostgreSQL audio reuse. No paid application-model/E2B canary, full release gate, commit, push, deployment, or production mutation.
+
+### 2026-10-26 — `main` — Full headline and CLI release
+
+- **Status:** Release authorized for all tracked and untracked repository changes; exact-commit validation in progress.
+- **Scope:** Consistent reader headlines, preserved audio identities, compact native Briefing metadata, and the existing unpushed CLI 0.3.0 release commit.
+- **Validation:** Prior focused implementation checks are recorded above. A fresh explicit Claude Opus 5.5 release review and the canonical complete gate, including paid live provider/E2B smoke, are required before push.
+- **Delivery:** Reconciled with current `origin/main`; gate artifacts will be stored under `test-results/release-gate/<sha>/`. Push only the clean tested SHA, wait for its Docker Deploy workflow, and independently prove active image, migration state, operator health and public readiness. Apple distribution remains outside this release.

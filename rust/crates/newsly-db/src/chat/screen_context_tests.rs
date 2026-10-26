@@ -22,6 +22,14 @@ fn content_titles_share_nonblank_fallback_and_bounded_display_policy() {
     );
     assert_eq!(
         title(
+            Some("Original"),
+            &json!({"domain":{"summary":{"title":"Reader headline"}}})
+        )
+        .as_deref(),
+        Some("Reader headline")
+    );
+    assert_eq!(
+        title(
             None,
             &json!({"summary":{"artifact":{"payload":{"overview":"Artifact overview"}}}})
         )

@@ -6,6 +6,7 @@ fn source(id: i64, title: &str) -> BriefingRefreshSource {
         kind: "news".to_owned(),
         id,
         title: title.to_owned(),
+        original_title: title.to_owned(),
         source_name: None,
         summary: None,
         key_points: Vec::new(),

@@ -62,3 +62,20 @@ fn detail_and_list_baselines() {
         );
     }
 }
+
+#[test]
+fn reader_headlines_preserve_source_title_in_detail_and_use_preview_fallback() {
+    for kind in ["article", "podcast"] {
+        let fixture = serde_json::json!({"content_type":kind,"metadata":{"summary":{"title":"Reader headline","feed_preview":{"title":"Other preview"}}}});
+        let detail = present_content_detail(row(&fixture)).unwrap();
+        let list = present_content_summary(row(&fixture), None, None).unwrap();
+        assert_eq!(detail.display_title, "Reader headline");
+        assert_eq!(detail.title.as_deref(), Some("Fixture title"));
+        assert_eq!(list.title.as_deref(), Some("Reader headline"));
+        let fixture = serde_json::json!({"content_type":kind,"metadata":{"summary":{"title":" ","feed_preview":{"title":"Preview headline"}}}});
+        assert_eq!(
+            present_content_detail(row(&fixture)).unwrap().display_title,
+            "Preview headline"
+        );
+    }
+}

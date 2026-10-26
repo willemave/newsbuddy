@@ -27,8 +27,9 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
 
         XCTAssertEqual(headline.publishedAt, publishedAt)
         XCTAssertNotEqual(headline.publishedAt, headline.briefedAt)
-        XCTAssertTrue(try XCTUnwrap(headline.publicationLabel).hasPrefix("Published "))
-        XCTAssertTrue(try XCTUnwrap(headline.publicationLabel).contains("2023"))
+        let publicationDate = try XCTUnwrap(headline.publicationDate)
+        XCTAssertTrue(publicationDate.contains("2023"))
+        XCTAssertEqual(headline.detailLine, "Article · \(publicationDate)")
         XCTAssertTrue(headline.briefedLabel.hasPrefix("Briefed "))
     }
 
@@ -37,7 +38,8 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
         let headline = try XCTUnwrap(makeHeadline(sourceKeys: ["content:1"], sources: [source]))
 
         XCTAssertNil(headline.publishedAt)
-        XCTAssertNil(headline.publicationLabel)
+        XCTAssertNil(headline.publicationDate)
+        XCTAssertEqual(headline.detailLine, "Article")
         XCTAssertFalse(headline.briefedLabel.isEmpty)
     }
 
@@ -84,6 +86,20 @@ final class BriefingSegmentHeadlineTests: XCTestCase {
         )
         XCTAssertEqual(BriefingSegmentHeadline.publisherName("Moody's Talks - Inside Economics"), "Moody's Talks - Inside Economics")
         XCTAssertNil(BriefingSegmentHeadline.publisherName(" | Tagline"))
+    }
+
+    func testShortDateOmitsCurrentYear() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date(timeIntervalSince1970: 1_792_800_000) // 2026-10-24
+        let sameYear = Date(timeIntervalSince1970: 1_792_108_800) // 2026-10-16
+        let earlier = Date(timeIntervalSince1970: 1_680_000_000) // 2023-03-28
+
+        let sameYearLabel = BriefingSegmentHeadline.shortDate(sameYear, now: now, calendar: calendar)
+        let earlierLabel = BriefingSegmentHeadline.shortDate(earlier, now: now, calendar: calendar)
+
+        XCTAssertFalse(sameYearLabel.contains("2026"))
+        XCTAssertTrue(earlierLabel.contains("2023"))
     }
 
     func testDurationLabelRoundsToWholeMinutes() {

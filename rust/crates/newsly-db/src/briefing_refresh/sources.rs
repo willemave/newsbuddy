@@ -217,7 +217,9 @@ pub(super) fn source_from_content(
         source_key: format!("content:{id}"),
         kind: "content".to_owned(),
         id,
-        title: clean_text(title).unwrap_or_else(|| format!("Content {id}")),
+        title: crate::content_metadata::source_presentation::content_display_title(title, &map)
+            .unwrap_or_else(|| format!("Content {id}")),
+        original_title: clean_text(title).unwrap_or_else(|| format!("Content {id}")),
         source_name: crate::content_metadata::source_presentation::content_publisher(
             url,
             source_name,
@@ -270,6 +272,7 @@ pub(crate) fn source_from_news(row: &super::SourceNewsRow) -> BriefingRefreshSou
         source_key: format!("news:{id}"),
         kind: "news".to_owned(),
         id,
+        original_title: title.clone(),
         title,
         source_name: None,
         summary: clean_text(summary_text),
@@ -769,5 +772,46 @@ mod source_presentation_tests {
         );
         assert_eq!(source.published_at, None);
         assert_eq!(source.source_name.as_deref(), Some("Publisher"));
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn composition_and_narration_sources_use_the_reader_headline() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z")
+            .unwrap()
+            .naive_utc();
+        for kind in ["article", "podcast"] {
+            for (summary, expected) in [
+                (
+                    serde_json::json!({"title":"Rob Snyder’s playbook for finding product-market fit"}),
+                    "Rob Snyder’s playbook for finding product-market fit",
+                ),
+                (
+                    serde_json::json!({"title":" ","feed_preview":{"title":"Preview headline"}}),
+                    "Preview headline",
+                ),
+                (serde_json::json!({}), "Source (Part 2)"),
+            ] {
+                let metadata = serde_json::json!({"domain":{"summary":summary}});
+                let source = source_from_content(
+                    7,
+                    kind,
+                    "https://example.com/episode",
+                    None,
+                    Some("  Source  (Part 2)  "),
+                    None,
+                    &metadata,
+                    now,
+                    None,
+                );
+                assert_eq!(source.title, expected);
+                assert_eq!(source.original_title, "Source (Part 2)");
+                assert_eq!(source.source_key, "content:7");
+            }
+        }
     }
 }

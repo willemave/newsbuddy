@@ -173,24 +173,16 @@ pub(super) async fn get_content_chat_url(
 }
 
 fn resolve_display_title(projection: &ContentBodyProjection) -> String {
-    projection
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .or_else(|| {
-            projection
-                .metadata
-                .get("summary")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|summary| summary.get("title"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| format!("Untitled {}", projection.content_type))
+    let metadata = projection
+        .metadata
+        .as_object()
+        .map(newsly_db::content_metadata::runtime_metadata)
+        .unwrap_or_default();
+    newsly_db::content_metadata::source_presentation::content_display_title(
+        projection.title.as_deref(),
+        &metadata,
+    )
+    .unwrap_or_else(|| format!("Untitled {}", projection.content_type))
 }
 
 fn fallback_discussion_text(metadata: &serde_json::Value) -> Option<&str> {
@@ -404,4 +396,28 @@ fn not_found(message: &str, request_id: &str) -> ApiError {
         message,
         request_id.to_owned(),
     )
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn chatgpt_context_uses_the_same_headline_as_content_detail() {
+        let projection = ContentBodyProjection {
+            response_content_id: 7,
+            content_type: "podcast".to_owned(),
+            title: Some("Episode #123 (Guest credentials)".to_owned()),
+            source: None,
+            publication_date: None,
+            metadata: serde_json::json!({"domain":{"summary":{"title":"Reader headline"}}}),
+            variant: newsly_db::ContentBodyVariant::Source,
+            kind: "transcript".to_owned(),
+            fallback_format: None,
+            fallback_text: None,
+            fallback_updated_at: None,
+            pointer: None,
+        };
+        assert_eq!(resolve_display_title(&projection), "Reader headline");
+    }
 }

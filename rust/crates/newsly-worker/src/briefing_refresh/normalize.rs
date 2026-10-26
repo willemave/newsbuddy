@@ -492,6 +492,7 @@ mod tests {
             kind: "content".to_owned(),
             id,
             title: format!("Source {id}"),
+            original_title: format!("Source {id}"),
             source_name: None,
             summary: None,
             key_points: Vec::new(),

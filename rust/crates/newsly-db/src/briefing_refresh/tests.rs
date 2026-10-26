@@ -187,6 +187,7 @@ fn embedding_text_keeps_title_summary_and_points() {
         kind: "news".to_owned(),
         id: 1,
         title: "A title".to_owned(),
+        original_title: "A title".to_owned(),
         source_name: None,
         summary: Some("A summary".to_owned()),
         key_points: vec!["One".to_owned(), "Two".to_owned()],

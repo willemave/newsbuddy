@@ -136,7 +136,7 @@ pub(super) async fn load_content_material(
         content_id: row.id,
         content_type: row.content_type,
         url: row.url,
-        title: row.title,
+        title: crate::chat::content_display_title(row.title.as_deref(), &row.content_metadata),
         source: row.source,
         fallback_body: fallback_content_body(&row.content_metadata),
         metadata: row.content_metadata,

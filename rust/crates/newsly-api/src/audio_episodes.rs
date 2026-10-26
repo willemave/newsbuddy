@@ -353,6 +353,7 @@ pub(super) async fn create_custom_narration_audio_episode(
     let source_budget = (CUSTOM_SOURCE_TOTAL_CHAR_LIMIT / source_count)
         .clamp(CUSTOM_SOURCE_MIN_CHARS, LONGFORM_BODY_MAX_CHARS);
     let mut items = Vec::with_capacity(source_count);
+    let mut first_reader_title = None;
     for content_id in &content_ids {
         let projection =
             find_visible_content_detail(state.database.pool(), current_user.id, *content_id)
@@ -366,6 +367,9 @@ pub(super) async fn create_custom_narration_audio_episode(
             ));
         }
         let body = load_content_body(&state, current_user.id, *content_id, &request_id).await?;
+        if first_reader_title.is_none() {
+            first_reader_title = Some(content_display_title(&projection));
+        }
         let mut item = content_source_payload(&projection, &body, source_budget);
         item.as_object_mut()
             .expect("content source payload is an object")
@@ -420,7 +424,8 @@ pub(super) async fn create_custom_narration_audio_episode(
         "source_text_included_chars": source_text_included_chars,
         "items": items,
     });
-    let title = normalized_title.unwrap_or_else(|| custom_narration_title(&snapshot));
+    let title = normalized_title
+        .unwrap_or_else(|| custom_narration_title(&snapshot, first_reader_title.as_deref()));
     create_and_enqueue(
         &state,
         &stamp,
@@ -976,7 +981,7 @@ fn content_source_payload(
     json!({
         "content_id": content.id,
         "content_type": content.content_type,
-        "title": content_display_title(content),
+        "title": content_source_title(content),
         "source": content.source,
         "platform": content.platform,
         "url": content.url,
@@ -1005,6 +1010,24 @@ fn news_source_payload(item: &newsly_db::NewsItemProjection) -> Value {
 }
 
 fn content_display_title(content: &newsly_db::ContentDetailProjection) -> String {
+    let metadata = content
+        .content_metadata
+        .as_object()
+        .map(newsly_db::content_metadata::runtime_metadata)
+        .unwrap_or_default();
+    newsly_db::content_metadata::source_presentation::content_display_title(
+        content.title.as_deref(),
+        &metadata,
+    )
+    .or_else(|| {
+        first_metadata_text(&content.content_metadata, &["title", "episode_title"])
+            .map(str::to_owned)
+    })
+    .unwrap_or_else(|| format!("Content {}", content.id))
+}
+
+// Keep source provenance byte-equivalent to existing snapshots: title participates in the hash.
+fn content_source_title(content: &newsly_db::ContentDetailProjection) -> String {
     content
         .title
         .as_deref()
@@ -1066,14 +1089,17 @@ fn excerpt_longform(body: &str, max_chars: usize) -> (String, &'static str) {
     (result, "head_middle_tail")
 }
 
-fn custom_narration_title(snapshot: &Value) -> String {
+fn custom_narration_title(snapshot: &Value, first_reader_title: Option<&str>) -> String {
     let Some(items) = snapshot.get("items").and_then(Value::as_array) else {
         return "Custom narration".to_owned();
     };
-    let first_title = items
-        .first()
-        .and_then(|item| item.get("title"))
-        .and_then(Value::as_str)
+    let first_title = first_reader_title
+        .or_else(|| {
+            items
+                .first()
+                .and_then(|item| item.get("title"))
+                .and_then(Value::as_str)
+        })
         .map(str::trim)
         .filter(|title| !title.is_empty())
         .unwrap_or("Selected sources");
@@ -1237,3 +1263,6 @@ fn escape_html(value: &str) -> String {
 fn escape_html_attribute(value: &str) -> String {
     escape_html(value)
 }
+
+#[cfg(test)]
+mod title_tests;

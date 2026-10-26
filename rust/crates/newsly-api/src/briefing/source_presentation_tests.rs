@@ -154,3 +154,25 @@ fn podcast_sources_carry_duration_but_not_reading_minutes() {
     let source = present_content_source("content:7", &projection, false, "r").unwrap();
     assert_eq!(source.duration_seconds, None);
 }
+
+#[test]
+fn briefing_and_content_views_share_generated_headlines_without_changing_provenance() {
+    for kind in ["article", "podcast"] {
+        for (summary, expected) in [
+            (
+                json!({"title":"Reader headline (with a meaningful qualifier)", "feed_preview":{"title":"Alternate preview"}}),
+                "Reader headline (with a meaningful qualifier)",
+            ),
+            (
+                json!({"title":" ", "feed_preview":{"title":"Preview headline"}}),
+                "Preview headline",
+            ),
+            (json!({"title":"Access denied"}), "A Work"),
+        ] {
+            let projection = content_source(kind, json!({"domain":{"summary":summary}}));
+            let briefing = present_content_source("content:7", &projection, false, "r").unwrap();
+            assert_eq!(briefing.title, expected);
+            assert_eq!(projection.title.as_deref(), Some("A Work"));
+        }
+    }
+}

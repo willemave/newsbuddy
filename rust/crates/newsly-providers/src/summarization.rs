@@ -273,6 +273,7 @@ pub struct SelectionTrace {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FeedPreview {
+    /// The same faithful, subject-specific reader headline as the envelope title, without publisher/show branding or promotional clutter.
     pub title: String,
     pub one_line: String,
     pub preview_bullets: Vec<String>,
@@ -283,6 +284,7 @@ pub struct FeedPreview {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LongformArtifactEnvelope {
+    /// A faithful, subject-specific reader headline in single-line plain text. Preserve meaningful named entities, qualifiers, interview guests, and parentheses; omit publisher/show branding, newsletter prefixes, episode numbers, durations, guest credentials, and promotional clutter. Aim for 6-12 words when appropriate, without truncating technical entities.
     pub title: String,
     pub one_line: String,
     pub ask: ArtifactAsk,
@@ -345,6 +347,7 @@ impl LongformArtifactEnvelope {
             .clone_from(&hint.source_hint);
         self.selection_trace.candidates.clone_from(&hint.candidates);
         self.selection_trace.selected = selected;
+        self.feed_preview.title.clone_from(&self.title);
         self.feed_preview.artifact_type = selected;
         Ok(self)
     }
@@ -652,6 +655,14 @@ Produce one typed artifact from the source content, not a generic summary. Choos
 artifact type from the candidate list, then generate the matching artifact in the same JSON
 response. The choice belongs in selection_trace.
 
+Write title as a faithful, subject-specific reader headline. Preserve meaningful named entities,
+qualifiers, interview guests, and parentheses needed for meaning. Omit publisher/show branding,
+newsletter prefixes, episode numbers, durations, guest credentials, and promotional clutter.
+Aim for 6-12 words when appropriate; never truncate technical entities to meet that target.
+Use single-line plain text in sentence case, retaining proper-name capitalization. Do not use
+Markdown, decorative quotation marks, or bracket labels.
+Use exactly the same headline for title and feed_preview.title.
+
 Candidate artifact types:
 {candidate_guidance}
 
@@ -804,6 +815,82 @@ mod tests {
         let (system, _) = build_prompts(&source, &hint);
         assert!(system.contains("reader comments"));
         assert!(system.contains("Preserve who said each material claim"));
+    }
+
+    #[test]
+    fn prompt_and_schema_guide_subject_specific_titles() {
+        let source = source("podcast", "https://example.com/episode", Some("podcast"));
+        let hint = resolve_artifact_source_hint(&source);
+        let (system, _) = build_prompts(&source, &hint);
+        let schema = serde_json::to_value(schemars::schema_for!(LongformArtifactEnvelope)).unwrap();
+        let title_description = schema["properties"]["title"]["description"]
+            .as_str()
+            .unwrap();
+        for policy in [
+            "subject-specific reader headline",
+            "named entities",
+            "qualifiers",
+            "interview guests",
+            "parentheses",
+            "publisher/show branding",
+            "newsletter prefixes",
+            "episode numbers",
+            "durations",
+            "guest credentials",
+            "promotional clutter",
+            "6-12 words when appropriate",
+            "technical entities",
+        ] {
+            assert!(system.contains(policy), "prompt missing {policy}");
+            assert!(
+                title_description.contains(policy),
+                "schema missing {policy}"
+            );
+        }
+        assert!(system.contains("same headline for title and feed_preview.title"));
+        let preview_schema = serde_json::to_value(schemars::schema_for!(FeedPreview)).unwrap();
+        assert!(
+            preview_schema["properties"]["title"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("same faithful, subject-specific reader headline as the envelope title")
+        );
+    }
+
+    #[test]
+    fn new_artifact_normalization_uses_the_canonical_title_without_truncation() {
+        let source = source("news", "https://example.com/article", None);
+        let hint = resolve_artifact_source_hint(&source);
+        let canonical_title = "How the European Space Agency uses synthetic aperture radar (SAR) to track Antarctic ice movement";
+        let original_preview_title = "Daily Newsletter #123: Publisher branding (45 minutes)";
+        let value = serde_json::json!({
+            "title": canonical_title,
+            "one_line": "Satellite radar tracks changes in Antarctic ice movement.",
+            "ask": "track",
+            "artifact": {
+                "type": "briefing",
+                "payload": {
+                    "quotes": [
+                        {"text": "Satellite radar tracks changes in Antarctic ice movement.", "attribution": null},
+                        {"text": "Repeated observations reveal how the ice changes over time.", "attribution": null}
+                    ],
+                    "key_points": [],
+                    "takeaway": "Repeated radar observations track ice movement.",
+                    "extras": {"timeline": [], "key_actors": [], "what_to_watch": "Future radar observations."}
+                }
+            },
+            "generated_at": "2026-10-26T00:00:00Z",
+            "source_context": {"url": source.url, "source_name": null, "publication_date": null, "platform": null},
+            "selection_trace": {"source_hint": hint.source_hint, "candidates": ["briefing"], "selected": "briefing", "reason": "The source reports changes in ice movement.", "confidence": 0.9},
+            "feed_preview": {"title": original_preview_title, "one_line": "Satellite radar tracks changes in Antarctic ice movement.", "preview_bullets": [], "reason_to_read": "Understand Antarctic ice observations.", "artifact_type": "briefing"}
+        });
+        let artifact: LongformArtifactEnvelope = serde_json::from_value(value).unwrap();
+        // Reading existing artifacts preserves their titles; only generation normalizes them.
+        assert_eq!(artifact.feed_preview.title, original_preview_title);
+
+        let normalized = artifact.normalize_and_validate(&source, &hint).unwrap();
+        assert_eq!(normalized.title, canonical_title);
+        assert_eq!(normalized.feed_preview.title, canonical_title);
     }
 
     #[test]
