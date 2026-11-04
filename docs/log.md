@@ -3995,3 +3995,12 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Scope:** Consistent reader headlines, preserved audio identities, compact native Briefing metadata, and the existing unpushed CLI 0.3.0 release commit.
 - **Validation:** Prior focused implementation checks are recorded above. A fresh explicit Claude Opus 5.5 release review and the canonical complete gate, including paid live provider/E2B smoke, are required before push.
 - **Delivery:** Reconciled with current `origin/main`; gate artifacts will be stored under `test-results/release-gate/<sha>/`. Push only the clean tested SHA, wait for its Docker Deploy workflow, and independently prove active image, migration state, operator health and public readiness. Apple distribution remains outside this release.
+
+### 2026-11-03 — `main` — Keep Briefing headline metadata on one line
+
+- **Status:** Complete locally.
+- **Scope:** Native Article/Podcast headline metadata and Briefing law B5.
+- **Changes:** Removed the stacked layout fallback; metadata keeps one line at every text size, truncating the publisher first while preserving the complete VoiceOver label. The current checkout already omits the screenshot’s separate Published/Briefed lines.
+- **Validation:** `newsly` built and launched on iPhone 17 (iOS 26.4). The `briefing-list-metadata` fixture reproduced the stacked article header at Accessibility Large before the change and showed a single line afterward; Articles and Podcasts also checked at normal size, including long and absent publishers. All 9 `BriefingSegmentHeadlineTests` passed. Screenshots: `test-results/briefing-metadata-2026-11-03/`. Simulator text size restored to Large.
+- **Remaining:** None for the local fix. The screenshot's older three-line layout requires a newer distributed iOS build; no Apple distribution was requested or verified.
+- **Delivery:** Commit and push to `main` authorized on 2026-11-04; Apple build/distribution status remains unverified.

@@ -89,28 +89,17 @@ struct BriefingSegmentHeadlineView: View {
             onOpenSource(headline.sourceKey)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                ViewThatFits(in: .horizontal) {
-                    // One line: details keep their width and a long publisher
-                    // truncates, down to a small minimum.
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        if headline.publisher != nil {
-                            publisher
-                                .lineLimit(1)
-                                .frame(minWidth: 0, idealWidth: 64, alignment: .leading)
-                        }
-                        details
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                    }
-
-                    // Accessibility text sizes and very narrow widths.
-                    VStack(alignment: .leading, spacing: 5) {
+                // Keep metadata on one line at every text size. A long
+                // publisher truncates first; VoiceOver retains every detail.
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    if headline.publisher != nil {
                         publisher
-                            .fixedSize(horizontal: false, vertical: true)
-                        details
-                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minWidth: 0, idealWidth: 64, alignment: .leading)
                     }
+                    details
+                        .layoutPriority(1)
                 }
+                .lineLimit(1)
                 .padding(.bottom, 7)
 
                 Text(headline.title)
