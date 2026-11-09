@@ -1,14 +1,15 @@
 //! One durable clock and private candidates survive fresh sandbox attempts.
 use super::{
     AcquiredTaskSandbox, AgentOutcome, AgentRuntimeError, Arc, CancellationToken, Duration,
-    HOUSE_DESIGN_APPENDIX, Instant, LearningDeckAgentError, LearningDeckAgentRunResult,
-    LearningDeckAgentRuntime, LearningDeckArtifactError, LearningDeckArtifactStore,
-    LearningDeckEvents, LearningDeckGenerationClaimFence, LearningDeckTaskSnapshot, Map,
-    NewslyTranscript, SandboxHandle, TaskToolExecutor, Value, agent_network_policy,
-    build_user_prompt, json,
+    Instant, LearningDeckAgentError, LearningDeckAgentRunResult, LearningDeckAgentRuntime,
+    LearningDeckArtifactError, LearningDeckArtifactStore, LearningDeckEvents,
+    LearningDeckGenerationClaimFence, LearningDeckTaskSnapshot, Map, NewslyTranscript,
+    SandboxHandle, TaskToolExecutor, Value, agent_network_policy, build_user_prompt, json,
+    remaining_minutes,
 };
 use super::{
     candidate::{capture_candidate, restore_candidate},
+    look::DeckLook,
     policy::GenerationBudget,
     validation::DeckValidator,
 };
@@ -34,6 +35,7 @@ struct Attempt<'a> {
     events: Arc<LearningDeckEvents>,
     last_candidate: Option<DeckCandidate>,
     last_digest: Option<String>,
+    look_sheets: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl LearningDeckAgentRuntime {
@@ -190,6 +192,7 @@ impl LearningDeckAgentRuntime {
             events,
             last_candidate: None,
             last_digest: None,
+            look_sheets: Arc::default(),
         };
         let mut outcome = empty_outcome(&self.config.model_spec.canonical());
         let mut validation = None;
@@ -229,7 +232,11 @@ impl LearningDeckAgentRuntime {
             outcome = match attempt
                 .model(
                     NewslyTranscript::default(),
-                    build_user_prompt(source, task.interests_prompt.as_deref()),
+                    build_user_prompt(
+                        source,
+                        task.interests_prompt.as_deref(),
+                        remaining_minutes(budget.initial_deadline()),
+                    ),
                     budget.initial_deadline(),
                 )
                 .await
@@ -262,7 +269,8 @@ impl LearningDeckAgentRuntime {
                     restore_candidate(&attempt.tools, &self.config.limits, candidate).await?;
                 }
                 let prompt = format!(
-                    "Repair the existing output files using input/source.txt and output/source-notes.md; do not repeat completed research. Fix this canonical validation report: {}. Call validate_deck after edits. Keep complete output/index.html and output/source-notes.md on disk throughout.",
+                    "Repair the existing output files using input/source.txt and output/source-notes.md; do not repeat completed research. About {} minutes remain. Fix this canonical validation report: {}. Call validate_deck after edits. Keep complete output/index.html and output/source-notes.md on disk throughout.",
+                    remaining_minutes(budget.repair_deadline()),
                     error.log_payload()
                 );
                 let mut repair_interrupted = false;
@@ -332,6 +340,15 @@ impl Attempt<'_> {
             deadline,
             self.cancellation.child_token(),
             self.runtime.config.limits.clone(),
+            DeckLook::new(
+                self.runtime.provider.clone(),
+                self.sandbox.clone(),
+                self.tools.clone(),
+                self.task.workspace_path.clone(),
+                deadline,
+                self.cancellation.child_token(),
+                Arc::clone(&self.look_sheets),
+            ),
         ))
     }
     async fn validate(&self, candidate: &DeckCandidate) -> Result<Value, LearningDeckAgentError> {
@@ -401,6 +418,7 @@ impl Attempt<'_> {
         let validator = self.validator(deadline);
         let mut definitions = TaskToolExecutor::definitions();
         definitions.push(DeckValidator::definition());
+        definitions.push(DeckLook::definition());
         let request =
             self.runtime
                 .agent_request(self.task, transcript, prompt, definitions, deadline)?;
@@ -475,7 +493,7 @@ fn input_fingerprint(
     tool_policy: &Map<String, Value>,
 ) -> Result<String, serde_json::Error> {
     Ok(digest(&serde_json::to_vec(
-        &json!({"source":source,"interests":interests,"tool_policy":tool_policy,"prompt":include_str!("../../../../../assets/prompts/learning_decks/agent.md"),"house":HOUSE_DESIGN_APPENDIX,"validator":include_str!("../browser.rs"),"draft_version":1}),
+        &json!({"source":source,"interests":interests,"tool_policy":tool_policy,"prompt":include_str!("../../../../../assets/prompts/learning_decks/agent.md"),"deck_kit":crate::learning_deck::DECK_KIT_FILES.iter().map(|(path, bytes)| json!([path, String::from_utf8_lossy(bytes)])).collect::<Vec<_>>(),"validator":include_str!("../browser.rs"),"draft_version":1}),
     )?))
 }
 fn candidate_digest(candidate: &DeckCandidate) -> Result<String, serde_json::Error> {

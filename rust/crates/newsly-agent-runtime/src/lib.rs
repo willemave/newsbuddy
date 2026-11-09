@@ -11,10 +11,10 @@ mod transcript;
 pub use engine::{
     AgentEvent, AgentEventSink, AgentLimits, AgentModelUsageObservation, AgentOutcome,
     AgentRequest, AgentRuntimeError, BoxToolFuture, ChatBudget, ResponseContract, ToolCall,
-    ToolDefinition, ToolExecutor, ToolOutput, ToolPolicy,
+    ToolDefinition, ToolExecutor, ToolImage, ToolOutput, ToolPolicy,
 };
 pub use transcript::{
-    AssistantPart, LegacyHistoryError, MessagePart, MessageRole, NEWSLY_TRANSCRIPT_VERSION,
-    NewslyMessage, NewslyTranscript, ProviderUsage, ReasoningContentKind, RequestPart,
-    TranscriptError, TranscriptFinishReason,
+    AssistantPart, ImageMediaType, LegacyHistoryError, MessagePart, MessageRole,
+    NEWSLY_TRANSCRIPT_VERSION, NewslyMessage, NewslyTranscript, ProviderUsage,
+    ReasoningContentKind, RequestPart, TranscriptError, TranscriptFinishReason,
 };

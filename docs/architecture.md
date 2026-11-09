@@ -773,6 +773,14 @@ Interrupted edits retain the last complete candidate; a normal model completion 
 its current files and cannot silently fall back to an older draft. Deletion collects private registered
 objects; interrupted uploads and terminal candidates use the existing artifact cleanup sweep.
 
+The agent's `look` tool renders the current deck through the same viewer shell at upright-phone
+size and returns JPEG contact sheets (about 1.1 MP each, under the provider's downscale size) of
+slides the model has not seen in their current form, or a requested range. Change detection hashes
+authored slide content without Reveal's runtime state, and the host commits the seen set only after
+it has read every sheet. One model conversation (the initial and repair phases of an attempt)
+receives at most 24 sheets; a look failure is reported to the model without failing the deck. The prompt requires review rounds (look, critique the weakest
+slides, fix, validate) calibrated to the remaining budget.
+
 The agent's `validate_deck` tool and final publication use the same static and Chromium checks.
 Browser validation renders an exact root-owned, sealed copy of the captured candidate; publication
 uses those captured bytes with the same viewer transform. Only explicit artifact defects are
@@ -874,6 +882,14 @@ Rig 0.42 is pinned behind `newsly-agent-runtime`. Newsly owns:
 - usage, cache/reasoning tokens, request/response identity, and tracing;
 - versioned transcripts and legacy-history conversion.
 
+Tool outputs may carry typed images. The engine sends a batch's tool results first and then one
+user message holding that batch's images, because Rig's OpenRouter path rejects images inside
+tool results and providers require tool results to lead the user turn. Image parts live only in
+in-memory run transcripts; `validate_durable` rejects them, and chat publication enforces it.
+Move images into the tool results only when Rig's OpenRouter provider supports that and a live
+probe confirms delivery to Claude; the transcript shape does not change. Image media types are
+JPEG and PNG. The chat budget's size estimate assumes chat tools return no images.
+
 `newsly-db` owns transcript read compatibility. Only bare arrays or messages
 with legacy request/response kinds attempt PydanticAI conversion; failed
 conversion returns the original canonical decode error. Retire the converter
@@ -916,6 +932,18 @@ gate validates a clean current-main SHA, the manual publication workflow uses
 an exact-pinned official E2B CLI to rebuild only the canonical `newsly-agent`
 alias, recording the resolved template ID and source receipt. No Python SDK
 participates in template publication.
+
+The template also bakes the Learning Deck Kit (`rust/assets/deckkit`, installed to
+`/opt/deckkit` by its `install.sh`). The kit owns deck presentation: the Daylight theme,
+bundled fonts, Reveal configuration, layout components, KaTeX pre-rendering, a
+matplotlib style, and static diagram renderers (D3 and visx through server-side React, and
+Mermaid through Chromium), which inline SVG so decks ship no runtime chart scripts, with npm dependencies pinned by its lockfile. The deck prompt
+(`rust/assets/prompts/learning_decks/agent.md`) owns teaching only and stays byte-stable
+across initial and repair requests; remaining time is stated in the task message. One
+kit file list feeds both the template revision and the private draft fingerprint. Workspace preparation fails as
+infrastructure when the kit is missing, so the template carrying a kit change must be
+published before workers that depend on it. The host `validate_deck` tool remains the
+only validator; the kit carries no copy of it.
 
 Command events preserve observed stdout/stderr order while decoding each stream
 incrementally. Keepalives are not text. Nonzero exit is a structured command

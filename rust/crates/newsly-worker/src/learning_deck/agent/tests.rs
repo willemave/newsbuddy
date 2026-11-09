@@ -42,3 +42,58 @@ fn infrastructure_failures_never_become_artifact_repairs() {
     assert!(!internal.repairable());
     assert_eq!(internal.error_type(), "validation_infrastructure_failed");
 }
+
+#[test]
+fn system_prompt_is_the_rebuild_method_and_stays_time_independent() {
+    let prompt = super::system_prompt().unwrap();
+
+    assert!(prompt.contains("deckkit help"));
+    assert!(prompt.contains("Method: rebuild the mechanism"));
+    assert!(prompt.contains("output/plan.md"));
+    assert!(prompt.contains("The task message states your remaining wall-clock budget"));
+    assert!(
+        !prompt.contains('$'),
+        "unsubstituted placeholder in system prompt"
+    );
+    assert_eq!(super::system_prompt().unwrap(), prompt);
+}
+
+#[test]
+fn user_prompt_substitutes_every_placeholder_including_remaining_time() {
+    let source = serde_json::json!({"source_title": "Neural Networks Are Already Clean", "source_kind": "article"});
+    // User text that looks like a placeholder must stay literal.
+    let prompt = super::build_user_prompt(
+        source.as_object().unwrap(),
+        Some("Focus on SAEs, not $remaining_minutes"),
+        12,
+    );
+
+    assert!(prompt.contains("Primary source: Neural Networks Are Already Clean"));
+    assert!(prompt.contains("User instructions: Focus on SAEs, not $remaining_minutes"));
+    assert!(prompt.contains("Remaining wall-clock budget: about 12 minutes"));
+    assert!(!prompt.contains("deck-design-brief"));
+    assert!(!prompt.replace("$remaining_minutes", "").contains('$'));
+}
+
+#[test]
+fn missing_deck_kit_is_named_infrastructure_not_a_repair() {
+    let error = super::missing_deck_kit();
+
+    assert!(!error.repairable());
+    assert!(error.to_string().contains("/opt/deckkit/bin/deckkit"));
+}
+
+#[test]
+fn deck_kit_skeleton_satisfies_the_publication_contract() {
+    use super::super::artifacts::{LearningDeckArtifactLimits, validate_learning_deck_artifact};
+    let skeleton = include_str!("../../../../../assets/deckkit/skeleton.html")
+        .replace("__TITLE__", "Kit contract");
+    let limits = LearningDeckArtifactLimits {
+        index_html_bytes: 2_000_000,
+        source_notes_bytes: 1_000_000,
+        asset_count: 40,
+        asset_bytes: 5_000_000,
+    };
+
+    validate_learning_deck_artifact(&skeleton, "# Sources\n\n- Kit contract", &limits).unwrap();
+}

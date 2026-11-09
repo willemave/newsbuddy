@@ -27,6 +27,88 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-07 — `willem/deck-prompt-rethink` — Learning Deck depth: variant A (rebuild the mechanism)
+
+- **Status:** Complete. Slices 1 (prompt + kit) and 2 (`look`) and the visual tools are committed to `main`. Publish the `newsly-agent` template from the same SHA right after the deploy.
+- **Scope:** `rust/assets/prompts/learning_decks/agent.md`, `rust/assets/deckkit/` (new), `e2b.Dockerfile`, `newsly-worker` `learning_deck/agent.rs` + `agent/session.rs` + `agent/tests.rs`, `share_actions/agent.rs` (template revision inputs), `docs/architecture.md`, `docs/laws/knowledge-and-learning.md` (K23).
+- **Decisions:**
+  - The system prompt stays byte-stable across initial and repair requests (cache and replayed-thinking safety). Remaining minutes go in the task and repair messages.
+  - One `DECK_KIT_FILES` list (learning_deck/mod.rs) feeds the template revision and the draft fingerprint. A test compares it with the directory.
+  - The kit's npm dependencies are pinned by `package-lock.json` (`npm ci`).
+  - Decks were shallow because the prompt was mostly a CSS/layout spec, and its one teaching instruction asked for "the simplest primitive". The VM's scientific Python stack was never advertised.
+  - Presentation moved into a VM-baked Deck Kit. The prompt is now variant A: learner outcomes, a depth bar, faithful computation, a `plan.md` first, and the rebuild-the-mechanism arc. The old design-brief input file and `HOUSE_DESIGN_APPENDIX` are removed.
+  - The kit carries no validator; host `validate_deck` stays canonical.
+  - KaTeX assets are copied only when a deck has math, because of the 40-asset cap: base kit 8 assets, with math 29.
+  - Preflight `test -x /opt/deckkit/bin/deckkit` fails as infrastructure on old templates.
+  - Draft fingerprint now includes kit README/CSS.
+- **Validation:**
+  - Lab (Sonnet 5.5, prod template; 3 prod knowledge saves × 2 variants): all decks passed the canonical validator. Variant A was preferred.
+  - `cargo fmt --check` and warning-denied Clippy on newsly-worker pass; `cargo test -p newsly-worker` passes (338). New tests cover:
+    - the stable system prompt;
+    - user placeholders and remaining time;
+    - the missing-kit infrastructure error;
+    - the kit skeleton against the publication contract;
+    - kit file-list coverage;
+    - the base asset count.
+  - Oracle implementation review: no blockers. All 13 findings were addressed: title escaping, partial math failure, the remaining budget, `deckkit help` instead of an absolute path, one toolchain list, a clearer preflight error, full kit fingerprint, README asset math, the lockfile, SVG text as paths, K23 wording, and stale "deck brief" wording.
+  - `build_agent_vm_template.sh --check` passes.
+  - In a fresh VM:
+    - `install.sh` installs from the lockfile;
+    - both kit paths (no math / math) pass the canonical browser validator;
+    - titles with escaped characters, a partial math failure, and SVG text-as-paths behave as intended.
+- **Slice 2 (`look`):**
+  - Runtime and engine:
+    - `ToolOutput.images` (typed JPEG/PNG) and a `RequestPart::Image` part.
+    - The Rig engine sends each batch's tool results first, then one labelled user message with that batch's images; Rig 0.42's OpenRouter path rejects images in tool results.
+    - `validate_durable` rejects inline images; chat publication enforces it.
+  - Deck `look` tool (`agent/look.rs`, kit `bin/look.mjs`):
+    - renders through the hosted viewer at upright-phone size;
+    - returns JPEG 8-slide sheets (about 1.1 MP, about 130 KB);
+    - shows only unseen content by default (hashes authored slide content without Reveal's runtime state);
+    - the host commits seen-state only after reading every sheet, and checks JPEG bytes and manifest paths;
+    - 24 sheets per conversation, 5 per call, a 75 s minimum and a 30 s reserve;
+    - failures become tool errors, never deck failures.
+  - Prompt: mandatory review rounds (whole-deck look, `output/critique.md` with the five weakest slides, fix, validate), with time calibration.
+    - Lab evidence on the 15-minute budget: without calibration the agent stopped at 2.5–3.6 min (20–27 slides), even with `look`; with it, 7.4 min, 38 slides, 4 toy experiments, 6 looks, and real fixes.
+  - Validation:
+    - OpenRouter probe.
+    - An ignored live Rust test (`live_openrouter_tool_image_round_trips_with_reasoning`) passed, including replay of an image-bearing transcript.
+    - Engine test of ordering, wire JSON and replay; durable-guard test; look manifest/JPEG/range tests.
+    - Workspace Clippy is clean, and the workspace tests passed before the last prompt edit; the affected crates were re-run after it.
+    - VM checks of look.mjs: change detection, state commit, insertion, ranges, sheet size.
+  - Oracle review of slice 2: no blockers. All findings were addressed except two:
+    - whether an image user message mid-loop affects Anthropic thinking or cache prefixes is unmeasured;
+    - there is no automated test that `DeckValidator` routes `look`.
+- **Prompt follow-up (user direction):** a 3–5 minute run is fine, and budget pressure invites mistakes. I removed the time calibration and the "at least two rounds / fill the budget" rules. The budget is now a ceiling ("usually three to six minutes"); the prompt asks for one review round (whole-deck look, `critique.md`, fix, changed-only look, validate) and a second only for serious problems.
+  - Final pass, all three saves, prod-equivalent `look`: 5.5–6.5 min, 29–30 slides, 3–8 lab files each, all passing the canonical validator, about $2 total.
+  - Collages: `outputs/deck-depth-2026-11/collages/final-pass-*`.
+- **Visual tools (user direction):** the kit now pins D3 7.9.2, visx 4.0 with React 19.3 (server-side render only), Mermaid 12.3 and esbuild 0.28. New commands:
+  - `deckkit svg`: D3/visx entry → static SVG, with `@deckkit/theme` tokens;
+  - `deckkit mermaid`: house-themed SVG text labels, scaled to the figure width, portrait sequence settings;
+  - `deckkit inline`: idempotent placement of `lab/*.svg` into elements marked `data-deckkit-svg`.
+
+  The prompt maps explanation types to tools (matplotlib, D3/visx, Mermaid, fragment SVG, KaTeX), asks for a visual on most slides and never three text-only slides in a row, and forbids runtime chart scripts. Validated in a VM: visx chart, D3 tree, Mermaid flowchart and sequence all render, inline, pass the canonical validator and show in `look`.
+  - A suggestion alone barely changed behavior (3–4 figures per deck, Mermaid occasionally, no D3/visx). Two changes did:
+    - `plan.md` now needs a visual plan: the figure and tool for each arc step;
+    - a floor: at least a third of slides carry a real figure, including two or more D3/visx or Mermaid diagrams.
+
+    "Missing figure" joined the review checklist. Rerun results:
+
+    | Deck | Figures | Lab files | Time | Validator |
+    | --- | --- | --- | --- | --- |
+    | Dreaming | 10 of 31 | 4 D3/visx, 2 Mermaid | 9.0 min | pass |
+    | Neural Networks | 8 of 31 | 5 visx, 2 Mermaid | 8.9 min | pass |
+    | Coinbase | 4 of 24 (17%, under the floor) | 1 visx, 1 Mermaid | 5.7 min | pass |
+
+    About $2.80 total. Collages: `outputs/deck-depth-2026-11/collages/visual-tools-*`.
+- **Cleanup:** I ran `cargo clean` on the main checkout's `rust/target` at the user's request (481 GiB as cargo counts it).
+- **Disk note:** the machine hit 0 bytes free during the workspace build. I deleted this worktree's own `rust/target` and reused the main checkout's 202 GB `rust/target` for later builds.
+- **Remaining:**
+  - Publish the `newsly-agent` template from the merged SHA before deploying workers (deploy order).
+  - Measure cache-read tokens before and after a `look` in a production-route run.
+  - Workspace-wide gate and `check_public_contracts.sh` not run (no contract changes).
+- **Commits:** the 2026-11-08 learning-deck depth commit on `main` (see git history)
+
 ### 2026-10-25 — `main` — Briefing segment headline single-line metadata
 
 - **Status:** Complete

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use super::LearningDeckAgentError;
 use super::candidate::capture_candidate;
+use super::look::DeckLook;
 use crate::learning_deck::artifacts::drafts::DeckCandidate;
 use crate::learning_deck::artifacts::{
     LearningDeckArtifactLimits, validate_learning_deck_artifact,
@@ -39,6 +40,7 @@ pub(super) struct DeckValidator {
     deadline: Instant,
     cancellation: CancellationToken,
     limits: LearningDeckArtifactLimits,
+    look: DeckLook,
     failure: Arc<Mutex<Option<LearningDeckAgentError>>>,
 }
 
@@ -50,6 +52,7 @@ impl DeckValidator {
         deadline: Instant,
         cancellation: CancellationToken,
         limits: LearningDeckArtifactLimits,
+        look: DeckLook,
     ) -> Self {
         Self {
             provider,
@@ -58,6 +61,7 @@ impl DeckValidator {
             deadline,
             cancellation,
             limits,
+            look,
             failure: Arc::new(Mutex::new(None)),
         }
     }
@@ -186,11 +190,15 @@ fn deadline_ends_model_phase(
 impl ToolExecutor for DeckValidator {
     fn execute(&self, call: ToolCall, events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
         Box::pin(async move {
+            if call.name == "look" {
+                return Ok(self.look.execute(call.arguments).await);
+            }
             if call.name != "validate_deck" {
                 return self.model_tools.execute(call, events).await;
             }
             if let Err(error) = serde_json::from_value::<ValidationArguments>(call.arguments) {
                 return Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({"status":"failed", "error":format!("validate_deck takes an empty object: {error}"), "repairable":false}),
                     is_error: true,
                 });
@@ -202,10 +210,12 @@ impl ToolExecutor for DeckValidator {
             .await;
             match result {
                 Ok(report) => Ok(ToolOutput {
+                    images: Vec::new(),
                     content: report,
                     is_error: false,
                 }),
                 Err(error) if error.repairable() => Ok(ToolOutput {
+                    images: Vec::new(),
                     content: error.log_payload(),
                     is_error: true,
                 }),

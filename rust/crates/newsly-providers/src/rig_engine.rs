@@ -3,9 +3,9 @@ use std::sync::Arc;
 use chrono::Utc;
 use newsly_agent_runtime::{
     AgentEvent, AgentEventSink, AgentModelUsageObservation, AgentOutcome, AgentRequest,
-    AgentRuntimeError, AssistantPart, ChatBudget, MessagePart, MessageRole, NewslyMessage,
-    ProviderUsage, ReasoningContentKind, RequestPart, ResponseContract, ToolCall as NewslyToolCall,
-    ToolExecutor, TranscriptFinishReason,
+    AgentRuntimeError, AssistantPart, ChatBudget, ImageMediaType, MessagePart, MessageRole,
+    NewslyMessage, ProviderUsage, ReasoningContentKind, RequestPart, ResponseContract,
+    ToolCall as NewslyToolCall, ToolExecutor, ToolImage, TranscriptFinishReason,
 };
 use reqwest::Client;
 use rig_core::client::CompletionClient;
@@ -14,8 +14,8 @@ use rig_core::completion::{
     Message, ToolDefinition as RigToolDefinition,
 };
 use rig_core::message::{
-    ProviderCallId, Reasoning, ReasoningContent, ToolCall as RigToolCall, ToolCallId, ToolChoice,
-    ToolFunction, ToolResultContent, UserContent,
+    ImageMediaType as RigImageMediaType, ProviderCallId, Reasoning, ReasoningContent,
+    ToolCall as RigToolCall, ToolCallId, ToolChoice, ToolFunction, ToolResultContent, UserContent,
 };
 use rig_core::providers::{anthropic, gemini, openai, openrouter};
 use secrecy::ExposeSecret;
@@ -312,6 +312,8 @@ impl RigAgentEngine {
                 if calls.len() > remaining as usize {
                     return Err(AgentRuntimeError::ToolCallLimitExceeded);
                 }
+                let mut images = Vec::new();
+                let mut image_sources = Vec::new();
                 for call in calls {
                     tool_call_count = tool_call_count.saturating_add(1);
                     let call_id = call.id.as_str().to_owned();
@@ -319,7 +321,7 @@ impl RigAgentEngine {
                         id: call_id.clone(),
                         name: call.function.name.clone(),
                     })?;
-                    let output = tools
+                    let mut output = tools
                         .execute(
                             NewslyToolCall {
                                 id: call_id.clone(),
@@ -329,6 +331,14 @@ impl RigAgentEngine {
                             Arc::clone(&events),
                         )
                         .await?;
+                    if !output.images.is_empty() {
+                        image_sources.push(format!(
+                            "{} ({})",
+                            call.function.name,
+                            output.images.len()
+                        ));
+                    }
+                    images.append(&mut output.images);
                     events.publish(AgentEvent::ToolCallFinished {
                         id: call_id.clone(),
                         is_error: output.is_error,
@@ -364,6 +374,41 @@ impl RigAgentEngine {
                             content: output.content,
                             is_error: output.is_error,
                         })],
+                        created_at: Utc::now(),
+                        run_id: response.response_id.clone(),
+                        provider: Some(response.provider.clone()),
+                        model: response.model.clone().or_else(|| Some(model_name.clone())),
+                        finish_reason: None,
+                        usage: ProviderUsage::default(),
+                        metadata: Map::new(),
+                    });
+                }
+                // Providers accept images in a user turn only after every tool result of the
+                // batch, so tool images travel together in one follow-up user message.
+                if !images.is_empty() {
+                    // Label the images so the model reads them as tool output, not a person.
+                    let label = format!(
+                        "Images returned by this batch's tool calls, in order: {}.",
+                        image_sources.join(", ")
+                    );
+                    history.push(Message::User {
+                        content: std::iter::once(UserContent::text(label.clone()))
+                            .chain(images.iter().map(rig_image))
+                            .collect(),
+                    });
+                    transcript.messages.push(NewslyMessage {
+                        id: Some(Uuid::new_v4()),
+                        role: MessageRole::User,
+                        parts: std::iter::once(MessagePart::Request(RequestPart::Text {
+                            text: label,
+                        }))
+                        .chain(images.into_iter().map(|image| {
+                            MessagePart::Request(RequestPart::Image {
+                                media_type: image.media_type,
+                                data_base64: image.data_base64,
+                            })
+                        }))
+                        .collect(),
                         created_at: Utc::now(),
                         run_id: response.response_id.clone(),
                         provider: Some(response.provider.clone()),
@@ -693,11 +738,27 @@ fn request_text(parts: &[MessagePart]) -> Result<String, AgentRuntimeError> {
         .map(|parts| parts.join("\n"))
 }
 
+fn rig_image(image: &ToolImage) -> UserContent {
+    rig_image_part(image.media_type, &image.data_base64)
+}
+
+fn rig_image_part(media_type: ImageMediaType, data_base64: &str) -> UserContent {
+    let media_type = match media_type {
+        ImageMediaType::Jpeg => RigImageMediaType::JPEG,
+        ImageMediaType::Png => RigImageMediaType::PNG,
+    };
+    UserContent::image_base64(data_base64.to_owned(), Some(media_type), None)
+}
+
 fn request_content(parts: &[MessagePart]) -> Result<Vec<UserContent>, AgentRuntimeError> {
     parts
         .iter()
         .map(|part| match part {
             MessagePart::Request(RequestPart::Text { text }) => Ok(UserContent::text(text.clone())),
+            MessagePart::Request(RequestPart::Image {
+                media_type,
+                data_base64,
+            }) => Ok(rig_image_part(*media_type, data_base64)),
             MessagePart::Request(RequestPart::Retry { message, .. }) => {
                 Ok(UserContent::text(message.clone()))
             }
@@ -997,3 +1058,6 @@ mod tests;
 
 #[cfg(test)]
 mod chat_budget_tests;
+
+#[cfg(test)]
+mod tool_image_tests;

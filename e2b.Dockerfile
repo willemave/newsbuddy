@@ -48,6 +48,9 @@ RUN apt-get update \
     && newsly-vm-bootstrap --help >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
+COPY rust/assets/deckkit /tmp/deckkit-src
+RUN bash /tmp/deckkit-src/install.sh && rm -rf /tmp/deckkit-src
+
 RUN ln -s /opt/newsly-agent/node_modules /node_modules \
     && mkdir -p /home/user/.cache \
     && ln -s /opt/ms-playwright /home/user/.cache/ms-playwright \
