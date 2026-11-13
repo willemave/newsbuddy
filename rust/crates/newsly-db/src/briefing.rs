@@ -565,7 +565,7 @@ pub async fn mark_briefing_lens_read(
     let lens_id = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND key = $2 AND status = 'active'
+        WHERE user_id = $1::bigint AND key = $2 AND status = 'active'
         "#,
     )
     .bind(user_id)
@@ -578,7 +578,7 @@ pub async fn mark_briefing_lens_read(
     let raw_keys = sqlx::query_scalar::<_, Value>(
         r#"
         SELECT source_keys::jsonb FROM briefing_segments
-        WHERE lens_id::bigint = $1 AND user_id::bigint = $2
+        WHERE lens_id = $1::bigint AND user_id = $2::bigint
           AND status IN ('active', 'degraded')
         "#,
     )
@@ -586,13 +586,16 @@ pub async fn mark_briefing_lens_read(
     .bind(user_id)
     .fetch_all(&mut **transaction)
     .await?;
-    let source_keys = dedupe_source_keys(raw_keys.iter().flat_map(json_string_array));
-    let read_keys = read_source_keys_transaction(transaction, user_id, &source_keys).await?;
-    let keys_to_mark = source_keys
+    let mut source_keys = dedupe_source_keys(raw_keys.iter().flat_map(json_string_array));
+    // News keys still go through the idempotent insert so a representative can get its own mark.
+    let (content_ids, _) = parse_source_ids(&source_keys);
+    let read_content_keys = read_content_ids(&mut **transaction, user_id, &content_ids)
+        .await?
         .into_iter()
-        .filter(|key| key.starts_with("news:") || !read_keys.contains(key))
-        .collect::<Vec<_>>();
-    mark_sources_locked(transaction, user_id, &keys_to_mark, version)
+        .map(|id| format!("content:{id}"))
+        .collect::<HashSet<_>>();
+    source_keys.retain(|key| !read_content_keys.contains(key));
+    mark_sources_locked(transaction, user_id, &source_keys, version)
         .await
         .map(Some)
 }
@@ -814,20 +817,7 @@ async fn read_source_keys_pool(
     source_keys: &[String],
 ) -> Result<HashSet<String>, BriefingRepositoryError> {
     let (content_ids, news_ids) = parse_source_ids(source_keys);
-    let content = if content_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT DISTINCT content_id::bigint FROM content_read_status
-            WHERE user_id::bigint = $1 AND content_id::bigint = ANY($2::bigint[])
-            "#,
-        )
-        .bind(user_id)
-        .bind(&content_ids)
-        .fetch_all(pool)
-        .await?
-    };
+    let content = read_content_ids(pool, user_id, &content_ids).await?;
     let news = if news_ids.is_empty() {
         Vec::new()
     } else {
@@ -844,52 +834,36 @@ async fn read_source_keys_pool(
         .collect())
 }
 
-async fn read_source_keys_transaction(
-    transaction: &mut Transaction<'_, Postgres>,
+async fn read_content_ids<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     user_id: i64,
-    source_keys: &[String],
-) -> Result<HashSet<String>, BriefingRepositoryError> {
-    let (content_ids, news_ids) = parse_source_ids(source_keys);
-    let content = if content_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT DISTINCT content_id::bigint FROM content_read_status
-            WHERE user_id::bigint = $1 AND content_id::bigint = ANY($2::bigint[])
-            "#,
-        )
-        .bind(user_id)
-        .bind(&content_ids)
-        .fetch_all(&mut **transaction)
-        .await?
-    };
-    let news = if news_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_scalar::<_, i64>(read_news_keys_sql())
-            .bind(user_id)
-            .bind(&news_ids)
-            .fetch_all(&mut **transaction)
-            .await?
-    };
-    Ok(content
-        .into_iter()
-        .map(|id| format!("content:{id}"))
-        .chain(news.into_iter().map(|id| format!("news:{id}")))
-        .collect())
+    content_ids: &[i64],
+) -> Result<Vec<i64>, sqlx::Error> {
+    if content_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT DISTINCT content_id::bigint FROM content_read_status
+        WHERE user_id = $1::bigint AND content_id = ANY($2::bigint[])
+        "#,
+    )
+    .bind(user_id)
+    .bind(content_ids)
+    .fetch_all(executor)
+    .await
 }
 
 const fn read_news_keys_sql() -> &'static str {
     r#"
     SELECT requested.id::bigint
     FROM unnest($2::bigint[]) AS requested(id)
-    JOIN news_items AS requested_news ON requested_news.id::bigint = requested.id
+    JOIN news_items AS requested_news ON requested_news.id = requested.id
     WHERE EXISTS (
         SELECT 1
         FROM news_items AS member
         JOIN news_item_read_status AS read_status ON read_status.news_item_id = member.id
-        WHERE read_status.user_id::bigint = $1
+        WHERE read_status.user_id = $1::bigint
           AND coalesce(member.representative_news_item_id, member.id) =
               coalesce(requested_news.representative_news_item_id, requested_news.id)
     )
@@ -917,7 +891,7 @@ pub async fn ensure_briefing_state_version(
     .execute(&mut **transaction)
     .await?;
     Ok(sqlx::query_scalar::<_, i32>(
-        "SELECT version FROM briefing_states WHERE user_id::bigint = $1 FOR UPDATE",
+        "SELECT version FROM briefing_states WHERE user_id = $1::bigint FOR UPDATE",
     )
     .bind(user_id)
     .fetch_one(&mut **transaction)
@@ -937,7 +911,7 @@ async fn mark_sources_locked(
         sqlx::query_scalar::<_, i64>(
             r#"
             WITH existing AS (
-                SELECT id FROM contents WHERE id::bigint = ANY($2::bigint[])
+                SELECT id FROM contents WHERE id = ANY($2::bigint[])
             ), upserted AS (
                 INSERT INTO content_read_status (user_id, content_id, read_at, created_at)
                 SELECT $1::bigint::integer, id, timezone('UTC', now()), timezone('UTC', now())
@@ -960,10 +934,10 @@ async fn mark_sources_locked(
             WITH authorized AS (
                 SELECT news.id, news.representative_news_item_id
                 FROM news_items AS news
-                WHERE news.id::bigint = ANY($2::bigint[])
+                WHERE news.id = ANY($2::bigint[])
                   AND EXISTS (
                       SELECT 1 FROM briefing_segments AS segment
-                      WHERE segment.user_id::bigint = $1
+                      WHERE segment.user_id = $1::bigint
                         AND segment.source_keys::jsonb @>
                             jsonb_build_array('news:' || news.id::text)
                   )
@@ -988,41 +962,41 @@ async fn mark_sources_locked(
         .fetch_one(&mut **transaction)
         .await?
     };
+    // Resolve the user's canonical read set once before checking passage membership.
     let retired = sqlx::query_scalar::<_, i64>(
         r#"
-        WITH retired AS (
+        WITH read_news AS MATERIALIZED (
+            SELECT DISTINCT coalesce(member.representative_news_item_id, member.id) AS canonical_id
+            FROM news_item_read_status AS read_status
+            JOIN news_items AS member ON member.id = read_status.news_item_id
+            WHERE read_status.user_id = $1::bigint
+        ), fully_read AS (
+            SELECT segment.id
+            FROM briefing_segments AS segment
+            CROSS JOIN LATERAL jsonb_array_elements_text(segment.source_keys) AS source(key)
+            LEFT JOIN news_items AS news ON news.id = CASE
+                WHEN source.key LIKE 'news:%' THEN substring(source.key FROM 6)::bigint
+            END
+            LEFT JOIN read_news ON read_news.canonical_id =
+                coalesce(news.representative_news_item_id, news.id)
+            LEFT JOIN content_read_status AS content_read
+                ON content_read.user_id = $1::bigint AND content_read.content_id = CASE
+                    WHEN source.key LIKE 'content:%' THEN substring(source.key FROM 9)::bigint
+                END
+            WHERE segment.user_id = $1::bigint AND segment.status IN ('active', 'degraded')
+            GROUP BY segment.id
+            HAVING bool_and(CASE
+                WHEN source.key LIKE 'content:%' THEN content_read.content_id IS NOT NULL
+                WHEN source.key LIKE 'news:%' THEN read_news.canonical_id IS NOT NULL
+                ELSE source.key IS NULL
+            END)
+        ), retired AS (
             UPDATE briefing_segments AS segment
             SET status = 'retired', updated_at = timezone('UTC', now())
-            WHERE segment.user_id::bigint = $1
+            FROM fully_read
+            WHERE segment.id = fully_read.id AND segment.user_id = $1::bigint
               AND segment.status IN ('active', 'degraded')
-              AND jsonb_array_length(segment.source_keys::jsonb) > 0
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM jsonb_array_elements_text(segment.source_keys::jsonb) AS source(key)
-                  WHERE (
-                      source.key LIKE 'content:%'
-                      AND NOT EXISTS (
-                          SELECT 1 FROM content_read_status AS read_status
-                          WHERE read_status.user_id::bigint = $1
-                            AND read_status.content_id::bigint =
-                                substring(source.key FROM 9)::bigint
-                      )
-                  ) OR (
-                      source.key LIKE 'news:%'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM news_items AS requested_news
-                          JOIN news_items AS member ON
-                              coalesce(member.representative_news_item_id, member.id) =
-                              coalesce(requested_news.representative_news_item_id, requested_news.id)
-                          JOIN news_item_read_status AS read_status
-                            ON read_status.news_item_id = member.id
-                           AND read_status.user_id::bigint = $1
-                          WHERE requested_news.id::bigint = substring(source.key FROM 6)::bigint
-                      )
-                  ) OR (source.key NOT LIKE 'content:%' AND source.key NOT LIKE 'news:%')
-              )
-            RETURNING id
+            RETURNING segment.id
         )
         SELECT count(*)::bigint FROM retired
         "#,
@@ -1036,7 +1010,7 @@ async fn mark_sources_locked(
         sqlx::query_scalar::<_, i32>(
             r#"
             UPDATE briefing_states SET version = version + 1
-            WHERE user_id::bigint = $1 RETURNING version
+            WHERE user_id = $1::bigint RETURNING version
             "#,
         )
         .bind(user_id)

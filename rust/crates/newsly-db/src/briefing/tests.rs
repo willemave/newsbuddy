@@ -1,7 +1,10 @@
 use serde_json::json;
 use sqlx::PgPool;
 
-use super::{BriefingNarrationSelection, PrepareNarrationOutcome, prepare_briefing_narration};
+use super::{
+    BriefingNarrationSelection, PrepareNarrationOutcome, mark_briefing_lens_read,
+    mark_briefing_sources_read, prepare_briefing_narration,
+};
 use crate::AudioEpisodeProjection;
 
 async fn seed(pool: &PgPool) {
@@ -31,6 +34,108 @@ async fn seed(pool: &PgPool) {
         VALUES (100, 1, now(), now());
         "#,
     ).execute(pool).await.expect("fixture");
+}
+
+#[sqlx::test]
+async fn read_marks_cover_a_full_lens_and_retire_canonical_duplicates(pool: PgPool) {
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO users (id, apple_id, email, is_admin, is_active)
+        VALUES (100, 'bulk-read', 'bulk@example.com', false, true),
+               (101, 'other-reader', 'other@example.com', false, true);
+        INSERT INTO briefing_lenses (id, user_id, key, tier, title, deck, position, status, centroid_weight)
+        VALUES (10, 100, 'science', 'news', 'Science & Nature', '', 0, 'active', 0),
+               (20, 100, 'business', 'news', 'Business', '', 1, 'active', 0),
+               (30, 101, 'science', 'news', 'Science & Nature', '', 0, 'active', 0),
+               (40, 100, 'articles', 'longform', 'Articles', '', 2, 'active', 0);
+        INSERT INTO news_items (id, ingest_key, visibility_scope, status, ingested_at, created_at)
+        SELECT n, 'bulk-read-' || n, 'global', 'ready', now(), now()
+        FROM generate_series(1, 127) n;
+        UPDATE news_items SET representative_news_item_id = 125 WHERE id IN (124, 126);
+        INSERT INTO contents (id, content_type, url, title, source, status, content_metadata, is_aggregate)
+        VALUES (301, 'article', 'https://example.com/301', 'Document', 'Publication', 'completed', '{}', false),
+               (302, 'article', 'https://example.com/302', 'Read document', 'Publication', 'completed', '{}', false);
+        INSERT INTO content_read_status (user_id, content_id, read_at) VALUES (100, 302, '2026-11-01T12:00:00Z');
+        INSERT INTO briefing_segments (id, lens_id, user_id, blocks, markdown_raw, narration_text,
+            source_keys, status, model, prompt_version, warnings)
+        SELECT n, 10, 100, '[]', '', '',
+               CASE WHEN n = 124 THEN '["news:124", "news:123"]'::jsonb ELSE jsonb_build_array('news:' || n) END,
+               'active', 'test', 'test', '[]'
+        FROM generate_series(1, 124) n;
+        INSERT INTO briefing_segments (id, lens_id, user_id, blocks, markdown_raw, narration_text,
+            source_keys, status, model, prompt_version, warnings)
+        VALUES (200, 20, 100, '[]', '', '', '["news:126"]', 'degraded', 'test', 'test', '[]'),
+               (201, 20, 100, '[]', '', '', '["news:126", "news:127"]', 'active', 'test', 'test', '[]'),
+               (202, 20, 100, '[]', '', '', '["news:2147483648"]', 'active', 'test', 'test', '[]'),
+               (203, 30, 101, '[]', '', '', '["news:1"]', 'active', 'test', 'test', '[]'),
+               (204, 20, 100, '[]', '', '', '[]', 'active', 'test', 'test', '[]'),
+               (205, 20, 100, '[]', '', '', '["news:126", "unknown:1"]', 'active', 'test', 'test', '[]'),
+               (206, 40, 100, '[]', '', '', '["content:301", "content:302", "news:126"]', 'active', 'test', 'test', '[]');
+        INSERT INTO news_item_read_status (user_id, news_item_id, read_at, created_at)
+        VALUES (100, 124, now(), now());
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("bulk-read fixture");
+
+    let mut transaction = pool.begin().await.unwrap();
+    let first = mark_briefing_sources_read(
+        &mut transaction,
+        100,
+        &["news:1".to_owned(), "news:2147483648".to_owned()],
+    )
+    .await
+    .unwrap();
+    assert_eq!((first.marked, first.retired, first.version), (1, 2, 1));
+    transaction.commit().await.unwrap();
+
+    let mut transaction = pool.begin().await.unwrap();
+    let bulk = mark_briefing_lens_read(&mut transaction, 100, "science")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((bulk.marked, bulk.retired, bulk.version), (122, 123, 2));
+    transaction.commit().await.unwrap();
+    let representative_read: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM news_item_read_status WHERE user_id = 100 AND news_item_id = 125)",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(representative_read);
+
+    for (lens_key, expected) in [("science", (0, 0, 2)), ("articles", (2, 1, 3))] {
+        let mut transaction = pool.begin().await.unwrap();
+        let result = mark_briefing_lens_read(&mut transaction, 100, lens_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((result.marked, result.retired, result.version), expected);
+        transaction.commit().await.unwrap();
+    }
+
+    let remaining: Vec<i32> = sqlx::query_scalar(
+        "SELECT id FROM briefing_segments WHERE status <> 'retired' ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, [201, 202, 203, 204, 205]);
+    let read_ids: Vec<i32> = sqlx::query_scalar(
+        "SELECT news_item_id FROM news_item_read_status WHERE user_id = 100 ORDER BY news_item_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(read_ids, (1..=126).collect::<Vec<_>>());
+    let original_content_mark: bool = sqlx::query_scalar(
+        "SELECT read_at = '2026-11-01T12:00:00Z' FROM content_read_status WHERE user_id = 100 AND content_id = 302",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(original_content_mark);
 }
 
 async fn prepare(

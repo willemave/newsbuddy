@@ -4004,3 +4004,13 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Validation:** `newsly` built and launched on iPhone 17 (iOS 26.4). The `briefing-list-metadata` fixture reproduced the stacked article header at Accessibility Large before the change and showed a single line afterward; Articles and Podcasts also checked at normal size, including long and absent publishers. All 9 `BriefingSegmentHeadlineTests` passed. Screenshots: `test-results/briefing-metadata-2026-11-03/`. Simulator text size restored to Large.
 - **Remaining:** None for the local fix. The screenshot's older three-line layout requires a newer distributed iOS build; no Apple distribution was requested or verified.
 - **Delivery:** Commit and push to `main` authorized on 2026-11-04; Apple build/distribution status remains unverified.
+
+### 2026-11-13 — `codex/briefing-read-marks` — Briefing read-mark latency
+
+- **Status:** Complete locally.
+- **Scope:** PostgreSQL queries used by Briefing read marks and lens-wide read marking.
+- **Evidence:** Production read-mark requests took 41–54 seconds. The passage retirement predicate repeatedly scanned `news_items` when it cast the primary key to `bigint`.
+- **Changes:** Materialize the user's canonical News read set once and join it to active passage sources before retiring fully read passages. Use indexed integer comparisons for source and lens lookups. Skip the unused News read-status precheck in bulk marking and retain the idempotent insert that also marks representatives.
+- **Validation:** The read-only query over about 1,350 active production passages ran in 72–89 ms with custom and generic prepared plans and 253 ms with 64 KiB work memory. The previous predicate exceeded a five-second timeout. PostgreSQL regression coverage includes a 124-item lens, canonical duplicates across lenses, mixed-source passages, owner isolation, and idempotent retry.
+- **Checks:** All 305 `newsly-db` tests, warning-denied Clippy, Rust formatting, module size, and diff checks passed. Claude Opus 5.5 reviewed the final SQL and found no material regression.
+- **Delivery:** Production requires a backend deploy.
