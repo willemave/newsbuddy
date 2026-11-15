@@ -4014,3 +4014,11 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Validation:** The read-only query over about 1,350 active production passages ran in 72–89 ms with custom and generic prepared plans and 253 ms with 64 KiB work memory. The previous predicate exceeded a five-second timeout. PostgreSQL regression coverage includes a 124-item lens, canonical duplicates across lenses, mixed-source passages, owner isolation, and idempotent retry.
 - **Checks:** All 305 `newsly-db` tests, warning-denied Clippy, Rust formatting, module size, and diff checks passed. Claude Opus 5.5 reviewed the final SQL and found no material regression.
 - **Delivery:** Production requires a backend deploy.
+
+### 2026-11-15 — `codex/briefing-news-create-deck` — Create Deck from Briefing News detail
+
+- **Status:** Complete locally.
+- **Scope:** News detail action bar and Briefing law B18.
+- **Changes:** Added Create Deck immediately before the Newsbuddy icon on News detail. Reused the article deck creation sheet and the News source request. The server saves the linked article, then waits for readable source text before starting generation.
+- **Validation:** The `newsly` scheme passed 19 focused tests on iPhone 17e (iOS 26.5). On the real Briefing News detail route, a loopback API fixture received the News item ID and typed focus, returned HTTP 202, and the app dismissed the sheet and showed “Deck started.” Screenshots and request evidence are in `/tmp/newsly-briefing-create-deck-evidence/`.
+- **Remaining:** Live provider generation was outside local validation.

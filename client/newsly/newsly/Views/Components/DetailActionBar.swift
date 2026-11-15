@@ -91,12 +91,7 @@ struct DetailActionBar: View {
                 }
 
                 if content.contentType == .article || content.contentType == .podcast {
-                    Button(action: onCreateDeck) {
-                        actionIcon("rectangle.on.rectangle")
-                    }
-                    .detailActionBarSegment(overlaid: overlaid)
-                    .accessibilityIdentifier("content.action.create_deck")
-                    .accessibilityLabel("Create Learning Deck")
+                    createDeckButton
                 }
 
                 if supportsPodcastAudio {
@@ -110,6 +105,10 @@ struct DetailActionBar: View {
                     }
                     .detailActionBarSegment(overlaid: overlaid, isActive: isPodcastAudioActive)
                     .accessibilityIdentifier("content.action.podcast_audio")
+                }
+
+                if content.contentType == .news {
+                    createDeckButton
                 }
 
                 Button(action: onOpenKnowledgeActions) {
@@ -127,6 +126,15 @@ struct DetailActionBar: View {
 
     private var readerAccessibilityLabel: String {
         content.contentType == .podcast ? "Read transcript" : "Read full article"
+    }
+
+    private var createDeckButton: some View {
+        Button(action: onCreateDeck) {
+            actionIcon("rectangle.on.rectangle")
+        }
+        .detailActionBarSegment(overlaid: overlaid)
+        .accessibilityIdentifier("content.action.create_deck")
+        .accessibilityLabel("Create Learning Deck")
     }
 
     /// The ask-the-buddy action, matching `actionIcon`'s metrics so the left-packed bar

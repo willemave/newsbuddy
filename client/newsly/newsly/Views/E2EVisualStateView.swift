@@ -280,8 +280,15 @@ private struct E2EKnowledgeProcessingVisualState: View {
 private struct E2EDetailActionBarVisualState: View {
     private static let content = content(id: 999_902, type: .podcast)
     private static let article = content(id: 999_903, type: .article)
+    private static let news = content(
+        id: 999_904, type: .news, title: "A new way to improve video generation"
+    )
 
-    private static func content(id: Int, type: APIContentType) -> ContentDetail {
+    private static func content(
+        id: Int,
+        type: APIContentType,
+        title: String = "A calmer way to follow the news"
+    ) -> ContentDetail {
         ContentDetail(
             api: APIContentDetailResponse(
                 id: id,
@@ -289,8 +296,8 @@ private struct E2EDetailActionBarVisualState: View {
                 url: "https://example.com/",
                 sourceUrl: nil,
                 discussionUrl: nil,
-                title: "A calmer way to follow the news",
-                displayTitle: "A calmer way to follow the news",
+                title: title,
+                displayTitle: title,
                 source: "Newsbuddy Radio",
                 status: .completed,
                 errorMessage: nil,
@@ -343,8 +350,9 @@ private struct E2EDetailActionBarVisualState: View {
         updatedAt: nil
     )
 
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
     @State private var showsReader = false
-    @State private var showsDeckCreate = false
+    @State private var deckSource: ContentDetail?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -355,6 +363,8 @@ private struct E2EDetailActionBarVisualState: View {
             actionBar(for: Self.content)
             Text("ARTICLE").kicker()
             actionBar(for: Self.article)
+            Text("NEWS").kicker()
+            actionBar(for: Self.news)
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -371,9 +381,14 @@ private struct E2EDetailActionBarVisualState: View {
                 onDigDeeper: { _ in }
             )
         }
-        .sheet(isPresented: $showsDeckCreate) {
-            Text("Learning Deck")
-                .accessibilityIdentifier("e2e.detail.deck_create")
+        .sheet(item: $deckSource) { source in
+            LearningDeckContentCreateSheet(
+                content: source,
+                focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
+                learningDeckService: dependencyFactory.learningDeckService,
+                onCreated: { _ in },
+                onNotice: { _, _ in }
+            )
         }
     }
 
@@ -395,7 +410,7 @@ private struct E2EDetailActionBarVisualState: View {
             onDownloadMore: {},
             onConvertLinkedArticle: {},
             onToggleKnowledgeSave: {},
-            onCreateDeck: { showsDeckCreate = true },
+            onCreateDeck: { deckSource = content },
             onPodcastAudio: {},
             onPodcastAudioSpeed: { _ in },
             onOpenKnowledgeActions: {}
