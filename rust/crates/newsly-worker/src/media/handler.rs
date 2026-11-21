@@ -156,7 +156,8 @@ async fn execute_podcast(
         {
             Ok(body) => body,
             Err(error) => {
-                return podcast_failed(services, content_id, error.to_string(), true, true);
+                let retryable = error.is_retryable();
+                return podcast_failed(services, content_id, error.to_string(), retryable, true);
             }
         };
         return completed_media(
@@ -308,7 +309,8 @@ async fn execute_podcast(
             services,
             content_id,
             "OpenAI returned an empty podcast transcript".to_owned(),
-            true,
+            // Silent or music-only audio transcribes to nothing on every attempt.
+            false,
             true,
         );
     }
@@ -321,7 +323,8 @@ async fn execute_podcast(
         Ok(body) => body,
         Err(error) => {
             services.file_store.cleanup_podcast_attempt(&scratch).await;
-            return podcast_failed(services, content_id, error.to_string(), true, true);
+            let retryable = error.is_retryable();
+            return podcast_failed(services, content_id, error.to_string(), retryable, true);
         }
     };
     services.file_store.cleanup_podcast_attempt(&scratch).await;

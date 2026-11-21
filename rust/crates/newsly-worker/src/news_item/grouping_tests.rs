@@ -88,7 +88,7 @@ async fn independent_exact_preparations_publish_one_canonical_root(pool: PgPool)
     let roots: i64 = sqlx::query_scalar("SELECT count(*) FROM news_items WHERE status='ready' AND representative_news_item_id IS NULL").fetch_one(&pool).await.unwrap();
     assert_eq!(roots, 1);
     let root: i64 = sqlx::query_scalar(
-        "SELECT representative_news_item_id::bigint FROM news_items WHERE id::bigint=$1",
+        "SELECT representative_news_item_id::bigint FROM news_items WHERE id=$1::bigint",
     )
     .bind(b)
     .fetch_one(&pool)
@@ -107,7 +107,7 @@ async fn semantic_candidate_appearance_requires_preparation_before_fresh_groupin
     assert_eq!(apply(&pool, &pa).await, NewsApplyOutcome::Applied);
     assert_eq!(apply(&pool, &pb).await, NewsApplyOutcome::CandidateChanged);
     let ready: bool =
-        sqlx::query_scalar("SELECT status='ready' FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT status='ready' FROM news_items WHERE id=$1::bigint")
             .bind(b)
             .fetch_one(&pool)
             .await
@@ -116,7 +116,7 @@ async fn semantic_candidate_appearance_requires_preparation_before_fresh_groupin
     warm_current(&pool, &pb).await;
     assert_eq!(apply(&pool, &pb).await, NewsApplyOutcome::Applied);
     let root: i64 = sqlx::query_scalar(
-        "SELECT representative_news_item_id::bigint FROM news_items WHERE id::bigint=$1",
+        "SELECT representative_news_item_id::bigint FROM news_items WHERE id=$1::bigint",
     )
     .bind(b)
     .fetch_one(&pool)
@@ -136,9 +136,9 @@ async fn changed_and_removed_candidates_are_queried_fresh_and_stale_sources_cann
     assert_eq!(apply(&pool, &pa).await, NewsApplyOutcome::Applied);
     let pb = prepared(&pool, b, "Science instrument observes planets").await;
     warm_current(&pool, &pb).await;
-    sqlx::query("UPDATE news_items SET summary_text='A changed candidate instrument report', raw_metadata=jsonb_set(raw_metadata::jsonb,'{summary,title}','\"Science instrument observes new planets\"')::json WHERE id::bigint=$1").bind(a).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE news_items SET summary_text='A changed candidate instrument report', raw_metadata=jsonb_set(raw_metadata::jsonb,'{summary,title}','\"Science instrument observes new planets\"')::json WHERE id=$1::bigint").bind(a).execute(&pool).await.unwrap();
     assert_eq!(apply(&pool, &pb).await, NewsApplyOutcome::CandidateChanged);
-    sqlx::query("DELETE FROM news_items WHERE id::bigint=$1")
+    sqlx::query("DELETE FROM news_items WHERE id=$1::bigint")
         .bind(a)
         .execute(&pool)
         .await
@@ -146,9 +146,9 @@ async fn changed_and_removed_candidates_are_queried_fresh_and_stale_sources_cann
     assert_eq!(apply(&pool, &pb).await, NewsApplyOutcome::Applied);
     let c = story(&pool, "source-c", "https://example.com/c").await;
     let pc = prepared(&pool, c, "Another science instrument").await;
-    sqlx::query("UPDATE news_items SET article_url='https://example.com/changed-source' WHERE id::bigint=$1").bind(c).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE news_items SET article_url='https://example.com/changed-source' WHERE id=$1::bigint").bind(c).execute(&pool).await.unwrap();
     assert_eq!(apply(&pool, &pc).await, NewsApplyOutcome::SourceChanged);
-    sqlx::query("DELETE FROM news_items WHERE id::bigint=$1")
+    sqlx::query("DELETE FROM news_items WHERE id=$1::bigint")
         .bind(c)
         .execute(&pool)
         .await
@@ -176,10 +176,10 @@ async fn reprocessing_keeps_published_root_visible_and_moves_all_its_members(poo
     assert_eq!(apply(&pool, &root_plan).await, NewsApplyOutcome::Applied);
     let member_plan = prepared(&pool, member, "Cooking recipe").await;
     assert_eq!(apply(&pool, &member_plan).await, NewsApplyOutcome::Applied);
-    sqlx::query("UPDATE news_items SET article_url='https://example.com/target',canonical_story_url='https://example.com/target' WHERE id::bigint=$1").bind(root).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE news_items SET article_url='https://example.com/target',canonical_story_url='https://example.com/target' WHERE id=$1::bigint").bind(root).execute(&pool).await.unwrap();
     let replacement = prepared(&pool, root, "Science instrument observes planets").await;
     let visible: bool =
-        sqlx::query_scalar("SELECT status='ready' FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT status='ready' FROM news_items WHERE id=$1::bigint")
             .bind(root)
             .fetch_one(&pool)
             .await
@@ -222,7 +222,7 @@ async fn contended_guard_defers_without_product_writes_and_unrelated_items_recov
         NewsApplyOutcome::CandidateChanged
     );
     let ready: bool =
-        sqlx::query_scalar("SELECT status='ready' FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT status='ready' FROM news_items WHERE id=$1::bigint")
             .bind(b)
             .fetch_one(&pool)
             .await
@@ -347,7 +347,7 @@ async fn relation_artifacts_reuse_exact_identities_and_cascade_with_sources(pool
         .unwrap(),
         None
     );
-    sqlx::query("DELETE FROM news_items WHERE id::bigint=$1")
+    sqlx::query("DELETE FROM news_items WHERE id=$1::bigint")
         .bind(id)
         .execute(&mut *connection)
         .await
@@ -367,7 +367,7 @@ async fn hundred_candidate_publication_uses_prepared_vectors_under_the_short_gua
     let plan = prepared(&pool, id, "Science instrument observes new planets").await;
     warm_current(&pool, &plan).await;
     sqlx::query(
-        "UPDATE news_relation_embeddings SET vector='[0,1]'::jsonb WHERE news_item_id::bigint<>$1",
+        "UPDATE news_relation_embeddings SET vector='[0,1]'::jsonb WHERE news_item_id<>$1::bigint",
     )
     .bind(id)
     .execute(&pool)
@@ -386,7 +386,7 @@ async fn hundred_candidate_publication_uses_prepared_vectors_under_the_short_gua
     .await
     .unwrap();
     assert_eq!(roots, 101); // Cached orthogonal candidate vectors preserve a new independent story.
-    let admitted:i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE source_kind='news' AND source_id::bigint=$1").bind(id).fetch_one(&pool).await.unwrap();
+    let admitted:i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE source_kind='news' AND source_id=$1::bigint").bind(id).fetch_one(&pool).await.unwrap();
     assert_eq!(admitted, 100);
 }
 
@@ -419,7 +419,7 @@ async fn successful_extraction_survives_guard_deferral_but_changed_sources_and_m
         .await
         .unwrap();
     // This is re-enrichment of an already published row, which must coordinate with grouping.
-    sqlx::query("UPDATE news_items SET status='ready' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET status='ready' WHERE id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
@@ -464,7 +464,7 @@ async fn successful_extraction_survives_guard_deferral_but_changed_sources_and_m
     );
     tx.rollback().await.unwrap();
     sqlx::query(
-        "UPDATE news_items SET article_url='https://example.com/changed' WHERE id::bigint=$1",
+        "UPDATE news_items SET article_url='https://example.com/changed' WHERE id=$1::bigint",
     )
     .bind(id)
     .execute(&pool)
@@ -485,7 +485,7 @@ async fn successful_extraction_survives_guard_deferral_but_changed_sources_and_m
             .is_none()
     );
     sqlx::query(
-        "UPDATE news_items SET article_url='https://example.com/extracted' WHERE id::bigint=$1",
+        "UPDATE news_items SET article_url='https://example.com/extracted' WHERE id=$1::bigint",
     )
     .bind(id)
     .execute(&pool)
@@ -566,7 +566,7 @@ async fn identical_private_and_global_evidence_never_crosses_owner_pools(pool: P
     let second = story(&pool, "scope-second", "https://example.com/scoped").await;
     for (index, id) in [first, second].into_iter().enumerate() {
         let user:i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES($1,$2,true,false) RETURNING id::bigint").bind(format!("scope-{index}")).bind(format!("scope-{index}@example.com")).fetch_one(&pool).await.unwrap();
-        sqlx::query("UPDATE news_items SET visibility_scope='user',owner_user_id=$2::bigint::integer WHERE id::bigint=$1").bind(id).bind(user).execute(&pool).await.unwrap();
+        sqlx::query("UPDATE news_items SET visibility_scope='user',owner_user_id=$2::bigint::integer WHERE id=$1::bigint").bind(id).bind(user).execute(&pool).await.unwrap();
     }
     for id in [global, first, second] {
         let plan = prepared(&pool, id, "Science instrument observes planets").await;
@@ -608,7 +608,7 @@ async fn provider_failure_preserves_retry_backoff_while_another_group_is_publish
     newsly_db::run_migrations(&pool).await.unwrap();
     let id = story(&pool, "provider-backoff", "https://example.com/backoff").await;
     let mut plan = prepared(&pool, id, "Science instrument observes planets").await;
-    sqlx::query("UPDATE news_items SET status='ready' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET status='ready' WHERE id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
@@ -641,7 +641,7 @@ async fn provider_failure_preserves_retry_backoff_while_another_group_is_publish
         TaskFinalizerResult::Keep
     ));
     fence.finish().await.unwrap().unwrap();
-    let (retry_count,wait,ready):(i32,f64,bool) = sqlx::query_as("SELECT task.retry_count,extract(epoch FROM task.available_at-timezone('UTC',clock_timestamp()))::double precision,news.status='ready' FROM processing_tasks task JOIN news_items news ON news.id::bigint=$2 WHERE task.id::bigint=$1").bind(claim.id).bind(id).fetch_one(&pool).await.unwrap();
+    let (retry_count,wait,ready):(i32,f64,bool) = sqlx::query_as("SELECT task.retry_count,extract(epoch FROM task.available_at-timezone('UTC',clock_timestamp()))::double precision,news.status='ready' FROM processing_tasks task JOIN news_items news ON news.id=$2::bigint WHERE task.id=$1::bigint").bind(claim.id).bind(id).fetch_one(&pool).await.unwrap();
     assert_eq!(retry_count, 1);
     assert!(
         wait > 30.0,
@@ -663,7 +663,7 @@ async fn credit_resume_ignores_unrelated_grouping_and_ends_the_old_conflict_epis
     newsly_db::news_grouping::record_deferral(&mut tx, claim.id)
         .await
         .unwrap();
-    sqlx::query("UPDATE news_grouping_deferrals SET first_deferred_at=clock_timestamp()-interval '2 hours',deferral_count=1200 WHERE task_id::bigint=$1").bind(claim.id).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE news_grouping_deferrals SET first_deferred_at=clock_timestamp()-interval '2 hours',deferral_count=1200 WHERE task_id=$1::bigint").bind(claim.id).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     let plan = EnrichmentFinalizationPlan {
         task_id: claim.id,
@@ -694,7 +694,7 @@ async fn credit_resume_ignores_unrelated_grouping_and_ends_the_old_conflict_epis
         TaskFinalizerResult::Keep
     ));
     fence.finish().await.unwrap().unwrap();
-    let (retry_count,wait):(i32,f64) = sqlx::query_as("SELECT retry_count,extract(epoch FROM available_at-timezone('UTC',clock_timestamp()))::double precision FROM processing_tasks WHERE id::bigint=$1").bind(claim.id).fetch_one(&pool).await.unwrap();
+    let (retry_count,wait):(i32,f64) = sqlx::query_as("SELECT retry_count,extract(epoch FROM available_at-timezone('UTC',clock_timestamp()))::double precision FROM processing_tasks WHERE id=$1::bigint").bind(claim.id).fetch_one(&pool).await.unwrap();
     assert_eq!(retry_count, 0);
     assert!(wait > 850.0, "credit resume must remain scheduled: {wait}");
     let mut tx = pool.begin().await.unwrap();

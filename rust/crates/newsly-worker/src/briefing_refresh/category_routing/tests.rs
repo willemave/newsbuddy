@@ -208,10 +208,10 @@ async fn recorded_category_cost_survives_without_any_product_publication(pool: s
     recorder.record(observed.clone()).unwrap();
     recorder.record(observed).unwrap();
     recorder.finish().await;
-    let rows: Vec<(f64,i32)> = sqlx::query_as("SELECT cost_usd,input_tokens FROM vendor_usage_records WHERE task_id::bigint=$1 AND feature='briefing_category_assignment'").bind(task_id).fetch_all(&pool).await.unwrap();
+    let rows: Vec<(f64,i32)> = sqlx::query_as("SELECT cost_usd,input_tokens FROM vendor_usage_records WHERE task_id=$1::bigint AND feature='briefing_category_assignment'").bind(task_id).fetch_all(&pool).await.unwrap();
     assert_eq!(rows, vec![(0.000_004_2, 100)]);
     let lenses: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM briefing_lenses WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT count(*) FROM briefing_lenses WHERE user_id=$1::bigint")
             .bind(user)
             .fetch_one(&pool)
             .await

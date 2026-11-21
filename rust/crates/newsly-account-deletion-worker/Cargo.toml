@@ -11,14 +11,12 @@ repository.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 newsly-db = { path = "../newsly-db" }
-newsly-domain = { path = "../newsly-domain" }
 newsly-providers = { path = "../newsly-providers" }
 newsly-queue = { path = "../newsly-queue" }
 newsly-worker = { path = "../newsly-worker" }
 object_store.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
@@ -30,4 +28,5 @@ url.workspace = true
 workspace = true
 
 [dev-dependencies]
+newsly-domain = { path = "../newsly-domain" }
 tempfile.workspace = true

@@ -34,7 +34,7 @@ pub async fn record_exa_search_usage(
             'exa', 'search', $1, $2, 'api', $3, users.id,
             $5, $6, $7, 'USD', $8, $9, $10, $11,
             timezone('UTC', clock_timestamp())
-          FROM users WHERE users.id::bigint = $4 AND users.is_active = TRUE
+          FROM users WHERE users.id = $4::bigint AND users.is_active = TRUE
         RETURNING id::bigint",
     )
     .bind(usage.feature)
@@ -326,7 +326,7 @@ mod exa_tests {
         assert!(record_exa_search_usage(&pool, &usage).await.unwrap());
         let observed = sqlx::query_as::<_,(i64,i64)>("SELECT count(*)::bigint,count(DISTINCT idempotency_key)::bigint FROM vendor_usage_records WHERE request_id=$1").bind(usage.request_id).fetch_one(&pool).await.unwrap();
         assert_eq!(observed, (2, 2));
-        sqlx::query("UPDATE users SET is_active=FALSE WHERE id::bigint=$1")
+        sqlx::query("UPDATE users SET is_active=FALSE WHERE id=$1::bigint")
             .bind(user_id)
             .execute(&pool)
             .await

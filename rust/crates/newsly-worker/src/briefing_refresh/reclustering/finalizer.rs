@@ -26,7 +26,7 @@ impl TaskFinalizer for ReclusteringFinalizer {
             // QueueKernel already locked the exact claimed task/lease. Owner first
             // keeps timezone/profile mutations ordered with routing publication.
             sqlx::query_scalar::<_, i64>(
-                "SELECT id::bigint FROM users WHERE id::bigint=$1 FOR UPDATE",
+                "SELECT id::bigint FROM users WHERE id=$1::bigint FOR UPDATE",
             )
             .bind(self.context.run.user_id)
             .fetch_optional(&mut **tx)

@@ -159,14 +159,14 @@ mod tests {
         assert!(!result.retryable);
         tx.commit().await.unwrap();
         let retries: i32 =
-            sqlx::query_scalar("SELECT retry_count FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query_scalar("SELECT retry_count FROM processing_tasks WHERE id=$1::bigint")
                 .bind(task)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert_eq!(retries, 0);
         sqlx::query(
-            "UPDATE news_grouping_deferrals SET deferral_count=$2 WHERE task_id::bigint=$1",
+            "UPDATE news_grouping_deferrals SET deferral_count=$2 WHERE task_id=$1::bigint",
         )
         .bind(task)
         .bind(newsly_db::news_grouping::MAX_DEFERRALS - 1)

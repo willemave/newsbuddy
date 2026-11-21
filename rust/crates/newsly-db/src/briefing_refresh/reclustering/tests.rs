@@ -68,12 +68,12 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
         .bind(other_user).bind(seed.stories[1].source.id).fetch_one(&pool).await.unwrap();
     let wrong_kind_pending: i64 = sqlx::query_scalar("INSERT INTO briefing_pending_sources(user_id,source_kind,source_id,lens_key,enqueued_at) VALUES($1,'podcast',$2,'news-old',timezone('UTC',now())) RETURNING id::bigint")
         .bind(user).bind(seed.stories[1].source.id).fetch_one(&pool).await.unwrap();
-    let segment: i64 = sqlx::query_scalar("INSERT INTO briefing_segments(lens_id,user_id,blocks,markdown_raw,narration_text,source_keys,status,model,prompt_version,warnings) SELECT id,$1,'[]','Existing roundup','Existing narration',$2,'active','test','test','[]' FROM briefing_lenses WHERE user_id::bigint=$1 AND key='news-old' RETURNING briefing_segments.id::bigint")
+    let segment: i64 = sqlx::query_scalar("INSERT INTO briefing_segments(lens_id,user_id,blocks,markdown_raw,narration_text,source_keys,status,model,prompt_version,warnings) SELECT id,$1,'[]','Existing roundup','Existing narration',$2,'active','test','test','[]' FROM briefing_lenses WHERE user_id=$1::bigint AND key='news-old' RETURNING briefing_segments.id::bigint")
         .bind(user).bind(json!([format!("news:{}",seed.stories[0].source.id)]))
         .fetch_one(&pool).await.unwrap();
     // A composed source is normally absent from pending; preserve that boundary.
     sqlx::query(
-        "DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_id::bigint=$2",
+        "DELETE FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_id=$2::bigint",
     )
     .bind(user)
     .bind(seed.stories[0].source.id)
@@ -86,7 +86,7 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
         "SELECT id::bigint,user_id::bigint,source_kind,source_id::bigint,enqueued_at FROM briefing_pending_sources ORDER BY id",
     ).fetch_all(&pool).await.unwrap();
     let read_before: Vec<(i64, chrono::NaiveDateTime)> = sqlx::query_as(
-        "SELECT news_item_id::bigint,read_at FROM news_item_read_status WHERE user_id::bigint=$1 ORDER BY news_item_id",
+        "SELECT news_item_id::bigint,read_at FROM news_item_read_status WHERE user_id=$1::bigint ORDER BY news_item_id",
     ).bind(user).fetch_all(&pool).await.unwrap();
     let mut seed = snapshot(&pool, user).await;
     seed.pending.push(NewsCategoryPending {
@@ -111,13 +111,13 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
     assert!(snapshot_is_current(&mut tx, &seed).await.unwrap());
     apply_partition(&mut tx, &seed, &[new]).await.unwrap();
     tx.commit().await.unwrap();
-    let old:(String,bool)=sqlx::query_as("SELECT status,accepts_news FROM briefing_lenses WHERE user_id::bigint=$1 AND key='news-old'")
+    let old:(String,bool)=sqlx::query_as("SELECT status,accepts_news FROM briefing_lenses WHERE user_id=$1::bigint AND key='news-old'")
         .bind(user).fetch_one(&pool).await.unwrap();
     assert_eq!(old, ("active".into(), false));
-    let assigned: i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND lens_key='news-new'")
+    let assigned: i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND lens_key='news-new'")
         .bind(user).fetch_one(&pool).await.unwrap();
     assert_eq!(assigned, 0);
-    let unassigned: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news' AND lens_key IS NULL")
+    let unassigned: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news' AND lens_key IS NULL")
         .bind(user).fetch_one(&pool).await.unwrap();
     assert_eq!(unassigned, 3);
     let identities_after: Vec<(i64, i64, String, i64, chrono::NaiveDateTime)> = sqlx::query_as(
@@ -125,11 +125,11 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
     ).fetch_all(&pool).await.unwrap();
     assert_eq!(identities_after, identities_before);
     let read_after: Vec<(i64, chrono::NaiveDateTime)> = sqlx::query_as(
-        "SELECT news_item_id::bigint,read_at FROM news_item_read_status WHERE user_id::bigint=$1 ORDER BY news_item_id",
+        "SELECT news_item_id::bigint,read_at FROM news_item_read_status WHERE user_id=$1::bigint ORDER BY news_item_id",
     ).bind(user).fetch_all(&pool).await.unwrap();
     assert_eq!(read_after, read_before);
     let preserved: (String, String, serde_json::Value) = sqlx::query_as(
-        "SELECT markdown_raw,narration_text,source_keys FROM briefing_segments WHERE id::bigint=$1",
+        "SELECT markdown_raw,narration_text,source_keys FROM briefing_segments WHERE id=$1::bigint",
     )
     .bind(segment)
     .fetch_one(&pool)
@@ -143,18 +143,18 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
             json!([format!("news:{}", seed.stories[0].source.id)])
         )
     );
-    let mixed:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND lens_key='misc'")
+    let mixed:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND lens_key='misc'")
         .bind(user).fetch_one(&pool).await.unwrap();
     assert_eq!(mixed, 0);
     let unfitted_key: Option<String> =
-        sqlx::query_scalar("SELECT lens_key FROM briefing_pending_sources WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT lens_key FROM briefing_pending_sources WHERE id=$1::bigint")
             .bind(unfitted_pending)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(unfitted_key.as_deref(), Some("news-old"));
     let decoy_keys: Vec<Option<String>> = sqlx::query_scalar(
-        "SELECT lens_key FROM briefing_pending_sources WHERE id::bigint=ANY($1::bigint[]) ORDER BY id",
+        "SELECT lens_key FROM briefing_pending_sources WHERE id=ANY($1::bigint[]) ORDER BY id",
     )
     .bind(vec![wrong_owner_pending, wrong_kind_pending])
     .fetch_all(&pool)
@@ -162,7 +162,7 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
     .unwrap();
     assert_eq!(decoy_keys, vec![Some("news-old".into()); 2]);
     let version: i32 =
-        sqlx::query_scalar("SELECT version FROM briefing_states WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT version FROM briefing_states WHERE user_id=$1::bigint")
             .bind(user)
             .fetch_one(&pool)
             .await
@@ -180,7 +180,7 @@ async fn publication_drains_old_lenses_and_requeues_only_fitted_pending(pool: Pg
 async fn stale_text_or_pending_assignment_prevents_publication(pool: PgPool) {
     let user = fixture(&pool).await;
     let seed = snapshot(&pool, user).await;
-    sqlx::query("UPDATE news_items SET summary_text='Changed after planning' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET summary_text='Changed after planning' WHERE id=$1::bigint")
         .bind(seed.stories[0].source.id)
         .execute(&pool)
         .await
@@ -190,7 +190,7 @@ async fn stale_text_or_pending_assignment_prevents_publication(pool: PgPool) {
     tx.rollback().await.unwrap();
     let next = snapshot(&pool, user).await;
     assert_eq!(next.stories.len(), 3); // stale cached vector is excluded
-    sqlx::query("UPDATE briefing_pending_sources SET lens_key=NULL WHERE id::bigint=$1")
+    sqlx::query("UPDATE briefing_pending_sources SET lens_key=NULL WHERE id=$1::bigint")
         .bind(next.pending[0].id)
         .execute(&pool)
         .await
@@ -242,7 +242,7 @@ async fn recent_read_story_can_train_without_restoring_read_coverage(pool: PgPoo
             .candidate,
         json!({"schema_version":1})
     );
-    let count:i64=sqlx::query_scalar("SELECT count(*) FROM news_item_read_status WHERE user_id::bigint=$1 AND news_item_id::bigint=$2")
+    let count:i64=sqlx::query_scalar("SELECT count(*) FROM news_item_read_status WHERE user_id=$1::bigint AND news_item_id=$2::bigint")
         .bind(user).bind(id).fetch_one(&pool).await.unwrap();
     assert_eq!(count, 1);
 }
@@ -296,7 +296,7 @@ async fn successful_naming_attempt_is_cacheable(pool: PgPool) {
         Some(result)
     );
     let (attempts, usage_rows): (i64, i64) = sqlx::query_as(
-        "SELECT (SELECT count(*)::bigint FROM news_category_naming_attempts WHERE attempt_id=$1), (SELECT count(*)::bigint FROM vendor_usage_records WHERE task_id::bigint=$2 AND feature='briefing_lens_naming_batch')",
+        "SELECT (SELECT count(*)::bigint FROM news_category_naming_attempts WHERE attempt_id=$1), (SELECT count(*)::bigint FROM vendor_usage_records WHERE task_id=$2::bigint AND feature='briefing_lens_naming_batch')",
     )
     .bind(attempt_id)
     .bind(task_id)
@@ -337,7 +337,7 @@ async fn requeued_fitted_pending_retires_empty_old_category_and_uses_new_snapsho
     apply_partition(&mut tx, &seed, &[new]).await.unwrap();
     tx.commit().await.unwrap();
     let old: (String, bool) = sqlx::query_as(
-        "SELECT status,accepts_news FROM briefing_lenses WHERE user_id::bigint=$1 AND key='news-old'",
+        "SELECT status,accepts_news FROM briefing_lenses WHERE user_id=$1::bigint AND key='news-old'",
     ).bind(user).fetch_one(&pool).await.unwrap();
     assert_eq!(old, ("retired".into(), false));
     let mut tx = pool.begin().await.unwrap();

@@ -111,10 +111,6 @@ impl Gateway {
         self.barriers.block_and_drain(operation_id).await;
     }
 
-    fn resume_after_active_transition(&self, operation_id: &str) {
-        self.barriers.resume(operation_id);
-    }
-
     /// Watches durable prepared transitions, drains this replica, and records a truthful ready
     /// acknowledgement. Registry failures retain existing barriers and therefore fail closed.
     pub(crate) async fn monitor_transitions(self) {
@@ -344,12 +340,6 @@ pub(crate) async fn ownership_gateway(
         )
         .with_retryable(true)
         .into_response();
-    }
-
-    if ownership.transition_state == TransitionState::Active {
-        state
-            .gateway
-            .resume_after_active_transition(route.operation_id());
     }
 
     let _write_permit = if is_write {

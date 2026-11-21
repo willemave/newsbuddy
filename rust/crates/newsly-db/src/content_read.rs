@@ -112,13 +112,13 @@ pub async fn find_visible_content_detail(
             EXISTS (
                 SELECT 1
                 FROM content_read_status AS read_status
-                WHERE read_status.user_id::bigint = $1::bigint
+                WHERE read_status.user_id = $1::bigint
                   AND read_status.content_id = content.id
             ) AS is_read,
             EXISTS (
                 SELECT 1
                 FROM content_knowledge_saves AS knowledge_save
-                WHERE knowledge_save.user_id::bigint = $1::bigint
+                WHERE knowledge_save.user_id = $1::bigint
                   AND knowledge_save.content_id = content.id
             ) AS is_saved_to_knowledge,
             (body.content_id IS NOT NULL) AS body_available,
@@ -127,20 +127,20 @@ pub async fn find_visible_content_detail(
         LEFT JOIN content_bodies AS body
           ON body.content_id = content.id
          AND body.variant = 'source'
-        WHERE content.id::bigint = $2::bigint
+        WHERE content.id = $2::bigint
           AND content.status = 'completed'
           AND (
               EXISTS (
                   SELECT 1
                   FROM content_knowledge_saves AS knowledge_save
-                  WHERE knowledge_save.user_id::bigint = $1::bigint
+                  WHERE knowledge_save.user_id = $1::bigint
                     AND knowledge_save.content_id = content.id
               )
               OR (
                   EXISTS (
                       SELECT 1
                       FROM content_status AS user_status
-                      WHERE user_status.user_id::bigint = $1::bigint
+                      WHERE user_status.user_id = $1::bigint
                         AND user_status.content_id = content.id
                         AND user_status.status = 'inbox'
                   )
@@ -268,7 +268,8 @@ impl From<NewsItemRow> for NewsItemProjection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewsListPage {
     pub items: Vec<NewsItemProjection>,
-    pub total: i64,
+    /// Present on the first page only.
+    pub total: Option<i64>,
 }
 
 // Subscriptions are materialized once per query; `aggregator_config_admits` (migration-owned)
@@ -279,12 +280,12 @@ const NEWS_READ_FILTER_PREDICATE: &str = r#"
               $2::text = 'all'
               OR ($2::text = 'read' AND EXISTS (
                   SELECT 1 FROM news_item_read_status AS read_status
-                  WHERE read_status.user_id::bigint = $1::bigint
+                  WHERE read_status.user_id = $1::bigint
                     AND read_status.news_item_id = news.id
               ))
               OR ($2::text = 'unread' AND NOT EXISTS (
                   SELECT 1 FROM news_item_read_status AS read_status
-                  WHERE read_status.user_id::bigint = $1::bigint
+                  WHERE read_status.user_id = $1::bigint
                     AND read_status.news_item_id = news.id
               ))
           )
@@ -304,7 +305,7 @@ fn visible_news_count_query() -> String {
 
 fn visible_news_items_query(include_id_filter: bool) -> String {
     let id_filter = if include_id_filter {
-        "AND news.id::bigint = $2::bigint"
+        "AND news.id = $2::bigint"
     } else {
         ""
     };
@@ -333,7 +334,7 @@ fn visible_news_items_query(include_id_filter: bool) -> String {
                 AS sort_timestamp,
             EXISTS (
                 SELECT 1 FROM news_item_read_status AS read_status
-                WHERE read_status.user_id::bigint = $1::bigint
+                WHERE read_status.user_id = $1::bigint
                   AND read_status.news_item_id = news.id
             ) AS is_read,
             discussion.summary::jsonb AS discussion_summary,
@@ -407,12 +408,20 @@ pub async fn list_visible_news_items(
     cursor: Option<&NewsListCursor>,
     limit: usize,
 ) -> Result<NewsListPage, ContentReadRepositoryError> {
-    // The dynamic text contains only module-owned SQL fragments; every runtime value is bound.
-    let total = sqlx::query_scalar::<_, i64>(AssertSqlSafe(visible_news_count_query()))
-        .bind(user_id)
-        .bind(read_filter.as_str())
-        .fetch_one(pool)
-        .await?;
+    // Counting every visible row is the expensive part of a page; only the first page reports a
+    // total (the contract field is nullable and clients page by cursor/has_more).
+    let total = if cursor.is_none() {
+        // The dynamic text contains only module-owned SQL fragments; every runtime value is bound.
+        Some(
+            sqlx::query_scalar::<_, i64>(AssertSqlSafe(visible_news_count_query()))
+                .bind(user_id)
+                .bind(read_filter.as_str())
+                .fetch_one(pool)
+                .await?,
+        )
+    } else {
+        None
+    };
 
     let mut query = visible_news_items_query(false);
     query.push_str(NEWS_READ_FILTER_PREDICATE);
@@ -426,7 +435,7 @@ pub async fn list_visible_news_items(
               OR (
                   coalesce(news.published_at, news.processed_at, news.ingested_at, news.created_at)
                         = $3::timestamp
-                  AND news.id::bigint < $4::bigint
+                  AND news.id < $4::bigint
               )
           )
         ORDER BY
@@ -465,7 +474,7 @@ pub async fn find_visible_news_items_by_ids(
         return Ok(Vec::new());
     }
     let mut query = visible_news_items_query(false);
-    query.push_str(" AND news.id::bigint = ANY($2::bigint[]) ORDER BY news.id DESC LIMIT 101");
+    query.push_str(" AND news.id = ANY($2::bigint[]) ORDER BY news.id DESC LIMIT 101");
     let rows = sqlx::query_as::<_, NewsItemRow>(AssertSqlSafe(query))
         .bind(user_id)
         .bind(news_item_ids)
@@ -512,7 +521,7 @@ pub async fn list_active_feed_urls(
         r#"
         SELECT feed_url
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND scraper_type = $2
           AND is_active IS TRUE
           AND feed_url IS NOT NULL

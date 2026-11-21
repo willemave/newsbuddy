@@ -18,7 +18,7 @@ pub async fn delete_learning_deck(
     deck_id: i64,
 ) -> Result<Option<DeletedLearningDeck>, LearningDeckRepositoryError> {
     let deck_keys = sqlx::query_scalar::<_, Value>(
-        "SELECT artifact_object_keys FROM learning_decks WHERE id::bigint = $1 AND user_id::bigint = $2 AND deleted_at IS NULL FOR UPDATE",
+        "SELECT artifact_object_keys FROM learning_decks WHERE id = $1::bigint AND user_id = $2::bigint AND deleted_at IS NULL FOR UPDATE",
     )
     .bind(deck_id)
     .bind(user_id)
@@ -28,7 +28,7 @@ pub async fn delete_learning_deck(
         return Ok(None);
     };
     let run_keys = sqlx::query_scalar::<_, Value>(
-        "SELECT artifact_object_keys FROM learning_deck_runs WHERE deck_id::bigint = $1",
+        "SELECT artifact_object_keys FROM learning_deck_runs WHERE deck_id = $1::bigint",
     )
     .bind(deck_id)
     .fetch_all(&mut **transaction)
@@ -47,7 +47,7 @@ pub async fn delete_learning_deck(
             updated_at = timezone('UTC', now()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($2::jsonb)
         WHERE task_kind = 'learning_deck'
-          AND subject_id::bigint = $1
+          AND subject_id = $1::bigint
           AND status = ANY($3)
         "#,
     )
@@ -58,9 +58,9 @@ pub async fn delete_learning_deck(
     .await?;
     let private_keys: Vec<String> = sqlx::query_scalar(
         "SELECT candidate.object_key FROM artifact_cleanup_candidates AS candidate
-         JOIN llm_tasks AS task ON task.id::bigint = candidate.llm_task_id
-         WHERE task.task_kind = 'learning_deck' AND task.subject_id::bigint = $1
-           AND task.user_id::bigint = $2",
+         JOIN llm_tasks AS task ON task.id = candidate.llm_task_id
+         WHERE task.task_kind = 'learning_deck' AND task.subject_id = $1::bigint
+           AND task.user_id = $2::bigint",
     )
     .bind(deck_id)
     .bind(user_id)
@@ -69,7 +69,7 @@ pub async fn delete_learning_deck(
     sqlx::query(
         "DELETE FROM learning_deck_generation_state WHERE llm_task_id IN
          (SELECT id FROM llm_tasks WHERE task_kind = 'learning_deck'
-          AND subject_id::bigint = $1 AND user_id::bigint = $2)",
+          AND subject_id = $1::bigint AND user_id = $2::bigint)",
     )
     .bind(deck_id)
     .bind(user_id)
@@ -88,7 +88,7 @@ pub async fn delete_learning_deck(
             completed_at = timezone('UTC', now()),
             updated_at = timezone('UTC', now()),
             timeline = COALESCE(timeline, '[]'::jsonb) || jsonb_build_array($2::jsonb)
-        WHERE deck_id::bigint = $1
+        WHERE deck_id = $1::bigint
           AND status IN ('queued', 'preparing', 'generating', 'validating', 'publishing')
         "#,
     )
@@ -102,7 +102,7 @@ pub async fn delete_learning_deck(
         SET deleted_at = timezone('UTC', now()),
             share_enabled = FALSE,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(deck_id)
@@ -134,7 +134,7 @@ pub async fn prepare_enable_learning_deck_share(
         r#"
         SELECT latest_successful_task_id::bigint, latest_successful_run_id::bigint, share_token_nonce
         FROM learning_decks
-        WHERE id::bigint = $1 AND user_id::bigint = $2 AND deleted_at IS NULL
+        WHERE id = $1::bigint AND user_id = $2::bigint AND deleted_at IS NULL
         FOR UPDATE
         "#,
     )
@@ -172,7 +172,7 @@ pub async fn persist_learning_deck_share(
             share_token_hash = $3,
             share_enabled = TRUE,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(deck_id)
@@ -197,7 +197,7 @@ pub async fn disable_learning_deck_share(
         r#"
         UPDATE learning_decks
         SET share_enabled = FALSE, updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1 AND user_id::bigint = $2 AND deleted_at IS NULL
+        WHERE id = $1::bigint AND user_id = $2::bigint AND deleted_at IS NULL
         "#,
     )
     .bind(deck_id)

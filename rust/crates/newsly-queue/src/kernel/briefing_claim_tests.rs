@@ -73,7 +73,7 @@ async fn index_race(pool: PgPool, commit: bool) {
         .fetch_one(&mut *writer)
         .await
         .unwrap();
-    sqlx::query("UPDATE processing_tasks SET status='processing',locked_by='uncommitted-writer',lease_token=$2,locked_at=now(),lease_expires_at=now()+interval '5 minutes' WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET status='processing',locked_by='uncommitted-writer',lease_token=$2,locked_at=now(),lease_expires_at=now()+interval '5 minutes' WHERE id=$1::bigint")
         .bind(sweep).bind(Uuid::new_v4()).execute(&mut *writer).await.unwrap();
     let worker = tokio::spawn(async move { queue.claim(&request("index-racer")).await });
     // Prove the claimer reached the uncommitted index entry before allowing the writer to
@@ -124,7 +124,7 @@ async fn expired_owner_reclaims_itself_fences_old_worker_and_preserves_full(pool
     let original = queue.claim(&request("original")).await.unwrap().unwrap();
     let full = enqueue(&queue, user, "full").await;
     assert!(queue.claim(&request("blocked")).await.unwrap().is_none());
-    sqlx::query("UPDATE processing_tasks SET lease_expires_at=now()-interval '1 second' WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET lease_expires_at=now()-interval '1 second' WHERE id=$1::bigint")
         .bind(append).execute(&pool).await.unwrap();
     let replacement = queue.claim(&request("replacement")).await.unwrap().unwrap();
     assert_eq!(replacement.id, append);
@@ -174,7 +174,7 @@ async fn completion_retry_and_deferral_release_owner_exclusion(pool: PgPool) {
         assert_eq!(next_claim.id, next);
         if !result.success {
             let available: NaiveDateTime =
-                sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+                sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
                     .bind(active.id)
                     .fetch_one(&pool)
                     .await
@@ -241,7 +241,7 @@ async fn migration_rejects_duplicate_processing_owners_without_mutating_them(poo
         .execute(&mut *transaction)
         .await
         .unwrap();
-    sqlx::query("UPDATE processing_tasks SET status='processing' WHERE id::bigint=ANY($1)")
+    sqlx::query("UPDATE processing_tasks SET status='processing' WHERE id=ANY($1)")
         .bind([first, second])
         .execute(&mut *transaction)
         .await
@@ -263,7 +263,7 @@ async fn migration_rejects_duplicate_processing_owners_without_mutating_them(poo
     );
     transaction.rollback().await.unwrap();
     let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM processing_tasks WHERE id::bigint=ANY($1) AND status='pending'",
+        "SELECT count(*) FROM processing_tasks WHERE id=ANY($1) AND status='pending'",
     )
     .bind([first, second])
     .fetch_one(&pool)
@@ -295,7 +295,7 @@ async fn hundred_user_recovery_with_two_consumers_and_fake_provider(pool: PgPool
     // Model ten first-run owners using the real queue priority field; every other row is fresh
     // retry-generation-zero background work, so this does not test retry-bucket fairness.
     let priority_owners = users[..10].to_vec();
-    sqlx::query("UPDATE processing_tasks SET priority=100 WHERE owner_user_id::bigint=ANY($1)")
+    sqlx::query("UPDATE processing_tasks SET priority=100 WHERE owner_user_id=ANY($1)")
         .bind(&priority_owners)
         .execute(&pool)
         .await
@@ -388,4 +388,46 @@ async fn hundred_user_recovery_with_two_consumers_and_fake_provider(pool: PgPool
         stats.first_completion_ms.unwrap(),
         stats.last_completion_ms
     );
+}
+
+#[sqlx::test(migrations = "../newsly-db/migrations")]
+async fn structurally_invalid_claim_row_is_terminalized_instead_of_blocking_its_bucket(
+    pool: PgPool,
+) {
+    let queue = QueueKernel::new(pool.clone());
+    let poisoned = enqueue(&queue, user(&pool).await, "append").await;
+    let healthy = enqueue(&queue, user(&pool).await, "append").await;
+    sqlx::query("UPDATE processing_tasks SET payload = '[1]'::json WHERE id = $1::bigint")
+        .bind(poisoned)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(queue.claim(&request("first")).await.unwrap().is_none());
+    let (status, lease): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, lease_token FROM processing_tasks WHERE id = $1::bigint")
+            .bind(poisoned)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert!(lease.is_none());
+
+    let claim = queue.claim(&request("second")).await.unwrap().unwrap();
+    assert_eq!(claim.id, healthy);
+}
+
+#[sqlx::test(migrations = "../newsly-db/migrations")]
+async fn json_null_payload_claims_as_an_empty_object(pool: PgPool) {
+    let queue = QueueKernel::new(pool.clone());
+    let task = enqueue(&queue, user(&pool).await, "append").await;
+    sqlx::query("UPDATE processing_tasks SET payload = 'null'::json WHERE id = $1::bigint")
+        .bind(task)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let claim = queue.claim(&request("first")).await.unwrap().unwrap();
+    assert_eq!(claim.id, task);
+    assert!(claim.payload.is_empty());
 }

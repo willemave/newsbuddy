@@ -197,7 +197,7 @@ async fn duplicate_scrape_does_not_reactivate_existing_membership(pool: PgPool) 
     assert!(inserted.created);
 
     sqlx::query(
-        "UPDATE content_status SET status = 'archived' WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+        "UPDATE content_status SET status = 'archived' WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(inserted.content_id)
@@ -215,7 +215,7 @@ async fn duplicate_scrape_does_not_reactivate_existing_membership(pool: PgPool) 
         .expect("transaction should commit");
     assert!(!duplicate.created);
     let status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM content_status WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+        "SELECT status FROM content_status WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(inserted.content_id)
@@ -252,7 +252,7 @@ async fn brutalist_rescrape_persists_cross_listed_topics(pool: PgPool) {
     let second = persist_scraped_news(&mut tx, &story).await.unwrap();
     assert_eq!(first.news_item_id, second.news_item_id);
     let metadata: serde_json::Value =
-        sqlx::query_scalar("SELECT raw_metadata::jsonb FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT raw_metadata::jsonb FROM news_items WHERE id=$1::bigint")
             .bind(first.news_item_id)
             .fetch_one(&mut *tx)
             .await

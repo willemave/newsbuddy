@@ -147,7 +147,7 @@ pub async fn prepare_onboarding_discovery_task(
         r#"
         SELECT is_active
         FROM users
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -168,7 +168,7 @@ pub async fn prepare_onboarding_discovery_task(
             inferred_topics,
             discovery_task_id::bigint AS discovery_task_id
         FROM onboarding_discovery_runs
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
         FOR UPDATE
         "#,
     )
@@ -200,7 +200,7 @@ pub async fn prepare_onboarding_discovery_task(
             target,
             queries
         FROM onboarding_discovery_lanes
-        WHERE run_id::bigint = $1
+        WHERE run_id = $1::bigint
         ORDER BY id
         FOR UPDATE
         "#,
@@ -216,7 +216,7 @@ pub async fn prepare_onboarding_discovery_task(
             completed_at = NULL,
             discovery_task_id = $2::bigint::integer,
             discovery_retry_count = $3
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(run_id)
@@ -230,7 +230,7 @@ pub async fn prepare_onboarding_discovery_task(
         SET status = 'processing',
             completed_queries = 0,
             updated_at = timezone('UTC', now())
-        WHERE run_id::bigint = $1
+        WHERE run_id = $1::bigint
         "#,
     )
     .bind(run_id)
@@ -279,7 +279,7 @@ pub async fn complete_onboarding_discovery_task(
     {
         return Ok(false);
     }
-    sqlx::query("DELETE FROM onboarding_discovery_suggestions WHERE run_id::bigint = $1")
+    sqlx::query("DELETE FROM onboarding_discovery_suggestions WHERE run_id = $1::bigint")
         .bind(snapshot.run_id)
         .execute(&mut **transaction)
         .await?;
@@ -334,7 +334,7 @@ pub async fn complete_onboarding_discovery_task(
         SET status = 'completed',
             completed_queries = query_count,
             updated_at = timezone('UTC', now())
-        WHERE run_id::bigint = $1
+        WHERE run_id = $1::bigint
         "#,
     )
     .bind(snapshot.run_id)
@@ -348,7 +348,7 @@ pub async fn complete_onboarding_discovery_task(
             error_message = NULL,
             discovery_task_id = NULL,
             discovery_retry_count = NULL
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(snapshot.run_id)
@@ -374,7 +374,7 @@ pub async fn settle_onboarding_discovery_attempt(
         UPDATE onboarding_discovery_lanes
         SET status = $2,
             updated_at = timezone('UTC', now())
-        WHERE run_id::bigint = $1
+        WHERE run_id = $1::bigint
         "#,
     )
     .bind(run_id)
@@ -389,7 +389,7 @@ pub async fn settle_onboarding_discovery_attempt(
             error_message = $3,
             discovery_task_id = NULL,
             discovery_retry_count = NULL
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(run_id)
@@ -420,7 +420,7 @@ pub async fn prepare_feed_discovery_task(
         r#"
         SELECT id::bigint
         FROM feed_discovery_runs
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND status = 'completed'
           AND error_message IS NULL
           AND created_at >= $2
@@ -448,7 +448,7 @@ pub async fn prepare_feed_discovery_task(
             content.content_metadata -> 'summary' AS summary
         FROM content_knowledge_saves AS saved
         JOIN contents AS content ON content.id = saved.content_id
-        WHERE saved.user_id::bigint = $1
+        WHERE saved.user_id = $1::bigint
           AND content.url IS NOT NULL
         ORDER BY saved.saved_at DESC, content.id DESC
         LIMIT $2
@@ -462,8 +462,8 @@ pub async fn prepare_feed_discovery_task(
         r#"
         SELECT id::bigint
         FROM feed_discovery_runs
-        WHERE user_id::bigint = $1
-          AND discovery_task_id::bigint = $2
+        WHERE user_id = $1::bigint
+          AND discovery_task_id = $2::bigint
           AND status IN ('pending', 'processing')
         ORDER BY id DESC
         LIMIT 1
@@ -482,7 +482,7 @@ pub async fn prepare_feed_discovery_task(
                 error_message = NULL,
                 completed_at = NULL,
                 discovery_retry_count = $2
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             "#,
         )
         .bind(run_id)
@@ -559,7 +559,7 @@ pub async fn complete_feed_discovery_task(
         r#"
         SELECT COALESCE(feed_url, config::jsonb ->> 'feed_url')
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND is_active = TRUE
           AND COALESCE(feed_url, config::jsonb ->> 'feed_url') IS NOT NULL
         "#,
@@ -587,7 +587,7 @@ pub async fn complete_feed_discovery_task(
             r#"
             SELECT id::bigint, status
             FROM feed_discovery_suggestions
-            WHERE user_id::bigint = $1 AND feed_url = $2
+            WHERE user_id = $1::bigint AND feed_url = $2
             FOR UPDATE
             "#,
         )
@@ -598,7 +598,7 @@ pub async fn complete_feed_discovery_task(
         if let Some((id, _)) = existing {
             if status == "subscribed" {
                 sqlx::query(
-                    "UPDATE feed_discovery_suggestions SET run_id = $2::bigint::integer, status = 'subscribed', updated_at = timezone('UTC', now()) WHERE id::bigint = $1",
+                    "UPDATE feed_discovery_suggestions SET run_id = $2::bigint::integer, status = 'subscribed', updated_at = timezone('UTC', now()) WHERE id = $1::bigint",
                 )
                 .bind(id)
                 .bind(snapshot.run_id)
@@ -665,7 +665,7 @@ pub async fn complete_feed_discovery_task(
             error_message = $2,
             discovery_task_id = NULL,
             discovery_retry_count = NULL
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(snapshot.run_id)
@@ -695,7 +695,7 @@ pub async fn settle_feed_discovery_attempt(
             error_message = $3,
             discovery_task_id = CASE WHEN $2 = 'failed' THEN NULL ELSE discovery_task_id END,
             discovery_retry_count = CASE WHEN $2 = 'failed' THEN NULL ELSE discovery_retry_count END
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(run_id)
@@ -715,7 +715,7 @@ pub async fn ensure_weekly_discovery_session(
         r#"
         SELECT has_completed_onboarding
         FROM users
-        WHERE id::bigint = $1 AND is_active = TRUE
+        WHERE id = $1::bigint AND is_active = TRUE
         FOR UPDATE
         "#,
     )
@@ -730,7 +730,7 @@ pub async fn ensure_weekly_discovery_session(
         r#"
         SELECT id::bigint AS id, context_snapshot
         FROM chat_sessions
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND session_type = 'weekly_discovery'
           AND topic = $2
           AND is_archived = FALSE
@@ -758,7 +758,7 @@ pub async fn ensure_weekly_discovery_session(
                 processing_context,
                 status
             FROM chat_messages
-            WHERE session_id::bigint = $1
+            WHERE session_id = $1::bigint
             ORDER BY id
             LIMIT 2
             FOR UPDATE
@@ -789,7 +789,7 @@ pub async fn ensure_weekly_discovery_session(
                 changed: false,
             }));
         }
-        sqlx::query("DELETE FROM chat_messages WHERE id::bigint = $1")
+        sqlx::query("DELETE FROM chat_messages WHERE id = $1::bigint")
             .bind(message.id)
             .execute(&mut **transaction)
             .await?;
@@ -807,7 +807,7 @@ pub async fn ensure_weekly_discovery_session(
             SET context_snapshot = $2,
                 updated_at = $3,
                 last_message_at = $3
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             "#,
         )
         .bind(session.id)
@@ -885,9 +885,9 @@ async fn lock_current_claim(
         SELECT discovery.id::bigint
         FROM onboarding_discovery_runs AS discovery
         JOIN users AS owner ON owner.id = discovery.user_id
-        WHERE discovery.id::bigint = $1
-          AND discovery.user_id::bigint = $2
-          AND discovery.discovery_task_id::bigint = $3
+        WHERE discovery.id = $1::bigint
+          AND discovery.user_id = $2::bigint
+          AND discovery.discovery_task_id = $3::bigint
           AND discovery.discovery_retry_count = $4
           AND discovery.status = 'processing'
           AND owner.is_active = TRUE
@@ -915,9 +915,9 @@ async fn lock_feed_discovery_claim(
         SELECT discovery.id::bigint
         FROM feed_discovery_runs AS discovery
         JOIN users AS owner ON owner.id = discovery.user_id
-        WHERE discovery.id::bigint = $1
-          AND discovery.user_id::bigint = $2
-          AND discovery.discovery_task_id::bigint = $3
+        WHERE discovery.id = $1::bigint
+          AND discovery.user_id = $2::bigint
+          AND discovery.discovery_task_id = $3::bigint
           AND discovery.discovery_retry_count = $4
           AND discovery.status = 'processing'
           AND owner.is_active = TRUE
@@ -938,7 +938,7 @@ async fn lock_active_user(
     user_id: i64,
 ) -> Result<bool, sqlx::Error> {
     Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active = TRUE FOR UPDATE",
+        "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active = TRUE FOR UPDATE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)
@@ -1004,7 +1004,7 @@ async fn load_weekly_seed(
         r#"
         SELECT topic_summary, inferred_topics
         FROM onboarding_discovery_runs
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         "#,
@@ -1024,7 +1024,7 @@ async fn load_weekly_seed(
             content.url
         FROM contents AS content
         JOIN content_read_status AS read ON read.content_id = content.id
-        WHERE read.user_id::bigint = $1 AND content.url IS NOT NULL
+        WHERE read.user_id = $1::bigint AND content.url IS NOT NULL
         ORDER BY read.read_at DESC, content.id DESC
         LIMIT 6
         "#,
@@ -1037,7 +1037,7 @@ async fn load_weekly_seed(
         WITH latest_run AS (
             SELECT id
             FROM feed_discovery_runs
-            WHERE user_id::bigint = $1 AND status = 'completed'
+            WHERE user_id = $1::bigint AND status = 'completed'
             ORDER BY created_at DESC, id DESC
             LIMIT 1
         )
@@ -1049,7 +1049,7 @@ async fn load_weekly_seed(
             suggestion.rationale
         FROM feed_discovery_suggestions AS suggestion
         JOIN latest_run ON latest_run.id = suggestion.run_id
-        WHERE suggestion.user_id::bigint = $1 AND suggestion.status = 'new'
+        WHERE suggestion.user_id = $1::bigint AND suggestion.status = 'new'
         ORDER BY suggestion.score DESC NULLS LAST, suggestion.id
         LIMIT 20
         "#,
@@ -1061,7 +1061,7 @@ async fn load_weekly_seed(
         r#"
         SELECT COALESCE(feed_url, config::jsonb ->> 'feed_url')
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND is_active = TRUE
           AND COALESCE(feed_url, config::jsonb ->> 'feed_url') IS NOT NULL
         "#,

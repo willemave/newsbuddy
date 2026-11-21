@@ -148,11 +148,11 @@ fn content_select() -> &'static str {
             read.id IS NOT NULL AS is_read,
             saved.id IS NOT NULL AS is_saved_to_knowledge
         FROM contents AS content
-        JOIN users AS account ON account.id::bigint = $1 AND account.is_active = TRUE
+        JOIN users AS account ON account.id = $1::bigint AND account.is_active = TRUE
         LEFT JOIN content_read_status AS read
-          ON read.content_id = content.id AND read.user_id::bigint = $1
+          ON read.content_id = content.id AND read.user_id = $1::bigint
         LEFT JOIN content_knowledge_saves AS saved
-          ON saved.content_id = content.id AND saved.user_id::bigint = $1
+          ON saved.content_id = content.id AND saved.user_id = $1::bigint
     "#
 }
 

@@ -372,6 +372,6 @@ fn completed(
 }
 
 async fn busy(pool: &sqlx::PgPool, user: i64) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE owner_user_id::bigint=$1 AND task_type='briefing_refresh' AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp())) OR EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND NOT news_seed_settled)")
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE owner_user_id=$1::bigint AND task_type='briefing_refresh' AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp())) OR EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id=$1::bigint AND status='active' AND NOT news_seed_settled)")
         .bind(user).fetch_one(pool).await
 }

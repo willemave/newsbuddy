@@ -25,7 +25,7 @@ feed-rs = { version = "=2.4.0", default-features = false }
 quick-xml = "=0.41.0"
 getrandom = "=0.3.4"
 hostname = "=0.4.2"
-jsonwebtoken = { version = "=11.0.0", default-features = false, features = ["rust_crypto", "use_pem"] }
+jsonwebtoken = { version = "=11.0.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 jsonschema = { version = "=0.52.1", default-features = false }
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }

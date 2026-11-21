@@ -76,7 +76,7 @@ mod tests {
             .await
             .unwrap();
         let task_before: Value = sqlx::query_scalar(
-            "SELECT to_jsonb(task) FROM processing_tasks task WHERE id::bigint=$1",
+            "SELECT to_jsonb(task) FROM processing_tasks task WHERE id=$1::bigint",
         )
         .bind(task_id)
         .fetch_one(&pool)
@@ -111,7 +111,7 @@ mod tests {
             .await
             .unwrap();
         let rows: Vec<UsageRow> = sqlx::query_as(
-            "SELECT task_id::bigint,user_id::bigint,provider,model,feature,operation,source,request_id,request_count,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,total_tokens FROM vendor_usage_records WHERE task_id::bigint=$1 ORDER BY input_tokens",
+            "SELECT task_id::bigint,user_id::bigint,provider,model,feature,operation,source,request_id,request_count,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,total_tokens FROM vendor_usage_records WHERE task_id=$1::bigint ORDER BY input_tokens",
         ).bind(task_id).fetch_all(&pool).await.unwrap();
         assert_eq!(rows.len(), 3);
         for (index, row) in rows.into_iter().enumerate() {
@@ -138,7 +138,7 @@ mod tests {
             assert_eq!(row.total_tokens, 112 * multiplier);
         }
         let task_after: Value = sqlx::query_scalar(
-            "SELECT to_jsonb(task) FROM processing_tasks task WHERE id::bigint=$1",
+            "SELECT to_jsonb(task) FROM processing_tasks task WHERE id=$1::bigint",
         )
         .bind(task_id)
         .fetch_one(&pool)
@@ -195,7 +195,7 @@ mod tests {
             .await
             .unwrap();
         let mut product = pool.begin().await.unwrap();
-        sqlx::query("UPDATE processing_tasks SET payload='{}' WHERE id::bigint=$1")
+        sqlx::query("UPDATE processing_tasks SET payload='{}' WHERE id=$1::bigint")
             .bind(task)
             .execute(&mut *product)
             .await
@@ -207,7 +207,7 @@ mod tests {
                 .is_err()
         );
         product.rollback().await.unwrap();
-        sqlx::query("UPDATE processing_tasks SET lease_expires_at=now()-interval '1 second' WHERE id::bigint=$1")
+        sqlx::query("UPDATE processing_tasks SET lease_expires_at=now()-interval '1 second' WHERE id=$1::bigint")
             .bind(task).execute(&pool).await.unwrap();
         assert!(
             queue
@@ -216,11 +216,11 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        let (count, requests): (i64, i64) = sqlx::query_as("SELECT count(*),sum(request_count)::bigint FROM vendor_usage_records WHERE task_id::bigint=$1")
+        let (count, requests): (i64, i64) = sqlx::query_as("SELECT count(*),sum(request_count)::bigint FROM vendor_usage_records WHERE task_id=$1::bigint")
             .bind(task).fetch_one(&pool).await.unwrap();
         assert_eq!((count, requests), (1, 1));
         let payload: Value =
-            sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id=$1::bigint")
                 .bind(task)
                 .fetch_one(&pool)
                 .await

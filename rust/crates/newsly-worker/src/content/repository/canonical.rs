@@ -11,7 +11,7 @@ pub(super) async fn find_duplicate_content(
         r"
         SELECT id::bigint
         FROM contents
-        WHERE id::bigint <> $1 AND content_type = $2 AND url = $3
+        WHERE id <> $1::bigint AND content_type = $2 AND url = $3
         ORDER BY id
         LIMIT 1
         FOR SHARE
@@ -29,7 +29,7 @@ pub(super) async fn duplicate_can_prepare_or_read(
     content_id: i64,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT status IN ('new', 'pending', 'processing', 'awaiting_image', 'completed') FROM contents WHERE id::bigint = $1",
+        "SELECT status IN ('new', 'pending', 'processing', 'awaiting_image', 'completed') FROM contents WHERE id = $1::bigint",
     )
     .bind(content_id)
     .fetch_one(&mut **transaction)
@@ -51,7 +51,7 @@ pub(super) async fn relink_canonical_user_state(
         INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
         SELECT user_id, $2, status, created_at, updated_at
         FROM content_status
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO NOTHING
         ",
     )
@@ -59,7 +59,7 @@ pub(super) async fn relink_canonical_user_state(
     .bind(winner_content_id)
     .execute(&mut **transaction)
     .await?;
-    sqlx::query("DELETE FROM content_status WHERE content_id::bigint = $1")
+    sqlx::query("DELETE FROM content_status WHERE content_id = $1::bigint")
         .bind(loser_content_id)
         .execute(&mut **transaction)
         .await?;
@@ -69,7 +69,7 @@ pub(super) async fn relink_canonical_user_state(
         INSERT INTO content_read_status (user_id, content_id, read_at, created_at)
         SELECT user_id, $2, read_at, created_at
         FROM content_read_status
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO UPDATE
         SET read_at = GREATEST(content_read_status.read_at, EXCLUDED.read_at)
         ",
@@ -78,7 +78,7 @@ pub(super) async fn relink_canonical_user_state(
     .bind(winner_content_id)
     .execute(&mut **transaction)
     .await?;
-    sqlx::query("DELETE FROM content_read_status WHERE content_id::bigint = $1")
+    sqlx::query("DELETE FROM content_read_status WHERE content_id = $1::bigint")
         .bind(loser_content_id)
         .execute(&mut **transaction)
         .await?;
@@ -88,7 +88,7 @@ pub(super) async fn relink_canonical_user_state(
         INSERT INTO content_knowledge_saves (user_id, content_id, saved_at, created_at)
         SELECT user_id, $2, saved_at, created_at
         FROM content_knowledge_saves
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO UPDATE
         SET saved_at = GREATEST(content_knowledge_saves.saved_at, EXCLUDED.saved_at)
         ",
@@ -97,7 +97,7 @@ pub(super) async fn relink_canonical_user_state(
     .bind(winner_content_id)
     .execute(&mut **transaction)
     .await?;
-    sqlx::query("DELETE FROM content_knowledge_saves WHERE content_id::bigint = $1")
+    sqlx::query("DELETE FROM content_knowledge_saves WHERE content_id = $1::bigint")
         .bind(loser_content_id)
         .execute(&mut **transaction)
         .await?;
@@ -107,7 +107,7 @@ pub(super) async fn relink_canonical_user_state(
         INSERT INTO content_unlikes (user_id, content_id, unliked_at, created_at)
         SELECT user_id, $2, unliked_at, created_at
         FROM content_unlikes
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO UPDATE
         SET unliked_at = GREATEST(content_unlikes.unliked_at, EXCLUDED.unliked_at)
         ",
@@ -116,7 +116,7 @@ pub(super) async fn relink_canonical_user_state(
     .bind(winner_content_id)
     .execute(&mut **transaction)
     .await?;
-    sqlx::query("DELETE FROM content_unlikes WHERE content_id::bigint = $1")
+    sqlx::query("DELETE FROM content_unlikes WHERE content_id = $1::bigint")
         .bind(loser_content_id)
         .execute(&mut **transaction)
         .await?;
@@ -125,7 +125,7 @@ pub(super) async fn relink_canonical_user_state(
         r"
         UPDATE user_integration_synced_items
         SET content_id = $2, updated_at = timezone('UTC', now())
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ",
     )
     .bind(loser_content_id)
@@ -137,7 +137,7 @@ pub(super) async fn relink_canonical_user_state(
         r"
         UPDATE chat_sessions
         SET content_id = $2, updated_at = timezone('UTC', now())
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ",
     )
     .bind(loser_content_id)

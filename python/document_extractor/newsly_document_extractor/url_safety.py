@@ -34,7 +34,17 @@ class UrlSafetyError(RuntimeError):
         self.http_status = http_status
 
 
+_NAT64_WELL_KNOWN = ipaddress.IPv6Network("64:ff9b::/96")
+
+
 def _is_public_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(address, ipaddress.IPv6Address):
+        # IANA lists 64:ff9b::/96 as global, but a NAT64 gateway forwards it to the embedded
+        # IPv4 address, so judge that address instead.
+        if address in _NAT64_WELL_KNOWN:
+            return _is_public_ip(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+        if address.ipv4_mapped is not None:
+            return _is_public_ip(address.ipv4_mapped)
     return address.is_global and not address.is_multicast
 
 

@@ -116,7 +116,7 @@ async fn timezone_update_is_revision_fenced_and_due_runs_are_date_deduplicated(p
 
     let due_at = Utc.with_ymd_and_hms(2026, 9, 28, 10, 10, 0).unwrap();
     sqlx::query(
-        "UPDATE user_news_category_schedule SET next_due_at=$2,next_local_date='2026-09-28',next_window_start_at=$3,next_window_end_at=$4 WHERE user_id::bigint=$1",
+        "UPDATE user_news_category_schedule SET next_due_at=$2,next_local_date='2026-09-28',next_window_start_at=$3,next_window_end_at=$4 WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .bind(due_at.naive_utc())
@@ -142,7 +142,7 @@ async fn timezone_update_is_revision_fenced_and_due_runs_are_date_deduplicated(p
     );
 
     let count = sqlx::query_scalar::<_, i64>(
-        "SELECT count(*)::bigint FROM news_category_maintenance_runs WHERE user_id::bigint=$1 AND local_date='2026-09-28'",
+        "SELECT count(*)::bigint FROM news_category_maintenance_runs WHERE user_id=$1::bigint AND local_date='2026-09-28'",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -187,7 +187,7 @@ async fn timezone_update_is_revision_fenced_and_due_runs_are_date_deduplicated(p
     };
     let successor_token = Uuid::parse_str("00000000-0000-4000-8000-000000000718").unwrap();
     sqlx::query(
-        "UPDATE processing_tasks SET locked_by='successor', lease_token=$2, retry_count=1 WHERE id::bigint=$1",
+        "UPDATE processing_tasks SET locked_by='successor', lease_token=$2, retry_count=1 WHERE id=$1::bigint",
     )
     .bind(task_id)
     .bind(successor_token)
@@ -217,7 +217,7 @@ async fn timezone_update_is_revision_fenced_and_due_runs_are_date_deduplicated(p
     .unwrap();
     assert_eq!(status, "scheduled");
     sqlx::query(
-        "UPDATE processing_tasks SET locked_by=$2, lease_token=$3, retry_count=0 WHERE id::bigint=$1",
+        "UPDATE processing_tasks SET locked_by=$2, lease_token=$3, retry_count=0 WHERE id=$1::bigint",
     )
     .bind(task_id)
     .bind(&claim_fence.locked_by)
@@ -239,7 +239,7 @@ async fn timezone_update_is_revision_fenced_and_due_runs_are_date_deduplicated(p
     assert!(matches!(context, BeginNewsCategoryRunOutcome::Ready(_)));
 
     sqlx::query(
-        "UPDATE user_news_category_schedule SET timezone_revision=2 WHERE user_id::bigint=$1",
+        "UPDATE user_news_category_schedule SET timezone_revision=2 WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .execute(&pool)
@@ -294,7 +294,7 @@ async fn timezone_update_is_revision_fenced_and_due_runs_are_date_deduplicated(p
     );
     transaction.commit().await.unwrap();
     let status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM news_category_maintenance_runs WHERE user_id::bigint=$1 AND local_date='2026-09-29'",
+        "SELECT status FROM news_category_maintenance_runs WHERE user_id=$1::bigint AND local_date='2026-09-29'",
     )
     .bind(user_id)
     .fetch_one(&pool)

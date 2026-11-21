@@ -21,9 +21,9 @@ pub(super) const NEWS_COLUMNS: &str = r#"
 
 pub(super) const NEWS_FROM: &str = r#"
         FROM news_items AS item
-        JOIN users AS account ON account.id::bigint = $1::bigint AND account.is_active = TRUE
+        JOIN users AS account ON account.id = $1::bigint AND account.is_active = TRUE
         LEFT JOIN news_item_read_status AS read
-          ON read.news_item_id = item.id AND read.user_id::bigint = $1::bigint
+          ON read.news_item_id = item.id AND read.user_id = $1::bigint
 "#;
 
 pub(super) fn news_visibility_filter() -> String {

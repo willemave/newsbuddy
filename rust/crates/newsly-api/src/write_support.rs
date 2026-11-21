@@ -109,7 +109,7 @@ pub(super) fn stale_owner(request_id: &str) -> ApiError {
 }
 
 pub(super) fn internal_error(error: impl std::fmt::Display, request_id: &str) -> ApiError {
-    tracing::error!(error = %error, "mutation operation failed");
+    tracing::error!(request_id = %request_id, error = %error, "API operation failed");
     ApiError::new(
         StatusCode::INTERNAL_SERVER_ERROR,
         "internal_error",

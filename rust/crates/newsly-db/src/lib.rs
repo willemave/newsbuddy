@@ -243,12 +243,11 @@ pub use learning_deck_generation::{
     read_learning_deck_generation,
 };
 pub use learning_deck_tasks::{
-    ContentBodyMaterial, LearningDeckModelUsage, LearningDeckPreparationOutcome,
-    LearningDeckSourceMaterial, LearningDeckSourceSettlement, LearningDeckTaskRepositoryError,
-    LearningDeckTaskSnapshot, MarkLearningDeckRunningOutcome, PublishLearningDeck,
-    PublishLearningDeckOutcome, StoredLearningDeckArtifact, begin_learning_deck_preparation,
-    fail_learning_deck_task, mark_learning_deck_running, publish_learning_deck,
-    settle_learning_deck_source_missing,
+    ContentBodyMaterial, LearningDeckPreparationOutcome, LearningDeckSourceMaterial,
+    LearningDeckSourceSettlement, LearningDeckTaskRepositoryError, LearningDeckTaskSnapshot,
+    MarkLearningDeckRunningOutcome, PublishLearningDeck, PublishLearningDeckOutcome,
+    StoredLearningDeckArtifact, begin_learning_deck_preparation, fail_learning_deck_task,
+    mark_learning_deck_running, publish_learning_deck, settle_learning_deck_source_missing,
 };
 pub use learning_decks::{
     ContentSourceOutcome, ConvertedNewsSource, CreateLearningDeckOutcome, DeletedLearningDeck,

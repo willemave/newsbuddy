@@ -59,7 +59,13 @@ impl DatabaseConfig {
     pub fn connect_options(&self) -> Result<PgConnectOptions, DatabaseConfigError> {
         let normalized = normalize_database_url(self.url.expose_secret());
         PgConnectOptions::from_str(normalized.as_ref())
-            .map(|options| options.application_name(&self.application_name))
+            // Timestamps are stored as UTC `timestamp without time zone`; pin the session zone so
+            // implicit timestamptz comparisons never depend on the server's local default.
+            .map(|options| {
+                options
+                    .application_name(&self.application_name)
+                    .options([("TimeZone", "UTC")])
+            })
             .map_err(DatabaseConfigError::InvalidUrl)
     }
 }
@@ -86,7 +92,25 @@ pub enum DatabaseConfigError {
 mod tests {
     use std::borrow::Cow;
 
-    use super::normalize_database_url;
+    use secrecy::SecretString;
+
+    use super::{DatabaseConfig, normalize_database_url};
+
+    #[test]
+    fn sessions_are_pinned_to_utc() {
+        let config = DatabaseConfig::new(
+            SecretString::from("postgresql://newsly@example.test/newsly"),
+            "newsly-test",
+        );
+        let options = config.connect_options().expect("url should parse");
+        assert!(
+            options
+                .get_options()
+                .is_some_and(|value| value.contains("TimeZone=UTC")),
+            "{:?}",
+            options.get_options()
+        );
+    }
 
     #[test]
     fn native_database_urls_are_borrowed_unchanged() {

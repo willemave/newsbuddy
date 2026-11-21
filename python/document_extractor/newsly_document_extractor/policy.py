@@ -651,7 +651,8 @@ class ExtractionPolicy:
                 issue=None,
                 pdf_pages=pdf.page_count,
             )
-        return parse_static_document(document)
+        # HTML parsing is CPU-bound; keep it off the event loop serving other extractions.
+        return await asyncio.to_thread(parse_static_document, document)
 
     async def _extract_document(self, request: ExtractRequest, started_at: float) -> ExtractResult:
         static_document: StaticDocument | None = None
@@ -857,7 +858,7 @@ class ExtractionPolicy:
                 break
 
         browser_html = str(getattr(result, "html", None) or cleaned_html)
-        soup = BeautifulSoup(browser_html, "html.parser")
+        soup = await asyncio.to_thread(BeautifulSoup, browser_html, "html.parser")
         author = _metadata_value(soup, "author", "article:author")
         published_at = _parse_published_at(
             _metadata_value(soup, "article:published_time", "datePublished", "date")
@@ -916,7 +917,9 @@ class ExtractionPolicy:
             if exc.code in {"invalid_url", "response_too_large"}:
                 raise
 
-        next_url = _extract_pubmed_link(html, str(request.url)) if html else None
+        next_url = (
+            await asyncio.to_thread(_extract_pubmed_link, html, str(request.url)) if html else None
+        )
         if next_url is None:
             browser_timeout = min(
                 request.options.browser_timeout_ms / 1_000,
@@ -938,7 +941,7 @@ class ExtractionPolicy:
                 )
             if result is not None and getattr(result, "success", False):
                 html = str(getattr(result, "html", None) or "")
-                next_url = _extract_pubmed_link(html, str(request.url))
+                next_url = await asyncio.to_thread(_extract_pubmed_link, html, str(request.url))
                 usage_events.append(UsageEvent(kind="browser_page", quantity=1, unit="page"))
 
         if next_url is None:

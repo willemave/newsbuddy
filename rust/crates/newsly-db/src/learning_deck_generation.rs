@@ -131,7 +131,7 @@ pub async fn publish_learning_deck_progress(
         "UPDATE llm_tasks SET status = 'running', workflow_state = 'running',
          updated_at = timezone('UTC', clock_timestamp()),
          status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($2::jsonb)
-         WHERE id::bigint = $1 AND EXISTS (SELECT 1 FROM learning_deck_generation_state
+         WHERE id = $1::bigint AND EXISTS (SELECT 1 FROM learning_deck_generation_state
            WHERE llm_task_id = $1 AND deadline_at > clock_timestamp())",
     )
     .bind(fence.llm_task_id)
@@ -159,8 +159,8 @@ async fn lock_owned_generation(
     fence: &LearningDeckGenerationClaimFence,
 ) -> Result<bool, sqlx::Error> {
     let queue: Option<i64> = sqlx::query_scalar(
-        "SELECT id::bigint FROM processing_tasks WHERE id::bigint = $1
-         AND owner_user_id::bigint = $2 AND task_type = 'run_llm_task' AND queue_name = 'llm'
+        "SELECT id::bigint FROM processing_tasks WHERE id = $1::bigint
+         AND owner_user_id = $2::bigint AND task_type = 'run_llm_task' AND queue_name = 'llm'
          AND payload::jsonb @> jsonb_build_object('llm_task_id',$3::bigint,'user_id',$2::bigint)
          AND status = 'processing' AND locked_by = $4 AND lease_token = $5
          AND retry_count = $6 AND executor_runtime = $7 AND executor_version = $8
@@ -182,8 +182,8 @@ async fn lock_owned_generation(
         return Ok(false);
     }
     let task: Option<i64> = sqlx::query_scalar(
-        "SELECT id::bigint FROM llm_tasks WHERE id::bigint = $1 AND user_id::bigint = $2
-         AND subject_id::bigint = $3 AND task_kind = 'learning_deck'
+        "SELECT id::bigint FROM llm_tasks WHERE id = $1::bigint AND user_id = $2::bigint
+         AND subject_id = $3::bigint AND task_kind = 'learning_deck'
          AND status IN ('preparing','running') FOR UPDATE",
     )
     .bind(fence.llm_task_id)
@@ -197,11 +197,11 @@ async fn lock_owned_generation(
     // Deliberately do not lock the deck: deletion locks deck -> llm task and cancels that task
     // before committing. The task lock serializes publication with deletion without a cycle.
     sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM learning_decks WHERE id::bigint = $1
-         AND user_id::bigint = $2 AND latest_task_id::bigint = $3 AND deleted_at IS NULL)
-         AND EXISTS(SELECT 1 FROM processing_tasks WHERE id::bigint = $4
+        "SELECT EXISTS(SELECT 1 FROM learning_decks WHERE id = $1::bigint
+         AND user_id = $2::bigint AND latest_task_id = $3::bigint AND deleted_at IS NULL)
+         AND EXISTS(SELECT 1 FROM processing_tasks WHERE id = $4::bigint
          AND lease_expires_at > timezone('UTC', clock_timestamp()))
-         AND EXISTS(SELECT 1 FROM users WHERE id::bigint = $2 AND is_active IS TRUE)",
+         AND EXISTS(SELECT 1 FROM users WHERE id = $2::bigint AND is_active IS TRUE)",
     )
     .bind(fence.deck_id)
     .bind(fence.user_id)

@@ -340,7 +340,7 @@ pub async fn load_briefing_index_validator(
     user_id: i64,
 ) -> Result<BriefingIndexValidatorProjection, BriefingRepositoryError> {
     let version = sqlx::query_scalar::<_, Option<i32>>(
-        "SELECT version FROM briefing_states WHERE user_id::bigint = $1",
+        "SELECT version FROM briefing_states WHERE user_id = $1::bigint",
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -351,7 +351,7 @@ pub async fn load_briefing_index_validator(
         r#"
         SELECT id::bigint AS id, revision
         FROM onboarding_first_edition_runs
-        WHERE user_id::bigint = $1 AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
         ORDER BY id DESC
         LIMIT 1
         "#,
@@ -375,7 +375,7 @@ pub async fn load_briefing_index(
         r#"
         SELECT id::bigint AS id, key, tier, title, deck, position
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
         ORDER BY position, id
         "#,
     )
@@ -387,7 +387,7 @@ pub async fn load_briefing_index(
         SELECT id::bigint AS id, lens_id::bigint AS lens_id, created_at,
                source_keys::jsonb AS source_keys
         FROM briefing_segments
-        WHERE user_id::bigint = $1 AND status IN ('active', 'degraded')
+        WHERE user_id = $1::bigint AND status IN ('active', 'degraded')
         "#,
     )
     .bind(user_id)
@@ -406,7 +406,7 @@ pub async fn load_briefing_index(
         r#"
         SELECT DISTINCT lens_key
         FROM briefing_pending_sources
-        WHERE user_id::bigint = $1 AND lens_key IS NOT NULL
+        WHERE user_id = $1::bigint AND lens_key IS NOT NULL
         "#,
     )
     .bind(user_id)
@@ -436,7 +436,7 @@ pub async fn load_briefing_lens_page(
         r#"
         SELECT id::bigint AS id, key, tier, title, deck, position
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND key = $2 AND status = 'active'
+        WHERE user_id = $1::bigint AND key = $2 AND status = 'active'
         LIMIT 1
         "#,
     )
@@ -455,7 +455,7 @@ pub async fn load_briefing_lens_page(
         SELECT id::bigint AS id, lens_id::bigint AS lens_id, created_at,
                source_keys::jsonb AS source_keys
         FROM briefing_segments
-        WHERE lens_id::bigint = $1 AND status IN ('active', 'degraded')
+        WHERE lens_id = $1::bigint AND status IN ('active', 'degraded')
         ORDER BY created_at DESC, id DESC
         "#,
     )
@@ -495,8 +495,8 @@ pub async fn load_briefing_lens_page(
             SELECT id::bigint AS id, created_at, status, narration_text,
                    blocks::jsonb AS blocks, source_keys::jsonb AS source_keys
             FROM briefing_segments
-            WHERE lens_id::bigint = $1 AND status IN ('active', 'degraded')
-              AND (created_at < $2 OR (created_at = $2 AND id::bigint < $3))
+            WHERE lens_id = $1::bigint AND status IN ('active', 'degraded')
+              AND (created_at < $2 OR (created_at = $2 AND id < $3::bigint))
             ORDER BY created_at DESC, id DESC
             LIMIT $4
             "#,
@@ -513,7 +513,7 @@ pub async fn load_briefing_lens_page(
             SELECT id::bigint AS id, created_at, status, narration_text,
                    blocks::jsonb AS blocks, source_keys::jsonb AS source_keys
             FROM briefing_segments
-            WHERE lens_id::bigint = $1 AND status IN ('active', 'degraded')
+            WHERE lens_id = $1::bigint AND status IN ('active', 'degraded')
             ORDER BY created_at DESC, id DESC
             LIMIT $2
             "#,
@@ -610,8 +610,8 @@ pub async fn load_briefing_refresh_task(
         SELECT task.status, state.version
         FROM processing_tasks AS task
         JOIN briefing_states AS state ON state.user_id = task.owner_user_id
-        WHERE task.id::bigint = $1
-          AND task.owner_user_id::bigint = $2
+        WHERE task.id = $1::bigint
+          AND task.owner_user_id = $2::bigint
           AND task.task_type = 'briefing_refresh'
         "#,
     )
@@ -631,7 +631,7 @@ pub async fn expedite_pending_briefing_refresh(
         r#"
         UPDATE processing_tasks
         SET available_at = $2
-        WHERE id::bigint = $1 AND status = 'pending'
+        WHERE id = $1::bigint AND status = 'pending'
           AND (available_at IS NULL OR available_at > $2)
         "#,
     )
@@ -650,7 +650,7 @@ pub async fn recent_briefing_dig_count(
     Ok(sqlx::query_scalar::<_, i64>(
         r#"
         SELECT count(*)::bigint FROM vendor_usage_records
-        WHERE user_id::bigint = $1 AND feature = 'briefing_dig'
+        WHERE user_id = $1::bigint AND feature = 'briefing_dig'
           AND created_at >= timezone('UTC', now()) - interval '1 hour'
         "#,
     )
@@ -712,7 +712,7 @@ pub async fn load_briefing_narration<'e>(
                audio_storage_path, duration_seconds, error_message,
                episode_group_id, chapter_index, created_at, updated_at
         FROM audio_episodes
-        WHERE user_id::bigint = $1 AND kind = 'briefing_narration'
+        WHERE user_id = $1::bigint AND kind = 'briefing_narration'
           AND episode_group_id = $2
         ORDER BY chapter_index, id
         "#,
@@ -733,7 +733,7 @@ async fn load_state(
     let state = sqlx::query_as::<_, StateRow>(
         r#"
         SELECT version, masthead_title, masthead_deck
-        FROM briefing_states WHERE user_id::bigint = $1
+        FROM briefing_states WHERE user_id = $1::bigint
         "#,
     )
     .bind(user_id)
@@ -761,7 +761,7 @@ async fn load_first_run(
         r#"
         SELECT id::bigint AS id, revision
         FROM onboarding_first_edition_runs
-        WHERE user_id::bigint = $1 AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
         ORDER BY id DESC LIMIT 1
         "#,
     )
@@ -772,7 +772,7 @@ async fn load_first_run(
         return Ok(None);
     };
     crate::first_edition_progress::reconcile_sources(&mut *pool.acquire().await?, user_id).await?;
-    let still_active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE id::bigint=$1 AND status='active')")
+    let still_active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE id=$1::bigint AND status='active')")
         .bind(run.id).fetch_one(pool).await?;
     if !still_active {
         return Ok(None);
@@ -782,7 +782,7 @@ async fn load_first_run(
         r#"
         SELECT display_name, position, status, processed_item_count, completed_at
         FROM onboarding_first_edition_sources
-        WHERE run_id::bigint = $1
+        WHERE run_id = $1::bigint
         ORDER BY completed_at ASC NULLS LAST, position, id
         "#,
     )
@@ -800,7 +800,7 @@ async fn load_first_run(
         });
     }
     let tiers = crate::first_edition_progress::tiers(pool, run.id).await?;
-    let pending_news: bool = sqlx::query_scalar("SELECT NOT news_seed_settled AND (news_seeded OR EXISTS(SELECT 1 FROM onboarding_first_edition_sources s WHERE s.run_id=r.id AND s.source_kind='aggregator' AND s.processed_item_count>0)) FROM onboarding_first_edition_runs r WHERE r.id::bigint=$1")
+    let pending_news: bool = sqlx::query_scalar("SELECT NOT news_seed_settled AND (news_seeded OR EXISTS(SELECT 1 FROM onboarding_first_edition_sources s WHERE s.run_id=r.id AND s.source_kind='aggregator' AND s.processed_item_count>0)) FROM onboarding_first_edition_runs r WHERE r.id=$1::bigint")
         .bind(run.id).fetch_one(pool).await?;
     Ok(Some(BriefingFirstRunProjection {
         pending_news,

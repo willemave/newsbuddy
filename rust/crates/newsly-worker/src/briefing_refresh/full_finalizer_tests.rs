@@ -71,7 +71,7 @@ async fn stale_full_finalization_retains_intent_and_exhausts_neutral_conflict_bu
         let transition = finalization.finish().await.unwrap().unwrap();
         assert_eq!(transition.retry_count, 0);
         let (status, payload): (String, Value) =
-            sqlx::query_as("SELECT status,payload FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query_as("SELECT status,payload FROM processing_tasks WHERE id=$1::bigint")
                 .bind(task_id)
                 .fetch_one(&pool)
                 .await
@@ -80,7 +80,7 @@ async fn stale_full_finalization_retains_intent_and_exhausts_neutral_conflict_bu
         assert_eq!(payload["mode"], "full");
         assert_eq!(payload["keep"], "intent");
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM processing_tasks WHERE owner_user_id::bigint=$1",
+            "SELECT count(*) FROM processing_tasks WHERE owner_user_id=$1::bigint",
         )
         .bind(user_id)
         .fetch_one(&pool)
@@ -96,7 +96,7 @@ async fn stale_full_finalization_retains_intent_and_exhausts_neutral_conflict_bu
         );
         if !exhausted {
             assert_eq!(result.retry_delay_seconds, Some(5));
-            sqlx::query("UPDATE processing_tasks SET available_at=now(),payload=(payload::jsonb || jsonb_build_object('assignment_stale_since',$2::bigint))::json WHERE id::bigint=$1")
+            sqlx::query("UPDATE processing_tasks SET available_at=now(),payload=(payload::jsonb || jsonb_build_object('assignment_stale_since',$2::bigint))::json WHERE id=$1::bigint")
                 .bind(task_id).bind(Utc::now().timestamp()-301).execute(&pool).await.unwrap();
         }
     }

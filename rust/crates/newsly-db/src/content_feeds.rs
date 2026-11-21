@@ -141,7 +141,7 @@ SELECT
         FROM user_integration_synced_items AS synced_item
         JOIN user_integration_connections AS connection
           ON connection.id = synced_item.connection_id
-        WHERE connection.user_id::bigint = $1::bigint
+        WHERE connection.user_id = $1::bigint
           AND connection.provider = 'x'
           AND synced_item.channel = 'bookmarks'
           AND synced_item.content_id = content.id
@@ -150,13 +150,13 @@ SELECT
 FROM contents AS content
 LEFT JOIN content_read_status AS read_status
   ON read_status.content_id = content.id
- AND read_status.user_id::bigint = $1::bigint
+ AND read_status.user_id = $1::bigint
 LEFT JOIN content_knowledge_saves AS knowledge_save
   ON knowledge_save.content_id = content.id
- AND knowledge_save.user_id::bigint = $1::bigint
+ AND knowledge_save.user_id = $1::bigint
 LEFT JOIN content_status AS user_status
   ON user_status.content_id = content.id
- AND user_status.user_id::bigint = $1::bigint
+ AND user_status.user_id = $1::bigint
  AND user_status.status = 'inbox'
 LEFT JOIN content_bodies AS body
   ON body.content_id = content.id
@@ -203,7 +203,7 @@ WHERE content.status = 'completed'
   AND (
       $5::timestamp IS NULL
       OR {sort} < $5::timestamp
-      OR ({sort} = $5::timestamp AND content.id::bigint < $6::bigint)
+      OR ({sort} = $5::timestamp AND content.id < $6::bigint)
   )
 ORDER BY {sort} DESC, content.id DESC
 LIMIT $7::bigint
@@ -247,10 +247,10 @@ async fn list_inbox_dates(
         FROM contents AS content
         LEFT JOIN content_read_status AS read_status
           ON read_status.content_id = content.id
-         AND read_status.user_id::bigint = $1::bigint
+         AND read_status.user_id = $1::bigint
         LEFT JOIN content_status AS user_status
           ON user_status.content_id = content.id
-         AND user_status.user_id::bigint = $1::bigint
+         AND user_status.user_id = $1::bigint
          AND user_status.status = 'inbox'
         WHERE content.status = 'completed'
           AND (content.content_type = 'news' OR user_status.id IS NOT NULL)
@@ -294,7 +294,7 @@ WHERE content.status = 'completed'
   AND (
       $4::timestamp IS NULL
       OR {sort} < $4::timestamp
-      OR ({sort} = $4::timestamp AND content.id::bigint < $5::bigint)
+      OR ({sort} = $4::timestamp AND content.id < $5::bigint)
   )
 ORDER BY {sort} DESC, content.id DESC
 LIMIT $6::bigint
@@ -316,7 +316,7 @@ LIMIT $6::bigint
         SELECT DISTINCT to_char(read_status.read_at::date, 'YYYY-MM-DD') AS value
         FROM content_read_status AS read_status
         JOIN contents AS content ON content.id = read_status.content_id
-        WHERE read_status.user_id::bigint = $1::bigint
+        WHERE read_status.user_id = $1::bigint
           AND content.status = 'completed'
           AND (cardinality($2::text[]) = 0 OR content.content_type = ANY($2::text[]))
           AND read_status.read_at >= statement_timestamp() - ($3::bigint * interval '1 day')
@@ -364,7 +364,7 @@ WHERE knowledge_save.id IS NOT NULL
                   {rank} = $4::double precision
                   AND (
                       {sort} < $3::timestamp
-                      OR ({sort} = $3::timestamp AND content.id::bigint < $5::bigint)
+                      OR ({sort} = $3::timestamp AND content.id < $5::bigint)
                   )
               )
           )
@@ -373,7 +373,7 @@ WHERE knowledge_save.id IS NOT NULL
           ($2::text IS NULL OR $4::double precision IS NULL)
           AND (
               {sort} < $3::timestamp
-              OR ({sort} = $3::timestamp AND content.id::bigint < $5::bigint)
+              OR ({sort} = $3::timestamp AND content.id < $5::bigint)
           )
       )
   )
@@ -428,7 +428,7 @@ WHERE content.status = 'completed'
           {rank} = $5::double precision
           AND (
               content.created_at < $4::timestamp
-              OR (content.created_at = $4::timestamp AND content.id::bigint < $6::bigint)
+              OR (content.created_at = $4::timestamp AND content.id < $6::bigint)
           )
       )
   )
@@ -520,7 +520,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("test content should insert");
-        sqlx::query("UPDATE contents SET classification = 'skip' WHERE id::bigint = $1")
+        sqlx::query("UPDATE contents SET classification = 'skip' WHERE id = $1::bigint")
             .bind(content_id)
             .execute(&pool)
             .await

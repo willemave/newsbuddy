@@ -42,10 +42,10 @@ async fn firecrawl_demand_follows_active_subscriber_visibility(pool: PgPool) {
         policy(&pool, global).await,
         FirecrawlDemandPolicy::NoSubscriberDemand
     );
-    sqlx::query("UPDATE user_scraper_configs SET config='{\"key\":\"brutalist\",\"topics\":[\"science\"]}' WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE user_scraper_configs SET config='{\"key\":\"brutalist\",\"topics\":[\"science\"]}' WHERE user_id=$1::bigint")
         .bind(user).execute(&pool).await.unwrap();
     assert_eq!(policy(&pool, global).await, FirecrawlDemandPolicy::Allowed);
-    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id=$1::bigint")
         .bind(user)
         .execute(&pool)
         .await
@@ -54,12 +54,12 @@ async fn firecrawl_demand_follows_active_subscriber_visibility(pool: PgPool) {
         policy(&pool, global).await,
         FirecrawlDemandPolicy::NoSubscriberDemand
     );
-    sqlx::query("UPDATE user_scraper_configs SET is_active=true WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE user_scraper_configs SET is_active=true WHERE user_id=$1::bigint")
         .bind(user)
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("UPDATE users SET is_active=false WHERE id::bigint=$1")
+    sqlx::query("UPDATE users SET is_active=false WHERE id=$1::bigint")
         .bind(user)
         .execute(&pool)
         .await
@@ -92,7 +92,7 @@ async fn firecrawl_demand_denial_is_replayable_and_allows_metadata_processing(po
     );
     tx.commit().await.unwrap();
     let metadata: Value =
-        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id=$1::bigint")
             .bind(id)
             .fetch_one(&pool)
             .await
@@ -205,14 +205,14 @@ async fn firecrawl_demand_subscription_during_extraction_reprepares_without_queu
     fenced.replace_result(&result, 3).unwrap();
     assert!(fenced.finish().await.unwrap().is_some());
     let row: (String, i32) =
-        sqlx::query_as("SELECT status,retry_count FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_as("SELECT status,retry_count FROM processing_tasks WHERE id=$1::bigint")
             .bind(task)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(row, ("pending".to_owned(), 0));
     let metadata: Value =
-        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id=$1::bigint")
             .bind(id)
             .fetch_one(&pool)
             .await
@@ -318,7 +318,7 @@ async fn firecrawl_demand_full_body_replay_rejects_metadata_only_sibling_summary
         "article_extraction":{"error_code":"fallback_not_permitted"},"summary_version":1,
         "summary_kind":"short_news","summary":{"title":"Metadata-only headline","summary":"Denied sibling evidence"}
     })).await;
-    sqlx::query("UPDATE news_items SET status='ready',canonical_story_url='https://example.com/story' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET status='ready',canonical_story_url='https://example.com/story' WHERE id=$1::bigint")
         .bind(sibling).execute(&pool).await.unwrap();
     let dir = tempfile::tempdir().unwrap();
     let store = NewsArticleBodyStore::new(dir.path().to_path_buf(), "bodies".into()).unwrap();
@@ -349,7 +349,7 @@ async fn firecrawl_demand_full_body_replay_rejects_metadata_only_sibling_summary
         .unwrap();
     tx.commit().await.unwrap();
     for error_code in ["fallback_not_permitted", "provider_failed"] {
-        sqlx::query("UPDATE news_items SET raw_metadata=jsonb_set(raw_metadata::jsonb,'{article_extraction,error_code}',to_jsonb($2::text))::json WHERE id::bigint=$1")
+        sqlx::query("UPDATE news_items SET raw_metadata=jsonb_set(raw_metadata::jsonb,'{article_extraction,error_code}',to_jsonb($2::text))::json WHERE id=$1::bigint")
             .bind(sibling).bind(error_code).execute(&pool).await.unwrap();
         let mut tx = pool.begin().await.unwrap();
         let processing = prepare_processing(&mut tx, id).await.unwrap().unwrap();

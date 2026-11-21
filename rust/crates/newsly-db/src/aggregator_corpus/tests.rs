@@ -96,13 +96,13 @@ async fn aggregator_due_uses_subscriber_and_source_specific_cadence(pool: PgPool
             (false, true, inactive_interval),
             (true, false, inactive_interval),
         ] {
-            sqlx::query("UPDATE users SET is_active=$2 WHERE id::bigint=$1")
+            sqlx::query("UPDATE users SET is_active=$2 WHERE id=$1::bigint")
                 .bind(user_id)
                 .bind(user_active)
                 .execute(&pool)
                 .await
                 .unwrap();
-            sqlx::query("UPDATE user_scraper_configs SET is_active=$2 WHERE id::bigint=$1")
+            sqlx::query("UPDATE user_scraper_configs SET is_active=$2 WHERE id=$1::bigint")
                 .bind(config_id)
                 .bind(config_active)
                 .execute(&pool)
@@ -125,12 +125,12 @@ async fn aggregator_due_uses_subscriber_and_source_specific_cadence(pool: PgPool
                 );
             }
         }
-        sqlx::query("DELETE FROM user_scraper_configs WHERE id::bigint=$1")
+        sqlx::query("DELETE FROM user_scraper_configs WHERE id=$1::bigint")
             .bind(config_id)
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE users SET is_active=true WHERE id::bigint=$1")
+        sqlx::query("UPDATE users SET is_active=true WHERE id=$1::bigint")
             .bind(user_id)
             .execute(&pool)
             .await

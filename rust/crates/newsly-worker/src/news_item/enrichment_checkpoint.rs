@@ -25,7 +25,7 @@ pub(super) async fn load(
     snapshot: &NewsSnapshot,
     store: &NewsArticleBodyStore,
 ) -> Result<Option<EnrichmentMutation>, String> {
-    let prepared: Option<serde_json::Value> = sqlx::query_scalar("SELECT prepared FROM news_enrichment_preparations WHERE news_item_id::bigint=$1 AND source_fingerprint=$2 AND policy_version=$3")
+    let prepared: Option<serde_json::Value> = sqlx::query_scalar("SELECT prepared FROM news_enrichment_preparations WHERE news_item_id=$1::bigint AND source_fingerprint=$2 AND policy_version=$3")
         .bind(snapshot.id).bind(&snapshot.fingerprint).bind(POLICY_VERSION).fetch_optional(pool).await.map_err(|error| error.to_string())?;
     let Some(prepared) = prepared else {
         return Ok(None);
@@ -96,9 +96,9 @@ pub(super) async fn save(
         char_count: body.char_count,
     };
     let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO news_enrichment_preparations(news_item_id,source_fingerprint,policy_version,prepared) SELECT id,$2,$3,$4 FROM news_items WHERE id::bigint=$1 ON CONFLICT(news_item_id,source_fingerprint,policy_version) DO UPDATE SET prepared=EXCLUDED.prepared,created_at=now()")
+    sqlx::query("INSERT INTO news_enrichment_preparations(news_item_id,source_fingerprint,policy_version,prepared) SELECT id,$2,$3,$4 FROM news_items WHERE id=$1::bigint ON CONFLICT(news_item_id,source_fingerprint,policy_version) DO UPDATE SET prepared=EXCLUDED.prepared,created_at=now()")
         .bind(snapshot.id).bind(&snapshot.fingerprint).bind(POLICY_VERSION).bind(serde_json::json!(prepared)).execute(&mut *tx).await.map_err(|error| error.to_string())?;
-    sqlx::query("DELETE FROM news_enrichment_preparations WHERE ctid IN (SELECT ctid FROM news_enrichment_preparations WHERE news_item_id::bigint=$1 ORDER BY created_at DESC,source_fingerprint OFFSET 4)")
+    sqlx::query("DELETE FROM news_enrichment_preparations WHERE ctid IN (SELECT ctid FROM news_enrichment_preparations WHERE news_item_id=$1::bigint ORDER BY created_at DESC,source_fingerprint OFFSET 4)")
         .bind(snapshot.id).execute(&mut *tx).await.map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|error| error.to_string())?;
     Ok(())

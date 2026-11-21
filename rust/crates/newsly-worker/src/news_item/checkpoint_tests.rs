@@ -31,13 +31,13 @@ async fn summary_checkpoint_survives_relation_failure_but_rejects_changed_input(
             .await
             .unwrap()
     );
-    sqlx::query(r#"UPDATE news_items SET status = 'new', raw_metadata = (raw_metadata::jsonb || '{"processing_error":"embedding timeout"}'::jsonb)::json WHERE id::bigint = $1"#).bind(id).execute(&pool).await.unwrap();
+    sqlx::query(r#"UPDATE news_items SET status = 'new', raw_metadata = (raw_metadata::jsonb || '{"processing_error":"embedding timeout"}'::jsonb)::json WHERE id = $1::bigint"#).bind(id).execute(&pool).await.unwrap();
     let mut tx = pool.begin().await.unwrap();
     let retry = prepare_processing(&mut tx, id).await.unwrap().unwrap();
     tx.commit().await.unwrap();
     assert_eq!(retry.reusable_summary, Some(summary.clone()));
     sqlx::query(
-        "UPDATE news_items SET article_url = 'https://example.com/changed' WHERE id::bigint = $1",
+        "UPDATE news_items SET article_url = 'https://example.com/changed' WHERE id = $1::bigint",
     )
     .bind(id)
     .execute(&pool)
@@ -52,7 +52,7 @@ async fn summary_checkpoint_survives_relation_failure_but_rejects_changed_input(
     let changed = prepare_processing(&mut tx, id).await.unwrap().unwrap();
     assert!(changed.reusable_summary.is_none());
     tx.commit().await.unwrap();
-    sqlx::query("UPDATE processing_tasks SET lease_expires_at = now() - interval '1 second' WHERE id::bigint = $1").bind(claim.id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE processing_tasks SET lease_expires_at = now() - interval '1 second' WHERE id = $1::bigint").bind(claim.id).execute(&pool).await.unwrap();
     assert!(
         !checkpoint_summary(&queue, &claim, &changed.snapshot, &summary)
             .await
@@ -283,7 +283,7 @@ async fn polling_metrics_preserve_news_work_and_prompts_but_evidence_changes_do_
             target = &mut target[*key];
         }
         target[path[path.len() - 1]] = value;
-        sqlx::query("UPDATE news_items SET raw_metadata=$2 WHERE id::bigint=$1")
+        sqlx::query("UPDATE news_items SET raw_metadata=$2 WHERE id=$1::bigint")
             .bind(id)
             .bind(&changed)
             .execute(&pool)
@@ -304,7 +304,7 @@ async fn polling_metrics_preserve_news_work_and_prompts_but_evidence_changes_do_
         );
     }
     // Completing the accepted in-flight work must not restore old snapshot counters.
-    sqlx::query("UPDATE news_items SET raw_metadata=$2 WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET raw_metadata=$2 WHERE id=$1::bigint")
         .bind(id)
         .bind(&polled)
         .execute(&pool)
@@ -342,7 +342,7 @@ async fn polling_metrics_preserve_news_work_and_prompts_but_evidence_changes_do_
     );
     assert!(fenced.finish().await.unwrap().is_some());
     let published: Value =
-        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id=$1::bigint")
             .bind(id)
             .fetch_one(&pool)
             .await

@@ -92,7 +92,7 @@ async fn learning_deck_delivery_requires_category_before_provider_dispatch(pool:
             .unwrap(),
         LlmTaskDispatchKind::LearningDeck
     );
-    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id::bigint=$1")
+    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id=$1::bigint")
         .bind(task_id)
         .fetch_one(&pool)
         .await
@@ -137,7 +137,7 @@ async fn deleted_queued_deck_delivery_completes_without_provider_dispatch(pool: 
         .unwrap()
         .unwrap();
     assert_eq!(transition.status, TaskStatus::Completed);
-    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id::bigint=$1")
+    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id=$1::bigint")
         .bind(task_id)
         .fetch_one(&pool)
         .await
@@ -160,7 +160,7 @@ async fn deleting_started_deck_releases_reserved_retry_slot_for_queued_deck(pool
     let first_claim = queue.claim(&request).await.unwrap().unwrap();
     // Model the durable boundary after source preparation and before a transient
     // provider failure, without constructing any external provider executor.
-    sqlx::query("UPDATE llm_tasks SET status='running',started_at=now() WHERE id::bigint=$1")
+    sqlx::query("UPDATE llm_tasks SET status='running',started_at=now() WHERE id=$1::bigint")
         .bind(first_task)
         .execute(&pool)
         .await
@@ -193,7 +193,7 @@ async fn deleting_started_deck_releases_reserved_retry_slot_for_queued_deck(pool
         .unwrap();
     transaction.commit().await.unwrap();
     let generation_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM learning_deck_generation_state WHERE llm_task_id::bigint=$1",
+        "SELECT count(*) FROM learning_deck_generation_state WHERE llm_task_id=$1::bigint",
     )
     .bind(first_task)
     .fetch_one(&pool)
@@ -211,7 +211,7 @@ async fn deleting_started_deck_releases_reserved_retry_slot_for_queued_deck(pool
             .unwrap(),
         LlmTaskDispatchKind::LearningDeck
     );
-    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id::bigint=$1")
+    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id=$1::bigint")
         .bind(first_task)
         .fetch_one(&pool)
         .await
@@ -222,7 +222,7 @@ async fn deleting_started_deck_releases_reserved_retry_slot_for_queued_deck(pool
 #[sqlx::test]
 async fn share_action_delivery_category_must_match_its_canonical_workflow(pool: PgPool) {
     let (user, _, task) = deck(&pool).await;
-    sqlx::query("UPDATE llm_tasks SET task_kind='share_action',mode='add_content',subject_id=NULL WHERE id::bigint=$1")
+    sqlx::query("UPDATE llm_tasks SET task_kind='share_action',mode='add_content',subject_id=NULL WHERE id=$1::bigint")
         .bind(task).execute(&pool).await.unwrap();
     let wrong = delivery(user, task).payload.unwrap();
     let result = classify_delivery(&pool, task, user, &wrong)

@@ -273,7 +273,7 @@ pub async fn sweep_expired_cli_links(
         .iter()
         .filter_map(|(id, old)| old.then_some(*id))
         .collect();
-    sqlx::query("DELETE FROM cli_link_sessions WHERE id::bigint = ANY($1)")
+    sqlx::query("DELETE FROM cli_link_sessions WHERE id = ANY($1)")
         .bind(old_ids)
         .execute(&mut **transaction)
         .await?;

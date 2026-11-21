@@ -57,7 +57,7 @@ async fn feed_backfill_preserves_normalized_metadata_and_existing_membership(poo
     let content_id = inserted.content_ids[0];
     let (source, platform, metadata) =
         sqlx::query_as::<_, (Option<String>, Option<String>, Value)>(
-            "SELECT source, platform, content_metadata::jsonb FROM contents WHERE id::bigint = $1",
+            "SELECT source, platform, content_metadata::jsonb FROM contents WHERE id = $1::bigint",
         )
         .bind(content_id)
         .fetch_one(&pool)
@@ -75,7 +75,7 @@ async fn feed_backfill_preserves_normalized_metadata_and_existing_membership(poo
     );
 
     sqlx::query(
-        "UPDATE content_status SET status = 'archived' WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+        "UPDATE content_status SET status = 'archived' WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(content_id)
@@ -98,7 +98,7 @@ async fn feed_backfill_preserves_normalized_metadata_and_existing_membership(poo
         .expect("transaction should commit");
     assert_eq!(duplicate.duplicates, 1);
     let status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM content_status WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+        "SELECT status FROM content_status WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(content_id)

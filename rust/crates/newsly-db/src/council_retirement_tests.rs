@@ -29,7 +29,7 @@ async fn populated_database_requires_the_explicit_barrier(pool: PgPool) {
     );
     drop(transaction);
     let council_mode: bool =
-        sqlx::query_scalar("SELECT council_mode FROM chat_sessions WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT council_mode FROM chat_sessions WHERE id = $1::bigint")
             .bind(fixture.parent_id)
             .fetch_one(&pool)
             .await
@@ -84,7 +84,7 @@ async fn selected_branch_is_collapsed_without_copying_branch_history(pool: PgPoo
 #[sqlx::test(migrations = false)]
 async fn legacy_successful_boundary_does_not_require_newer_run_metadata(pool: PgPool) {
     let fixture = legacy_council(&pool, "legacy-boundary").await;
-    sqlx::query("UPDATE chat_messages SET processing_context = NULL WHERE id::bigint = $1")
+    sqlx::query("UPDATE chat_messages SET processing_context = NULL WHERE id = $1::bigint")
         .bind(fixture.selected_run_id)
         .execute(&pool)
         .await
@@ -131,7 +131,7 @@ async fn latest_council_run_is_the_fallback_boundary_for_an_all_failed_branch(po
         base + Duration::seconds(1),
     )
     .await;
-    sqlx::query("UPDATE chat_sessions SET branch_start_message_id = NULL WHERE id::bigint = $1")
+    sqlx::query("UPDATE chat_sessions SET branch_start_message_id = NULL WHERE id = $1::bigint")
         .bind(fixture.selected_id)
         .execute(&pool)
         .await
@@ -178,7 +178,7 @@ async fn successful_retry_boundary_leaves_older_followups_in_the_archive(pool: P
     )
     .await;
     sqlx::query(
-        "UPDATE chat_sessions SET branch_start_message_id = $2::bigint::integer WHERE id::bigint = $1",
+        "UPDATE chat_sessions SET branch_start_message_id = $2::bigint::integer WHERE id = $1::bigint",
     )
     .bind(fixture.selected_id)
     .bind(retry_id)
@@ -188,7 +188,7 @@ async fn successful_retry_boundary_leaves_older_followups_in_the_archive(pool: P
 
     apply_retirement(&pool).await.unwrap();
     let old_locations = sqlx::query_scalar::<_, i64>(
-        "SELECT DISTINCT session_id::bigint FROM chat_messages WHERE id::bigint = ANY($1)",
+        "SELECT DISTINCT session_id::bigint FROM chat_messages WHERE id = ANY($1)",
     )
     .bind(&fixture.selected_followup_ids)
     .fetch_all(&pool)
@@ -250,7 +250,7 @@ async fn active_council_work_aborts_atomically(pool: PgPool) {
 async fn invalid_selected_child_links_fail_closed(pool: PgPool) {
     let fixture = legacy_council(&pool, "wrong-owner").await;
     let other_user = insert_user(&pool, "wrong-owner-other").await;
-    sqlx::query("UPDATE chat_sessions SET user_id = $2::bigint::integer WHERE id::bigint = $1")
+    sqlx::query("UPDATE chat_sessions SET user_id = $2::bigint::integer WHERE id = $1::bigint")
         .bind(fixture.selected_id)
         .bind(other_user)
         .execute(&pool)
@@ -261,7 +261,7 @@ async fn invalid_selected_child_links_fail_closed(pool: PgPool) {
         .expect_err("a selected child owned by another user must fail closed");
     assert!(database_error_message(&error).contains("branch"));
     let still_active: bool =
-        sqlx::query_scalar("SELECT council_mode FROM chat_sessions WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT council_mode FROM chat_sessions WHERE id = $1::bigint")
             .bind(fixture.parent_id)
             .fetch_one(&pool)
             .await
@@ -273,7 +273,7 @@ async fn invalid_selected_child_links_fail_closed(pool: PgPool) {
 async fn orphaned_selected_child_links_fail_closed(pool: PgPool) {
     let fixture = legacy_council(&pool, "orphan").await;
     sqlx::query(
-        "UPDATE chat_sessions SET active_child_session_id = 2147483647 WHERE id::bigint = $1",
+        "UPDATE chat_sessions SET active_child_session_id = 2147483647 WHERE id = $1::bigint",
     )
     .bind(fixture.parent_id)
     .execute(&pool)
@@ -298,7 +298,7 @@ async fn preflight_is_read_only_and_classifies_migration_blockers(pool: PgPool) 
         SELECT council_mode,
                (SELECT count(*)::bigint FROM chat_sessions),
                (SELECT count(*)::bigint FROM chat_messages)
-        FROM chat_sessions WHERE id::bigint = $1
+        FROM chat_sessions WHERE id = $1::bigint
         "#,
     )
     .bind(fixture.parent_id)
@@ -311,7 +311,7 @@ async fn preflight_is_read_only_and_classifies_migration_blockers(pool: PgPool) 
         SELECT council_mode,
                (SELECT count(*)::bigint FROM chat_sessions),
                (SELECT count(*)::bigint FROM chat_messages)
-        FROM chat_sessions WHERE id::bigint = $1
+        FROM chat_sessions WHERE id = $1::bigint
         "#,
     )
     .bind(fixture.parent_id)
@@ -358,7 +358,7 @@ async fn retirement_is_idempotent_and_ordinary_chat_remains_usable(pool: PgPool)
     assert_retired_graph(&pool, &fixture).await;
 
     let stored = sqlx::query_as::<_, (String, Value)>(
-        "SELECT status, processing_context FROM chat_messages WHERE id::bigint = $1",
+        "SELECT status, processing_context FROM chat_messages WHERE id = $1::bigint",
     )
     .bind(queued_id)
     .fetch_one(&pool)
@@ -426,10 +426,10 @@ async fn database_constraints_prevent_old_binaries_from_restarting_council(pool:
     .expect("ordinary inserts should receive retired-column defaults");
 
     for statement in [
-        "UPDATE chat_sessions SET council_mode = TRUE WHERE id::bigint = $1",
-        "UPDATE chat_sessions SET active_child_session_id = id WHERE id::bigint = $1",
-        "UPDATE chat_sessions SET council_message_id = id WHERE id::bigint = $1",
-        "UPDATE chat_sessions SET is_hidden_from_history = TRUE WHERE id::bigint = $1",
+        "UPDATE chat_sessions SET council_mode = TRUE WHERE id = $1::bigint",
+        "UPDATE chat_sessions SET active_child_session_id = id WHERE id = $1::bigint",
+        "UPDATE chat_sessions SET council_message_id = id WHERE id = $1::bigint",
+        "UPDATE chat_sessions SET is_hidden_from_history = TRUE WHERE id = $1::bigint",
     ] {
         sqlx::query(statement)
             .bind(ordinary_id)

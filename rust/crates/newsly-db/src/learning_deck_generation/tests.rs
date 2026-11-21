@@ -416,7 +416,6 @@ async fn publication_rechecks_budget_after_waiting_for_task_lock(pool: PgPool) {
                 sandbox_id: None,
                 agent_log_object_key: None,
                 usage_json: &empty,
-                vendor_usage: None,
             },
         )
         .await

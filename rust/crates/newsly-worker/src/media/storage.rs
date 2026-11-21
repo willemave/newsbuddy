@@ -218,6 +218,14 @@ pub enum MediaFileStoreError {
     Write(#[source] std::io::Error),
 }
 
+impl MediaFileStoreError {
+    /// Only filesystem I/O can succeed on a later attempt; validation outcomes repeat for the
+    /// same input, so retrying would only repeat the download and paid transcription.
+    pub(crate) const fn is_retryable(&self) -> bool {
+        matches!(self, Self::CurrentDir(_) | Self::Read(_) | Self::Write(_))
+    }
+}
+
 impl From<LocalObjectError> for MediaFileStoreError {
     fn from(error: LocalObjectError) -> Self {
         match error {
@@ -236,7 +244,15 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::MediaFileStore;
+    use super::{MediaFileStore, MediaFileStoreError};
+
+    #[test]
+    fn only_filesystem_failures_are_retryable() {
+        assert!(MediaFileStoreError::Write(std::io::Error::other("disk")).is_retryable());
+        assert!(!MediaFileStoreError::EmptyTranscript.is_retryable());
+        assert!(!MediaFileStoreError::TranscriptTooLarge(3_000_000).is_retryable());
+        assert!(!MediaFileStoreError::UnsafeStorageKey.is_retryable());
+    }
 
     #[tokio::test]
     async fn stages_canonical_content_body_pointer() {

@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,10 +20,9 @@ mod lane_sources;
 #[path = "onboarding_model.rs"]
 mod model_config;
 use crate::exa::{ExaSearchOptions, ExaSearchUsage, search_exa};
-use crate::provider_env::{ProviderEnvError, u64_from_env};
+use crate::provider_env::{ProviderEnvError, secret_env, u64_from_env};
 pub type OnboardingExaUsage = ExaSearchUsage;
 use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
-const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const EXA_MAX_CONCURRENCY: usize = 8;
 const AUDIO_PLAN_TIMEOUT: Duration = Duration::from_secs(8);
 const FAST_DISCOVER_TIMEOUT: Duration = Duration::from_secs(12);
@@ -912,25 +910,7 @@ fn clean(value: Option<String>) -> Option<String> {
 }
 
 fn exa_search_url() -> Result<Url, OnboardingGatewayError> {
-    let raw = env::var("EXA_API_BASE_URL").unwrap_or_else(|_| DEFAULT_EXA_API_BASE.to_owned());
-    let mut base =
-        Url::parse(&raw).map_err(|error| OnboardingGatewayError::Url(error.to_string()))?;
-    if base.path().trim_end_matches('/').ends_with("/search") {
-        return Ok(base);
-    }
-    if !base.path().ends_with('/') {
-        base.set_path(&format!("{}/", base.path().trim_end_matches('/')));
-    }
-    base.join("search")
-        .map_err(|error| OnboardingGatewayError::Url(error.to_string()))
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .map(SecretString::from)
+    crate::exa::exa_search_url_from_env().map_err(OnboardingGatewayError::Url)
 }
 
 #[derive(Debug, Error)]

@@ -81,8 +81,8 @@ pub async fn find_recorded_task_sandbox(
           ON sessions.llm_task_id = tasks.id
          AND sessions.sandbox_id = tasks.sandbox_id
          AND sessions.ended_at IS NULL
-        WHERE tasks.id::bigint = $1
-          AND tasks.user_id::bigint = $2
+        WHERE tasks.id = $1::bigint
+          AND tasks.user_id = $2::bigint
           AND tasks.status NOT IN ('completed', 'failed', 'cancelled')
         ORDER BY sessions.requested_at DESC NULLS LAST
         LIMIT 1
@@ -120,7 +120,7 @@ pub async fn begin_task_sandbox_session(
     let live_task = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint FROM llm_tasks
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
           AND status NOT IN ('completed', 'failed', 'cancelled')
         FOR SHARE
         "#,
@@ -196,7 +196,7 @@ pub async fn attach_task_sandbox(
         SET sandbox_id = $2, provider_started_at = $3, provider_end_at = $4,
             cpu_count = $5, memory_mb = $6,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id = $1 AND llm_task_id::bigint = $7 AND user_id::bigint = $8
+        WHERE id = $1 AND llm_task_id = $7::bigint AND user_id = $8::bigint
           AND ended_at IS NULL AND sandbox_id IS NULL
         "#,
     )
@@ -217,7 +217,7 @@ pub async fn attach_task_sandbox(
         SET sandbox_provider = 'e2b', sandbox_id = $3,
             sandbox_cleanup_required = FALSE,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
           AND status NOT IN ('completed', 'failed', 'cancelled')
         "#,
     )
@@ -265,7 +265,7 @@ pub async fn mark_task_sandbox_cleanup_required(
         r#"
         UPDATE task_sandbox_sessions
         SET cleanup_required = TRUE, updated_at = timezone('UTC', clock_timestamp())
-        WHERE id = $1 AND llm_task_id::bigint = $2 AND user_id::bigint = $3
+        WHERE id = $1 AND llm_task_id = $2::bigint AND user_id = $3::bigint
           AND sandbox_id = $4 AND ended_at IS NULL
         "#,
     )
@@ -297,7 +297,7 @@ pub async fn finalize_task_sandbox_session(
         SELECT feature, template_id, template_revision, timeout_seconds,
                requested_at, provider_started_at, cpu_count, memory_mb, ended_at, sandbox_id
         FROM task_sandbox_sessions
-        WHERE id = $1 AND llm_task_id::bigint = $2 AND user_id::bigint = $3
+        WHERE id = $1 AND llm_task_id = $2::bigint AND user_id = $3::bigint
         FOR UPDATE
         "#,
     )
@@ -410,7 +410,7 @@ pub async fn finalize_task_sandbox_session(
             SET sandbox_provider = NULL, sandbox_id = NULL,
                 sandbox_cleanup_required = FALSE,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1 AND user_id::bigint = $2 AND sandbox_id = $3
+            WHERE id = $1::bigint AND user_id = $2::bigint AND sandbox_id = $3
             "#,
         )
         .bind(task_id)

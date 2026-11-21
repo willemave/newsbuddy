@@ -12,7 +12,7 @@ pub(super) async fn start_first_edition(
         UPDATE onboarding_first_edition_runs
         SET status = 'expired',
             completed_at = timezone('UTC', now())
-        WHERE user_id::bigint = $1::bigint AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
         "#,
     )
     .bind(user_id)
@@ -48,7 +48,7 @@ pub(super) async fn start_first_edition(
             display_name,
             COALESCE(config, '{}'::json) AS config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1::bigint AND is_active = TRUE
+        WHERE user_id = $1::bigint AND is_active = TRUE
         ORDER BY created_at ASC, id ASC
         "#,
     )

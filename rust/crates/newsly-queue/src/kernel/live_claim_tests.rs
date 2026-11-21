@@ -39,7 +39,7 @@ async fn exact_live_claim_locks_the_task_until_transaction_ends(pool: PgPool) {
             .unwrap()
     );
     let lock_error =
-        sqlx::query("SELECT id FROM processing_tasks WHERE id::bigint = $1 FOR UPDATE NOWAIT")
+        sqlx::query("SELECT id FROM processing_tasks WHERE id = $1::bigint FOR UPDATE NOWAIT")
             .bind(claim.id)
             .fetch_one(&pool)
             .await
@@ -49,7 +49,7 @@ async fn exact_live_claim_locks_the_task_until_transaction_ends(pool: PgPool) {
         Some("55P03")
     );
     transaction.rollback().await.unwrap();
-    sqlx::query("SELECT id FROM processing_tasks WHERE id::bigint = $1 FOR UPDATE NOWAIT")
+    sqlx::query("SELECT id FROM processing_tasks WHERE id = $1::bigint FOR UPDATE NOWAIT")
         .bind(claim.id)
         .fetch_one(&pool)
         .await
@@ -95,7 +95,7 @@ async fn stale_claim_identity_never_authorizes_mutation(pool: PgPool) {
 async fn expired_or_terminal_claim_never_authorizes_mutation(pool: PgPool) {
     let queue = QueueKernel::new(pool.clone());
     let claim = claimed(&queue).await;
-    sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', clock_timestamp()) - interval '1 second' WHERE id::bigint = $1")
+    sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', clock_timestamp()) - interval '1 second' WHERE id = $1::bigint")
         .bind(claim.id).execute(&pool).await.unwrap();
     let mut transaction = pool.begin().await.unwrap();
     assert!(
@@ -105,7 +105,7 @@ async fn expired_or_terminal_claim_never_authorizes_mutation(pool: PgPool) {
             .unwrap()
     );
     transaction.rollback().await.unwrap();
-    sqlx::query("UPDATE processing_tasks SET status = 'failed', lease_token = NULL, lease_expires_at = timezone('UTC', clock_timestamp()) + interval '5 minutes' WHERE id::bigint = $1")
+    sqlx::query("UPDATE processing_tasks SET status = 'failed', lease_token = NULL, lease_expires_at = timezone('UTC', clock_timestamp()) + interval '5 minutes' WHERE id = $1::bigint")
         .bind(claim.id).execute(&pool).await.unwrap();
     let mut transaction = pool.begin().await.unwrap();
     assert!(
@@ -127,10 +127,10 @@ async fn claim_expiry_uses_operation_time_in_an_older_transaction(pool: PgPool) 
             .fetch_one(&mut *transaction)
             .await
             .unwrap();
-    sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', clock_timestamp()) WHERE id::bigint = $1")
+    sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', clock_timestamp()) WHERE id = $1::bigint")
         .bind(claim.id).execute(&pool).await.unwrap();
     let deadline: chrono::NaiveDateTime =
-        sqlx::query_scalar("SELECT lease_expires_at FROM processing_tasks WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT lease_expires_at FROM processing_tasks WHERE id = $1::bigint")
             .bind(claim.id)
             .fetch_one(&pool)
             .await

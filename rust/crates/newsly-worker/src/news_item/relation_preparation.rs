@@ -49,7 +49,7 @@ pub(super) async fn load_vectors(
         "SELECT cached.vector FROM unnest($1::text[]) WITH ORDINALITY requested(text_hash,position)
          LEFT JOIN LATERAL (
              SELECT vector FROM news_relation_embeddings
-             WHERE news_item_id::bigint=ANY($2) AND text_hash=requested.text_hash
+             WHERE news_item_id=ANY($2) AND text_hash=requested.text_hash
                AND provider=$3 AND model=$4 AND encoder_version=$5
                AND dimensions=jsonb_array_length(vector)
              ORDER BY news_item_id LIMIT 1
@@ -112,13 +112,13 @@ pub(super) async fn save_vectors(
         "INSERT INTO news_relation_embeddings(news_item_id,provider,model,encoder_version,text_hash,dimensions,vector)
          SELECT source.id,$3,$4,$5,requested.text_hash,jsonb_array_length(prepared.vector),prepared.vector
          FROM unnest($1::bigint[],$2::text[]) WITH ORDINALITY requested(source_id,text_hash,position)
-         JOIN news_items source ON source.id::bigint=requested.source_id
+         JOIN news_items source ON source.id=requested.source_id
          JOIN jsonb_array_elements($6::jsonb) WITH ORDINALITY prepared(vector,position) ON prepared.position=requested.position
          ON CONFLICT DO NOTHING")
         .bind(owners).bind(hashes).bind(PROVIDER).bind(model).bind(ENCODER_VERSION).bind(serde_json::json!(vectors))
         .execute(&mut *connection).await?;
     // Keep storage finite per item/model; current batches are far below this bound.
-    sqlx::query("DELETE FROM news_relation_embeddings WHERE ctid IN (SELECT ctid FROM (SELECT ctid,row_number() OVER (PARTITION BY news_item_id ORDER BY created_at DESC,text_hash) AS n FROM news_relation_embeddings WHERE news_item_id::bigint=ANY($1)) old WHERE n>1024)")
+    sqlx::query("DELETE FROM news_relation_embeddings WHERE ctid IN (SELECT ctid FROM (SELECT ctid,row_number() OVER (PARTITION BY news_item_id ORDER BY created_at DESC,text_hash) AS n FROM news_relation_embeddings WHERE news_item_id=ANY($1)) old WHERE n>1024)")
         .bind(owners).execute(connection).await?;
     Ok(())
 }
@@ -129,7 +129,7 @@ pub(super) async fn load_links(
     hash: &str,
     model: &str,
 ) -> Result<Option<Option<Vec<RelevantLink>>>, sqlx::Error> {
-    let value: Option<serde_json::Value> = sqlx::query_scalar("SELECT result FROM news_relation_link_preparations WHERE news_item_id::bigint=$1 AND input_hash=$2 AND model=$3")
+    let value: Option<serde_json::Value> = sqlx::query_scalar("SELECT result FROM news_relation_link_preparations WHERE news_item_id=$1::bigint AND input_hash=$2 AND model=$3")
         .bind(source_id).bind(hash).bind(model).fetch_optional(connection).await?;
     value
         .map(|value| {
@@ -145,9 +145,9 @@ pub(super) async fn save_links(
     model: &str,
     links: Option<&[RelevantLink]>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO news_relation_link_preparations(news_item_id,input_hash,model,result) SELECT id,$2,$3,$4 FROM news_items WHERE id::bigint=$1 ON CONFLICT DO NOTHING")
+    sqlx::query("INSERT INTO news_relation_link_preparations(news_item_id,input_hash,model,result) SELECT id,$2,$3,$4 FROM news_items WHERE id=$1::bigint ON CONFLICT DO NOTHING")
         .bind(source_id).bind(hash).bind(model).bind(serde_json::json!(links)).execute(&mut *connection).await?;
-    sqlx::query("DELETE FROM news_relation_link_preparations WHERE ctid IN (SELECT ctid FROM news_relation_link_preparations WHERE news_item_id::bigint=$1 ORDER BY created_at DESC,input_hash OFFSET 8)")
+    sqlx::query("DELETE FROM news_relation_link_preparations WHERE ctid IN (SELECT ctid FROM news_relation_link_preparations WHERE news_item_id=$1::bigint ORDER BY created_at DESC,input_hash OFFSET 8)")
         .bind(source_id).execute(connection).await?;
     Ok(())
 }

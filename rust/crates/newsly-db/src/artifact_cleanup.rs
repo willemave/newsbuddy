@@ -17,11 +17,11 @@ pub async fn artifact_cleanup_candidates(
           AND candidate.created_at < now() - interval '1 day'
           AND NOT EXISTS (SELECT 1
             FROM llm_tasks AS task
-            WHERE task.id::bigint = candidate.llm_task_id
+            WHERE task.id = candidate.llm_task_id
               AND task.status NOT IN ('completed', 'failed', 'cancelled'))
           AND NOT EXISTS (SELECT 1
             FROM processing_tasks AS task
-            WHERE task.id::bigint = candidate.processing_task_id
+            WHERE task.id = candidate.processing_task_id
               AND task.status IN ('pending', 'processing'))
           AND NOT EXISTS (SELECT 1
             FROM contents

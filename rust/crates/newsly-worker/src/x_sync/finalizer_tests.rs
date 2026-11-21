@@ -170,7 +170,7 @@ async fn rolled_back_sync_publishes_neither_knowledge_nor_processing_work(pool: 
 #[sqlx::test(migrations = false)]
 async fn replaced_connection_discards_obsolete_sync_without_saving_or_enqueueing(pool: PgPool) {
     let plan = sync_plan(&pool).await;
-    sqlx::query("UPDATE user_integration_connections SET access_token_encrypted='replacement-token' WHERE id::bigint=$1")
+    sqlx::query("UPDATE user_integration_connections SET access_token_encrypted='replacement-token' WHERE id=$1::bigint")
         .bind(plan.prepared.connection_id).execute(&pool).await.unwrap();
     let finalizer = XSyncFinalizer::new(QueueKernel::new(pool.clone()), plan.clone());
     let mut transaction = pool.begin().await.unwrap();

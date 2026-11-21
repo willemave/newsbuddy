@@ -230,7 +230,8 @@ class ChatService {
     /// Poll for message status
     func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
         let response: APIMessageStatusResponse = try await client.request(
-            APIEndpoints.chatMessageStatus(messageId: messageId)
+            APIEndpoints.chatMessageStatus(messageId: messageId),
+            recoveryPolicy: .safeRead
         )
         return MessageStatusResponse(api: response)
     }

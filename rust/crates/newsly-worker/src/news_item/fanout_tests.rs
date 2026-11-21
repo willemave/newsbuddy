@@ -48,22 +48,22 @@ async fn hundred_subscriber_fanout_batches_admission_and_preserves_wakes(pool: P
     .fetch_all(&pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) SELECT id,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true FROM users WHERE id::bigint=ANY($1)")
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) SELECT id,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true FROM users WHERE id=ANY($1)")
         .bind(&user_ids).execute(&pool).await.unwrap();
     let story = insert_story(&pool, "fanout-story", None).await;
     sqlx::query("INSERT INTO news_item_read_status(user_id,news_item_id,read_at,created_at) VALUES($1::bigint::integer,$2::bigint::integer,now(),now())")
         .bind(user_ids[0]).bind(story).execute(&pool).await.unwrap();
-    sqlx::query("UPDATE users SET is_active=false WHERE id::bigint=$1")
+    sqlx::query("UPDATE users SET is_active=false WHERE id=$1::bigint")
         .bind(user_ids[1])
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id=$1::bigint")
         .bind(user_ids[2])
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM users WHERE id::bigint=$1")
+    sqlx::query("DELETE FROM users WHERE id=$1::bigint")
         .bind(user_ids[3])
         .execute(&pool)
         .await
@@ -74,7 +74,7 @@ async fn hundred_subscriber_fanout_batches_admission_and_preserves_wakes(pool: P
         .bind(user_ids[5]).bind(user_ids[6]).execute(&pool).await.unwrap();
     let queue = QueueKernel::new(pool.clone());
     let retry = append_task(&queue, user_ids[7]).await;
-    sqlx::query("UPDATE processing_tasks SET retry_count=1 WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET retry_count=1 WHERE id=$1::bigint")
         .bind(retry)
         .execute(&pool)
         .await
@@ -89,7 +89,7 @@ async fn hundred_subscriber_fanout_batches_admission_and_preserves_wakes(pool: P
     let plan = plan(&pool, story).await;
     let before = Utc::now().naive_utc();
     let retry_deadline: NaiveDateTime =
-        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
             .bind(retry)
             .fetch_one(&pool)
             .await
@@ -155,14 +155,14 @@ async fn hundred_subscriber_fanout_batches_admission_and_preserves_wakes(pool: P
         }
     }
     let expedited: NaiveDateTime =
-        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
             .bind(existing)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert!(expedited < before + Duration::seconds(905));
     let invalid_filter_pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
     )
     .bind(user_ids[5])
     .fetch_one(&pool)
@@ -213,7 +213,7 @@ async fn filtered_news_arriving_during_append_preserves_an_immediate_sweep(pool:
         .bind(user).execute(&pool).await.unwrap();
     let queue = QueueKernel::new(pool.clone());
     let append = append_task(&queue, user).await;
-    sqlx::query("UPDATE processing_tasks SET available_at=now() WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET available_at=now() WHERE id=$1::bigint")
         .bind(append)
         .execute(&pool)
         .await
@@ -240,7 +240,7 @@ async fn filtered_news_arriving_during_append_preserves_an_immediate_sweep(pool:
         transaction.commit().await.unwrap();
     }
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
     )
     .bind(user)
     .fetch_one(&pool)
@@ -250,13 +250,13 @@ async fn filtered_news_arriving_during_append_preserves_an_immediate_sweep(pool:
         pending, 0,
         "filtered admission must not create unversioned pending rows"
     );
-    let (sweep, mode, retries, available): (i64, String, i32, NaiveDateTime) = sqlx::query_as("SELECT id::bigint,payload->>'mode',retry_count,available_at FROM processing_tasks WHERE owner_user_id::bigint=$1 AND status='pending' AND dedupe_key=$2")
+    let (sweep, mode, retries, available): (i64, String, i32, NaiveDateTime) = sqlx::query_as("SELECT id::bigint,payload->>'mode',retry_count,available_at FROM processing_tasks WHERE owner_user_id=$1::bigint AND status='pending' AND dedupe_key=$2")
         .bind(user).bind(format!("briefing_refresh:{user}:sweep")).fetch_one(&pool).await.unwrap();
     assert_eq!(mode, "sweep");
     assert_eq!(retries, 0);
     assert!(available <= Utc::now().naive_utc());
     let count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM processing_tasks WHERE owner_user_id::bigint=$1")
+        sqlx::query_scalar("SELECT count(*) FROM processing_tasks WHERE owner_user_id=$1::bigint")
             .bind(user)
             .fetch_one(&pool)
             .await
@@ -270,10 +270,10 @@ async fn filtered_news_arriving_during_append_preserves_an_immediate_sweep(pool:
         "same-owner exclusion keeps the sweep pending"
     );
     // A fresh publication must also preserve an existing successor's provider backoff.
-    sqlx::query("UPDATE processing_tasks SET retry_count=1,available_at=now()+interval '1 hour' WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET retry_count=1,available_at=now()+interval '1 hour' WHERE id=$1::bigint")
         .bind(sweep).execute(&pool).await.unwrap();
     let before: NaiveDateTime =
-        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
             .bind(sweep)
             .fetch_one(&pool)
             .await
@@ -284,13 +284,13 @@ async fn filtered_news_arriving_during_append_preserves_an_immediate_sweep(pool:
         .unwrap();
     transaction.commit().await.unwrap();
     let after: NaiveDateTime =
-        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
             .bind(sweep)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(after, before);
-    sqlx::query("UPDATE processing_tasks SET retry_count=0,available_at=now() WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET retry_count=0,available_at=now() WHERE id=$1::bigint")
         .bind(sweep)
         .execute(&pool)
         .await

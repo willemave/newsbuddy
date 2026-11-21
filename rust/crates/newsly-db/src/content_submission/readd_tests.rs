@@ -31,20 +31,20 @@ async fn fixture(pool: &PgPool, membership: &str) -> (i64, i64) {
         .unwrap();
     transaction.commit().await.unwrap();
     sqlx::query(
-        "UPDATE contents SET content_type = 'article', status = 'completed' WHERE id::bigint = $1",
+        "UPDATE contents SET content_type = 'article', status = 'completed' WHERE id = $1::bigint",
     )
     .bind(first.content_id)
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query("UPDATE content_status SET status = $2, updated_at = '2020-01-01' WHERE content_id::bigint = $1")
+    sqlx::query("UPDATE content_status SET status = $2, updated_at = '2020-01-01' WHERE content_id = $1::bigint")
         .bind(first.content_id).bind(membership).execute(pool).await.unwrap();
     (user_id, first.content_id)
 }
 
 async fn state(pool: &PgPool, user_id: i64, content_id: i64) -> Value {
     sqlx::query_scalar(
-        "SELECT jsonb_build_object('membership', to_jsonb(s), 'read', to_jsonb(r), 'save', to_jsonb(k)) FROM content_status s LEFT JOIN content_read_status r USING (user_id, content_id) LEFT JOIN content_knowledge_saves k USING (user_id, content_id) WHERE s.user_id::bigint = $1 AND s.content_id::bigint = $2",
+        "SELECT jsonb_build_object('membership', to_jsonb(s), 'read', to_jsonb(r), 'save', to_jsonb(k)) FROM content_status s LEFT JOIN content_read_status r USING (user_id, content_id) LEFT JOIN content_knowledge_saves k USING (user_id, content_id) WHERE s.user_id = $1::bigint AND s.content_id = $2::bigint",
     ).bind(user_id).bind(content_id).fetch_one(pool).await.unwrap()
 }
 
@@ -144,7 +144,7 @@ async fn x_bookmark_submission_preserves_read_and_saved_state_without_inbox(pool
     transaction.commit().await.unwrap();
     assert_eq!(state(&pool, user_id, content_id).await, before);
     sqlx::query(
-        "DELETE FROM content_status WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+        "DELETE FROM content_status WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(content_id)
@@ -156,7 +156,7 @@ async fn x_bookmark_submission_preserves_read_and_saved_state_without_inbox(pool
         .await
         .unwrap();
     transaction.commit().await.unwrap();
-    let count = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM content_status WHERE user_id::bigint = $1 AND content_id::bigint = $2")
+    let count = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM content_status WHERE user_id = $1::bigint AND content_id = $2::bigint")
         .bind(user_id).bind(content_id).fetch_one(&pool).await.unwrap();
     assert_eq!(count, 0);
 }

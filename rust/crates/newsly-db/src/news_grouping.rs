@@ -23,7 +23,7 @@ pub async fn record_deferral(
 ) -> Result<GroupingDeferral, sqlx::Error> {
     let (count, age_seconds): (i32, f64) = sqlx::query_as(
         "INSERT INTO news_grouping_deferrals(task_id,retry_count)
-         SELECT id,retry_count FROM processing_tasks WHERE id::bigint=$1
+         SELECT id,retry_count FROM processing_tasks WHERE id=$1::bigint
          ON CONFLICT(task_id) DO UPDATE SET
            first_deferred_at=CASE WHEN news_grouping_deferrals.retry_count<>EXCLUDED.retry_count
              THEN clock_timestamp() ELSE news_grouping_deferrals.first_deferred_at END,
@@ -46,7 +46,7 @@ pub async fn clear_deferral(
     connection: &mut PgConnection,
     task_id: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM news_grouping_deferrals WHERE task_id::bigint=$1")
+    sqlx::query("DELETE FROM news_grouping_deferrals WHERE task_id=$1::bigint")
         .bind(task_id)
         .execute(connection)
         .await?;

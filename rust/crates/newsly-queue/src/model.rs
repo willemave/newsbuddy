@@ -495,6 +495,12 @@ pub struct ResolvedFinalization {
     pub retry_delay_seconds: Option<i64>,
 }
 
+/// Upper bound for a retry backoff. Provider `Retry-After` values are external input; an
+/// unbounded value can overflow `PostgreSQL` timestamp arithmetic and wedge finalization.
+pub(crate) const MAX_RETRY_DELAY_SECONDS: i64 = 24 * 3_600;
+/// Upper bound for an explicit deferral (credit windows can resume up to a billing period away).
+pub(crate) const MAX_DEFERRAL_SECONDS: i64 = 35 * 24 * 3_600;
+
 impl ResolvedFinalization {
     /// Resolves one handler result exactly once before the fresh finalization transaction.
     ///
@@ -520,7 +526,12 @@ impl ResolvedFinalization {
             return Ok(Self {
                 outcome: FinalizationOutcome::Deferred,
                 error_message: None,
-                retry_delay_seconds: Some(result.retry_delay_seconds.unwrap_or(0).max(0)),
+                retry_delay_seconds: Some(
+                    result
+                        .retry_delay_seconds
+                        .unwrap_or(0)
+                        .clamp(0, MAX_DEFERRAL_SECONDS),
+                ),
             });
         }
         let error_message = Some(
@@ -539,7 +550,10 @@ impl ResolvedFinalization {
                 outcome: FinalizationOutcome::Retry,
                 error_message,
                 retry_delay_seconds: Some(
-                    result.retry_delay_seconds.unwrap_or(default_delay).max(0),
+                    result
+                        .retry_delay_seconds
+                        .unwrap_or(default_delay)
+                        .clamp(0, MAX_RETRY_DELAY_SECONDS),
                 ),
             });
         }
@@ -755,9 +769,50 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ClaimedTask, FinalizationOutcome, PayloadError, ResolvedFinalization, TaskResult,
-        TaskStatus, TaskType,
+        ClaimedTask, FinalizationOutcome, MAX_DEFERRAL_SECONDS, MAX_RETRY_DELAY_SECONDS,
+        PayloadError, ResolvedFinalization, TaskResult, TaskStatus, TaskType,
     };
+
+    fn fixture_claim() -> ClaimedTask {
+        serde_json::from_value(json!({
+            "available_at": "2026-08-30T12:00:01Z",
+            "content_id": null,
+            "created_at": "2026-08-30T12:00:00Z",
+            "executor_namespace": "run_llm_task",
+            "executor_runtime": "python",
+            "executor_version": 1,
+            "id": 41002,
+            "lease_expires_at": "2026-08-30T12:01:02Z",
+            "lease_token": "00000000-0000-4000-8000-000000000002",
+            "locked_at": "2026-08-30T12:00:02Z",
+            "locked_by": "fixture-worker",
+            "owner_user_id": 51,
+            "payload": {"llm_task_id": 8801, "user_id": 51},
+            "queue_name": "llm",
+            "retry_count": 0,
+            "started_at": "2026-08-30T12:00:02Z",
+            "status": "processing",
+            "task_type": "run_llm_task"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn external_retry_and_deferral_delays_are_bounded() {
+        let claim = fixture_claim();
+        let mut retry = TaskResult::fail(Some("rate limited".to_owned()), true);
+        retry.retry_delay_seconds = Some(i64::MAX);
+        let resolved = ResolvedFinalization::from_result(&claim, &retry, 3).unwrap();
+        assert_eq!(resolved.retry_delay_seconds, Some(MAX_RETRY_DELAY_SECONDS));
+
+        let resolved =
+            ResolvedFinalization::from_result(&claim, &TaskResult::defer(i64::MAX), 3).unwrap();
+        assert_eq!(resolved.retry_delay_seconds, Some(MAX_DEFERRAL_SECONDS));
+
+        let resolved =
+            ResolvedFinalization::from_result(&claim, &TaskResult::defer(-5), 3).unwrap();
+        assert_eq!(resolved.retry_delay_seconds, Some(0));
+    }
 
     #[test]
     fn retry_policy_matches_queue_transition_fixture() {

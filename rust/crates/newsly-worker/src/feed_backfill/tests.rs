@@ -224,7 +224,7 @@ async fn deactivated_configs_still_settle_first_edition_progress(pool: PgPool) {
         .await
         .expect("first-edition source should insert");
     }
-    sqlx::query("UPDATE user_scraper_configs SET is_active = FALSE WHERE id::bigint = ANY($1)")
+    sqlx::query("UPDATE user_scraper_configs SET is_active = FALSE WHERE id = ANY($1)")
         .bind(&config_ids)
         .execute(&pool)
         .await
@@ -248,7 +248,7 @@ async fn deactivated_configs_still_settle_first_edition_progress(pool: PgPool) {
         TaskFinalizerResult::Keep
     ));
     let statuses = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint = $1 ORDER BY source_key",
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id = $1::bigint ORDER BY source_key",
     )
     .bind(run_id)
     .fetch_all(&pool)
@@ -313,7 +313,7 @@ async fn article_and_podcast_backfill_commit_with_membership_and_work(pool: PgPo
         r"
         SELECT content_id::bigint, status
         FROM content_status
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         ORDER BY content_id
         ",
     )
@@ -392,7 +392,7 @@ async fn queue_fence_commits_parent_completion_with_backfill_outputs(pool: PgPoo
         .expect("worker should finalize once");
     assert!(matches!(attempt, WorkerAttempt::Completed(_)));
     let parent_status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM processing_tasks WHERE id::bigint = $1",
+        "SELECT status FROM processing_tasks WHERE id = $1::bigint",
     )
     .bind(parent_task_id)
     .fetch_one(&pool)
@@ -441,7 +441,7 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
         SET status = 'archived'
         FROM contents AS content
         WHERE membership.content_id = content.id
-          AND membership.user_id::bigint = $1
+          AND membership.user_id = $1::bigint
           AND content.content_type = 'podcast'
         ",
     )
@@ -510,7 +510,7 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
     .expect("task count should be queryable");
     assert_eq!(task_count, 2);
     let second_membership_count = sqlx::query_scalar::<_, i64>(
-        "SELECT count(*)::bigint FROM content_status WHERE user_id::bigint = $1 AND status = 'inbox'",
+        "SELECT count(*)::bigint FROM content_status WHERE user_id = $1::bigint AND status = 'inbox'",
     )
     .bind(second_user_id)
     .fetch_one(&pool)
@@ -522,7 +522,7 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
         SELECT membership.status
         FROM content_status AS membership
         JOIN contents AS content ON content.id = membership.content_id
-        WHERE membership.user_id::bigint = $1 AND content.content_type = 'podcast'
+        WHERE membership.user_id = $1::bigint AND content.content_type = 'podcast'
         ",
     )
     .bind(user_id)
@@ -613,7 +613,7 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
         r"
         SELECT source_key, status, processed_item_count
         FROM onboarding_first_edition_sources
-        WHERE run_id::bigint = $1
+        WHERE run_id = $1::bigint
         ORDER BY source_key
         ",
     )
@@ -633,7 +633,7 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
         ]
     );
     let revision = sqlx::query_scalar::<_, i32>(
-        "SELECT revision FROM onboarding_first_edition_runs WHERE id::bigint = $1",
+        "SELECT revision FROM onboarding_first_edition_runs WHERE id = $1::bigint",
     )
     .bind(run_id)
     .fetch_one(&pool)
@@ -677,7 +677,7 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
         .expect("configs should prepare")
         .expect("active user should prepare");
     let result = outcome(&prepared, user_id);
-    sqlx::query("UPDATE user_scraper_configs SET display_name = 'Changed' WHERE id::bigint = $1")
+    sqlx::query("UPDATE user_scraper_configs SET display_name = 'Changed' WHERE id = $1::bigint")
         .bind(config_ids[0])
         .execute(&pool)
         .await
@@ -704,7 +704,7 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
         .await
         .expect("task count should be queryable");
     assert_eq!(task_count, 0);
-    let states: Vec<String> = sqlx::query_scalar("SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint = $1 ORDER BY source_key").bind(run_id).fetch_all(&pool).await.unwrap();
+    let states: Vec<String> = sqlx::query_scalar("SELECT status FROM onboarding_first_edition_sources WHERE run_id = $1::bigint ORDER BY source_key").bind(run_id).fetch_all(&pool).await.unwrap();
     assert_eq!(states, ["queued", "queued"]);
 }
 

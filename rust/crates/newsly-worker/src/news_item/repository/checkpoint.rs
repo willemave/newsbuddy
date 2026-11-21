@@ -23,7 +23,7 @@ pub(in crate::news_item) async fn checkpoint_summary(
         return Ok(false);
     }
     let checkpoint = json!({"fingerprint": snapshot.fingerprint, "summary": summary});
-    sqlx::query("UPDATE news_items SET raw_metadata = (COALESCE(raw_metadata, '{}'::json)::jsonb || jsonb_build_object('summary_checkpoint', $2::jsonb))::json WHERE id::bigint = $1")
+    sqlx::query("UPDATE news_items SET raw_metadata = (COALESCE(raw_metadata, '{}'::json)::jsonb || jsonb_build_object('summary_checkpoint', $2::jsonb))::json WHERE id = $1::bigint")
         .bind(snapshot.id).bind(checkpoint).execute(&mut **tx).await?;
     Ok(fence.checkpoint().await?)
 }

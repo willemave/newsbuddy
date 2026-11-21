@@ -163,7 +163,7 @@ async fn apply_and_finish(
 async fn timezone_revision_change_discards_candidate_and_fails_run(pool: PgPool) {
     let fixture = fixture(&pool, "revision").await;
     sqlx::query(
-        "UPDATE user_news_category_schedule SET timezone_revision=2 WHERE user_id::bigint=$1",
+        "UPDATE user_news_category_schedule SET timezone_revision=2 WHERE user_id=$1::bigint",
     )
     .bind(fixture.context.run.user_id)
     .execute(&pool)

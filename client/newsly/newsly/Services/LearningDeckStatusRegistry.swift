@@ -223,7 +223,7 @@ actor LearningDeckStatusRegistry {
             } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
-                guard isRetryableLearningDeckStatusError(error) else {
+                guard isRetryablePollingError(error) else {
                     finish(deckId: deckId, generation: generation, result: .failure(error))
                     return
                 }
@@ -278,26 +278,5 @@ actor LearningDeckStatusRegistry {
         for observer in entry.observers.values {
             observer.continuation.resume(with: result)
         }
-    }
-}
-
-private func isRetryableLearningDeckStatusError(_ error: Error) -> Bool {
-    switch ClientFailure.classify(error) {
-    case .cancelled,
-         .authenticationRequired,
-         .authenticationExpired,
-         .invalidRequest,
-         .decoding:
-        return false
-    case .http(let statusCode, _):
-        return statusCode == 408
-            || statusCode == 409
-            || statusCode == 425
-            || statusCode == 429
-            || statusCode >= 500
-    case .server(_, let error):
-        return error.retryable
-    case .connectivity, .invalidResponse, .unexpected:
-        return true
     }
 }

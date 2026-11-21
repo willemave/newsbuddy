@@ -64,7 +64,7 @@ pub async fn insert_content_interaction(
     interaction: &NewContentInteraction<'_>,
 ) -> Result<ContentInteractionInsertResult, InteractionRepositoryError> {
     let content_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM contents WHERE id::bigint = $1::bigint)",
+        "SELECT EXISTS(SELECT 1 FROM contents WHERE id = $1::bigint)",
     )
     .bind(interaction.content_id)
     .fetch_one(&mut **transaction)
@@ -111,7 +111,7 @@ pub async fn insert_content_interaction(
         r#"
         SELECT id::bigint
         FROM analytics_interactions
-        WHERE user_id::bigint = $1::bigint AND interaction_id = $2
+        WHERE user_id = $1::bigint AND interaction_id = $2
         "#,
     )
     .bind(interaction.user_id)

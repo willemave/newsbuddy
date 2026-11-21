@@ -25,7 +25,7 @@ pub(super) async fn load_image_snapshot(
             status,
             COALESCE(content_metadata, '{}'::json) AS content_metadata
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(content_id)
@@ -115,7 +115,7 @@ async fn load_locked_content(
             error_message,
             processed_at
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         ",
     )
@@ -137,7 +137,7 @@ async fn persist_locked_content(
             error_message = $4,
             processed_at = $5,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(content.id)
@@ -277,7 +277,7 @@ pub(super) async fn record_image_generation_usage(
         VALUES (
             $1, $2, 'image_generation', 'image_generation.infographic', 'queue', $3,
             $4, $5,
-            (SELECT id FROM users WHERE id::bigint = $6 AND is_active IS TRUE),
+            (SELECT id FROM users WHERE id = $6::bigint AND is_active IS TRUE),
             $7, $8, $9, $10, $11, $12, $13, 'USD', $14, $15, $16, $17,
             timezone('UTC', clock_timestamp())
         )

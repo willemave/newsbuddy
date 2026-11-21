@@ -20,7 +20,7 @@ pub async fn list_learning_decks(
     user_id: i64,
 ) -> Result<Vec<LearningDeckProjection>, LearningDeckRepositoryError> {
     let rows = sqlx::query_as::<_, LearningDeckRow>(AssertSqlSafe(format!(
-        "{LEARNING_DECK_PROJECTION_SQL} WHERE deck.user_id::bigint = $1 AND deck.deleted_at IS NULL ORDER BY deck.updated_at DESC, deck.id DESC"
+        "{LEARNING_DECK_PROJECTION_SQL} WHERE deck.user_id = $1::bigint AND deck.deleted_at IS NULL ORDER BY deck.updated_at DESC, deck.id DESC"
     )))
     .bind(user_id)
     .fetch_all(pool)
@@ -39,7 +39,7 @@ pub async fn get_learning_deck(
     deck_id: i64,
 ) -> Result<Option<LearningDeckProjection>, LearningDeckRepositoryError> {
     let row = sqlx::query_as::<_, LearningDeckRow>(AssertSqlSafe(format!(
-        "{LEARNING_DECK_PROJECTION_SQL} WHERE deck.user_id::bigint = $1 AND deck.id::bigint = $2 AND deck.deleted_at IS NULL"
+        "{LEARNING_DECK_PROJECTION_SQL} WHERE deck.user_id = $1::bigint AND deck.id = $2::bigint AND deck.deleted_at IS NULL"
     )))
     .bind(user_id)
     .bind(deck_id)
@@ -72,7 +72,7 @@ pub async fn get_hosted_learning_deck(
             latest_successful_task_id::bigint AS latest_successful_task_id,
             latest_successful_run_id::bigint AS latest_successful_run_id
         FROM learning_decks
-        WHERE id::bigint = $1 AND deleted_at IS NULL
+        WHERE id = $1::bigint AND deleted_at IS NULL
         "#,
     )
     .bind(deck_id)

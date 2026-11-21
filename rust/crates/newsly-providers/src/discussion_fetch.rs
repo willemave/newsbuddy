@@ -41,7 +41,13 @@ async fn refresh_hacker_news(
         .or_else(|| discussion_url.and_then(hacker_news_discussion_id))
         .ok_or(ContentMiscGatewayError::DiscussionIdentityMissing)?;
     let firebase_url = format!("{HN_FIREBASE_ITEM_URL}{item_id}.json");
-    let firebase = match fetch_json(client.get(firebase_url)).await {
+    let algolia_url = format!("{HN_ALGOLIA_ITEM_URL}{item_id}");
+    // The two reads are independent; issue them together and keep the original validation order.
+    let (firebase, algolia) = tokio::join!(
+        fetch_json(client.get(firebase_url)),
+        fetch_json(client.get(algolia_url))
+    );
+    let firebase = match firebase {
         Ok(value) => value,
         Err(error) if error.status == Some(StatusCode::NOT_FOUND) => {
             return Err(unavailable("gone", "Hacker News discussion is gone"));
@@ -55,8 +61,7 @@ async fn refresh_hacker_news(
         return Err(unavailable("gone", "Hacker News discussion is gone"));
     }
     require_object_payload(&firebase, "Hacker News Firebase")?;
-    let algolia_url = format!("{HN_ALGOLIA_ITEM_URL}{item_id}");
-    let algolia = match fetch_json(client.get(algolia_url)).await {
+    let algolia = match algolia {
         Ok(value) => value,
         Err(error) if error.status == Some(StatusCode::NOT_FOUND) => {
             return Err(unavailable("gone", "Hacker News discussion is gone"));

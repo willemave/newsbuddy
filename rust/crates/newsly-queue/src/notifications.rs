@@ -115,7 +115,13 @@ impl QueueNotificationWaiter {
     }
 
     async fn wait_connected(&mut self, poll_interval: Duration) -> QueueWakeOutcome {
-        let generation = *self.generation.borrow_and_update();
+        // A notification that committed after the caller's last claim snapshot but before this
+        // wait began is still unseen; consume it now instead of adopting it as the baseline.
+        if self.generation.has_changed().unwrap_or(true) {
+            self.generation.borrow_and_update();
+            return QueueWakeOutcome::Notification;
+        }
+        let generation = *self.generation.borrow();
         match timeout(poll_interval, async {
             loop {
                 tokio::select! {
@@ -231,4 +237,44 @@ fn set_connected(
 
 fn increment_generation(generation_tx: &watch::Sender<u64>) {
     generation_tx.send_modify(|generation| *generation = generation.wrapping_add(1));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::sync::watch;
+    use tokio::time::timeout;
+
+    use super::{QueueNotificationWaiter, QueueWakeOutcome};
+
+    #[tokio::test]
+    async fn notification_between_waits_is_not_absorbed_as_baseline() {
+        let (generation_tx, generation) = watch::channel(0_u64);
+        let (_connected_tx, connection_state) = watch::channel(true);
+        let (_stop_tx, shutdown) = watch::channel(false);
+        let mut waiter = QueueNotificationWaiter {
+            generation,
+            connection_state,
+            shutdown,
+        };
+
+        assert_eq!(
+            waiter.wait(Duration::from_millis(10)).await,
+            QueueWakeOutcome::PollTimeout
+        );
+        generation_tx.send_modify(|value| *value += 1);
+
+        let outcome = timeout(
+            Duration::from_millis(200),
+            waiter.wait(Duration::from_secs(30)),
+        )
+        .await
+        .expect("pending notification must wake immediately");
+        assert_eq!(outcome, QueueWakeOutcome::Notification);
+        assert_eq!(
+            waiter.wait(Duration::from_millis(10)).await,
+            QueueWakeOutcome::PollTimeout
+        );
+    }
 }

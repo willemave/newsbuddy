@@ -154,7 +154,7 @@ async fn bookmark_reconciliation_is_atomic_durable_and_idempotent(pool: PgPool) 
         super::preparation::seed_content_pending(&mut tx, f.owner, full)
             .await
             .unwrap();
-        let ids:Vec<i64>=sqlx::query_scalar("SELECT source_id::bigint FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='content' ORDER BY source_id")
+        let ids:Vec<i64>=sqlx::query_scalar("SELECT source_id::bigint FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='content' ORDER BY source_id")
             .bind(f.owner).fetch_all(&mut *tx).await.unwrap();
         assert_eq!(
             ids,
@@ -214,7 +214,7 @@ async fn bookmark_reconciliation_rejects_stale_version_and_changed_provenance(po
             .is_err()
     );
     assert_eq!(state(&pool, &f).await, before);
-    sqlx::query("UPDATE content_status SET updated_at=now() WHERE user_id::bigint=$1 AND content_id::bigint=$2")
+    sqlx::query("UPDATE content_status SET updated_at=now() WHERE user_id=$1::bigint AND content_id=$2::bigint")
         .bind(f.owner).bind(f.target).execute(&pool).await.unwrap();
     assert!(
         reconcile_legacy_bookmarks(&pool, &scope(&f), Uuid::new_v4(), "test", "approved", true)
@@ -227,7 +227,7 @@ async fn bookmark_reconciliation_rejects_stale_version_and_changed_provenance(po
 #[sqlx::test(migrations = false)]
 async fn bookmark_reconciliation_rejects_mixed_coverage(pool: PgPool) {
     let f = fixture(&pool).await;
-    sqlx::query("UPDATE briefing_segments SET source_keys=$2 WHERE id::bigint=$1")
+    sqlx::query("UPDATE briefing_segments SET source_keys=$2 WHERE id=$1::bigint")
         .bind(f.segment)
         .bind(json!([
             format!("content:{}", f.target),
@@ -263,7 +263,7 @@ async fn bookmark_reconciliation_rejects_existing_audio(pool: PgPool) {
 async fn bookmark_reconciliation_fences_publication_by_user_lock(pool: PgPool) {
     let f = fixture(&pool).await;
     let mut publication = pool.begin().await.unwrap();
-    sqlx::query("SELECT id FROM users WHERE id::bigint=$1 FOR SHARE")
+    sqlx::query("SELECT id FROM users WHERE id=$1::bigint FOR SHARE")
         .bind(f.owner)
         .execute(&mut *publication)
         .await
@@ -281,7 +281,7 @@ async fn bookmark_reconciliation_fences_publication_by_user_lock(pool: PgPool) {
         !repair.is_finished(),
         "repair waits for an existing publisher"
     );
-    sqlx::query("UPDATE briefing_states SET version=6 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE briefing_states SET version=6 WHERE user_id=$1::bigint")
         .bind(f.owner)
         .execute(&mut *publication)
         .await
@@ -301,7 +301,7 @@ async fn bookmark_reconciliation_allows_concurrent_read_foreign_keys(pool: PgPoo
         .execute(&mut *reader)
         .await
         .unwrap();
-    sqlx::query("SELECT version FROM briefing_states WHERE user_id::bigint=$1 FOR UPDATE")
+    sqlx::query("SELECT version FROM briefing_states WHERE user_id=$1::bigint FOR UPDATE")
         .bind(f.owner)
         .execute(&mut *reader)
         .await
@@ -318,7 +318,7 @@ async fn bookmark_reconciliation_allows_concurrent_read_foreign_keys(pool: PgPoo
     crate::mark_content_read(&mut reader, f.owner, f.target)
         .await
         .unwrap();
-    sqlx::query("UPDATE briefing_states SET version=6 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE briefing_states SET version=6 WHERE user_id=$1::bigint")
         .bind(f.owner)
         .execute(&mut *reader)
         .await

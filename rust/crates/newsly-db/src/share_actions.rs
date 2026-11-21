@@ -143,7 +143,7 @@ pub async fn insert_share_action_task(
     input: &NewShareActionTask<'_>,
 ) -> Result<CreatedShareActionTask, ShareActionRepositoryError> {
     let active = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1 AND is_active = TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active = TRUE)",
     )
     .bind(input.user_id)
     .fetch_one(&mut **transaction)
@@ -194,7 +194,7 @@ pub async fn insert_share_action_task(
         r#"
         UPDATE llm_tasks
         SET workspace_path = $2
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(id)
@@ -218,7 +218,7 @@ pub async fn find_share_action_for_user(
         r#"
         SELECT id::bigint, user_id::bigint, mode, status, workflow_state, created_at
         FROM llm_tasks
-        WHERE id::bigint = $1 AND user_id::bigint = $2 AND task_kind = 'share_action'
+        WHERE id = $1::bigint AND user_id = $2::bigint AND task_kind = 'share_action'
         "#,
     )
     .bind(task_id)
@@ -325,7 +325,7 @@ pub async fn finish_share_action_preparation(
             started_at = COALESCE(started_at, timezone('UTC', clock_timestamp())),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($5::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(draft.id)
@@ -394,7 +394,7 @@ pub async fn persist_share_action_agent_output(
             sandbox_provider = $6, sandbox_id = $7,
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($8::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -432,7 +432,7 @@ pub async fn request_share_action(
         r#"
         SELECT id::bigint, action_status
         FROM llm_task_actions
-        WHERE llm_task_id::bigint = $1 AND action_name = $2 AND idempotency_key = $3
+        WHERE llm_task_id = $1::bigint AND action_name = $2 AND idempotency_key = $3
         FOR UPDATE
         "#,
     )
@@ -491,7 +491,7 @@ pub async fn mark_share_action_applying(
         UPDATE llm_task_actions
         SET action_status = 'applying', started_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(action_id)
@@ -511,7 +511,7 @@ pub async fn mark_share_action_applied(
         SET action_status = 'applied', action_result = $2,
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(action_id)
@@ -533,7 +533,7 @@ pub async fn mark_share_action_failed(
         SET action_status = 'failed', action_result = COALESCE($2, action_result),
             error_message = $3, completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(action_id)
@@ -552,7 +552,7 @@ pub async fn finish_share_action_task(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM llm_task_actions
-            WHERE llm_task_id::bigint = $1
+            WHERE llm_task_id = $1::bigint
               AND action_status IN ('awaiting_approval', 'proposed')
         )
         "#,
@@ -595,7 +595,7 @@ pub async fn fail_share_action_task(
     let current = sqlx::query_scalar::<_, String>(
         r#"
         SELECT status FROM llm_tasks
-        WHERE id::bigint = $1 AND user_id::bigint = $2 AND task_kind = 'share_action'
+        WHERE id = $1::bigint AND user_id = $2::bigint AND task_kind = 'share_action'
         FOR UPDATE
         "#,
     )
@@ -618,7 +618,7 @@ pub async fn fail_share_action_task(
             sandbox_id = COALESCE($5, sandbox_id), completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($6::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -659,7 +659,7 @@ pub async fn approve_share_action(
         SET action_status = 'approved', approved_by_user_id = $3::bigint::integer,
             approved_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND llm_task_id::bigint = $2
+        WHERE id = $1::bigint AND llm_task_id = $2::bigint
         "#,
     )
     .bind(action_id)
@@ -739,7 +739,7 @@ pub async fn fail_share_action_approval(
             error_message = $3,
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND llm_task_id::bigint = $2
+        WHERE id = $1::bigint AND llm_task_id = $2::bigint
         "#,
     )
     .bind(action_id)
@@ -779,7 +779,7 @@ pub async fn find_prepared_share_content(
         sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, Option<String>)>(
             r#"
         SELECT id::bigint, url, source_url, title, platform
-        FROM contents WHERE id::bigint = $1 FOR UPDATE
+        FROM contents WHERE id = $1::bigint FOR UPDATE
         "#,
         )
         .bind(content_id)
@@ -809,7 +809,7 @@ pub async fn enrich_prepared_share_content(
         SET title = CASE WHEN NULLIF(title, '') IS NULL THEN NULLIF($2, '') ELSE title END,
             platform = CASE WHEN NULLIF(platform, '') IS NULL THEN NULLIF($3, '') ELSE platform END,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(content.id)
@@ -828,7 +828,7 @@ pub async fn get_or_create_share_chat_session(
     if let Some(session_id) = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint FROM chat_sessions
-        WHERE user_id::bigint = $1 AND content_id::bigint = $2 AND is_archived = FALSE
+        WHERE user_id = $1::bigint AND content_id = $2::bigint AND is_archived = FALSE
         ORDER BY id LIMIT 1 FOR UPDATE
         "#,
     )
@@ -878,7 +878,7 @@ async fn load_task_for_update(
                users.is_active AS user_is_active
         FROM llm_tasks AS task
         JOIN users ON users.id = task.user_id
-        WHERE task.id::bigint = $1
+        WHERE task.id = $1::bigint
         FOR UPDATE OF task, users
         "#,
     )
@@ -904,7 +904,7 @@ async fn load_actions<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    Ok(sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE llm_task_id::bigint = $1 ORDER BY created_at, id")))
+    Ok(sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE llm_task_id = $1::bigint ORDER BY created_at, id")))
         .bind(task_id)
         .fetch_all(executor)
         .await?
@@ -918,7 +918,7 @@ async fn load_action_for_update(
     task_id: i64,
     action_id: i64,
 ) -> Result<Option<LlmTaskActionRow>, sqlx::Error> {
-    sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE id::bigint = $2 AND llm_task_id::bigint = $1 FOR UPDATE")))
+    sqlx::query_as::<_, LlmTaskActionRow>(AssertSqlSafe(format!("SELECT {ACTION_COLUMNS_SQL} FROM llm_task_actions WHERE id = $2::bigint AND llm_task_id = $1::bigint FOR UPDATE")))
         .bind(task_id)
         .bind(action_id)
         .fetch_optional(&mut **transaction)
@@ -941,7 +941,7 @@ async fn set_task_state(
                 THEN COALESCE(started_at, timezone('UTC', clock_timestamp())) ELSE started_at END,
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($4::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -971,7 +971,7 @@ async fn set_task_terminal(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($6::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)

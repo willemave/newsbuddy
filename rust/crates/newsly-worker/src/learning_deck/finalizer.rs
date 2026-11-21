@@ -83,7 +83,6 @@ impl LearningDeckSuccessFinalizer {
             sandbox_id: self.sandbox_id.as_deref(),
             agent_log_object_key: self.agent_log_object_key.as_deref(),
             usage_json: &self.usage_json,
-            vendor_usage: None,
         };
         let outcome = publish_learning_deck(transaction, &publication).await?;
         let (cleanup, result) = match outcome {

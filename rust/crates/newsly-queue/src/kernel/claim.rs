@@ -107,17 +107,74 @@ async fn claim_retry_bucket_once(
             return Err(error.into());
         }
     };
-    let claim: Option<ClaimedTask> = row.map(TryInto::try_into).transpose()?;
-    if let Some(claim) = &claim {
-        if claim.locked_by != request.worker_id || claim.lease_token.get() != lease_token {
-            return Err(QueueError::ClaimOwnershipMismatch(claim.id));
-        }
-        if !request.runtime_scope.allows(&claim.executor_stamp()?) {
-            return Err(QueueError::ClaimScopeMismatch(claim.id));
-        }
+    let Some(row) = row else {
+        transaction.commit().await?;
+        return Ok(None);
+    };
+    let Some(claim) = decode_claim_row(&mut transaction, row).await? else {
+        transaction.commit().await?;
+        return Ok(None);
+    };
+    if claim.locked_by != request.worker_id || claim.lease_token.get() != lease_token {
+        return Err(QueueError::ClaimOwnershipMismatch(claim.id));
+    }
+    if !request.runtime_scope.allows(&claim.executor_stamp()?) {
+        return Err(QueueError::ClaimScopeMismatch(claim.id));
     }
     transaction.commit().await?;
-    Ok(claim)
+    Ok(Some(claim))
+}
+
+/// Decodes a claimed row. Unknown names can be deploy version skew (an older worker seeing a
+/// newer task type) and roll back so the newer executor can claim them; any other structurally
+/// invalid row would be re-selected first on every poll and starve its bucket, so it is
+/// terminalized in the claiming transaction and `None` is returned.
+async fn decode_claim_row(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    row: ClaimRow,
+) -> Result<Option<ClaimedTask>, QueueError> {
+    let (row_id, row_lease_token) = (row.id, row.lease_token);
+    match ClaimedTask::try_from(row) {
+        Ok(claim) => Ok(Some(claim)),
+        Err(error @ (QueueError::UnknownValue(_) | QueueError::OwnershipValue(_))) => Err(error),
+        Err(error) => {
+            terminalize_invalid_claim(transaction, row_id, row_lease_token, &error).await?;
+            tracing::error!(
+                task_id = row_id,
+                error_code = "invalid_claim_row",
+                error = %error,
+                "terminalized a claimed task row that could not be decoded"
+            );
+            Ok(None)
+        }
+    }
+}
+
+async fn terminalize_invalid_claim(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    task_id: i64,
+    lease_token: Option<Uuid>,
+    error: &QueueError,
+) -> Result<(), QueueError> {
+    sqlx::query(
+        r"
+        UPDATE processing_tasks
+        SET status = 'failed',
+            completed_at = timezone('UTC', now()),
+            error_message = $3,
+            locked_at = NULL,
+            locked_by = NULL,
+            lease_token = NULL,
+            lease_expires_at = NULL
+        WHERE id = $1::bigint AND lease_token IS NOT DISTINCT FROM $2
+        ",
+    )
+    .bind(task_id)
+    .bind(lease_token)
+    .bind(format!("invalid queue row: {error}"))
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 const CANDIDATE_PREFIX_SQL: &str = r"

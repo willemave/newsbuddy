@@ -103,12 +103,11 @@ pub async fn prepare_x_sync(
     sync_min_interval_minutes: i64,
     bookmark_min_interval_minutes: i64,
 ) -> Result<PrepareXSyncOutcome, XSyncRepositoryError> {
-    let user_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1::bigint)",
-    )
-    .bind(user_id)
-    .fetch_one(&mut **transaction)
-    .await?;
+    let user_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint)")
+            .bind(user_id)
+            .fetch_one(&mut **transaction)
+            .await?;
     if !user_exists {
         return Ok(PrepareXSyncOutcome::UserMissing);
     }
@@ -124,7 +123,7 @@ pub async fn prepare_x_sync(
             token_expires_at,
             scopes
         FROM user_integration_connections
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND provider = 'x'
           AND is_active IS TRUE
         FOR SHARE
@@ -164,7 +163,7 @@ pub async fn prepare_x_sync(
         r#"
         SELECT last_synced_at, last_synced_item_id, sync_metadata
         FROM user_integration_sync_state
-        WHERE connection_id::bigint = $1::bigint
+        WHERE connection_id = $1::bigint
         "#,
     )
     .bind(connection.connection_id)
@@ -248,7 +247,7 @@ pub async fn lock_current_x_sync_connection(
         r#"
         SELECT id::bigint
         FROM users
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
           AND is_active IS TRUE
         FOR SHARE
         "#,
@@ -263,8 +262,8 @@ pub async fn lock_current_x_sync_connection(
         r#"
         SELECT id::bigint
         FROM user_integration_connections
-        WHERE id::bigint = $1::bigint
-          AND user_id::bigint = $2::bigint
+        WHERE id = $1::bigint
+          AND user_id = $2::bigint
           AND provider = 'x'
           AND is_active IS TRUE
           AND access_token_encrypted IS NOT DISTINCT FROM $3
@@ -302,7 +301,7 @@ pub async fn persist_x_sync_connection_update(
             token_expires_at = $6,
             scopes = CASE WHEN json_array_length($7::json) > 0 THEN $7::json ELSE scopes END,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
         "#,
     )
     .bind(plan.connection_id)
@@ -320,7 +319,7 @@ pub async fn persist_x_sync_connection_update(
             UPDATE users
             SET twitter_username = COALESCE(NULLIF(twitter_username, ''), $2),
                 updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1::bigint
+            WHERE id = $1::bigint
             "#,
         )
         .bind(plan.user_id)
@@ -357,7 +356,7 @@ pub async fn mark_x_sync_reauth_required(
                 )
             )::json,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
         "#,
     )
     .bind(plan.connection_id)
@@ -464,7 +463,7 @@ pub async fn find_reusable_x_bookmark_content(
         r#"
         SELECT content_id::bigint
         FROM user_integration_synced_items
-        WHERE connection_id::bigint = $1::bigint
+        WHERE connection_id = $1::bigint
           AND channel = 'bookmarks'
           AND external_item_id = $2
         "#,
@@ -478,7 +477,7 @@ pub async fn find_reusable_x_bookmark_content(
         return Ok(None);
     };
     let exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM contents WHERE id::bigint = $1::bigint)",
+        "SELECT EXISTS(SELECT 1 FROM contents WHERE id = $1::bigint)",
     )
     .bind(content_id)
     .fetch_one(&mut **transaction)
@@ -507,7 +506,7 @@ pub async fn resolve_x_bookmark_destination(
             r#"
             SELECT id::bigint, COALESCE(content_metadata, '{}'::json)
             FROM contents
-            WHERE id::bigint = $1::bigint
+            WHERE id = $1::bigint
             FOR SHARE
             "#,
         )
@@ -545,7 +544,7 @@ pub async fn persist_x_bookmark_snapshot(
     snapshot_updates: &Value,
 ) -> Result<(), XSyncRepositoryError> {
     let stored = sqlx::query_scalar::<_, Value>(
-        "SELECT COALESCE(content_metadata, '{}'::json) FROM contents WHERE id::bigint = $1 FOR UPDATE"
+        "SELECT COALESCE(content_metadata, '{}'::json) FROM contents WHERE id = $1::bigint FOR UPDATE"
     ).bind(content_id).fetch_optional(&mut **transaction).await?;
     let Some(stored) = stored else {
         return Ok(());
@@ -555,7 +554,7 @@ pub async fn persist_x_bookmark_snapshot(
         crate::content_metadata::set_fields(&mut metadata, updates);
     }
     sqlx::query(
-        "UPDATE contents SET content_metadata = $2, updated_at = timezone('UTC', now()) WHERE id::bigint = $1"
+        "UPDATE contents SET content_metadata = $2, updated_at = timezone('UTC', now()) WHERE id = $1::bigint"
     ).bind(content_id).bind(Value::Object(metadata)).execute(&mut **transaction).await?;
     Ok(())
 }
@@ -628,7 +627,7 @@ pub async fn remove_stale_x_bookmark_save(
         return Ok(false);
     }
     let removed = sqlx::query(
-        "DELETE FROM content_knowledge_saves WHERE user_id::bigint = $1::bigint AND content_id::bigint = $2::bigint",
+        "DELETE FROM content_knowledge_saves WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(shell_content_id)
@@ -689,12 +688,12 @@ pub async fn x_bookmark_destination_needs_image(
             EXISTS (
                 SELECT 1
                 FROM processing_tasks
-                WHERE content_id::bigint = $1::bigint
+                WHERE content_id = $1::bigint
                   AND task_type = 'generate_image'
                   AND status IN ('pending', 'processing')
             ) AS has_active_image_task
         FROM contents
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
         "#,
     )
     .bind(content_id)
@@ -730,7 +729,7 @@ pub async fn record_x_sync_usage(
     usage: &NewXSyncUsage<'_>,
 ) -> Result<bool, XSyncRepositoryError> {
     let active = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1::bigint AND is_active IS TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active IS TRUE)",
     )
     .bind(usage.user_id)
     .fetch_one(&mut **transaction)

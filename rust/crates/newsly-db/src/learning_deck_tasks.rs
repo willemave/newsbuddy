@@ -93,19 +93,6 @@ pub struct StoredLearningDeckArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LearningDeckModelUsage {
-    pub provider: String,
-    pub model: String,
-    pub provider_response_id: Option<String>,
-    pub request_count: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_write_tokens: u64,
-    pub metadata: Map<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct PublishLearningDeck<'a> {
     pub task_id: i64,
     pub user_id: i64,
@@ -119,7 +106,6 @@ pub struct PublishLearningDeck<'a> {
     pub sandbox_id: Option<&'a str>,
     pub agent_log_object_key: Option<&'a str>,
     pub usage_json: &'a Map<String, Value>,
-    pub vendor_usage: Option<&'a LearningDeckModelUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -362,7 +348,7 @@ pub async fn settle_learning_deck_source_missing(
         SELECT EXISTS(
             SELECT 1
             FROM processing_tasks
-            WHERE content_id::bigint = $1
+            WHERE content_id = $1::bigint
               AND task_type = ANY($2)
               AND status = ANY($3)
         )
@@ -387,7 +373,7 @@ pub async fn settle_learning_deck_source_missing(
         r#"
         SELECT status, error_message
         FROM processing_tasks
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
           AND task_type = ANY($2)
         ORDER BY id DESC
         LIMIT 1
@@ -560,7 +546,7 @@ async fn prepare_content_source(
         r#"
         SELECT storage_key
         FROM content_bodies
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
           AND variant = 'source'
         LIMIT 1
         "#,
@@ -596,7 +582,7 @@ async fn load_task_for_update(
             subject_id::bigint AS subject_id,
             started_at
         FROM llm_tasks
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -623,7 +609,7 @@ async fn load_deck_for_update(
             latest_task_id::bigint AS latest_task_id,
             deleted_at
         FROM learning_decks
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -646,7 +632,7 @@ async fn set_preparing(
             started_at = COALESCE(started_at, timezone('UTC', clock_timestamp())),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($2::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -654,7 +640,7 @@ async fn set_preparing(
     .execute(&mut **transaction)
     .await?;
     sqlx::query(
-        "UPDATE learning_decks SET latest_task_id = $2::bigint::integer, updated_at = timezone('UTC', clock_timestamp()) WHERE id::bigint = $1",
+        "UPDATE learning_decks SET latest_task_id = $2::bigint::integer, updated_at = timezone('UTC', clock_timestamp()) WHERE id = $1::bigint",
     )
     .bind(deck_id)
     .bind(task_id)
@@ -677,7 +663,7 @@ async fn set_running(
             started_at = COALESCE(started_at, timezone('UTC', clock_timestamp())),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($3::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -715,7 +701,7 @@ async fn fail_task(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($7::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
           AND status <> ALL($8)
         "#,
     )
@@ -760,7 +746,7 @@ async fn cancel_task_with_reason(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($3::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
           AND status <> ALL($4)
         "#,
     )
@@ -896,10 +882,6 @@ fn is_terminal(status: &str) -> bool {
     TERMINAL_TASK_STATUSES.contains(&status)
 }
 
-fn i64_bound(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
-}
-
 const CONTENT_ROW_SQL: &str = r#"
     SELECT
         id::bigint AS id,
@@ -907,7 +889,7 @@ const CONTENT_ROW_SQL: &str = r#"
         status,
         content_metadata::jsonb AS content_metadata
     FROM contents
-    WHERE id::bigint = $1
+    WHERE id = $1::bigint
 "#;
 
 #[derive(Debug, Error)]

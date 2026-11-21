@@ -537,7 +537,13 @@ impl SandboxCleanup {
         .await
         {
             Ok(()) => {}
-            Err(TaskSandboxRepositoryError::AttemptUnavailable) => return Ok(()),
+            Err(TaskSandboxRepositoryError::AttemptUnavailable) => {
+                // The session ended without this sandbox attached (the reconciler can close a
+                // session while E2B create is still in flight). Nobody else will ever see this
+                // sandbox id, so kill it now; kill is idempotent and NotFound maps to Missing.
+                kill(&self.provider, &self.sandbox_id).await?;
+                return Ok(());
+            }
             Err(error) => return Err(error.into()),
         }
         let end = if let Some(end) = self.observed_end {

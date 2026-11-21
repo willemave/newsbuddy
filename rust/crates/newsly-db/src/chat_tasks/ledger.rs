@@ -33,8 +33,8 @@ pub async fn cancel_chat_llm_task_attempt(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($4::jsonb)
-        WHERE id::bigint = $1
-          AND user_id::bigint = $2
+        WHERE id = $1::bigint
+          AND user_id = $2::bigint
           AND status NOT IN ('completed', 'failed', 'cancelled')
         "#,
     )
@@ -151,7 +151,7 @@ pub(super) async fn create_chat_llm_task(
         r#"
         UPDATE llm_tasks
         SET workspace_path = $2
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -182,7 +182,7 @@ pub(super) async fn cancel_stale_chat_llm_tasks(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($4::jsonb)
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND task_kind IN ('article_chat', 'assistant_chat')
           AND input_json @> jsonb_build_object('queue_task_id', $2::bigint)
           AND input_json @> jsonb_build_object('message_id', $3::bigint)
@@ -232,8 +232,8 @@ pub(super) async fn complete_chat_llm_task(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($6::jsonb)
-        WHERE id::bigint = $1
-          AND user_id::bigint = $7
+        WHERE id = $1::bigint
+          AND user_id = $7::bigint
           AND status NOT IN ('completed', 'failed', 'cancelled')
         "#,
     )
@@ -266,7 +266,7 @@ pub(super) async fn fail_chat_llm_task(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($4::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
           AND status NOT IN ('completed', 'failed', 'cancelled')
         "#,
     )

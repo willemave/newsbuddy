@@ -93,7 +93,7 @@ pub async fn find_x_connection(
          AND connection.provider = 'x'
         LEFT JOIN user_integration_sync_state AS sync_state
           ON sync_state.connection_id = connection.id
-        WHERE users.id::bigint = $1::bigint
+        WHERE users.id = $1::bigint
         "#,
     )
     .bind(user_id)
@@ -117,7 +117,7 @@ pub async fn store_x_oauth_pending(
             UPDATE users
             SET twitter_username = $2,
                 updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1::bigint
+            WHERE id = $1::bigint
             "#,
         )
         .bind(user_id)
@@ -182,7 +182,7 @@ pub async fn prepare_x_oauth_exchange(
         r#"
         SELECT id::bigint, connection_metadata
         FROM user_integration_connections
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND provider = 'x'
         FOR UPDATE
         "#,
@@ -258,8 +258,8 @@ pub async fn finalize_x_oauth_exchange(
                 || jsonb_build_object('connected_at', $10)
             )::json,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $2::bigint
-          AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint
+          AND user_id = $1::bigint
           AND provider = 'x'
           AND connection_metadata::jsonb #>> '{oauth_pending,state}' = $3
         "#,
@@ -287,7 +287,7 @@ pub async fn finalize_x_oauth_exchange(
             UPDATE users
             SET twitter_username = $2,
                 updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1::bigint
+            WHERE id = $1::bigint
             "#,
         )
         .bind(user_id)
@@ -329,7 +329,7 @@ pub async fn prepare_x_disconnect(
         r#"
         SELECT id::bigint, refresh_token_encrypted, access_token_encrypted
         FROM user_integration_connections
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND provider = 'x'
         FOR UPDATE
         "#,
@@ -372,8 +372,8 @@ pub async fn finalize_x_disconnect(
                 || jsonb_build_object('disconnected_at', $3)
             )::json,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $2::bigint
-          AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint
+          AND user_id = $1::bigint
           AND provider = 'x'
         "#,
     )
@@ -456,7 +456,7 @@ pub async fn list_user_llm_integrations(
             access_token_encrypted IS NOT NULL AND access_token_encrypted <> '' AS configured,
             updated_at
         FROM user_integration_connections
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND provider = ANY(ARRAY['anthropic', 'openai']::text[])
         ORDER BY provider ASC
         "#,
@@ -523,7 +523,7 @@ pub async fn delete_user_llm_integration(
     Ok(sqlx::query(
         r#"
         DELETE FROM user_integration_connections
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND provider = $2
         "#,
     )
@@ -545,7 +545,7 @@ pub async fn user_llm_integration_configured(
         SELECT EXISTS(
             SELECT 1
             FROM user_integration_connections
-            WHERE user_id::bigint = $1::bigint
+            WHERE user_id = $1::bigint
               AND provider = $2
               AND access_token_encrypted IS NOT NULL
               AND access_token_encrypted <> ''

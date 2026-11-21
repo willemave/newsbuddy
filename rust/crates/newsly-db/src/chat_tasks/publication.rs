@@ -22,7 +22,7 @@ pub async fn publish_chat_turn(
         r#"
         SELECT status, stream_generation, session_id::bigint
         FROM chat_messages
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -53,7 +53,7 @@ pub async fn publish_chat_turn(
         SELECT EXISTS(
             SELECT 1 FROM chat_sessions AS session
             JOIN users AS account ON account.id = session.user_id AND account.is_active = TRUE
-            WHERE session.id::bigint = $1 AND session.user_id::bigint = $2
+            WHERE session.id = $1::bigint AND session.user_id = $2::bigint
         )
         "#,
     )
@@ -75,7 +75,7 @@ pub async fn publish_chat_turn(
             partial_text = NULL,
             tool_progress = NULL,
             stream_updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND stream_generation = $2 AND status = 'processing'
+        WHERE id = $1::bigint AND stream_generation = $2 AND status = 'processing'
         "#,
     )
     .bind(snapshot.message_id)
@@ -89,7 +89,7 @@ pub async fn publish_chat_turn(
         r#"
         UPDATE chat_sessions
         SET last_message_at = $2, updated_at = $2
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(snapshot.session_id)
@@ -123,7 +123,7 @@ pub async fn fail_chat_turn(
         r#"
         SELECT status, stream_generation, session_id::bigint
         FROM chat_messages
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -164,7 +164,7 @@ pub async fn fail_chat_turn(
             partial_text = NULL,
             tool_progress = NULL,
             stream_updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND status = 'processing'
+        WHERE id = $1::bigint AND status = 'processing'
         "#,
     )
     .bind(message_id)

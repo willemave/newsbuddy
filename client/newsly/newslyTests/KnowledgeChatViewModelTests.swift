@@ -347,6 +347,35 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.sessions.map(\.id), [2])
     }
 
+    func testRevalidationKeepsPagesAlreadyLoaded() async {
+        let firstPage = makeSessionListResponse(
+            sessions: [makeSession(id: 1), makeSession(id: 2)],
+            nextCursor: "next-page",
+            hasMore: true
+        )
+        let secondPage = makeSessionListResponse(
+            sessions: [makeSession(id: 3)],
+            nextCursor: nil,
+            hasMore: false
+        )
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [
+                .success(firstPage), .success(secondPage),
+                .success(firstPage), .success(secondPage),
+            ],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+
+        await viewModel.loadChats()
+        await viewModel.loadMoreSessions()
+        await viewModel.loadChats()
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2, 3])
+        XCTAssertFalse(viewModel.hasMoreSessions)
+        XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page", nil, "next-page"])
+    }
+
     func testLoadMoreAppendsUniqueSessions() async {
         let chatService = MockKnowledgeChatService(
             pageResponses: [

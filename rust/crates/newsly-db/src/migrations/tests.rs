@@ -180,7 +180,7 @@ async fn deck_queue_cutover_requires_barrier_and_backfills_existing_deliveries(p
         "{error:?}"
     );
     let marker: Option<String> = sqlx::query_scalar(
-        "SELECT payload->>'task_kind' FROM processing_tasks WHERE id::bigint=$1",
+        "SELECT payload->>'task_kind' FROM processing_tasks WHERE id=$1::bigint",
     )
     .bind(delivery)
     .fetch_one(&pool)
@@ -190,7 +190,7 @@ async fn deck_queue_cutover_requires_barrier_and_backfills_existing_deliveries(p
     run_migrations_with_barrier(&pool, true).await.unwrap();
     verify_migration_history(&pool).await.unwrap();
     let marker: String = sqlx::query_scalar(
-        "SELECT payload->>'task_kind' FROM processing_tasks WHERE id::bigint=$1",
+        "SELECT payload->>'task_kind' FROM processing_tasks WHERE id=$1::bigint",
     )
     .bind(delivery)
     .fetch_one(&pool)
@@ -212,7 +212,7 @@ async fn deck_queue_cutover_requires_barrier_and_backfills_existing_deliveries(p
 async fn deck_queue_cutover_duplicate_claims_roll_back_backfill_and_indexes(pool: PgPool) {
     prefix(&pool, DECK_QUEUE_VERSION).await;
     let delivery = legacy_deck_delivery(&pool).await;
-    sqlx::query("INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace) SELECT task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace FROM processing_tasks WHERE id::bigint=$1")
+    sqlx::query("INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace) SELECT task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace FROM processing_tasks WHERE id=$1::bigint")
         .bind(delivery).execute(&pool).await.unwrap();
     let error = run_migrations_with_barrier(&pool, true).await.unwrap_err();
     assert!(
@@ -246,14 +246,14 @@ async fn deck_queue_cutover_duplicate_claims_roll_back_backfill_and_indexes(pool
 async fn deck_queue_cutover_rejects_multiple_pending_generation_reservations(pool: PgPool) {
     prefix(&pool, DECK_QUEUE_VERSION).await;
     let delivery = legacy_deck_delivery(&pool).await;
-    sqlx::query("UPDATE processing_tasks SET status='pending' WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET status='pending' WHERE id=$1::bigint")
         .bind(delivery)
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO learning_deck_generation_state(llm_task_id,input_fingerprint,deadline_at) SELECT (payload->>'llm_task_id')::integer,$2,now()+interval '10 minutes' FROM processing_tasks WHERE id::bigint=$1")
+    sqlx::query("INSERT INTO learning_deck_generation_state(llm_task_id,input_fingerprint,deadline_at) SELECT (payload->>'llm_task_id')::integer,$2,now()+interval '10 minutes' FROM processing_tasks WHERE id=$1::bigint")
         .bind(delivery).bind("a".repeat(64)).execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace) SELECT task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace FROM processing_tasks WHERE id::bigint=$1")
+    sqlx::query("INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace) SELECT task_type,queue_name,status,owner_user_id,payload,executor_runtime,executor_version,executor_namespace FROM processing_tasks WHERE id=$1::bigint")
         .bind(delivery).execute(&pool).await.unwrap();
     let error = run_migrations_with_barrier(&pool, true).await.unwrap_err();
     assert!(
@@ -335,7 +335,7 @@ async fn deck_queue_generation_lookup_uses_expression_index_with_history(pool: P
              SELECT 1 FROM learning_deck_generation_state AS generation
              WHERE generation.llm_task_id::text = delivery.payload ->> 'llm_task_id'
          )
-         FROM processing_tasks AS delivery WHERE delivery.id::bigint=$1",
+         FROM processing_tasks AS delivery WHERE delivery.id=$1::bigint",
     )
     .bind(delivery)
     .fetch_all(&pool)
@@ -364,7 +364,7 @@ async fn deck_queue_cutover_backfills_live_and_terminal_share_action_deliveries(
     run_migrations_with_barrier(&pool, true).await.unwrap();
     for (task, delivery, status) in deliveries {
         let category: String = sqlx::query_scalar(
-            "SELECT payload->>'task_kind' FROM processing_tasks WHERE id::bigint=$1",
+            "SELECT payload->>'task_kind' FROM processing_tasks WHERE id=$1::bigint",
         )
         .bind(delivery)
         .fetch_one(&pool)

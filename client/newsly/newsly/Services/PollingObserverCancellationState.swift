@@ -145,3 +145,26 @@ struct KeyedPollingObserverStore<Key: Hashable, Output, Metadata> {
         return entry
     }
 }
+
+/// Shared retry classification for status polls: transient transport and server failures keep
+/// polling within the caller's budget; client, auth and decoding failures end it.
+func isRetryablePollingError(_ error: Error) -> Bool {
+    switch ClientFailure.classify(error) {
+    case .cancelled,
+         .authenticationRequired,
+         .authenticationExpired,
+         .invalidRequest,
+         .decoding:
+        return false
+    case .http(let statusCode, _):
+        return statusCode == 408
+            || statusCode == 409
+            || statusCode == 425
+            || statusCode == 429
+            || statusCode >= 500
+    case .server(_, let error):
+        return error.retryable
+    case .connectivity, .invalidResponse, .unexpected:
+        return true
+    }
+}

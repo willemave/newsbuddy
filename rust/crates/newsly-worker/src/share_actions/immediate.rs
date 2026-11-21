@@ -154,7 +154,7 @@ mod tests {
         ).fetch_one(&pool).await.expect("counts");
         assert_eq!((saves, reads, analyzes, llm_jobs), (1, 1, 1, 0));
         let channel: String = sqlx::query_scalar(
-            "SELECT content_metadata->>'submitted_via' FROM contents WHERE id::bigint = $1",
+            "SELECT content_metadata->>'submitted_via' FROM contents WHERE id = $1::bigint",
         )
         .bind(content_id)
         .fetch_one(&pool)
@@ -162,7 +162,7 @@ mod tests {
         .expect("submission channel");
         assert_eq!(channel, "share_sheet");
 
-        sqlx::query("UPDATE contents SET status = 'completed', content_metadata = jsonb_build_object('summary', 'A readable completed summary') WHERE id::bigint = $1")
+        sqlx::query("UPDATE contents SET status = 'completed', content_metadata = jsonb_build_object('summary', 'A readable completed summary') WHERE id = $1::bigint")
             .bind(content_id).execute(&pool).await.expect("complete");
         sqlx::query(
             "UPDATE processing_tasks SET status = 'completed' WHERE task_type = 'analyze_url'",
@@ -332,7 +332,7 @@ mod canonical_tests {
         .expect("tasks");
         assert_eq!(tasks, 0);
         let status: String =
-            sqlx::query_scalar("SELECT status FROM contents WHERE id::bigint = $1")
+            sqlx::query_scalar("SELECT status FROM contents WHERE id = $1::bigint")
                 .bind(alias)
                 .fetch_one(&pool)
                 .await
@@ -357,7 +357,7 @@ mod canonical_tests {
             "INSERT INTO contents (url, content_type, status, is_aggregate, content_metadata) VALUES ('https://example.test/other-broken-alias', 'article', 'skipped', FALSE, jsonb_build_object('canonical_content_id', $1::bigint)) RETURNING id::bigint",
         ).bind(alias).fetch_one(&pool).await.expect("other alias");
         for target in [alias, other_alias, i64::from(i32::MAX)] {
-            sqlx::query("UPDATE contents SET content_metadata = jsonb_build_object('canonical_content_id', $2::bigint) WHERE id::bigint = $1")
+            sqlx::query("UPDATE contents SET content_metadata = jsonb_build_object('canonical_content_id', $2::bigint) WHERE id = $1::bigint")
                 .bind(alias).bind(target).execute(&pool).await.expect("pointer");
             let mut transaction = pool.begin().await.expect("transaction");
             let result = save_immediate_bookmark(

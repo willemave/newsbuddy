@@ -24,7 +24,7 @@ pub async fn load(
     model: &str,
     text: &str,
 ) -> Result<Option<Vec<f64>>, sqlx::Error> {
-    let value: Option<Value> = sqlx::query_scalar("SELECT vector FROM news_lens_embeddings WHERE news_item_id::bigint = $1 AND model = $2 AND input_hash = $3 AND encoder_version = $4 AND dimensions = jsonb_array_length(vector)")
+    let value: Option<Value> = sqlx::query_scalar("SELECT vector FROM news_lens_embeddings WHERE news_item_id = $1::bigint AND model = $2 AND input_hash = $3 AND encoder_version = $4 AND dimensions = jsonb_array_length(vector)")
         .bind(id).bind(model).bind(input_hash(text)).bind(ENCODER_VERSION).fetch_optional(connection).await?;
     Ok(value
         .and_then(|v| serde_json::from_value::<Vec<f64>>(v).ok())
@@ -52,7 +52,7 @@ pub async fn save(
     let dimensions =
         i32::try_from(embedding.vector.len()).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     // Refresh the observation without rewriting a matching (potentially TOASTed) vector.
-    let touched = sqlx::query("UPDATE news_lens_embeddings SET checked_at=now() WHERE news_item_id::bigint=$1 AND model=$2 AND input_hash=$3 AND encoder_version=$4 AND dimensions=$5")
+    let touched = sqlx::query("UPDATE news_lens_embeddings SET checked_at=now() WHERE news_item_id=$1::bigint AND model=$2 AND input_hash=$3 AND encoder_version=$4 AND dimensions=$5")
         .bind(embedding.news_item_id).bind(&embedding.model).bind(&embedding.input_hash)
         .bind(ENCODER_VERSION).bind(dimensions).execute(&mut *connection).await?.rows_affected();
     if touched > 0 {
@@ -69,7 +69,7 @@ pub async fn source(
     connection: &mut PgConnection,
     id: i64,
 ) -> Result<Option<BriefingRefreshSource>, sqlx::Error> {
-    let row = sqlx::query_as::<_, SourceNewsRow>("SELECT id::bigint, summary_text, summary_key_points::jsonb, raw_metadata::jsonb, article_url, canonical_story_url, canonical_item_url, published_at, processed_at, ingested_at, created_at FROM news_items WHERE id::bigint = $1 AND status = 'ready' AND representative_news_item_id IS NULL")
+    let row = sqlx::query_as::<_, SourceNewsRow>("SELECT id::bigint, summary_text, summary_key_points::jsonb, raw_metadata::jsonb, article_url, canonical_story_url, canonical_item_url, published_at, processed_at, ingested_at, created_at FROM news_items WHERE id = $1::bigint AND status = 'ready' AND representative_news_item_id IS NULL")
         .bind(id).fetch_optional(connection).await?;
     Ok(row.map(|r| crate::briefing_refresh::sources::source_from_news(&r)))
 }

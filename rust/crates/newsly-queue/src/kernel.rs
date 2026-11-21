@@ -214,7 +214,7 @@ impl QueueKernel {
         database_id(user_id, "user_id")?;
         lock_active_user_ids(transaction, &[user_id]).await?;
         let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE id::bigint = $1)",
+            "SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE id = $1::bigint)",
         )
         .bind(task_id)
         .fetch_one(&mut **transaction)
@@ -277,7 +277,7 @@ impl QueueKernel {
                 locked_at = timezone('UTC', now()),
                 lease_expires_at = timezone('UTC', now()) + $1 * interval '1 second'
             WHERE
-                id::bigint = $2
+                id = $2::bigint
                 AND status = 'processing'
                 AND locked_by = $3
                 AND lease_token = $4
@@ -377,7 +377,7 @@ impl QueueKernel {
             SELECT id::bigint
             FROM processing_tasks
             WHERE
-                id::bigint = $1
+                id = $1::bigint
                 AND status = 'processing'
                 AND locked_by = $2
                 AND lease_token = $3
@@ -418,7 +418,7 @@ impl QueueKernel {
         sqlx::query(
             r"
             DELETE FROM processing_tasks
-            WHERE id::bigint <> $1 AND owner_user_id::bigint = $2 AND status = 'pending'
+            WHERE id <> $1::bigint AND owner_user_id = $2::bigint AND status = 'pending'
             ",
         )
         .bind(current_task_id)
@@ -430,8 +430,8 @@ impl QueueKernel {
             SELECT EXISTS(
                 SELECT 1
                 FROM processing_tasks
-                WHERE id::bigint <> $1
-                    AND owner_user_id::bigint = $2
+                WHERE id <> $1::bigint
+                    AND owner_user_id = $2::bigint
                     AND status = 'processing'
             )
             ",
@@ -480,7 +480,7 @@ impl QueueKernel {
             r"
             SELECT is_active
             FROM users
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             FOR SHARE
             ",
         )
@@ -763,7 +763,7 @@ async fn lock_active_user_ids(
         r"
         SELECT id::bigint
         FROM users
-        WHERE id::bigint = ANY($1::bigint[]) AND is_active IS TRUE
+        WHERE id = ANY($1::bigint[]) AND is_active IS TRUE
         ORDER BY id
         FOR SHARE
         ",
@@ -852,7 +852,7 @@ async fn insert_or_resolve_task(
     .await?
     .ok_or(QueueError::DedupeRace)?;
     // A foreground consumer may promote shared work without changing its retry deadline.
-    sqlx::query("UPDATE processing_tasks SET priority=$2 WHERE id::bigint=$1 AND status='pending' AND priority<$2 AND task_type=$3")
+    sqlx::query("UPDATE processing_tasks SET priority=$2 WHERE id=$1::bigint AND status='pending' AND priority<$2 AND task_type=$3")
         .bind(existing.id).bind(request.priority).bind(request.task_type.as_str()).execute(&mut **transaction).await?;
     Ok((existing.id, false, existing.owner_user_id))
 }
@@ -956,7 +956,7 @@ impl TryFrom<ClaimRow> for ClaimedTask {
             return Err(QueueError::InvalidClaim(row.id, "status is not processing"));
         }
         let payload = match row.payload {
-            None => Map::new(),
+            None | Some(Value::Null) => Map::new(),
             Some(Value::Object(payload)) => payload,
             Some(_) => return Err(QueueError::InvalidClaim(row.id, "payload is not an object")),
         };
@@ -1090,7 +1090,7 @@ async fn finalize_resolved(
     query.push(
         r"
         WHERE
-            id::bigint =
+            id =
         ",
     );
     query.push_bind(claim.id);

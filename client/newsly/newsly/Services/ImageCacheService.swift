@@ -217,7 +217,8 @@ actor ImageCacheService {
         let fileURL = diskCacheURL(for: key)
 
         do {
-            try data.write(to: fileURL)
+            // Atomic so a crash or termination mid-write never leaves a truncated image behind.
+            try data.write(to: fileURL, options: .atomic)
             scheduleDiskCleanupIfNeeded(reason: "write")
         } catch {
             imageCacheLogger.error(
@@ -239,6 +240,10 @@ actor ImageCacheService {
         }
 
         guard let image = await preparedImage(from: data, targetPixelSize: targetPixelSize) else {
+            // Header-valid but undecodable (for example truncated) data must not stay cached.
+            try? fileManager.removeItem(
+                at: diskCacheURL(for: diskCacheKey(for: url, cacheIdentifier: cacheIdentifier))
+            )
             return nil
         }
 
@@ -260,7 +265,11 @@ actor ImageCacheService {
     ) async -> Data? {
         let diskKey = diskCacheKey(for: url, cacheIdentifier: cacheIdentifier)
         if let cached = await loadDataFromDisk(key: diskKey) {
-            return cached
+            if Self.isDecodableImageData(cached) {
+                return cached
+            }
+            // A corrupt entry would otherwise mask the image until it ages out; refetch instead.
+            try? fileManager.removeItem(at: diskCacheURL(for: diskKey))
         }
 
         let downloadKey = sourceCacheKey(for: url, cacheIdentifier: cacheIdentifier)
@@ -273,10 +282,28 @@ actor ImageCacheService {
         let data = await task.value
         inFlightDataDownloads[downloadKey] = nil
 
-        if let data, !Task.isCancelled {
+        guard let data, Self.isDecodableImageData(data) else {
+            if data != nil {
+                imageCacheLogger.error(
+                    "Discarded undecodable image response | url=\(url.absoluteString, privacy: .public)"
+                )
+            }
+            return nil
+        }
+        if !Task.isCancelled {
             await saveDataToDisk(data, key: diskKey)
         }
         return data
+    }
+
+    /// Header-level check (no pixel decode): a captive-portal page or CDN error body served with
+    /// a 2xx status must never be persisted as an image.
+    nonisolated static func isDecodableImageData(_ data: Data) -> Bool {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+            return false
+        }
+        return CGImageSourceGetType(source) != nil && CGImageSourceGetCount(source) > 0
     }
 
     private func downloadData(for url: URL) async -> Data? {

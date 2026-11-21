@@ -42,7 +42,7 @@ async fn warm_cadence_uses_active_demand_and_exact_boundaries(pool: PgPool) {
             .await
             .unwrap()
     );
-    sqlx::query("UPDATE users SET is_active=false WHERE id::bigint=$1")
+    sqlx::query("UPDATE users SET is_active=false WHERE id=$1::bigint")
         .bind(id)
         .execute(&mut *c)
         .await
@@ -86,7 +86,7 @@ async fn warm_embeddings_reuse_exact_input_and_reject_changed_sources(pool: PgPo
     let mut wrong_dimensions = e.clone();
     wrong_dimensions.vector = vec![0.5];
     assert!(embeddings::save(&mut c, &wrong_dimensions).await.is_err());
-    sqlx::query("UPDATE news_items SET summary_text='Changed' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET summary_text='Changed' WHERE id=$1::bigint")
         .bind(id)
         .execute(&mut *c)
         .await
@@ -129,19 +129,19 @@ async fn warm_progress_tracks_reuse_without_double_counting(pool: PgPool) {
     let tier = tiers.iter().find(|t| t.tier == "longform").unwrap();
     assert_eq!((tier.discovered, tier.ready, tier.processing), (1, 0, 1));
     let before: i32 = sqlx::query_scalar(
-        "SELECT revision FROM onboarding_first_edition_runs WHERE id::bigint=$1",
+        "SELECT revision FROM onboarding_first_edition_runs WHERE id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    sqlx::query("UPDATE contents SET status='failed' WHERE id::bigint=$1")
+    sqlx::query("UPDATE contents SET status='failed' WHERE id=$1::bigint")
         .bind(content_id)
         .execute(&pool)
         .await
         .unwrap();
     let after: i32 = sqlx::query_scalar(
-        "SELECT revision FROM onboarding_first_edition_runs WHERE id::bigint=$1",
+        "SELECT revision FROM onboarding_first_edition_runs WHERE id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&pool)
@@ -181,7 +181,7 @@ async fn warm_first_batch_is_frozen_and_remaining_news_is_eventually_admitted(po
     tx.commit().await.unwrap();
     // A full rebuild deletes pending rows before seeding. It must still respect
     // the frozen cohort, including the nullable limit and fourth SQL parameter.
-    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1")
+    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
@@ -194,9 +194,9 @@ async fn warm_first_batch_is_frozen_and_remaining_news_is_eventually_admitted(po
         40
     );
     tx.commit().await.unwrap();
-    let members:i64=sqlx::query_scalar("SELECT count(*) FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news'").bind(run_id).fetch_one(&pool).await.unwrap();
+    let members:i64=sqlx::query_scalar("SELECT count(*) FROM onboarding_first_edition_items WHERE run_id=$1::bigint AND source_kind='news'").bind(run_id).fetch_one(&pool).await.unwrap();
     assert_eq!(members, 40);
-    sqlx::query("INSERT INTO news_item_read_status(user_id,news_item_id,read_at,created_at) SELECT $1::bigint::integer,source_id,now(),now() FROM onboarding_first_edition_items WHERE run_id::bigint=$2 AND source_kind='news'").bind(id).bind(run_id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO news_item_read_status(user_id,news_item_id,read_at,created_at) SELECT $1::bigint::integer,source_id,now(),now() FROM onboarding_first_edition_items WHERE run_id=$2::bigint AND source_kind='news'").bind(id).bind(run_id).execute(&pool).await.unwrap();
     let mut tx = pool.begin().await.unwrap();
     assert_eq!(
         crate::briefing_refresh::preparation::seed_news_pending(&mut tx, id, false)
@@ -215,7 +215,7 @@ async fn aggregator_progress_freezes_a_run_check_and_ignores_later_arrivals(pool
     sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES ($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true)").bind(id).execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO onboarding_first_edition_sources(run_id,source_key,source_kind,display_name,position,status,processed_item_count) VALUES ($1::bigint::integer,'scraper:hackernews','aggregator','HN',0,'queued',0)").bind(run_id).execute(&pool).await.unwrap();
     let story = news(&pool, "first-check").await;
-    sqlx::query("UPDATE news_items SET status='processing' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET status='processing' WHERE id=$1::bigint")
         .bind(story)
         .execute(&pool)
         .await
@@ -226,14 +226,14 @@ async fn aggregator_progress_freezes_a_run_check_and_ignores_later_arrivals(pool
         .await
         .unwrap();
     let state: String = sqlx::query_scalar(
-        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&mut *c)
     .await
     .unwrap();
     assert_eq!(state, "processing");
-    sqlx::query("UPDATE news_items SET status='ready' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET status='ready' WHERE id=$1::bigint")
         .bind(story)
         .execute(&mut *c)
         .await
@@ -242,7 +242,7 @@ async fn aggregator_progress_freezes_a_run_check_and_ignores_later_arrivals(pool
         .await
         .unwrap();
     let later = news(&pool, "later").await;
-    sqlx::query("UPDATE news_items SET status='processing' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET status='processing' WHERE id=$1::bigint")
         .bind(later)
         .execute(&mut *c)
         .await
@@ -251,7 +251,7 @@ async fn aggregator_progress_freezes_a_run_check_and_ignores_later_arrivals(pool
     crate::first_edition_progress::reconcile_sources(&mut c, id)
         .await
         .unwrap();
-    let state:(String,i32)=sqlx::query_as("SELECT status,processed_item_count FROM onboarding_first_edition_sources WHERE run_id::bigint=$1").bind(run_id).fetch_one(&mut *c).await.unwrap();
+    let state:(String,i32)=sqlx::query_as("SELECT status,processed_item_count FROM onboarding_first_edition_sources WHERE run_id=$1::bigint").bind(run_id).fetch_one(&mut *c).await.unwrap();
     assert_eq!(state, ("processed".into(), 1));
 }
 
@@ -304,12 +304,12 @@ async fn terminal_artwork_archival_and_missing_artwork_settle_progress(pool: PgP
         .unwrap();
     let audio = tiers.iter().find(|t| t.tier == "audio").unwrap();
     assert_eq!((audio.failed, audio.processing), (1, 1));
-    sqlx::query("UPDATE onboarding_first_edition_runs SET started_at=timezone('UTC',now())-interval '25 hours' WHERE id::bigint=$1").bind(run_id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE onboarding_first_edition_runs SET started_at=timezone('UTC',now())-interval '25 hours' WHERE id=$1::bigint").bind(run_id).execute(&pool).await.unwrap();
     crate::first_edition_progress::expire_runs(&mut pool.acquire().await.unwrap(), id)
         .await
         .unwrap();
     let status: String =
-        sqlx::query_scalar("SELECT status FROM onboarding_first_edition_runs WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT status FROM onboarding_first_edition_runs WHERE id=$1::bigint")
             .bind(run_id)
             .fetch_one(&pool)
             .await
@@ -371,7 +371,7 @@ async fn warm_attach_waits_for_new_topic_fetch_and_bounds_missing_check(pool: Pg
         .await
         .unwrap();
     let status: String = sqlx::query_scalar(
-        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&mut *connection)
@@ -383,7 +383,7 @@ async fn warm_attach_waits_for_new_topic_fetch_and_bounds_missing_check(pool: Pg
         .await
         .unwrap();
     let status: String = sqlx::query_scalar(
-        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&mut *connection)
@@ -394,13 +394,13 @@ async fn warm_attach_waits_for_new_topic_fetch_and_bounds_missing_check(pool: Pg
         .execute(&mut *connection)
         .await
         .unwrap();
-    sqlx::query("UPDATE onboarding_first_edition_runs SET started_at=timezone('UTC',now())-interval '46 minutes' WHERE id::bigint=$1").bind(run_id).execute(&mut *connection).await.unwrap();
-    sqlx::query("UPDATE onboarding_first_edition_sources SET status='queued',check_cutoff=NULL,completed_at=NULL WHERE run_id::bigint=$1").bind(run_id).execute(&mut *connection).await.unwrap();
+    sqlx::query("UPDATE onboarding_first_edition_runs SET started_at=timezone('UTC',now())-interval '46 minutes' WHERE id=$1::bigint").bind(run_id).execute(&mut *connection).await.unwrap();
+    sqlx::query("UPDATE onboarding_first_edition_sources SET status='queued',check_cutoff=NULL,completed_at=NULL WHERE run_id=$1::bigint").bind(run_id).execute(&mut *connection).await.unwrap();
     crate::first_edition_progress::reconcile_sources(&mut connection, id)
         .await
         .unwrap();
     let status: String = sqlx::query_scalar(
-        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&mut *connection)
@@ -424,12 +424,12 @@ async fn frozen_first_batch_rechecks_subscription_visibility_before_reseeding(po
         1
     );
     tx.commit().await.unwrap();
-    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE user_id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1")
+    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
@@ -443,7 +443,7 @@ async fn frozen_first_batch_rechecks_subscription_visibility_before_reseeding(po
     );
     tx.commit().await.unwrap();
     let settled: bool = sqlx::query_scalar(
-        "SELECT news_seed_settled FROM onboarding_first_edition_runs WHERE id::bigint=$1",
+        "SELECT news_seed_settled FROM onboarding_first_edition_runs WHERE id=$1::bigint",
     )
     .bind(run_id)
     .fetch_one(&pool)

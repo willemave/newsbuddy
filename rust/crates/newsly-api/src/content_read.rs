@@ -217,7 +217,7 @@ pub(super) async fn list_news_items(
             next_cursor,
             has_more,
             page_size: contents.len(),
-            total: Some(page.total),
+            total: page.total,
         },
         contents,
         available_dates,

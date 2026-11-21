@@ -204,7 +204,7 @@ async fn load_article_body(
             content.content_metadata::jsonb AS content_metadata,
             content.updated_at
         FROM contents AS content
-        WHERE content.id::bigint = $1::bigint
+        WHERE content.id = $1::bigint
           AND content.content_type = 'article'
         "#,
     )
@@ -250,7 +250,7 @@ async fn find_pointer(
             content_format,
             updated_at
         FROM content_bodies
-        WHERE content_id::bigint = $1::bigint
+        WHERE content_id = $1::bigint
           AND variant = $2
         "#,
     )

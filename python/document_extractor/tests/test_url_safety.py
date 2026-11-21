@@ -19,6 +19,8 @@ from newsly_document_extractor.url_safety import (
         "http://127.0.0.1/private",
         "http://[::1]/private",
         "http://[::ffff:127.0.0.1]/private",
+        "http://[64:ff9b::7f00:1]/nat64-loopback",
+        "http://[64:ff9b::a00:1]/nat64-private",
         "http://169.254.169.254/latest/meta-data",
         "http://[ff0e::1]/multicast",
         "ftp://example.com/file",
@@ -109,3 +111,10 @@ async def test_static_fetch_bounds_streamed_response_bytes(
             timeout_seconds=1,
             max_redirects=0,
         )
+
+
+def test_nat64_embedded_public_ipv4_is_public() -> None:
+    import ipaddress
+
+    assert url_safety_module._is_public_ip(ipaddress.IPv6Address("64:ff9b::808:808"))
+    assert not url_safety_module._is_public_ip(ipaddress.IPv6Address("64:ff9b::a9fe:a9fe"))

@@ -84,7 +84,7 @@ pub async fn reconcile_legacy_bookmarks(
         .await?;
     // Fence publication's FOR SHARE while allowing foreign-key KEY SHARE locks from reads/saves.
     let active: Option<i64> = sqlx::query_scalar(
-        "SELECT id::bigint FROM users WHERE id::bigint=$1 AND is_active FOR NO KEY UPDATE",
+        "SELECT id::bigint FROM users WHERE id=$1::bigint AND is_active FOR NO KEY UPDATE",
     )
     .bind(scope.user_id)
     .fetch_optional(&mut *tx)
@@ -118,7 +118,7 @@ pub async fn reconcile_legacy_bookmarks(
         return Ok(report);
     }
     let version: i64 = sqlx::query_scalar(
-        "SELECT version::bigint FROM briefing_states WHERE user_id::bigint=$1 FOR UPDATE",
+        "SELECT version::bigint FROM briefing_states WHERE user_id=$1::bigint FOR UPDATE",
     )
     .bind(scope.user_id)
     .fetch_one(&mut *tx)
@@ -132,9 +132,9 @@ pub async fn reconcile_legacy_bookmarks(
     let bookmarks = sqlx::query_as::<_, BookmarkBeforeState>(r"
         SELECT c.id::bigint AS content_id,c.created_at AS imported_at,
                s.created_at AS inbox_created_at,s.updated_at AS inbox_updated_at,k.saved_at
-        FROM contents c JOIN content_status s ON s.content_id=c.id AND s.user_id::bigint=$1
-        LEFT JOIN content_knowledge_saves k ON k.content_id=c.id AND k.user_id::bigint=$1
-        WHERE c.id::bigint=ANY($2::bigint[]) AND c.content_type='article' AND c.status='completed'
+        FROM contents c JOIN content_status s ON s.content_id=c.id AND s.user_id=$1::bigint
+        LEFT JOIN content_knowledge_saves k ON k.content_id=c.id AND k.user_id=$1::bigint
+        WHERE c.id=ANY($2::bigint[]) AND c.content_type='article' AND c.status='completed'
           AND c.platform='twitter' AND s.status='inbox'
           AND c.created_at<$3 AND s.created_at<$3 AND COALESCE(s.updated_at,s.created_at)<$3
           AND COALESCE(c.content_metadata::jsonb#>>'{processing,submitted_via}',c.content_metadata::jsonb->>'submitted_via',c.content_metadata::jsonb#>>'{domain,submitted_via}')='x_bookmarks'
@@ -154,7 +154,7 @@ pub async fn reconcile_legacy_bookmarks(
         ));
     }
     let saved: Vec<(i64, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
-        "SELECT content_id::bigint,saved_at FROM content_knowledge_saves WHERE user_id::bigint=$1 AND content_id::bigint=ANY($2::bigint[]) ORDER BY content_id FOR UPDATE",
+        "SELECT content_id::bigint,saved_at FROM content_knowledge_saves WHERE user_id=$1::bigint AND content_id=ANY($2::bigint[]) ORDER BY content_id FOR UPDATE",
     ).bind(scope.user_id).bind(&scope.content_ids).fetch_all(&mut *tx).await?;
     if bookmarks.iter().any(|row| {
         row.saved_at
@@ -173,7 +173,7 @@ pub async fn reconcile_legacy_bookmarks(
         .map(|id| format!("content:{id}"))
         .collect::<Vec<_>>();
     let segments = sqlx::query_as::<_, BookmarkSegmentBeforeState>(
-        "SELECT id::bigint,status,updated_at,source_keys FROM briefing_segments WHERE user_id::bigint=$1 AND status IN ('active','degraded') AND source_keys ?| $2::text[] ORDER BY id FOR UPDATE",
+        "SELECT id::bigint,status,updated_at,source_keys FROM briefing_segments WHERE user_id=$1::bigint AND status IN ('active','degraded') AND source_keys ?| $2::text[] ORDER BY id FOR UPDATE",
     ).bind(scope.user_id).bind(&keys).fetch_all(&mut *tx).await?;
     for segment in &segments {
         let Some(sources) = segment.source_keys.as_array() else {
@@ -191,7 +191,7 @@ pub async fn reconcile_legacy_bookmarks(
     }
     // Do not invalidate historical or in-flight audio without a separately reviewed audio repair.
     let has_audio: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM audio_episodes WHERE user_id::bigint=$1 AND kind='briefing_narration' AND (source_snapshot->'source_keys') ?| $2::text[])",
+        "SELECT EXISTS(SELECT 1 FROM audio_episodes WHERE user_id=$1::bigint AND kind='briefing_narration' AND (source_snapshot->'source_keys') ?| $2::text[])",
     ).bind(scope.user_id).bind(&keys).fetch_one(&mut *tx).await?;
     if has_audio {
         return Err(rejected(
@@ -199,7 +199,7 @@ pub async fn reconcile_legacy_bookmarks(
         ));
     }
     let pending = sqlx::query_as::<_, BookmarkPendingBeforeState>(
-        "SELECT p.id::bigint,p.source_id::bigint,to_jsonb(p) AS row FROM briefing_pending_sources p WHERE p.user_id::bigint=$1 AND p.source_kind='content' AND p.source_id::bigint=ANY($2::bigint[]) ORDER BY p.id FOR UPDATE",
+        "SELECT p.id::bigint,p.source_id::bigint,to_jsonb(p) AS row FROM briefing_pending_sources p WHERE p.user_id=$1::bigint AND p.source_kind='content' AND p.source_id=ANY($2::bigint[]) ORDER BY p.id FOR UPDATE",
     ).bind(scope.user_id).bind(&scope.content_ids).fetch_all(&mut *tx).await?;
     let report = BookmarkReconciliationReport {
         batch_id,
@@ -230,7 +230,7 @@ pub async fn reconcile_legacy_bookmarks(
         r"
         INSERT INTO content_knowledge_saves(user_id,content_id,saved_at,created_at)
         SELECT $1::bigint::integer,id,created_at AT TIME ZONE 'UTC',now()
-        FROM contents WHERE id::bigint=ANY($2::bigint[])
+        FROM contents WHERE id=ANY($2::bigint[])
         ON CONFLICT (user_id,content_id) DO NOTHING
     ",
     )
@@ -249,12 +249,12 @@ pub async fn reconcile_legacy_bookmarks(
             "Knowledge membership changed during repair; review a fresh inventory",
         ));
     }
-    let archived = sqlx::query("UPDATE content_status SET status='archived',updated_at=timezone('UTC',now()) WHERE user_id::bigint=$1 AND content_id::bigint=ANY($2::bigint[]) AND status='inbox'")
+    let archived = sqlx::query("UPDATE content_status SET status='archived',updated_at=timezone('UTC',now()) WHERE user_id=$1::bigint AND content_id=ANY($2::bigint[]) AND status='inbox'")
         .bind(scope.user_id).bind(&scope.content_ids).execute(&mut *tx).await?.rows_affected();
     let segment_ids = report.segments.iter().map(|row| row.id).collect::<Vec<_>>();
-    let retired = sqlx::query("UPDATE briefing_segments SET status='retired',updated_at=timezone('UTC',now()) WHERE id::bigint=ANY($1::bigint[]) AND status IN ('active','degraded')")
+    let retired = sqlx::query("UPDATE briefing_segments SET status='retired',updated_at=timezone('UTC',now()) WHERE id=ANY($1::bigint[]) AND status IN ('active','degraded')")
         .bind(&segment_ids).execute(&mut *tx).await?.rows_affected();
-    let removed = sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='content' AND source_id::bigint=ANY($2::bigint[])")
+    let removed = sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='content' AND source_id=ANY($2::bigint[])")
         .bind(scope.user_id).bind(&scope.content_ids).execute(&mut *tx).await?.rows_affected();
     if archived != scope.content_ids.len() as u64
         || retired != report.segments.len() as u64
@@ -264,7 +264,7 @@ pub async fn reconcile_legacy_bookmarks(
             "locked repair inventory changed; transaction rolled back",
         ));
     }
-    sqlx::query("UPDATE briefing_states SET version=$2 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE briefing_states SET version=$2 WHERE user_id=$1::bigint")
         .bind(scope.user_id)
         .bind(report.version_after)
         .execute(&mut *tx)

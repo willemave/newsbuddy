@@ -4,11 +4,10 @@
 //! receive owned items which can be published later under the queue lease fence.
 
 use std::collections::BTreeSet;
-use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::provider_env::{ProviderEnvError, u64_from_env};
+use crate::provider_env::{ProviderEnvError, clean_env, secret_env, u64_from_env};
 use crate::public_http::{MAX_SOURCE_RESPONSE_BYTES, PublicHttpError, fetch_public};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
@@ -863,17 +862,6 @@ fn timestamp_from_seconds(value: f64) -> Option<DateTime<Utc>> {
     let duration = std::time::Duration::try_from_secs_f64(value).ok()?;
     let seconds = i64::try_from(duration.as_secs()).ok()?;
     DateTime::from_timestamp(seconds, duration.subsec_nanos())
-}
-
-fn clean_env(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    clean_env(name).map(SecretString::from)
 }
 
 #[derive(Debug, Deserialize)]

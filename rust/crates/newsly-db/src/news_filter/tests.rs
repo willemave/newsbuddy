@@ -30,7 +30,7 @@ async fn task(pool: &PgPool, user_id: i64) -> i64 {
 async fn prepare(pool: &PgPool, task_id: i64, user_id: i64) -> NewsFilterPreparation {
     let mut tx = pool.begin().await.unwrap();
     let expected_lease: Uuid =
-        sqlx::query_scalar("SELECT lease_token FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT lease_token FROM processing_tasks WHERE id=$1::bigint")
             .bind(task_id)
             .fetch_one(&mut *tx)
             .await
@@ -132,14 +132,14 @@ async fn evidence_and_preference_changes_invalidate_without_rereading_editorial_
     let initial = prepare(&pool, task_id, user_id).await;
     assert!(store(&pool, task_id, user_id, &initial, false).await);
     assert!(prepare(&pool, task_id, user_id).await.candidates.is_empty());
-    sqlx::query("UPDATE news_items SET raw_metadata=(raw_metadata::jsonb || '{\"classification\":\"skip\",\"unrelated\":true}')::json WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET raw_metadata=(raw_metadata::jsonb || '{\"classification\":\"skip\",\"unrelated\":true}')::json WHERE id=$1::bigint")
         .bind(id).execute(&pool).await.unwrap();
     assert!(
         prepare(&pool, task_id, user_id).await.candidates.is_empty(),
         "non-evidence metadata cannot invalidate a paid decision"
     );
     sqlx::query(
-        "UPDATE news_items SET summary_text='Changed factual evidence' WHERE id::bigint=$1",
+        "UPDATE news_items SET summary_text='Changed factual evidence' WHERE id=$1::bigint",
     )
     .bind(id)
     .execute(&pool)
@@ -176,7 +176,7 @@ async fn changed_evidence_and_lost_lease_cannot_publish_old_decisions(pool: PgPo
     let id = news(&pool, 1).await[0];
     let task_id = task(&pool, user_id).await;
     let initial = prepare(&pool, task_id, user_id).await;
-    sqlx::query("UPDATE news_items SET summary_text='New version' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET summary_text='New version' WHERE id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
@@ -188,7 +188,7 @@ async fn changed_evidence_and_lost_lease_cannot_publish_old_decisions(pool: PgPo
         .unwrap();
     assert_eq!(count, 0, "stale evidence must not create a decision");
     let current = prepare(&pool, task_id, user_id).await;
-    sqlx::query("UPDATE processing_tasks SET lease_token=$2 WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET lease_token=$2 WHERE id=$1::bigint")
         .bind(task_id)
         .bind(Uuid::new_v4())
         .execute(&pool)
@@ -217,7 +217,7 @@ async fn background_reservation_caps_oversized_pass_and_preview_lease_is_token_f
     let first = prepare(&pool, task_id, user_id).await;
     assert_eq!(first.candidates.len(), 128);
     assert!(first.more_work);
-    sqlx::query("UPDATE news_filter_daily_usage SET background_count=499 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE news_filter_daily_usage SET background_count=499 WHERE user_id=$1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await
@@ -253,7 +253,7 @@ async fn background_reservation_caps_oversized_pass_and_preview_lease_is_token_f
     );
     tx.commit().await.unwrap();
     release_preview(&pool, user_id, token, 0).await.unwrap();
-    sqlx::query("UPDATE news_filter_daily_usage SET preview_count=199 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE news_filter_daily_usage SET preview_count=199 WHERE user_id=$1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await
@@ -316,7 +316,7 @@ async fn exclusion_threshold_uncertainty_and_outside_window_have_distinct_admiss
         .await
         .unwrap();
     assert!(settled, "model exclusions must settle first-run progress");
-    sqlx::query("UPDATE news_items SET ingested_at=timezone('UTC',now())-interval '8 days' WHERE id::bigint=$1").bind(ids[0]).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE news_items SET ingested_at=timezone('UTC',now())-interval '8 days' WHERE id=$1::bigint").bind(ids[0]).execute(&pool).await.unwrap();
     assert!(!admits(&pool, user_id, ids[0]).await);
     let all = list_news_ids(&pool, user_id, false, None, 20)
         .await
@@ -395,14 +395,14 @@ async fn fully_excluded_onboarding_cohort_settles_after_bounded_examination(pool
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    let settled:(bool,bool)=sqlx::query_as("SELECT news_seeded,news_seed_settled FROM onboarding_first_edition_runs WHERE id::bigint=$1")
+    let settled:(bool,bool)=sqlx::query_as("SELECT news_seeded,news_seed_settled FROM onboarding_first_edition_runs WHERE id=$1::bigint")
         .bind(run).fetch_one(&pool).await.unwrap();
     assert_eq!(
         settled,
         (true, true),
         "all filtered must finish the cohort instead of waiting forever"
     );
-    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news'")
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news'")
         .bind(user_id).fetch_one(&pool).await.unwrap();
     assert_eq!(pending, 0);
 }
@@ -426,7 +426,7 @@ async fn unavailable_pending_is_reused_until_policy_or_evidence_changes(pool: Pg
             .filter_status,
         "unavailable"
     );
-    sqlx::query("UPDATE news_items SET summary_text='Replacement evidence' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET summary_text='Replacement evidence' WHERE id=$1::bigint")
         .bind(id)
         .execute(&pool)
         .await
@@ -498,7 +498,7 @@ async fn settings_revision_fences_old_admission_pass_and_articles_podcasts_bypas
     news(&pool, 1).await;
     let task_id = task(&pool, user_id).await;
     let expected_lease: Uuid =
-        sqlx::query_scalar("SELECT lease_token FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT lease_token FROM processing_tasks WHERE id=$1::bigint")
             .bind(task_id)
             .fetch_one(&pool)
             .await
@@ -571,7 +571,7 @@ async fn settings_revision_fences_old_admission_pass_and_articles_podcasts_bypas
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    let pending:Vec<String>=sqlx::query_scalar("SELECT source_kind FROM briefing_pending_sources WHERE user_id::bigint=$1 ORDER BY source_id")
+    let pending:Vec<String>=sqlx::query_scalar("SELECT source_kind FROM briefing_pending_sources WHERE user_id=$1::bigint ORDER BY source_id")
         .bind(user_id).fetch_all(&pool).await.unwrap();
     assert_eq!(
         pending,
@@ -611,14 +611,14 @@ async fn full_rebuild_keeps_published_news_after_new_exclusion(pool: PgPool) {
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news' AND source_id::bigint=$2")
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news' AND source_id=$2::bigint")
         .bind(user_id).bind(id).fetch_one(&pool).await.unwrap();
     assert_eq!(
         pending, 1,
         "Full rebuild preparation must retain published coverage despite current exclusion"
     );
     let status: String =
-        sqlx::query_scalar("SELECT status FROM briefing_segments WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT status FROM briefing_segments WHERE user_id=$1::bigint")
             .bind(user_id)
             .fetch_one(&pool)
             .await
@@ -655,7 +655,7 @@ async fn freeze_cohort_from_preparation(
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    sqlx::query_as("SELECT news_seeded,news_seed_settled FROM onboarding_first_edition_runs WHERE id::bigint=$1")
+    sqlx::query_as("SELECT news_seeded,news_seed_settled FROM onboarding_first_edition_runs WHERE id=$1::bigint")
         .bind(run).fetch_one(pool).await.unwrap()
 }
 
@@ -714,7 +714,7 @@ async fn outside_window_only_onboarding_settles_without_provider_candidates(pool
             .all(|row| row.filter_status == "outside_window")
     );
     let used: i32 = sqlx::query_scalar(
-        "SELECT background_count FROM news_filter_daily_usage WHERE user_id::bigint=$1",
+        "SELECT background_count FROM news_filter_daily_usage WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -742,14 +742,14 @@ async fn unused_background_reservations_refund_only_their_original_utc_day(pool:
     refund_background(&mut connection, user_id, prepared.usage_day, 4)
         .await
         .unwrap();
-    let counts:Vec<(chrono::NaiveDate,i32)>=sqlx::query_as("SELECT day,background_count FROM news_filter_daily_usage WHERE user_id::bigint=$1 ORDER BY day")
+    let counts:Vec<(chrono::NaiveDate,i32)>=sqlx::query_as("SELECT day,background_count FROM news_filter_daily_usage WHERE user_id=$1::bigint ORDER BY day")
         .bind(user_id).fetch_all(&mut *connection).await.unwrap();
     assert_eq!(counts, vec![(previous_day, 89), (prepared.usage_day, 6)]);
     refund_background(&mut connection, user_id, prepared.usage_day, usize::MAX)
         .await
         .unwrap();
     let remaining: i32 = sqlx::query_scalar(
-        "SELECT background_count FROM news_filter_daily_usage WHERE user_id::bigint=$1 AND day=$2",
+        "SELECT background_count FROM news_filter_daily_usage WHERE user_id=$1::bigint AND day=$2",
     )
     .bind(user_id)
     .bind(prepared.usage_day)
@@ -793,7 +793,7 @@ async fn preview_unused_refund_requires_current_token_and_cannot_repeat(pool: Pg
     tx.commit().await.unwrap();
     release_preview(&pool, user_id, first, 20).await.unwrap();
     let current: (i32, Option<Uuid>) = sqlx::query_as(
-        "SELECT preview_count,preview_token FROM news_filter_daily_usage WHERE user_id::bigint=$1",
+        "SELECT preview_count,preview_token FROM news_filter_daily_usage WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -806,7 +806,7 @@ async fn preview_unused_refund_requires_current_token_and_cannot_repeat(pool: Pg
     );
     release_preview(&pool, user_id, second, 20).await.unwrap();
     let current: (i32, Option<Uuid>) = sqlx::query_as(
-        "SELECT preview_count,preview_token FROM news_filter_daily_usage WHERE user_id::bigint=$1",
+        "SELECT preview_count,preview_token FROM news_filter_daily_usage WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -818,7 +818,7 @@ async fn preview_unused_refund_requires_current_token_and_cannot_repeat(pool: Pg
 #[sqlx::test]
 async fn spent_provider_usage_survives_account_deletion_with_anonymous_owner(pool: PgPool) {
     let user_id = user(&pool, "deleted-billing").await;
-    sqlx::query("DELETE FROM users WHERE id::bigint=$1")
+    sqlx::query("DELETE FROM users WHERE id=$1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await
@@ -844,4 +844,36 @@ async fn spent_provider_usage_survives_account_deletion_with_anonymous_owner(poo
     assert_eq!(actual.0, None);
     assert_eq!(actual.1, Some(0.000_123));
     assert_eq!(actual.2, "provider_reported");
+}
+
+#[sqlx::test]
+async fn batched_decisions_skip_stale_input_hashes(pool: PgPool) {
+    let user_id = user(&pool, "stale-hash").await;
+    news(&pool, 3).await;
+    let task_id = task(&pool, user_id).await;
+    let prepared = prepare(&pool, task_id, user_id).await;
+    let mut decisions = prepared
+        .candidates
+        .iter()
+        .map(|c| decision(c, true))
+        .collect::<Vec<_>>();
+    decisions[1].input_hash = "stale".into();
+    decisions.push(decision(&prepared.candidates[0], true));
+    let mut tx = pool.begin().await.unwrap();
+    assert!(
+        store_decisions(&mut tx, task_id, user_id, &prepared, &decisions)
+            .await
+            .unwrap()
+    );
+    tx.commit().await.unwrap();
+    let stored: Vec<i64> = sqlx::query_scalar(
+        "SELECT news_item_id::bigint FROM news_filter_decisions WHERE user_id=$1::bigint ORDER BY news_item_id",
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let mut expected = vec![decisions[0].news_item_id, decisions[2].news_item_id];
+    expected.sort_unstable();
+    assert_eq!(stored, expected);
 }

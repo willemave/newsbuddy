@@ -239,7 +239,7 @@ async fn event_cache_requires_exact_model_text_and_encoder_before_alignment(pool
     assert_eq!(planned.windows[0].sources, sources);
     assert_eq!(planned.embedding_batches.len(), 1);
     for source in &sources {
-        sqlx::query("UPDATE news_lens_embeddings SET model='test-model',input_hash=$2,encoder_version=$3 WHERE news_item_id::bigint=$1")
+        sqlx::query("UPDATE news_lens_embeddings SET model='test-model',input_hash=$2,encoder_version=$3 WHERE news_item_id=$1::bigint")
             .bind(source.id).bind(news_lens_embeddings::input_hash(&source.embedding_text())).bind(news_lens_embeddings::ENCODER_VERSION).execute(&pool).await.unwrap();
     }
     let warm = cached_news_vectors(&pool, &sources, "test-model")

@@ -92,24 +92,12 @@ impl SourceResolver {
     /// # Errors
     /// Returns an error if the HTTP client or configured Exa URL is invalid.
     pub fn from_env() -> Result<Self, SourceResolutionError> {
-        let raw = std::env::var("EXA_API_BASE_URL").unwrap_or_else(|_| "https://api.exa.ai".into());
-        let mut endpoint = reqwest::Url::parse(&raw)
-            .map_err(|error| SourceResolutionError::Url(error.to_string()))?;
-        if !endpoint.path().trim_end_matches('/').ends_with("/search") {
-            endpoint.set_path(&format!("{}/", endpoint.path().trim_end_matches('/')));
-            endpoint = endpoint
-                .join("search")
-                .map_err(|error| SourceResolutionError::Url(error.to_string()))?;
-        }
+        let endpoint = crate::exa::exa_search_url_from_env().map_err(SourceResolutionError::Url)?;
         Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .build()?,
-            exa_api_key: std::env::var("EXA_API_KEY")
-                .ok()
-                .map(|key| key.trim().to_owned())
-                .filter(|key| !key.is_empty())
-                .map(SecretString::from),
+            exa_api_key: crate::provider_env::secret_env("EXA_API_KEY"),
             exa_search_url: endpoint,
             validator: FeedValidator::new(),
         })

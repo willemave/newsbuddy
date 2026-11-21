@@ -270,16 +270,16 @@ pub async fn list_chat_sessions(
         "{}\n{}",
         SESSION_PROJECTION_SQL,
         r"
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND is_archived = FALSE
-          AND ($2::bigint IS NULL OR content_id::bigint = $2)
-          AND ($3::bigint IS NULL OR news_item_id::bigint = $3)
+          AND ($2::bigint IS NULL OR content_id = $2::bigint)
+          AND ($3::bigint IS NULL OR news_item_id = $3::bigint)
           AND (
                 $4::timestamp IS NULL
                 OR COALESCE(last_message_at, created_at) < $4
                 OR (
                     COALESCE(last_message_at, created_at) = $4
-                    AND id::bigint < $5
+                    AND id < $5::bigint
                 )
           )
         ORDER BY COALESCE(last_message_at, created_at) DESC, id DESC
@@ -295,9 +295,11 @@ pub async fn list_chat_sessions(
     .fetch_all(pool)
     .await?;
 
+    let mut states = load_session_message_states(pool, user_id, &rows).await?;
     let mut projections = Vec::with_capacity(rows.len());
     for row in rows {
-        projections.push(present_session(pool, user_id, row).await?);
+        let state = states.remove(&row.id).unwrap_or_default();
+        projections.push(present_session_with_state(pool, user_id, row, state).await?);
     }
     Ok(projections)
 }
@@ -486,7 +488,7 @@ pub async fn update_chat_session(
             SET llm_provider = $2,
                 llm_model = $3,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             ",
         )
         .bind(input.session_id)
@@ -520,7 +522,7 @@ pub async fn archive_chat_session(
             UPDATE chat_sessions
             SET is_archived = TRUE,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             ",
         )
         .bind(session_id)
@@ -650,7 +652,7 @@ pub async fn stage_assistant_turn(
                 topic = $5,
                 title = $6,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             ",
         )
         .bind(row.id)
@@ -741,7 +743,7 @@ pub async fn get_chat_message_status(
     message_id: i64,
 ) -> Result<ChatRecordAccess<ChatMessageStatusProjection>, ChatRepositoryError> {
     let row = sqlx::query_as::<_, ChatMessageRow>(AssertSqlSafe(format!(
-        "{MESSAGE_PROJECTION_SQL} WHERE id::bigint = $1"
+        "{MESSAGE_PROJECTION_SQL} WHERE id = $1::bigint"
     )))
     .bind(message_id)
     .fetch_optional(pool)
@@ -894,7 +896,7 @@ async fn stage_session_turn(
         UPDATE chat_sessions
         SET last_message_at = $2,
             updated_at = $2
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(session.id)
@@ -921,52 +923,33 @@ async fn present_session(
     user_id: i64,
     row: ChatSessionRow,
 ) -> Result<ChatSessionProjection, ChatRepositoryError> {
-    let has_pending_message = sqlx::query_scalar::<_, bool>(
-        r"
-        SELECT EXISTS(
-            SELECT 1 FROM chat_messages
-            WHERE session_id::bigint = $1 AND status = 'processing'
-        )
-        ",
-    )
-    .bind(row.id)
-    .fetch_one(pool)
-    .await?;
-    let has_messages = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM chat_messages WHERE session_id::bigint = $1)",
-    )
-    .bind(row.id)
-    .fetch_one(pool)
-    .await?;
-    let last_message = sqlx::query_as::<_, ChatMessageRow>(AssertSqlSafe(format!(
-        "{MESSAGE_PROJECTION_SQL} WHERE session_id::bigint = $1 ORDER BY id DESC LIMIT 1"
-    )))
-    .bind(row.id)
-    .fetch_optional(pool)
-    .await?;
-    let (last_message_preview, last_message_role) = last_message
-        .as_ref()
-        .and_then(|message| latest_message_preview(&message.message_list))
+    let state = load_session_message_states(pool, user_id, std::slice::from_ref(&row))
+        .await?
+        .remove(&row.id)
+        .unwrap_or_default();
+    present_session_with_state(pool, user_id, row, state).await
+}
+
+async fn present_session_with_state(
+    pool: &PgPool,
+    user_id: i64,
+    row: ChatSessionRow,
+    state: SessionMessageState,
+) -> Result<ChatSessionProjection, ChatRepositoryError> {
+    let SessionMessageState {
+        has_pending_message,
+        has_messages,
+        last_message_list,
+        is_saved_to_knowledge,
+        ..
+    } = state;
+    let (last_message_preview, last_message_role) = last_message_list
+        .as_deref()
+        .and_then(latest_message_preview)
         .map_or((None, None), |(preview, role)| {
             (Some(preview), Some(role.to_owned()))
         });
 
-    let is_saved_to_knowledge = if let Some(content_id) = row.content_id {
-        sqlx::query_scalar::<_, bool>(
-            r"
-            SELECT EXISTS(
-                SELECT 1 FROM content_knowledge_saves
-                WHERE user_id::bigint = $1 AND content_id::bigint = $2
-            )
-            ",
-        )
-        .bind(user_id)
-        .bind(content_id)
-        .fetch_one(pool)
-        .await?
-    } else {
-        false
-    };
     let is_waiting_for_content =
         if !has_messages && row.session_type.as_deref() == Some(KNOWLEDGE_SESSION_TYPE) {
             if let Some(content_id) = row.content_id {
@@ -1274,7 +1257,7 @@ async fn load_session(
     session_id: i64,
 ) -> Result<Option<ChatSessionRow>, sqlx::Error> {
     sqlx::query_as::<_, ChatSessionRow>(AssertSqlSafe(format!(
-        "{SESSION_PROJECTION_SQL} WHERE id::bigint = $1"
+        "{SESSION_PROJECTION_SQL} WHERE id = $1::bigint"
     )))
     .bind(session_id)
     .fetch_optional(pool)
@@ -1286,7 +1269,7 @@ pub(crate) async fn load_session_for_update(
     session_id: i64,
 ) -> Result<Option<ChatSessionRow>, sqlx::Error> {
     sqlx::query_as::<_, ChatSessionRow>(AssertSqlSafe(format!(
-        "{SESSION_PROJECTION_SQL} WHERE id::bigint = $1 FOR UPDATE"
+        "{SESSION_PROJECTION_SQL} WHERE id = $1::bigint FOR UPDATE"
     )))
     .bind(session_id)
     .fetch_optional(&mut **transaction)
@@ -1345,7 +1328,7 @@ async fn load_message_rows(
         "{}\n{}",
         MESSAGE_PROJECTION_SQL,
         r"
-        WHERE session_id::bigint = $1
+        WHERE session_id = $1::bigint
         ORDER BY created_at, id
         "
     )))
@@ -1363,7 +1346,7 @@ pub async fn load_active_feed_urls(
         r"
         SELECT feed_url
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND is_active = TRUE
           AND feed_url IS NOT NULL
         ",
@@ -1389,7 +1372,7 @@ async fn content_awaiting_first_chat_turn(
         SELECT EXISTS(
             SELECT 1
             FROM contents
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
               AND (
                     COALESCE(
                         content_metadata::jsonb->'processing'->'share_and_chat_requests',
@@ -1403,7 +1386,7 @@ async fn content_awaiting_first_chat_turn(
         ) OR EXISTS(
             SELECT 1
             FROM processing_tasks
-            WHERE content_id::bigint = $1
+            WHERE content_id = $1::bigint
               AND task_type = 'dig_deeper'
               AND status IN ('pending', 'processing')
               AND payload::jsonb @> jsonb_build_object('user_id', $2::bigint)
@@ -1421,7 +1404,7 @@ pub(crate) async fn lock_active_user(
     user_id: i64,
 ) -> Result<bool, sqlx::Error> {
     Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active = TRUE FOR SHARE",
+        "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active = TRUE FOR SHARE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)
@@ -1600,7 +1583,7 @@ const CONTENT_PRESENTATION_SQL: &str = r"
         source,
         content_metadata
     FROM contents
-    WHERE id::bigint = $1
+    WHERE id = $1::bigint
 ";
 
 const NEWS_PRESENTATION_SQL: &str = r"
@@ -1616,12 +1599,12 @@ const NEWS_PRESENTATION_SQL: &str = r"
         summary_text,
         raw_metadata
     FROM news_items
-    WHERE id::bigint = $1
+    WHERE id = $1::bigint
 ";
 
 const VISIBLE_NEWS_CLAUSE: &str = r"
     (
-        (visibility_scope = 'user' AND owner_user_id::bigint = $2)
+        (visibility_scope = 'user' AND owner_user_id = $2::bigint)
         OR (
             visibility_scope = 'global'
             AND EXISTS (
@@ -1674,3 +1657,11 @@ pub enum ChatRepositoryError {
 
 #[cfg(test)]
 mod screen_context_tests;
+
+#[cfg(test)]
+#[path = "chat/session_list_tests.rs"]
+mod session_list_tests;
+
+#[path = "chat/session_state.rs"]
+mod session_state;
+use session_state::{SessionMessageState, load_session_message_states};

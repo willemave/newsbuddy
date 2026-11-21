@@ -1322,6 +1322,13 @@ The required quality workflow precedes build and deployment. Deployment rejects
 a stale tested SHA. Baseline adoption of an eligible legacy database requires
 all writers to stop and drain; normal deploys cannot infer that authority.
 
+Route-group write barriers are raised and lifted only by each API replica's
+transition monitor. Request handling can raise a barrier for a prepared
+transition but never lifts one, so a cached or stale read cannot reopen writes
+that the replica has acknowledged as drained. If the monitor task stops, the API
+process shuts down for a supervised restart rather than serving with barriers
+that nothing can lift.
+
 `PUBLIC_BASE_URL` is the authoritative origin for externally returned artifact,
 audio, and share links. Proxy headers are accepted only from configured proxy
 ranges and do not redefine that origin.

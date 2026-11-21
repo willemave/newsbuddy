@@ -57,6 +57,9 @@ struct ChatPartialResponseUpdate: @unchecked Sendable {
 /// destroy shared work: a short orphan grace period lets foreground/background
 /// ownership hand off without issuing a duplicate status request.
 actor ChatMessageCompletionRegistry {
+    /// Each status read already retries transient transport failures internally (`.safeRead`),
+    /// so a few failed polls in a row means the network is not coming back soon.
+    static let maximumConsecutivePollFailures = 3
     typealias FetchStatus = @Sendable (Int) async throws -> MessageStatusResponse
     typealias Sleep = @Sendable (UInt64) async throws -> Void
     typealias ProcessingObserver = @MainActor @Sendable (Int) async -> Void
@@ -226,6 +229,7 @@ actor ChatMessageCompletionRegistry {
 
     private func poll(messageId: Int, generation: UUID) async {
         var idleRequestIndex = 0
+        var consecutiveFailures = 0
         var latestCursor: ChatPartialResponseCursor?
 
         for requestIndex in 0..<policy.absoluteMaximumRequestCount {
@@ -234,6 +238,7 @@ actor ChatMessageCompletionRegistry {
                 guard observerStore.isActive(key: messageId, generation: generation) else { return }
 
                 let status = try await fetchStatus(messageId)
+                consecutiveFailures = 0
                 switch status.status {
                 case .completed:
                     guard let assistantMessage = status.assistantMessage else {
@@ -321,6 +326,22 @@ actor ChatMessageCompletionRegistry {
             } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
+                // A transient failure spends idle budget instead of failing every observer, but a
+                // run of failures (each already retried inside the request) ends the wait.
+                consecutiveFailures += 1
+                if isRetryablePollingError(error),
+                   consecutiveFailures < Self.maximumConsecutivePollFailures,
+                   requestIndex + 1 < policy.absoluteMaximumRequestCount,
+                   idleRequestIndex < policy.delaysNanoseconds.count {
+                    let delay = policy.delaysNanoseconds[idleRequestIndex]
+                    idleRequestIndex += 1
+                    do {
+                        try await sleep(delay)
+                    } catch {
+                        return
+                    }
+                    continue
+                }
                 finish(
                     messageId: messageId,
                     generation: generation,

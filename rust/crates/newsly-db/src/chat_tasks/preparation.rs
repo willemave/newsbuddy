@@ -107,7 +107,7 @@ pub(super) async fn prepare_dig_deeper_turn(
             r#"
             SELECT EXISTS(
                 SELECT 1 FROM chat_sessions
-                WHERE id::bigint = $1 AND user_id::bigint = $2 AND content_id::bigint = $3
+                WHERE id = $1::bigint AND user_id = $2::bigint AND content_id = $3::bigint
             )
             "#,
         )
@@ -161,7 +161,7 @@ pub(super) async fn prepare_dig_deeper_turn(
                     'message_id', $3::bigint,
                     'prompt', $4::text
                 )
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             "#,
         )
         .bind(request.queue_task_id)
@@ -342,8 +342,8 @@ pub(super) async fn prepare_linked_turn(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM chat_messages
-            WHERE session_id::bigint = $1
-              AND id::bigint < $2
+            WHERE session_id = $1::bigint
+              AND id < $2::bigint
               AND status = 'processing'
         )
         "#,
@@ -430,7 +430,7 @@ pub(super) async fn load_queue_task_for_update(
             payload::jsonb AS payload,
             status
         FROM processing_tasks
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -455,7 +455,7 @@ pub(super) async fn load_message_for_update(
             error,
             stream_generation
         FROM chat_messages
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -481,7 +481,7 @@ pub(super) async fn load_content(
         FROM contents AS content
         LEFT JOIN content_bodies AS source_body
           ON source_body.content_id = content.id AND source_body.variant = 'source'
-        WHERE content.id::bigint = $1
+        WHERE content.id = $1::bigint
         FOR UPDATE OF content
         "#,
     )

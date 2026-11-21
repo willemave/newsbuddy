@@ -157,15 +157,15 @@ async fn category_profile_edits_fence_inflight_assignments_even_without_timestam
     for (field, update) in [
         (
             "title",
-            "UPDATE briefing_lenses SET title='Changed science desk' WHERE user_id::bigint=$1 AND key='news-science'",
+            "UPDATE briefing_lenses SET title='Changed science desk' WHERE user_id=$1::bigint AND key='news-science'",
         ),
         (
             "deck",
-            "UPDATE briefing_lenses SET deck='Changed research coverage.' WHERE user_id::bigint=$1 AND key='news-science'",
+            "UPDATE briefing_lenses SET deck='Changed research coverage.' WHERE user_id=$1::bigint AND key='news-science'",
         ),
         (
             "routing_rule",
-            "UPDATE briefing_lenses SET routing_rule='Only peer-reviewed research.' WHERE user_id::bigint=$1 AND key='news-science'",
+            "UPDATE briefing_lenses SET routing_rule='Only peer-reviewed research.' WHERE user_id=$1::bigint AND key='news-science'",
         ),
     ] {
         let seed = prepare_seed(&pool, task_id, user_id).await;
@@ -176,7 +176,7 @@ async fn category_profile_edits_fence_inflight_assignments_even_without_timestam
             .await
             .unwrap();
         let updated_at: chrono::NaiveDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM briefing_lenses WHERE user_id::bigint=$1 AND key='news-science'",
+            "SELECT updated_at FROM briefing_lenses WHERE user_id=$1::bigint AND key='news-science'",
         )
         .bind(user_id)
         .fetch_one(&pool)
@@ -197,7 +197,7 @@ async fn category_profile_edits_fence_inflight_assignments_even_without_timestam
         );
         transaction.commit().await.unwrap();
         let pending: Option<String> = sqlx::query_scalar(
-            "SELECT lens_key FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news'",
+            "SELECT lens_key FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news'",
         ).bind(user_id).fetch_one(&pool).await.unwrap();
         assert_eq!(
             pending, None,
@@ -234,7 +234,7 @@ async fn matching_metadata_topic_cannot_assign_news_before_category_inference(po
         "Science story"
     );
     let pending: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT source_kind,lens_key FROM briefing_pending_sources WHERE user_id::bigint=$1 ORDER BY source_kind",
+        "SELECT source_kind,lens_key FROM briefing_pending_sources WHERE user_id=$1::bigint ORDER BY source_kind",
     )
     .bind(user_id)
     .fetch_all(&pool)

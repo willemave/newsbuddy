@@ -66,16 +66,17 @@ async fn observe(connection: &mut PgConnection) -> Result<(), sqlx::Error> {
     let growing: bool = sqlx::query_scalar("WITH recent AS (SELECT *, lag(ready_media) OVER (ORDER BY observed_at) AS previous FROM (SELECT * FROM pipeline_queue_observations WHERE observed_at > now() - interval '16 minutes' ORDER BY observed_at DESC LIMIT 3) s) SELECT count(*) = 3 AND count(*) FILTER (WHERE ready_media > previous) = 2 AND max(ready_media) >= 100 AND max(oldest_ready_seconds) > 900 FROM recent")
         .fetch_one(&mut *connection).await?;
     set_signal(connection, "media_growth", growing, "Ready media queue grew in two successive watchdog intervals; at least 100 jobs and oldest over 15 minutes").await?;
-    sqlx::query(
-        "DELETE FROM pipeline_queue_observations WHERE observed_at < now() - interval '7 days'",
-    )
-    .execute(&mut *connection)
-    .await?;
-    sqlx::query(
-        "DELETE FROM source_ingestion_observations WHERE observed_at < now() - interval '7 days'",
-    )
-    .execute(&mut *connection)
-    .await?;
+    Ok(())
+}
+
+/// Bounded autocommit retention for watchdog observation tables (seven-day window).
+pub async fn prune_watchdog_observations(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM pipeline_queue_observations WHERE ctid IN (SELECT ctid FROM pipeline_queue_observations WHERE observed_at < now() - interval '7 days' LIMIT 5000)")
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM source_ingestion_observations WHERE ctid IN (SELECT ctid FROM source_ingestion_observations WHERE observed_at < now() - interval '7 days' LIMIT 5000)")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

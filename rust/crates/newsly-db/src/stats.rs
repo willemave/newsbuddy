@@ -26,13 +26,13 @@ pub async fn get_unread_counts(
               AND EXISTS (
                   SELECT 1 FROM content_status AS cs
                   WHERE cs.content_id = c.id
-                    AND cs.user_id::bigint = $1::bigint
+                    AND cs.user_id = $1::bigint
                     AND cs.status = 'inbox'
               )
               AND NOT EXISTS (
                   SELECT 1 FROM content_read_status AS crs
                   WHERE crs.content_id = c.id
-                    AND crs.user_id::bigint = $1::bigint
+                    AND crs.user_id = $1::bigint
               )
             GROUP BY c.content_type
         ), news_count AS (
@@ -43,7 +43,7 @@ pub async fn get_unread_counts(
               AND NOT EXISTS (
                   SELECT 1 FROM news_item_read_status AS nrs
                   WHERE nrs.news_item_id = n.id
-                    AND nrs.user_id::bigint = $1::bigint
+                    AND nrs.user_id = $1::bigint
               )
               AND {visibility}
         )
@@ -81,7 +81,7 @@ pub async fn get_processing_counts(
             WHERE EXISTS (
                 SELECT 1 FROM content_status AS cs
                 WHERE cs.content_id = c.id
-                  AND cs.user_id::bigint = $1::bigint
+                  AND cs.user_id = $1::bigint
                   AND cs.status = 'inbox'
             )
               AND (
@@ -125,13 +125,13 @@ pub async fn get_processing_counts(
             FROM (
                 SELECT 'reddit'::text AS source_key
                 FROM user_scraper_configs
-                WHERE user_id::bigint = $1::bigint
+                WHERE user_id = $1::bigint
                   AND scraper_type = 'reddit'
                   AND is_active IS TRUE
                 UNION ALL
                 SELECT (config::jsonb ->> 'key')
                 FROM user_scraper_configs
-                WHERE user_id::bigint = $1::bigint
+                WHERE user_id = $1::bigint
                   AND scraper_type = 'aggregator'
                   AND is_active IS TRUE
                   AND (config::jsonb ->> 'key') = ANY($3::text[])
@@ -190,13 +190,13 @@ pub async fn get_long_form_unread_count(
           AND EXISTS (
               SELECT 1 FROM content_status AS cs
               WHERE cs.content_id = c.id
-                AND cs.user_id::bigint = $1::bigint
+                AND cs.user_id = $1::bigint
                 AND cs.status = 'inbox'
           )
           AND NOT EXISTS (
               SELECT 1 FROM content_read_status AS crs
               WHERE crs.content_id = c.id
-                AND crs.user_id::bigint = $1::bigint
+                AND crs.user_id = $1::bigint
           )
         "#,
     )

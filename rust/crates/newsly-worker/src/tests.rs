@@ -211,7 +211,7 @@ async fn expired_scrape_attempts_consume_budget_before_dispatch(pool: PgPool) {
         .unwrap()
         .unwrap();
     for expected in [1, 2] {
-        sqlx::query("UPDATE processing_tasks SET lease_expires_at = now() - interval '1 second' WHERE id::bigint = $1").bind(task_id).execute(&pool).await.unwrap();
+        sqlx::query("UPDATE processing_tasks SET lease_expires_at = now() - interval '1 second' WHERE id = $1::bigint").bind(task_id).execute(&pool).await.unwrap();
         if expected == 1 {
             let replacement = worker
                 .queue
@@ -237,7 +237,7 @@ async fn expired_scrape_attempts_consume_budget_before_dispatch(pool: PgPool) {
         }
     }
     let message: String =
-        sqlx::query_scalar("SELECT error_message FROM processing_tasks WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT error_message FROM processing_tasks WHERE id = $1::bigint")
             .bind(task_id)
             .fetch_one(&pool)
             .await
@@ -311,7 +311,7 @@ async fn terminal_queue_failure_settles_running_llm_ledger(pool: PgPool) {
         .unwrap();
     assert!(matches!(attempt, WorkerAttempt::Failed(_)));
     let state: (String, String) =
-        sqlx::query_as("SELECT status, workflow_state FROM llm_tasks WHERE id::bigint = $1")
+        sqlx::query_as("SELECT status, workflow_state FROM llm_tasks WHERE id = $1::bigint")
             .bind(llm_id)
             .fetch_one(&pool)
             .await
@@ -326,7 +326,7 @@ async fn terminal_queue_failure_settles_running_llm_ledger(pool: PgPool) {
         0
     );
     // A legacy mismatch is observable, and a real pending retry removes that mismatch.
-    sqlx::query("UPDATE llm_tasks SET status = 'running' WHERE id::bigint = $1")
+    sqlx::query("UPDATE llm_tasks SET status = 'running' WHERE id = $1::bigint")
         .bind(llm_id)
         .execute(&mut *conn)
         .await
@@ -490,7 +490,7 @@ async fn lease_loss_drains_reclustering_audit_without_applying_finalizer(pool: P
     let attempt = tokio::spawn(async move { worker.run_once().await });
     started.notified().await;
     sqlx::query(
-        "UPDATE processing_tasks SET status='failed',completed_at=timezone('UTC',now()),locked_by=NULL,locked_at=NULL,lease_token=NULL,lease_expires_at=NULL WHERE id::bigint=$1",
+        "UPDATE processing_tasks SET status='failed',completed_at=timezone('UTC',now()),locked_by=NULL,locked_at=NULL,lease_token=NULL,lease_expires_at=NULL WHERE id=$1::bigint",
     )
     .bind(task_id)
     .execute(&pool)
@@ -622,7 +622,7 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
     let run_id: i64 = sqlx::query_scalar("INSERT INTO onboarding_discovery_runs (user_id, status, created_at, discovery_task_id, discovery_retry_count) VALUES ($1::integer, 'processing', now(), $2, 0) RETURNING id::bigint").bind(user_id).bind(task_id).fetch_one(&pool).await.unwrap();
     let weekly_id: i64 = sqlx::query_scalar("INSERT INTO feed_discovery_runs (user_id, status, discovery_task_id, discovery_retry_count) VALUES ($1::integer, 'processing', $2, 1) RETURNING id::bigint").bind(user_id).bind(task_id).fetch_one(&pool).await.unwrap();
     let content_id: i64 = sqlx::query_scalar("INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata) VALUES ('article', 'https://example.test/artwork', FALSE, 'completed', '{\"domain\":{\"artwork_status\":\"pending\"}}') RETURNING id::bigint").fetch_one(&pool).await.unwrap();
-    sqlx::query("UPDATE processing_tasks SET payload = $2 WHERE id::bigint = $1")
+    sqlx::query("UPDATE processing_tasks SET payload = $2 WHERE id = $1::bigint")
         .bind(task_id)
         .bind(json!({"message_id":message_id,"audio_episode_id":episode_id}))
         .execute(&pool)
@@ -648,30 +648,30 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
         .unwrap();
     }
     tx.commit().await.unwrap();
-    let chat: String = sqlx::query_scalar("SELECT status FROM chat_messages WHERE id::bigint = $1")
+    let chat: String = sqlx::query_scalar("SELECT status FROM chat_messages WHERE id = $1::bigint")
         .bind(message_id)
         .fetch_one(&pool)
         .await
         .unwrap();
     let audio: String =
-        sqlx::query_scalar("SELECT status FROM audio_episodes WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT status FROM audio_episodes WHERE id = $1::bigint")
             .bind(episode_id)
             .fetch_one(&pool)
             .await
             .unwrap();
     let onboarding: String =
-        sqlx::query_scalar("SELECT status FROM onboarding_discovery_runs WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT status FROM onboarding_discovery_runs WHERE id = $1::bigint")
             .bind(run_id)
             .fetch_one(&pool)
             .await
             .unwrap();
     let weekly: String =
-        sqlx::query_scalar("SELECT status FROM feed_discovery_runs WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT status FROM feed_discovery_runs WHERE id = $1::bigint")
             .bind(weekly_id)
             .fetch_one(&pool)
             .await
             .unwrap();
-    let artwork: String = sqlx::query_scalar("SELECT content_metadata::jsonb #>> '{domain,artwork_status}' FROM contents WHERE id::bigint = $1").bind(content_id).fetch_one(&pool).await.unwrap();
+    let artwork: String = sqlx::query_scalar("SELECT content_metadata::jsonb #>> '{domain,artwork_status}' FROM contents WHERE id = $1::bigint").bind(content_id).fetch_one(&pool).await.unwrap();
     assert_eq!(
         (
             chat.as_str(),
@@ -682,7 +682,7 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
         ),
         ("failed", "failed", "failed", "processing", "failed")
     );
-    sqlx::query("UPDATE processing_tasks SET retry_count = 1 WHERE id::bigint = $1")
+    sqlx::query("UPDATE processing_tasks SET retry_count = 1 WHERE id = $1::bigint")
         .bind(task_id)
         .execute(&pool)
         .await
@@ -700,7 +700,7 @@ async fn terminal_failure_settles_related_workflows_and_preserves_newer_generati
     .unwrap();
     tx.commit().await.unwrap();
     let weekly: String =
-        sqlx::query_scalar("SELECT status FROM feed_discovery_runs WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT status FROM feed_discovery_runs WHERE id = $1::bigint")
             .bind(weekly_id)
             .fetch_one(&pool)
             .await
@@ -752,7 +752,7 @@ async fn x_continuation_survives_a_fresh_preparation_without_promoting_checkpoin
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    let checkpoint: String = sqlx::query_scalar("SELECT last_synced_item_id FROM user_integration_sync_state WHERE connection_id::bigint = $1").bind(connection_id).fetch_one(&pool).await.unwrap();
+    let checkpoint: String = sqlx::query_scalar("SELECT last_synced_item_id FROM user_integration_sync_state WHERE connection_id = $1::bigint").bind(connection_id).fetch_one(&pool).await.unwrap();
     assert_eq!(checkpoint, "160");
     let mut tx = pool.begin().await.unwrap();
     assert!(matches!(
@@ -797,7 +797,7 @@ async fn watchdog_distinguishes_repeated_source_failure_from_a_healthy_empty_che
             .failing_sources,
         0
     );
-    sqlx::query("UPDATE processing_tasks SET available_at = timezone('UTC', now()) - interval '3 hours' WHERE id::bigint = $1").bind(task_id).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE processing_tasks SET available_at = timezone('UTC', now()) - interval '3 hours' WHERE id = $1::bigint").bind(task_id).execute(&mut *tx).await.unwrap();
     assert_eq!(
         newsly_db::pipeline_health_counts(&mut tx)
             .await
@@ -826,7 +826,7 @@ async fn malformed_legacy_llm_delivery_terminalizes_without_dispatch(pool: PgPoo
         .unwrap();
     // Model an orphan/unsupported legacy payload outside the supported migration
     // backfill. Prepare must reject it and settle both queue and ledger atomically.
-    sqlx::query("UPDATE processing_tasks SET payload=(payload::jsonb-'task_kind')::json WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET payload=(payload::jsonb-'task_kind')::json WHERE id=$1::bigint")
         .bind(delivery).execute(&pool).await.unwrap();
     let dispatched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     worker.handlers = HandlerRegistry::new();
@@ -847,18 +847,75 @@ async fn malformed_legacy_llm_delivery_terminalizes_without_dispatch(pool: PgPoo
         WorkerAttempt::Failed(_)
     ));
     let state: (String, String) =
-        sqlx::query_as("SELECT status,error_message FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_as("SELECT status,error_message FROM processing_tasks WHERE id=$1::bigint")
             .bind(delivery)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(state.0, "failed");
     assert!(state.1.contains("missing task_kind"), "{}", state.1);
-    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id::bigint=$1")
+    let status: String = sqlx::query_scalar("SELECT status FROM llm_tasks WHERE id=$1::bigint")
         .bind(task)
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(status, "failed");
+    assert!(!dispatched.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[sqlx::test]
+async fn deterministic_settlement_error_still_terminalizes_the_queue_row(pool: PgPool) {
+    let (mut worker, _) =
+        worker_with_failing_finalizer(&pool, 0, FinalizerErrorDisposition::Retryable).await;
+    let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('poison-settlement','poison-settlement@example.com',true,false) RETURNING id::bigint")
+        .fetch_one(&pool).await.unwrap();
+    let task: i64 = sqlx::query_scalar("INSERT INTO llm_tasks(user_id,task_kind,mode,workflow_key,workflow_version,workflow_state,status,approval_policy,allowed_actions,tool_policy,input_json,output_json,artifact_manifest,usage_json,status_history) VALUES($1,'share_action','add_content','share_action',1,'running','running','{}','[]','{}','{}','{}','{}','{}','[]') RETURNING id::bigint")
+        .bind(user).fetch_one(&pool).await.unwrap();
+    let delivery = worker
+        .queue
+        .enqueue(EnqueueRequest::run_llm_task(
+            task,
+            user,
+            LlmTaskDeliveryKind::ShareAction,
+        ))
+        .await
+        .unwrap();
+    // Settlement rejects non-positive ledger ids; a payload the producer could never write
+    // must not keep the queue row cycling through lease expiry forever.
+    sqlx::query(
+        "UPDATE processing_tasks SET payload=jsonb_set(payload::jsonb,'{llm_task_id}','0')::json WHERE id=$1::bigint",
+    )
+    .bind(delivery)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let dispatched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    worker.handlers = HandlerRegistry::new();
+    worker
+        .handlers
+        .register(DelayedAllocation {
+            cleaned: dispatched.clone(),
+        })
+        .unwrap();
+    let scope = ClaimRuntimeScope::namespaces(
+        RuntimeOwner::Rust,
+        [ResourceKey::new("run_llm_task").unwrap()],
+    )
+    .unwrap();
+    worker.config.claim = ClaimRequest::for_queue("poison-settlement", TaskQueue::Llm, scope);
+    assert!(matches!(
+        worker.run_once().await.unwrap(),
+        WorkerAttempt::Failed(_)
+    ));
+    let state: (String, Option<String>, String) = sqlx::query_as(
+        "SELECT status, lease_token::text, error_message FROM processing_tasks WHERE id=$1::bigint",
+    )
+    .bind(delivery)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(state.0, "failed");
+    assert_eq!(state.1, None);
+    assert!(state.2.starts_with("settlement_failed: "), "{}", state.2);
     assert!(!dispatched.load(std::sync::atomic::Ordering::SeqCst));
 }

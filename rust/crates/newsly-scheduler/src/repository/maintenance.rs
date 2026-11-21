@@ -28,14 +28,33 @@ impl SchedulerRepository {
         transaction.commit().await?;
         newsly_db::sweep_consumed_refresh_tokens(&self.pool, Utc::now()).await?;
         newsly_db::pipeline_monitoring::prune_briefing_composition_history(&self.pool).await?;
+        newsly_db::pipeline_monitoring::prune_watchdog_observations(&self.pool).await?;
+        prune_scheduler_ticks(&self.pool).await?;
         Ok(())
+    }
+
+    /// Diagnostics run after the repair transaction commits, on their own short transaction, so a
+    /// slow or failing analytical query can neither roll back lease repair nor hold its locks.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database error if an observation or signal write fails.
+    pub(super) async fn observe_pipeline_health(
+        &self,
+        alert_threshold: i64,
+    ) -> Result<newsly_db::PipelineHealthCounts, sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let pipeline =
+            newsly_db::pipeline_monitoring::observe_health(&mut transaction, alert_threshold)
+                .await?;
+        transaction.commit().await?;
+        Ok(pipeline)
     }
 
     pub(super) async fn repair_queue(
         &self,
         transaction: &mut Transaction<'static, Postgres>,
         orphan_grace: Duration,
-        alert_threshold: i64,
     ) -> Result<MaintenanceReport, SchedulerRepositoryError> {
         let grace_seconds = i64::try_from(orphan_grace.as_secs())
             .map_err(|_| SchedulerRepositoryError::DurationOutOfRange)?;
@@ -87,10 +106,8 @@ impl SchedulerRepository {
         )
         .fetch_one(&mut **transaction)
         .await?;
-        let pipeline =
-            newsly_db::pipeline_monitoring::observe_health(transaction, alert_threshold).await?;
         Ok(MaintenanceReport {
-            pipeline,
+            pipeline: newsly_db::PipelineHealthCounts::default(),
             orphaned_leases: usize::try_from(orphaned_leases).unwrap_or(usize::MAX),
             expired_reclaimable: usize::try_from(expired_reclaimable).unwrap_or(usize::MAX),
         })
@@ -299,7 +316,7 @@ async fn delete_terminal_batch(
         transaction.rollback().await?;
         return Ok(0);
     }
-    sqlx::query("UPDATE event_logs SET data = $2 WHERE id::bigint = $1 AND status = 'started'")
+    sqlx::query("UPDATE event_logs SET data = $2 WHERE id = $1::bigint AND status = 'started'")
         .bind(event_id)
         .bind(cleanup_event_data(
             scheduled_for,
@@ -351,7 +368,7 @@ async fn finish_cleanup_tick(
         r"
         UPDATE event_logs
         SET status = 'completed', data = $2
-        WHERE id::bigint = $1 AND status = 'started'
+        WHERE id = $1::bigint AND status = 'started'
         ",
     )
     .bind(event_id)
@@ -398,4 +415,63 @@ fn cleanup_event_data(
         "retention_days": config.terminal_retention_days,
         "max_delete": config.terminal_cleanup_max_delete,
     })
+}
+
+/// Tick markers only deduplicate occurrences; 30 days covers the weekly jobs with wide margin.
+const SCHEDULER_TICK_RETENTION_DAYS: i32 = 30;
+const SCHEDULER_TICK_PRUNE_BATCH: i64 = 5_000;
+
+async fn prune_scheduler_ticks(pool: &sqlx::PgPool) -> Result<u64, sqlx::Error> {
+    let deleted = sqlx::query(
+        r"
+        DELETE FROM event_logs
+        WHERE id IN (
+            SELECT id FROM event_logs
+            WHERE event_type = 'scheduler_tick'
+              AND created_at < timezone('UTC', now()) - make_interval(days => $1)
+            ORDER BY id
+            LIMIT $2
+        )
+        ",
+    )
+    .bind(SCHEDULER_TICK_RETENTION_DAYS)
+    .bind(SCHEDULER_TICK_PRUNE_BATCH)
+    .execute(pool)
+    .await?;
+    Ok(deleted.rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::PgPool;
+
+    use super::prune_scheduler_ticks;
+
+    #[sqlx::test(migrations = "../newsly-db/migrations")]
+    async fn scheduler_tick_retention_removes_only_expired_markers(pool: PgPool) {
+        for (name, age_days) in [("old", 31), ("recent", 1)] {
+            sqlx::query(
+                "INSERT INTO event_logs (event_type, event_name, status, data, created_at) VALUES ('scheduler_tick', $1, 'completed', '{}', timezone('UTC', now()) - make_interval(days => $2))",
+            )
+            .bind(name)
+            .bind(age_days)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO event_logs (event_type, event_name, status, data, created_at) VALUES ('other_event', 'keep', 'completed', '{}', timezone('UTC', now()) - interval '90 days')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(prune_scheduler_ticks(&pool).await.unwrap(), 1);
+        let remaining: Vec<String> =
+            sqlx::query_scalar("SELECT event_name FROM event_logs ORDER BY event_name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(remaining, ["keep", "recent"]);
+    }
 }

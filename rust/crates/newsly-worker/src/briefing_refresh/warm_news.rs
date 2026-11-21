@@ -73,7 +73,7 @@ impl TaskFinalizer for InputCheckpoint {
         tx: &'a mut Transaction<'static, Postgres>,
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
-            sqlx::query("UPDATE processing_tasks SET payload=(payload::jsonb || jsonb_build_object('embedding_model',$2::text,'input_hash',$3::text,'encoder_version',$4::integer))::json WHERE id::bigint=$1")
+            sqlx::query("UPDATE processing_tasks SET payload=(payload::jsonb || jsonb_build_object('embedding_model',$2::text,'input_hash',$3::text,'encoder_version',$4::integer))::json WHERE id=$1::bigint")
                 .bind(self.task_id).bind(&self.model).bind(&self.input_hash).bind(news_lens_embeddings::ENCODER_VERSION).execute(&mut **tx).await?;
             Ok(TaskFinalizerResult::Keep)
         })
@@ -201,7 +201,7 @@ impl TaskFinalizer for EmbeddingFinalizer {
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
             // The worker owns the exact queue lease here; lock the source before checking its hash.
-            sqlx::query("SELECT id FROM news_items WHERE id::bigint = $1 FOR UPDATE")
+            sqlx::query("SELECT id FROM news_items WHERE id = $1::bigint FOR UPDATE")
                 .bind(self.embedding.news_item_id)
                 .execute(&mut **tx)
                 .await?;
@@ -234,7 +234,7 @@ async fn expedite_waiting_refreshes(
               AND EXISTS (
                   SELECT 1 FROM briefing_pending_sources AS pending
                   WHERE pending.user_id = task.owner_user_id
-                    AND pending.source_kind = 'news' AND pending.source_id::bigint = $1
+                    AND pending.source_kind = 'news' AND pending.source_id = $1::bigint
               )
             ORDER BY task.id FOR UPDATE OF task
           )
@@ -478,7 +478,7 @@ mod wakeup_tests {
     }
 
     async fn available(pool: &sqlx::PgPool, task: i64) -> chrono::NaiveDateTime {
-        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
             .bind(task)
             .fetch_one(pool)
             .await
@@ -564,7 +564,7 @@ mod wakeup_tests {
         finalizer.apply(&mut tx).await.unwrap();
         tx.rollback().await.unwrap();
         assert_eq!(available(&pool, task).await, before);
-        sqlx::query("UPDATE news_items SET summary_text='Changed summary' WHERE id::bigint=$1")
+        sqlx::query("UPDATE news_items SET summary_text='Changed summary' WHERE id=$1::bigint")
             .bind(finalizer.embedding.news_item_id)
             .execute(&pool)
             .await

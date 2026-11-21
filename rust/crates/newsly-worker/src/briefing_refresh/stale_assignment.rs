@@ -26,7 +26,7 @@ impl TaskFinalizer for ClearStaleAssignment {
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
             // The exact queue lease fences this edit. Preserve mode and every unrelated field.
-            sqlx::query("UPDATE processing_tasks SET payload=(COALESCE(payload,'{}'::json)::jsonb - ARRAY['assignment_stale_since','assignment_stale_attempts','assignment_stale_retry_count'])::json WHERE id::bigint=$1")
+            sqlx::query("UPDATE processing_tasks SET payload=(COALESCE(payload,'{}'::json)::jsonb - ARRAY['assignment_stale_since','assignment_stale_attempts','assignment_stale_retry_count'])::json WHERE id=$1::bigint")
                 .bind(self.task_id).execute(&mut **transaction).await?;
             Ok(TaskFinalizerResult::Keep)
         })
@@ -112,7 +112,7 @@ impl TaskFinalizer for StaleAssignment {
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
             // The worker holds the exact queue lease; retain the original mode and intent.
-            sqlx::query("UPDATE processing_tasks SET payload=(COALESCE(payload,'{}'::json)::jsonb || jsonb_build_object('assignment_stale_since',$2::bigint,'assignment_stale_attempts',$3::bigint,'assignment_stale_retry_count',$4::integer))::json WHERE id::bigint=$1")
+            sqlx::query("UPDATE processing_tasks SET payload=(COALESCE(payload,'{}'::json)::jsonb || jsonb_build_object('assignment_stale_since',$2::bigint,'assignment_stale_attempts',$3::bigint,'assignment_stale_retry_count',$4::integer))::json WHERE id=$1::bigint")
                 .bind(self.task_id).bind(self.since).bind(i64::try_from(self.attempts).unwrap_or(4)).bind(self.retry_count)
                 .execute(&mut **transaction).await?;
             Ok(TaskFinalizerResult::Keep)
@@ -205,7 +205,7 @@ mod tests {
         .unwrap();
         finalization.finish().await.unwrap();
         let (status, retries, payload): (String, i32, Value) = sqlx::query_as(
-            "SELECT status,retry_count,payload FROM processing_tasks WHERE id::bigint=$1",
+            "SELECT status,retry_count,payload FROM processing_tasks WHERE id=$1::bigint",
         )
         .bind(claim.id)
         .fetch_one(&pool)
@@ -226,7 +226,7 @@ mod tests {
         );
         let request =
             ClaimRequest::for_queue("stale-assignment", newsly_queue::TaskQueue::Llm, scope);
-        sqlx::query("UPDATE processing_tasks SET available_at=now() WHERE id::bigint=$1")
+        sqlx::query("UPDATE processing_tasks SET available_at=now() WHERE id=$1::bigint")
             .bind(claim.id)
             .execute(&pool)
             .await
@@ -264,7 +264,7 @@ mod tests {
             .unwrap();
         finalization.finish().await.unwrap();
         let payload: Value =
-            sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id=$1::bigint")
                 .bind(next.id)
                 .fetch_one(&pool)
                 .await
@@ -318,7 +318,7 @@ mod tests {
             assert_eq!(transition.retry_delay_seconds, Some(delay));
             assert!(transition.deferred);
             let payload: Value =
-                sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id::bigint=$1")
+                sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id=$1::bigint")
                     .bind(claim.id)
                     .fetch_one(&pool)
                     .await
@@ -337,7 +337,7 @@ mod tests {
             let fresh = stale_assignment(claim.id, user, 0, payload.as_object().unwrap(), 1400);
             assert_eq!(fresh.task_result.retry_delay_seconds, Some(5));
             assert!(fresh.task_result.deferred);
-            sqlx::query("DELETE FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query("DELETE FROM processing_tasks WHERE id=$1::bigint")
                 .bind(claim.id)
                 .execute(&pool)
                 .await

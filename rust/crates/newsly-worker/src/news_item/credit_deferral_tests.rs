@@ -25,7 +25,7 @@ async fn firecrawl_deferral_keeps_article_pending_until_full_body_arrives(pool: 
     );
     tx.commit().await.unwrap();
     let metadata: Value =
-        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id=$1::bigint")
             .bind(id)
             .fetch_one(&pool)
             .await
@@ -55,7 +55,7 @@ async fn firecrawl_deferral_keeps_article_pending_until_full_body_arrives(pool: 
     apply_enrichment(&mut tx, &queue, &plan).await.unwrap();
     tx.commit().await.unwrap();
     let metadata: Value =
-        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT raw_metadata FROM news_items WHERE id=$1::bigint")
             .bind(id)
             .fetch_one(&pool)
             .await
@@ -118,7 +118,7 @@ async fn firecrawl_deferral_fences_product_state_and_preserves_retry_budget(pool
         .await
         .unwrap();
     assert!(fenced.finish().await.unwrap().is_some());
-    let row:(String,i32,bool)=sqlx::query_as("SELECT status,retry_count,available_at>timezone('UTC',now()) FROM processing_tasks WHERE id::bigint=$1").bind(claim.id).fetch_one(&pool).await.unwrap();
+    let row:(String,i32,bool)=sqlx::query_as("SELECT status,retry_count,available_at>timezone('UTC',now()) FROM processing_tasks WHERE id=$1::bigint").bind(claim.id).fetch_one(&pool).await.unwrap();
     assert_eq!(row, ("pending".to_owned(), 0, true));
     assert!(
         queue

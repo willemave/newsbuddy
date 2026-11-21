@@ -70,8 +70,8 @@ pub async fn load_feed_history(
                          id DESC
                 LIMIT 1
             ) AS task ON true
-            WHERE content.id::bigint = ANY($1)
-              AND EXISTS (SELECT 1 FROM content_status WHERE content_id = content.id AND user_id::bigint = $2)
+            WHERE content.id = ANY($1)
+              AND EXISTS (SELECT 1 FROM content_status WHERE content_id = content.id AND user_id = $2::bigint)
         )
         SELECT id, title, content_type, status, stage, processed_at, publication_at, metadata, source_char_count
         FROM history
@@ -201,7 +201,7 @@ mod tests {
         // A second unrelated task must not double-count an item or become its visible stage.
         sqlx::query("INSERT INTO processing_tasks (content_id, task_type, status, executor_runtime, executor_version, executor_namespace) VALUES ($1, 'dig_deeper', 'pending', 'rust', 1, 'dig_deeper')")
             .bind(ids[3]).execute(&pool).await.unwrap();
-        sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', now()) - interval '1 minute' WHERE content_id::bigint = $1")
+        sqlx::query("UPDATE processing_tasks SET lease_expires_at = timezone('UTC', now()) - interval '1 minute' WHERE content_id = $1::bigint")
             .bind(ids[3]).execute(&pool).await.unwrap();
         let stats = get_scraper_config_stats(&pool, user, &configs, &configs)
             .await

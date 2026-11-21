@@ -52,7 +52,7 @@ impl Harness {
                 .cloned();
         let task_id = queue.enqueue(request).await.unwrap();
         let namespace: String = sqlx::query_scalar(
-            "SELECT executor_namespace FROM processing_tasks WHERE id::bigint = $1",
+            "SELECT executor_namespace FROM processing_tasks WHERE id = $1::bigint",
         )
         .bind(task_id)
         .fetch_one(pool)
@@ -228,7 +228,7 @@ async fn subscription_fallback(pool: &PgPool, existing_subscription: bool) {
     ));
     assert!(fenced.finish().await.unwrap().is_some());
     let (status, error, message_list): (String, Option<String>, String) =
-        sqlx::query_as("SELECT status,error,message_list FROM chat_messages WHERE id::bigint = $1")
+        sqlx::query_as("SELECT status,error,message_list FROM chat_messages WHERE id = $1::bigint")
             .bind(harness.snapshot.message_id)
             .fetch_one(pool)
             .await
@@ -239,14 +239,14 @@ async fn subscription_fallback(pool: &PgPool, existing_subscription: bool) {
     transcript.validate().unwrap();
     assert!(message_list.contains(expected));
     let task_status: String =
-        sqlx::query_scalar("SELECT status FROM processing_tasks WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT status FROM processing_tasks WHERE id = $1::bigint")
             .bind(harness.claim.id)
             .fetch_one(pool)
             .await
             .unwrap();
     assert_eq!(task_status, "completed");
     let configs: Vec<serde_json::Value> =
-        sqlx::query_scalar("SELECT config FROM user_scraper_configs WHERE user_id::bigint = $1")
+        sqlx::query_scalar("SELECT config FROM user_scraper_configs WHERE user_id = $1::bigint")
             .bind(harness.snapshot.user_id)
             .fetch_all(pool)
             .await
@@ -254,7 +254,7 @@ async fn subscription_fallback(pool: &PgPool, existing_subscription: bool) {
     assert_eq!(configs.len(), 1);
     assert_eq!(configs[0]["topics"], json!(["cs.LG"]));
     let usage: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM vendor_usage_records WHERE message_id::bigint = $1",
+        "SELECT count(*) FROM vendor_usage_records WHERE message_id = $1::bigint",
     )
     .bind(harness.snapshot.message_id)
     .fetch_one(pool)
@@ -274,7 +274,7 @@ async fn cancellation_after_committed_action_never_publishes_success(pool: PgPoo
         Err(ChatAgentError::Cancelled)
     ));
     let status: String =
-        sqlx::query_scalar("SELECT status FROM chat_messages WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT status FROM chat_messages WHERE id = $1::bigint")
             .bind(harness.snapshot.message_id)
             .fetch_one(&pool)
             .await
@@ -296,7 +296,7 @@ async fn failed_product_transaction_records_no_action_or_success_fallback(pool: 
         Err(ChatAgentError::Agent(AgentRuntimeError::Provider(_)))
     ));
     let configs: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM user_scraper_configs WHERE user_id::bigint = $1")
+        sqlx::query_scalar("SELECT count(*) FROM user_scraper_configs WHERE user_id = $1::bigint")
             .bind(harness.snapshot.user_id)
             .fetch_one(&pool)
             .await

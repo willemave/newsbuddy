@@ -130,8 +130,8 @@ pub async fn search_accessible_content(
             SELECT COALESCE(NULLIF(BTRIM(display_name), ''), NULLIF(BTRIM(config->>'name'), ''), feed_url, 'Unnamed source') AS name,
                    NULLIF(BTRIM(config->>'name'), '') AS configured_name, feed_url, config
             FROM user_scraper_configs
-            WHERE user_id::bigint = $1 AND is_active = TRUE
-              AND EXISTS (SELECT 1 FROM users WHERE id::bigint = $1 AND is_active = TRUE)
+            WHERE user_id = $1::bigint AND is_active = TRUE
+              AND EXISTS (SELECT 1 FROM users WHERE id = $1::bigint AND is_active = TRUE)
             ORDER BY id
         "#).bind(user_id).fetch_all(pool).await?;
         if let Some(url) = &filters.source_url {
@@ -210,7 +210,7 @@ pub async fn search_accessible_content(
             {select}
             WHERE (saved.id IS NOT NULL OR EXISTS (
                 SELECT 1 FROM content_status inbox
-                WHERE inbox.content_id = content.id AND inbox.user_id::bigint = $1 AND inbox.status = 'inbox'
+                WHERE inbox.content_id = content.id AND inbox.user_id = $1::bigint AND inbox.status = 'inbox'
             ))
             AND content.status = 'completed'
             AND (NOT $5 OR read.id IS NULL)
@@ -220,7 +220,7 @@ pub async fn search_accessible_content(
                 OR EXISTS (SELECT 1 FROM unnest($8::text[]) AS feed(url) WHERE RTRIM(BTRIM(content.content_metadata->>'feed_url'), '/') = RTRIM(BTRIM(feed.url), '/'))
             ))
         ), matches AS (
-            SELECT scoped.* FROM scoped JOIN contents content ON content.id::bigint = scoped.content_id
+            SELECT scoped.* FROM scoped JOIN contents content ON content.id = scoped.content_id
             WHERE (BTRIM($2) = '' OR (
                 to_tsvector('english', COALESCE(content.content_metadata->'summary'->>'title', '') || ' ' || COALESCE(content.title, '') || ' ' || COALESCE(content.source, '') || ' ' || COALESCE(content.search_text, '')) @@ websearch_to_tsquery('english', $2)
                 OR COALESCE(content.title, '') OPERATOR(public.%>>) $2

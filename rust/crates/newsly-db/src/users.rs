@@ -151,7 +151,7 @@ pub async fn create_or_update_debug_user(
 ) -> Result<AppleUserUpsert, UserProfileRepositoryError> {
     let (user_id, is_new_user) = if let Some(user_id) = user_id {
         let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1 FOR UPDATE)",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint FOR UPDATE)",
         )
         .bind(user_id)
         .fetch_one(&mut **transaction)
@@ -197,7 +197,7 @@ pub async fn create_or_update_debug_user(
                 THEN NOW()
                 ELSE updated_at
             END
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(user_id)
@@ -229,7 +229,7 @@ pub async fn deactivate_active_user(
         r"
         UPDATE users
         SET is_active = FALSE, updated_at = NOW()
-        WHERE id::bigint = $1 AND is_active = TRUE
+        WHERE id = $1::bigint AND is_active = TRUE
         RETURNING id::bigint
         ",
     )

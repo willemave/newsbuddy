@@ -68,7 +68,7 @@ async fn index_race(pool: PgPool, commit: bool) {
         .fetch_one(&mut *writer)
         .await
         .unwrap();
-    sqlx::query("UPDATE processing_tasks SET status='processing',locked_by='uncommitted-writer',lease_token=$2,locked_at=now(),lease_expires_at=now()+interval '5 minutes' WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET status='processing',locked_by='uncommitted-writer',lease_token=$2,locked_at=now(),lease_expires_at=now()+interval '5 minutes' WHERE id=$1::bigint")
         .bind(first).bind(Uuid::new_v4()).execute(&mut *writer).await.unwrap();
     let worker = tokio::spawn(async move { queue.claim(&request("index-racer")).await });
     // Prove the claimer reached the uncommitted index entry before allowing the writer to
@@ -119,7 +119,7 @@ async fn expired_owner_reclaims_itself_and_fences_old_worker(pool: PgPool) {
     let original = queue.claim(&request("original")).await.unwrap().unwrap();
     let next_delivery = enqueue(&queue, user, 3).await;
     assert!(queue.claim(&request("blocked")).await.unwrap().is_none());
-    sqlx::query("UPDATE processing_tasks SET lease_expires_at=now()-interval '1 second' WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET lease_expires_at=now()-interval '1 second' WHERE id=$1::bigint")
         .bind(first_delivery).execute(&pool).await.unwrap();
     let replacement = queue.claim(&request("replacement")).await.unwrap().unwrap();
     assert_eq!(replacement.id, first_delivery);
@@ -193,7 +193,7 @@ async fn retry_and_source_wait_allow_independent_deck_then_reclaim_safely(pool: 
         let next_claim = queue.claim(&request("independent")).await.unwrap().unwrap();
         assert_eq!(next_claim.id, next);
         // Even once the first delivery is ready again, the independent deck owns the slot.
-        sqlx::query("UPDATE processing_tasks SET available_at=now()-interval '1 second' WHERE id::bigint=$1")
+        sqlx::query("UPDATE processing_tasks SET available_at=now()-interval '1 second' WHERE id=$1::bigint")
             .bind(first).execute(&pool).await.unwrap();
         assert!(queue.claim(&request("blocked")).await.unwrap().is_none());
         queue
@@ -278,7 +278,7 @@ async fn started_retry_reserves_owner_slot_without_consuming_budget_on_a_later_d
         .unwrap()
         .unwrap();
     sqlx::query(
-        "UPDATE processing_tasks SET available_at=now()-interval '1 second' WHERE id::bigint=$1",
+        "UPDATE processing_tasks SET available_at=now()-interval '1 second' WHERE id=$1::bigint",
     )
     .bind(first)
     .execute(&pool)

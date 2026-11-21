@@ -123,33 +123,33 @@ mod tests {
         sqlx::query("INSERT INTO briefing_pending_sources (user_id, source_kind, source_id) VALUES ($1, 'news', $2)")
             .bind(user_id).bind(item_id).execute(&pool).await.unwrap();
         assert!(!demanded(&pool, item_id, false).await);
-        sqlx::query("DELETE FROM news_item_read_status WHERE news_item_id::bigint = $1")
+        sqlx::query("DELETE FROM news_item_read_status WHERE news_item_id = $1::bigint")
             .bind(item_id)
             .execute(&pool)
             .await
             .unwrap();
         assert!(demanded(&pool, item_id, false).await);
-        sqlx::query("UPDATE news_items SET published_at = timezone('UTC', now()) - interval '24 hours' WHERE id::bigint = $1")
+        sqlx::query("UPDATE news_items SET published_at = timezone('UTC', now()) - interval '24 hours' WHERE id = $1::bigint")
             .bind(item_id).execute(&pool).await.unwrap();
         assert!(!demanded(&pool, item_id, false).await);
         assert!(demanded(&pool, item_id, true).await);
-        sqlx::query("UPDATE users SET is_active = false WHERE id::bigint = $1")
+        sqlx::query("UPDATE users SET is_active = false WHERE id = $1::bigint")
             .bind(user_id)
             .execute(&pool)
             .await
             .unwrap();
         assert!(!demanded(&pool, item_id, true).await);
-        sqlx::query("UPDATE users SET is_active = true WHERE id::bigint = $1")
+        sqlx::query("UPDATE users SET is_active = true WHERE id = $1::bigint")
             .bind(user_id)
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE news_items SET visibility_scope = 'global', owner_user_id = NULL, platform = 'brutalist', raw_metadata = $2, published_at = timezone('UTC', now()) WHERE id::bigint = $1")
+        sqlx::query("UPDATE news_items SET visibility_scope = 'global', owner_user_id = NULL, platform = 'brutalist', raw_metadata = $2, published_at = timezone('UTC', now()) WHERE id = $1::bigint")
             .bind(item_id).bind(json!({"aggregator":{"topic":"science"}})).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO user_scraper_configs (user_id, scraper_type, is_active, config) VALUES ($1, 'aggregator', true, $2)")
             .bind(user_id).bind(json!({"key":"brutalist","topics":["politics"]})).execute(&pool).await.unwrap();
         assert!(!demanded(&pool, item_id, true).await);
-        sqlx::query("UPDATE user_scraper_configs SET config = $2 WHERE user_id::bigint = $1")
+        sqlx::query("UPDATE user_scraper_configs SET config = $2 WHERE user_id = $1::bigint")
             .bind(user_id)
             .bind(json!({"key":"brutalist","topics":["science"]}))
             .execute(&pool)
@@ -161,21 +161,21 @@ mod tests {
         ).bind(user_id).fetch_one(&pool).await.unwrap();
         sqlx::query("INSERT INTO briefing_segments (user_id, lens_id, blocks, markdown_raw, narration_text, source_keys, status, model, prompt_version, warnings) VALUES ($1, $2, '[]', '', '', $3, 'active', 'test', 'v1', '[]')")
             .bind(user_id).bind(lens_id).bind(json!([format!("news:{item_id}")])).execute(&pool).await.unwrap();
-        sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint = $1")
+        sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id = $1::bigint")
             .bind(user_id)
             .execute(&pool)
             .await
             .unwrap();
         assert!(demanded(&pool, item_id, false).await);
         sqlx::query(
-            "UPDATE briefing_segments SET status = 'superseded' WHERE user_id::bigint = $1",
+            "UPDATE briefing_segments SET status = 'superseded' WHERE user_id = $1::bigint",
         )
         .bind(user_id)
         .execute(&pool)
         .await
         .unwrap();
         assert!(!demanded(&pool, item_id, false).await);
-        sqlx::query("UPDATE briefing_segments SET status = 'degraded' WHERE user_id::bigint = $1")
+        sqlx::query("UPDATE briefing_segments SET status = 'degraded' WHERE user_id = $1::bigint")
             .bind(user_id)
             .execute(&pool)
             .await

@@ -51,7 +51,7 @@ async fn x_connection_update_persists_json_scopes_and_preserves_them_when_empty(
 
     let (access_token, refresh_token, stored_scopes): (String, Option<String>, Value) =
         sqlx::query_as(
-            "SELECT access_token_encrypted, refresh_token_encrypted, scopes::jsonb FROM user_integration_connections WHERE id::bigint = $1",
+            "SELECT access_token_encrypted, refresh_token_encrypted, scopes::jsonb FROM user_integration_connections WHERE id = $1::bigint",
         )
         .bind(connection_id)
         .fetch_one(&pool)
@@ -79,7 +79,7 @@ async fn x_connection_update_persists_json_scopes_and_preserves_them_when_empty(
     transaction.commit().await.unwrap();
 
     let stored_scopes: Value = sqlx::query_scalar(
-        "SELECT scopes::jsonb FROM user_integration_connections WHERE id::bigint = $1",
+        "SELECT scopes::jsonb FROM user_integration_connections WHERE id = $1::bigint",
     )
     .bind(connection_id)
     .fetch_one(&pool)
@@ -95,14 +95,14 @@ async fn canonical_x_snapshot_merge_locks_and_preserves_concurrent_content_field
         .fetch_one(&pool).await.unwrap();
     let mut content_tx = pool.begin().await.unwrap();
     let stored: Value =
-        sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id::bigint=$1 FOR UPDATE")
+        sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id=$1::bigint FOR UPDATE")
             .bind(id)
             .fetch_one(&mut *content_tx)
             .await
             .unwrap();
     let mut metadata = stored.as_object().unwrap().clone();
     crate::content_metadata::set_field(&mut metadata, "summary", json!({"title":"concurrent"}));
-    sqlx::query("UPDATE contents SET content_metadata=$2 WHERE id::bigint=$1")
+    sqlx::query("UPDATE contents SET content_metadata=$2 WHERE id=$1::bigint")
         .bind(id)
         .bind(Value::Object(metadata))
         .execute(&mut *content_tx)
@@ -123,7 +123,7 @@ async fn canonical_x_snapshot_merge_locks_and_preserves_concurrent_content_field
     }
     x_tx.commit().await.unwrap();
     let stored: Value =
-        sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id=$1::bigint")
             .bind(id)
             .fetch_one(&pool)
             .await

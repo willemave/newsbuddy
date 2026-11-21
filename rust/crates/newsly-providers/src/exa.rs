@@ -5,6 +5,27 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
+
+/// Exa search endpoint from `EXA_API_BASE_URL`: a base that already ends in `/search` is used
+/// as-is; any other base gets `search` appended (never `/search/search`).
+pub(crate) fn exa_search_url_from_env() -> Result<Url, String> {
+    let raw = crate::provider_env::clean_env("EXA_API_BASE_URL")
+        .unwrap_or_else(|| DEFAULT_EXA_API_BASE.to_owned());
+    exa_search_url(&raw).map_err(|error| error.to_string())
+}
+
+fn exa_search_url(raw: &str) -> Result<Url, impl std::error::Error> {
+    let mut base = Url::parse(raw)?;
+    if base.path().trim_end_matches('/').ends_with("/search") {
+        return Ok(base);
+    }
+    if !base.path().ends_with('/') {
+        base.set_path(&format!("{}/", base.path().trim_end_matches('/')));
+    }
+    base.join("search")
+}
+
 pub(crate) const EXCLUDED_DOMAINS: [&str; 8] = [
     "facebook.com",
     "linkedin.com",
@@ -265,5 +286,29 @@ mod tests {
         assert_eq!(usage.estimated_cost_usd, None);
         assert!((usage.known_estimated_cost_usd - 0.01).abs() < f64::EPSILON);
         assert_eq!(usage.missing_cost_estimate_count, 1);
+    }
+}
+
+#[cfg(test)]
+mod search_url_tests {
+    use super::exa_search_url;
+
+    #[test]
+    fn search_endpoint_is_appended_exactly_once() {
+        for (base, expected) in [
+            ("https://api.exa.ai", "https://api.exa.ai/search"),
+            ("https://api.exa.ai/", "https://api.exa.ai/search"),
+            ("https://proxy.test/exa", "https://proxy.test/exa/search"),
+            (
+                "https://proxy.test/exa/search",
+                "https://proxy.test/exa/search",
+            ),
+            (
+                "https://proxy.test/exa/search/",
+                "https://proxy.test/exa/search/",
+            ),
+        ] {
+            assert_eq!(exa_search_url(base).unwrap().as_str(), expected, "{base}");
+        }
     }
 }

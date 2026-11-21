@@ -58,7 +58,7 @@ async fn url_subscription_reuses_legacy_type_and_prefers_an_active_match(pool: P
     );
     tx.commit().await.unwrap();
     let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM user_scraper_configs WHERE user_id::bigint=$1 AND is_active",
+        "SELECT count(*) FROM user_scraper_configs WHERE user_id=$1::bigint AND is_active",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -164,7 +164,7 @@ async fn concurrent_different_types_create_one_subscription_and_one_backfill_own
         1
     );
     let count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM user_scraper_configs WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT count(*) FROM user_scraper_configs WHERE user_id=$1::bigint")
             .bind(user_id)
             .fetch_one(&pool)
             .await
@@ -201,7 +201,7 @@ async fn referenced_redirect_reuses_an_existing_target_of_either_direct_type(poo
         assert_eq!(result.mutation, FeedSubscriptionMutation::AlreadySubscribed);
         tx.commit().await.unwrap();
         let source_url: Option<String> =
-            sqlx::query_scalar("SELECT feed_url FROM user_scraper_configs WHERE id::bigint=$1")
+            sqlx::query_scalar("SELECT feed_url FROM user_scraper_configs WHERE id=$1::bigint")
                 .bind(id)
                 .fetch_one(&pool)
                 .await
@@ -216,7 +216,7 @@ async fn redirects_preserve_search_history_and_put_carries_only_server_aliases(p
     let user_id = user(&pool).await;
     let id = legacy_config(&pool, user_id, false).await;
     sqlx::query(
-        "UPDATE user_scraper_configs SET display_name='Historical Feed' WHERE id::bigint=$1",
+        "UPDATE user_scraper_configs SET display_name='Historical Feed' WHERE id=$1::bigint",
     )
     .bind(id)
     .execute(&pool)
@@ -377,7 +377,7 @@ async fn generic_create_and_chat_subscribe_serialize_one_direct_feed_identity(po
     };
     tokio::join!(create, chat);
     let count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM user_scraper_configs WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT count(*) FROM user_scraper_configs WHERE user_id=$1::bigint")
             .bind(user_id)
             .fetch_one(&pool)
             .await

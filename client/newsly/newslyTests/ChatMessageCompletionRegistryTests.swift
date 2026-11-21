@@ -140,6 +140,68 @@ final class ChatMessageCompletionRegistryTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1)
     }
 
+    func testTransientStatusFailureKeepsPollingUntilCompletion() async throws {
+        let source = ScriptedMessageStatusSource(
+            responses: [
+                .thrown(.http(statusCode: 503, detail: nil)),
+                .thrown(.connectivity(.networkConnectionLost)),
+                .completed(Self.assistantMessage()),
+            ]
+        )
+        let delays = CompletionDelayRecorder()
+        let registry = ChatMessageCompletionRegistry(
+            fetchStatus: { try await source.fetch(messageId: $0) },
+            policy: ChatMessageCompletionPollingPolicy(delaysNanoseconds: [1, 2, 3]),
+            sleep: { await delays.record($0) }
+        )
+
+        let message = try await registry.waitForCompletion(messageId: 501)
+
+        XCTAssertEqual(message.id, 901)
+        let fetchCount = await source.callCount
+        XCTAssertEqual(fetchCount, 3)
+    }
+
+    func testConsecutiveTransientFailuresEndPollingEarly() async {
+        let source = ScriptedMessageStatusSource(
+            responses: [.thrown(.http(statusCode: 503, detail: nil))]
+        )
+        let registry = ChatMessageCompletionRegistry(
+            fetchStatus: { try await source.fetch(messageId: $0) },
+            policy: ChatMessageCompletionPollingPolicy(delaysNanoseconds: Array(repeating: 1, count: 30)),
+            sleep: { _ in }
+        )
+
+        do {
+            _ = try await registry.waitForCompletion(messageId: 501)
+            XCTFail("Expected the transient failure to surface")
+        } catch {
+            XCTAssertEqual(ClientFailure.classify(error), .http(statusCode: 503, detail: nil))
+        }
+        let fetchCount = await source.callCount
+        XCTAssertEqual(fetchCount, ChatMessageCompletionRegistry.maximumConsecutivePollFailures)
+    }
+
+    func testNonRetryableStatusFailureEndsPolling() async {
+        let source = ScriptedMessageStatusSource(
+            responses: [.thrown(.decoding(endpoint: "status"))]
+        )
+        let registry = ChatMessageCompletionRegistry(
+            fetchStatus: { try await source.fetch(messageId: $0) },
+            policy: ChatMessageCompletionPollingPolicy(delaysNanoseconds: [1, 2, 3]),
+            sleep: { _ in }
+        )
+
+        do {
+            _ = try await registry.waitForCompletion(messageId: 501)
+            XCTFail("Expected decoding failure")
+        } catch {
+            XCTAssertEqual(ClientFailure.classify(error), .decoding(endpoint: "status"))
+        }
+        let fetchCount = await source.callCount
+        XCTAssertEqual(fetchCount, 1)
+    }
+
     func testAdaptivePolicyTimesOutWithFewerSteadyStateRequests() async {
         let source = AlwaysProcessingMessageStatusSource()
         let delays = CompletionDelayRecorder()
@@ -272,6 +334,7 @@ private enum ScriptedMessageStatus {
     case partial(ChatMessage?, generation: Int, revision: Int)
     case completed(ChatMessage)
     case failed(String)
+    case thrown(ClientFailure)
 }
 
 private actor ScriptedMessageStatusSource {
@@ -317,6 +380,8 @@ private actor ScriptedMessageStatusSource {
                 status: .failed,
                 error: error
             )
+        case .thrown(let failure):
+            throw failure
         }
     }
 }

@@ -53,7 +53,7 @@ pub async fn find_visible_content_discussion(
         SELECT to_jsonb(discussion) AS stored_discussion
         FROM (SELECT $1::bigint AS requested_content_id) AS requested
         LEFT JOIN content_discussions AS discussion
-          ON discussion.content_id::bigint = requested.requested_content_id
+          ON discussion.content_id = requested.requested_content_id
         "#,
     )
     .bind(content_id)
@@ -98,7 +98,7 @@ pub async fn find_visible_news_discussion(
           ON news_discussion.news_item_id = news.id
         LEFT JOIN content_discussions AS legacy_discussion
           ON legacy_discussion.content_id = news.legacy_content_id
-        WHERE news.id::bigint = $1::bigint
+        WHERE news.id = $1::bigint
         "#,
     )
     .bind(news_item_id)

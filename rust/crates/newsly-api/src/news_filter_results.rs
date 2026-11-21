@@ -417,7 +417,7 @@ mod tests {
             .unwrap();
         assert_eq!(unchanged[0].filter_status, "filtered_out");
         assert_eq!(unchanged[0].news.title, "Original title");
-        sqlx::query(r#"UPDATE news_items SET summary_text='Rewritten summary',summary_key_points='["Rewritten point"]',raw_metadata='{"summary":{"title":"Rewritten title"}}' WHERE id::bigint=$1"#).bind(id).execute(&pool).await.unwrap();
+        sqlx::query(r#"UPDATE news_items SET summary_text='Rewritten summary',summary_key_points='["Rewritten point"]',raw_metadata='{"summary":{"title":"Rewritten title"}}' WHERE id=$1::bigint"#).bind(id).execute(&pool).await.unwrap();
         let items = load_preview_items(&pool, user_id, statuses.clone(), &evidence)
             .await
             .unwrap();
@@ -435,7 +435,7 @@ mod tests {
             &["Rewritten point"]
         );
 
-        sqlx::query("UPDATE news_items SET status='new' WHERE id::bigint=$1")
+        sqlx::query("UPDATE news_items SET status='new' WHERE id=$1::bigint")
             .bind(id)
             .execute(&pool)
             .await

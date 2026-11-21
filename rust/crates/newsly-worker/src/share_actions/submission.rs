@@ -346,7 +346,7 @@ mod tests {
                 r"
             SELECT id::bigint, scraper_type, feed_url, config, is_active
             FROM user_scraper_configs
-            WHERE user_id::bigint = $1
+            WHERE user_id = $1::bigint
             ",
             )
             .bind(user_id)
@@ -366,7 +366,7 @@ mod tests {
                 r"
                 SELECT task_type, owner_user_id::bigint, payload
                 FROM processing_tasks
-                WHERE id::bigint = $1
+                WHERE id = $1::bigint
                 ",
             )
             .bind(backfill_task_id)
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(repeated["subscription_outcome"], "already_exists");
         assert_eq!(repeated["backfill_task_id"], Value::Null);
 
-        sqlx::query("UPDATE user_scraper_configs SET is_active = FALSE WHERE id::bigint = $1")
+        sqlx::query("UPDATE user_scraper_configs SET is_active = FALSE WHERE id = $1::bigint")
             .bind(config_id)
             .execute(&pool)
             .await

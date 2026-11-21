@@ -77,7 +77,7 @@ pub async fn fail_unsupported_llm_task(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($3::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
           AND status <> ALL($4)
         "#,
     )
@@ -98,7 +98,7 @@ async fn load_for_update(
         r#"
         SELECT user_id::bigint AS user_id, task_kind, status
         FROM llm_tasks
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )

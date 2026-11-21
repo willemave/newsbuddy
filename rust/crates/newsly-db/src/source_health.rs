@@ -78,7 +78,7 @@ pub async fn pipeline_health_counts(
     sqlx::query_as(r#"
         SELECT
           (SELECT count(*) FROM pipeline_alerts WHERE active AND alert_key IN ('historical_intake','repeated_output_rejection','queue_no_progress','alert_destination_missing')) AS other_active_alerts,
-          (SELECT count(*) FROM processing_tasks WHERE status = 'failed' AND (error_message LIKE 'incident_cancelled:%' OR error_message = 'incident_2026_09_05_archival_feed_import_cancelled')) AS intentional_cancellations,
+          (SELECT count(*) FROM processing_tasks WHERE status = 'failed' AND error_message LIKE 'incident_cancelled:%') AS intentional_cancellations,
           (SELECT count(*) FROM user_scraper_configs c JOIN users u ON u.id = c.user_id
            WHERE c.is_active AND u.is_active AND c.scraper_type IN ('atom', 'rss', 'podcast_rss', 'substack', 'reddit', 'aggregator')
              AND COALESCE(c.updated_at,c.created_at) < timezone('UTC', now()) - interval '45 minutes'
@@ -101,7 +101,9 @@ pub async fn pipeline_health_counts(
             AND NOT EXISTS (SELECT 1 FROM processing_tasks AS task WHERE task.task_type = 'run_llm_task' AND task.payload ->> 'llm_task_id' = product.id::text AND task.owner_user_id = product.user_id AND task.status IN ('pending', 'processing')))
           + (SELECT count(*) FROM contents AS product WHERE product.status IN ('new', 'pending', 'processing', 'awaiting_image')
             AND (SELECT task.status FROM processing_tasks AS task WHERE task.content_id = product.id AND task.task_type IN ('analyze_url','process_content','summarize','process_podcast_media','download_tweet_video_audio','transcribe_tweet_video') ORDER BY task.id DESC LIMIT 1) = 'failed'
-            AND NOT EXISTS (SELECT 1 FROM processing_tasks AS task WHERE task.content_id = product.id AND task.status IN ('pending', 'processing'))) AS terminal_product_mismatches
+            AND NOT EXISTS (SELECT 1 FROM processing_tasks AS task WHERE task.content_id = product.id AND task.status IN ('pending', 'processing')))
+          + (SELECT count(*) FROM processing_tasks AS task WHERE task.status = 'failed' AND task.error_message LIKE 'settlement_failed:%'
+            AND task.task_type NOT IN ('run_llm_task','analyze_url','process_content','summarize','process_podcast_media','download_tweet_video_audio','transcribe_tweet_video')) AS terminal_product_mismatches
     "#).fetch_one(connection).await
 }
 
@@ -115,7 +117,7 @@ mod tests {
         crate::run_migrations(&pool).await.unwrap();
         let user_id:i64=sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('source-health','source-health@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
         for (key, threshold) in [("hackernews", 45_i32), ("arxiv", 180)] {
-            sqlx::query("DELETE FROM user_scraper_configs WHERE user_id::bigint=$1")
+            sqlx::query("DELETE FROM user_scraper_configs WHERE user_id=$1::bigint")
                 .bind(user_id)
                 .execute(&pool)
                 .await

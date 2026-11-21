@@ -5,12 +5,14 @@ pub async fn content_exists(
     transaction: &mut Transaction<'_, Postgres>,
     content_id: i64,
 ) -> Result<bool, ContentActionRepositoryError> {
-    Ok(sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM contents WHERE id::bigint = $1::bigint)",
+    Ok(
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM contents WHERE id = $1::bigint)",
+        )
+        .bind(content_id)
+        .fetch_one(&mut **transaction)
+        .await?,
     )
-    .bind(content_id)
-    .fetch_one(&mut **transaction)
-    .await?)
 }
 
 pub async fn mark_content_read(
@@ -39,7 +41,7 @@ pub async fn mark_content_unread(
     content_id: i64,
 ) -> Result<u64, ContentActionRepositoryError> {
     Ok(sqlx::query(
-        "DELETE FROM content_read_status WHERE user_id::bigint = $1::bigint AND content_id::bigint = $2::bigint",
+        "DELETE FROM content_read_status WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(content_id)
@@ -58,7 +60,7 @@ pub async fn mark_contents_read(
     unique_ids.dedup();
 
     let mut existing_ids = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM contents WHERE id::bigint = ANY($1::bigint[]) ORDER BY id",
+        "SELECT id::bigint FROM contents WHERE id = ANY($1::bigint[]) ORDER BY id",
     )
     .bind(&unique_ids)
     .fetch_all(&mut **transaction)
@@ -123,7 +125,7 @@ pub async fn remove_content_from_knowledge(
     content_id: i64,
 ) -> Result<bool, ContentActionRepositoryError> {
     Ok(sqlx::query(
-        "DELETE FROM content_knowledge_saves WHERE user_id::bigint = $1::bigint AND content_id::bigint = $2::bigint",
+        "DELETE FROM content_knowledge_saves WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(content_id)
@@ -175,8 +177,8 @@ pub async fn reset_saved_content_for_reprocessing(
         SELECT content.status
         FROM contents AS content
         JOIN content_knowledge_saves AS save
-            ON save.content_id = content.id AND save.user_id::bigint = $1::bigint
-        WHERE content.id::bigint = $2::bigint
+            ON save.content_id = content.id AND save.user_id = $1::bigint
+        WHERE content.id = $2::bigint
         FOR UPDATE OF content
         ",
     )
@@ -197,7 +199,7 @@ pub async fn reset_saved_content_for_reprocessing(
             SELECT 1
             FROM processing_tasks
             WHERE
-                content_id::bigint = $1::bigint
+                content_id = $1::bigint
                 AND task_type = ANY($2::text[])
                 AND status IN ('pending', 'processing')
         )
@@ -220,7 +222,7 @@ pub async fn reset_saved_content_for_reprocessing(
             retry_count = 0,
             processed_at = NULL,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
         ",
     )
     .bind(content_id)
@@ -306,7 +308,7 @@ mod tests {
         );
         let (status, retry_count, error_message, processed_at) =
             sqlx::query_as::<_, (String, i32, Option<String>, Option<chrono::NaiveDateTime>)>(
-                "SELECT status, retry_count, error_message, processed_at FROM contents WHERE id::bigint = $1",
+                "SELECT status, retry_count, error_message, processed_at FROM contents WHERE id = $1::bigint",
             )
             .bind(content_id)
             .fetch_one(&pool)
@@ -327,7 +329,7 @@ mod tests {
             KnowledgeReprocessOutcome::NotSaved
         );
         let status =
-            sqlx::query_scalar::<_, String>("SELECT status FROM contents WHERE id::bigint = $1")
+            sqlx::query_scalar::<_, String>("SELECT status FROM contents WHERE id = $1::bigint")
                 .bind(content_id)
                 .fetch_one(&pool)
                 .await

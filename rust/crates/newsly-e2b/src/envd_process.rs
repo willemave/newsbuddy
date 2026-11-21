@@ -11,7 +11,7 @@ use buffa::{EnumValue, MessageField};
 use bytes::Bytes;
 use connectrpc::ErrorCode;
 use connectrpc::client::{CallOptions, ClientConfig, HttpClient};
-use futures_core::Stream;
+use futures_util::Stream;
 use futures_util::StreamExt;
 use secrecy::ExposeSecret;
 use semver::Version;

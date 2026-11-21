@@ -26,10 +26,10 @@ pub(super) async fn load_sources(
                        AS source_char_count,
                    content.created_at, content.publication_date
             FROM contents AS content
-            WHERE content.id::bigint = ANY($2::bigint[])
+            WHERE content.id = ANY($2::bigint[])
               AND EXISTS (
                   SELECT 1 FROM content_status AS user_status
-                  WHERE user_status.user_id::bigint = $1
+                  WHERE user_status.user_id = $1::bigint
                     AND user_status.content_id = content.id
               )
             "#,
@@ -78,7 +78,7 @@ pub(super) async fn load_sources(
             FROM news_items AS news
             LEFT JOIN news_item_discussions AS discussion
               ON discussion.news_item_id = news.id
-            WHERE news.id::bigint = ANY($2::bigint[])
+            WHERE news.id = ANY($2::bigint[])
               AND {visibility}
             "#,
             visibility = visible_news_predicate("news")

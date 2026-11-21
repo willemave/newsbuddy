@@ -138,7 +138,7 @@ pub async fn get_scraper_config_stats(
         .iter()
         .filter_map(|(id, running)| running.then_some(*id))
         .collect::<HashSet<_>>();
-    let observations = sqlx::query_as::<_, (i64, Option<DateTime<Utc>>, Option<String>)>("SELECT config.id::bigint, health.last_success_at, health.error_code FROM user_scraper_configs AS config LEFT JOIN source_ingestion_health AS health ON health.source_key = CASE WHEN config.scraper_type = 'aggregator' THEN 'aggregator:' || (config.config::jsonb ->> 'key') ELSE 'config:' || config.id::text END WHERE config.user_id::bigint = $1")
+    let observations = sqlx::query_as::<_, (i64, Option<DateTime<Utc>>, Option<String>)>("SELECT config.id::bigint, health.last_success_at, health.error_code FROM user_scraper_configs AS config LEFT JOIN source_ingestion_health AS health ON health.source_key = CASE WHEN config.scraper_type = 'aggregator' THEN 'aggregator:' || (config.config::jsonb ->> 'key') ELSE 'config:' || config.id::text END WHERE config.user_id = $1::bigint")
         .bind(user_id).fetch_all(pool).await?;
     for (id, success, error) in observations {
         if let Some(stats) = working.get_mut(&id) {
@@ -238,7 +238,7 @@ pub(super) async fn load_content_rows(
             membership.status = 'inbox' AS in_inbox
         FROM contents AS content
         JOIN content_status AS membership ON membership.content_id = content.id
-        WHERE membership.user_id::bigint = $1
+        WHERE membership.user_id = $1::bigint
           AND (
               content.content_type IN ('article', 'podcast')
               OR (content.platform = 'youtube' AND content.content_type <> 'news')
@@ -262,7 +262,7 @@ async fn load_read_content_ids(
         r"
         SELECT content_id::bigint
         FROM content_read_status
-        WHERE user_id::bigint = $1 AND content_id::bigint = ANY($2::bigint[])
+        WHERE user_id = $1::bigint AND content_id = ANY($2::bigint[])
         ",
     )
     .bind(user_id)
@@ -284,7 +284,7 @@ async fn load_active_task_content_ids(
         SELECT content_id::bigint,
                bool_or(status = 'processing' AND COALESCE(lease_expires_at > timezone('UTC', now()), false))
         FROM processing_tasks
-        WHERE content_id::bigint = ANY($1::bigint[])
+        WHERE content_id = ANY($1::bigint[])
           AND status IN ('pending', 'processing')
           AND task_type IN ('process_content', 'process_podcast_media', 'summarize', 'generate_image')
         GROUP BY content_id

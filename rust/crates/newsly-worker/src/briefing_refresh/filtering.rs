@@ -170,14 +170,30 @@ async fn execute_candidates(
         more_work: preparation.more_work,
         ..FilterOutcomes::default()
     };
+    // After the phase deadline no new call starts, but calls already sent are drained (each is
+    // bounded by the gateway's own deadline) so their metered usage is recorded, not lost.
+    let mut dispatch_open = true;
     loop {
-        let completed = tokio::select! {
-            completed = tokio::time::timeout_at(deadline, calls.next()) => completed,
-            () = lease.wait_for_ownership_loss() => { outcome.lease_lost = true; break; },
+        let completed = if dispatch_open {
+            tokio::select! {
+                completed = tokio::time::timeout_at(deadline, calls.next()) => completed,
+                () = lease.wait_for_ownership_loss() => { outcome.lease_lost = true; break; },
+            }
+        } else {
+            tokio::select! {
+                completed = calls.next() => Ok(completed),
+                () = lease.wait_for_ownership_loss() => { outcome.lease_lost = true; break; },
+            }
         };
-        let Ok(Some((id, input_hash, result))) = completed else {
-            break;
+        let completed = match completed {
+            Ok(Some(completed)) => completed,
+            Ok(None) => break,
+            Err(_) => {
+                dispatch_open = false;
+                continue;
+            }
         };
+        let (id, input_hash, result) = completed;
         let (_, attempt) = started.remove(&id).expect("queued attempt identity");
         match result {
             Ok(decision) => {
@@ -226,6 +242,10 @@ async fn execute_candidates(
         if lease.ownership_lost() {
             outcome.lease_lost = true;
             break;
+        }
+        if !dispatch_open || tokio::time::Instant::now() >= deadline {
+            dispatch_open = false;
+            continue;
         }
         if let Some(candidate) = candidates.next() {
             let attempt = Arc::new(NewsFilterAttempt::default());

@@ -55,7 +55,7 @@ pub(super) fn database_error_message(error: &sqlx::Error) -> String {
 }
 
 pub(super) async fn message_session(pool: &PgPool, message_id: i64) -> i64 {
-    sqlx::query_scalar("SELECT session_id::bigint FROM chat_messages WHERE id::bigint = $1")
+    sqlx::query_scalar("SELECT session_id::bigint FROM chat_messages WHERE id = $1::bigint")
         .bind(message_id)
         .fetch_one(pool)
         .await
@@ -63,7 +63,7 @@ pub(super) async fn message_session(pool: &PgPool, message_id: i64) -> i64 {
 }
 
 pub(super) async fn set_message_status(pool: &PgPool, message_id: i64, status: &str) {
-    sqlx::query("UPDATE chat_messages SET status = $2 WHERE id::bigint = $1")
+    sqlx::query("UPDATE chat_messages SET status = $2 WHERE id = $1::bigint")
         .bind(message_id)
         .bind(status)
         .execute(pool)
@@ -79,9 +79,9 @@ pub(super) async fn council_snapshot(
     sqlx::query_as(
         r#"
         SELECT
-            (SELECT count(*)::bigint FROM chat_messages WHERE session_id::bigint = $1),
-            (SELECT count(*)::bigint FROM chat_messages WHERE session_id::bigint = $2),
-            (SELECT council_mode FROM chat_sessions WHERE id::bigint = $1)
+            (SELECT count(*)::bigint FROM chat_messages WHERE session_id = $1::bigint),
+            (SELECT count(*)::bigint FROM chat_messages WHERE session_id = $2::bigint),
+            (SELECT council_mode FROM chat_sessions WHERE id = $1::bigint)
         "#,
     )
     .bind(parent_id)
@@ -93,7 +93,7 @@ pub(super) async fn council_snapshot(
 
 pub(super) async fn durable_messages(pool: &PgPool, ids: &[i64]) -> Vec<(i64, String, Value)> {
     sqlx::query_as(
-        "SELECT id::bigint, message_list, processing_context FROM chat_messages WHERE id::bigint = ANY($1) ORDER BY id",
+        "SELECT id::bigint, message_list, processing_context FROM chat_messages WHERE id = ANY($1) ORDER BY id",
     )
     .bind(ids)
     .fetch_all(pool)
@@ -449,7 +449,7 @@ pub(super) async fn seed_council(pool: &PgPool, suffix: &str) -> CouncilFixture 
             active_child_session_id = $2::bigint::integer,
             council_message_id = $3::bigint::integer,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(parent_id)
@@ -459,7 +459,7 @@ pub(super) async fn seed_council(pool: &PgPool, suffix: &str) -> CouncilFixture 
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE chat_sessions SET branch_start_message_id = $2::bigint::integer WHERE id::bigint = $1",
+        "UPDATE chat_sessions SET branch_start_message_id = $2::bigint::integer WHERE id = $1::bigint",
     )
     .bind(selected_id)
     .bind(selected_run_id)
@@ -467,7 +467,7 @@ pub(super) async fn seed_council(pool: &PgPool, suffix: &str) -> CouncilFixture 
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE chat_sessions SET branch_start_message_id = $2::bigint::integer WHERE id::bigint = $1",
+        "UPDATE chat_sessions SET branch_start_message_id = $2::bigint::integer WHERE id = $1::bigint",
     )
     .bind(alternative_id)
     .bind(alternative_run_id)
@@ -497,7 +497,7 @@ pub(super) async fn assert_retired_graph(pool: &PgPool, fixture: &CouncilFixture
         r#"
         SELECT council_mode, active_child_session_id::bigint,
                council_message_id::bigint, is_archived
-        FROM chat_sessions WHERE id::bigint = $1
+        FROM chat_sessions WHERE id = $1::bigint
         "#,
     )
     .bind(fixture.parent_id)
@@ -507,7 +507,7 @@ pub(super) async fn assert_retired_graph(pool: &PgPool, fixture: &CouncilFixture
     assert_eq!(parent, (false, None, None, false));
 
     let parent_rows = sqlx::query_as::<_, (i64, Option<Value>)>(
-        "SELECT id::bigint, processing_context FROM chat_messages WHERE session_id::bigint = $1 ORDER BY created_at, id",
+        "SELECT id::bigint, processing_context FROM chat_messages WHERE session_id = $1::bigint ORDER BY created_at, id",
     )
     .bind(fixture.parent_id)
     .fetch_all(pool)
@@ -542,7 +542,7 @@ pub(super) async fn assert_retired_graph(pool: &PgPool, fixture: &CouncilFixture
         SELECT id::bigint, is_hidden_from_history, is_archived,
                council_persona_id, council_persona_prompt
         FROM chat_sessions
-        WHERE id::bigint = ANY($1)
+        WHERE id = ANY($1)
         ORDER BY id
         "#,
     )
@@ -559,7 +559,7 @@ pub(super) async fn assert_retired_graph(pool: &PgPool, fixture: &CouncilFixture
     );
 
     let retained_profile: Value =
-        sqlx::query_scalar("SELECT council_personas FROM users WHERE id::bigint = $1")
+        sqlx::query_scalar("SELECT council_personas FROM users WHERE id = $1::bigint")
             .bind(fixture.user_id)
             .fetch_one(pool)
             .await

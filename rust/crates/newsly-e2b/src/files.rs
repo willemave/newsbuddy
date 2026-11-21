@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures_core::Stream;
+use futures_util::Stream;
 use futures_util::StreamExt;
 use reqwest::Method;
 use semver::Version;

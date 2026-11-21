@@ -22,7 +22,7 @@ use crate::agent_support::NoTools;
 use crate::elevenlabs::{
     ElevenLabsSynthesisError, ElevenLabsSynthesisRequest, is_standard_api_base, synthesize,
 };
-use crate::provider_env::{ProviderEnvError, u64_from_env};
+use crate::provider_env::{ProviderEnvError, clean_env, secret_env, u64_from_env};
 
 const DEFAULT_ITUNES_SEARCH_URL: &str = "https://itunes.apple.com/search";
 const DEFAULT_ELEVENLABS_API_BASE: &str = "https://api.elevenlabs.io";
@@ -733,17 +733,6 @@ fn clean_optional_bounded(value: Option<String>, max_chars: usize) -> Option<Str
         let cleaned = clean_text(&value);
         (!cleaned.is_empty()).then(|| cleaned.chars().take(max_chars).collect())
     })
-}
-
-fn clean_env(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    clean_env(name).map(SecretString::from)
 }
 
 #[derive(Debug, Error)]

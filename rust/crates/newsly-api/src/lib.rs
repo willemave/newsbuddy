@@ -74,7 +74,7 @@ use newsly_providers::{
 };
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
-use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 pub use auth::{AuthConfig, AuthConfigError, AuthenticatedUser};
@@ -189,20 +189,29 @@ pub fn build_router(state: AppState) -> Router {
             gateway::ownership_gateway,
         ))
         .with_state(state)
+        // The trace span sits inside SetRequestId so every request log line carries the same
+        // request id that error envelopes return to clients.
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        uri = %request.uri().path(),
+                        request_id = request
+                            .headers()
+                            .get(&REQUEST_ID_HEADER)
+                            .and_then(|value| value.to_str().ok())
+                            .unwrap_or(""),
+                    )
+                })
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .layer(PropagateRequestIdLayer::new(REQUEST_ID_HEADER.clone()))
         .layer(SetRequestIdLayer::new(
             REQUEST_ID_HEADER.clone(),
             MakeRequestUuid,
         ))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(
-                    DefaultMakeSpan::new()
-                        .level(Level::INFO)
-                        .include_headers(false),
-                )
-                .on_response(DefaultOnResponse::new().level(Level::INFO)),
-        )
         .layer(CatchPanicLayer::new())
 }
 
@@ -279,7 +288,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         gateway,
     };
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
-    let transition_monitor = tokio::spawn(state.gateway.clone().monitor_transitions());
+    let (transition_monitor, monitor_exit_rx) = spawn_supervised_transition_monitor(&state);
     tracing::info!(
         bind_address = %config.bind_address,
         environment = %config.environment,
@@ -292,14 +301,45 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         listener,
         build_router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            () = shutdown_signal() => {}
+            _ = monitor_exit_rx => {}
+        }
+    })
     .await;
+    let monitor_exited = transition_monitor.is_finished();
     transition_monitor.abort();
     server_result?;
+    if monitor_exited {
+        anyhow::bail!("route transition monitor exited unexpectedly");
+    }
 
     tracing::info!("Newsly Rust API stopping");
     database.close().await;
     Ok(())
+}
+
+/// The monitor is the only code that lifts route write barriers, so the API must not keep serving
+/// without it: its exit (including a panic) signals the server to stop for a supervised restart.
+fn spawn_supervised_transition_monitor(
+    state: &AppState,
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::sync::oneshot::Receiver<()>,
+) {
+    let (monitor_exit_tx, monitor_exit_rx) = tokio::sync::oneshot::channel::<()>();
+    let monitor_gateway = state.gateway.clone();
+    let handle = tokio::spawn(async move {
+        let outcome = tokio::spawn(monitor_gateway.monitor_transitions()).await;
+        tracing::error!(
+            error_code = "transition_monitor_exited",
+            panicked = outcome.is_err(),
+            "route transition monitor stopped; shutting the API down"
+        );
+        let _ = monitor_exit_tx.send(());
+    });
+    (handle, monitor_exit_rx)
 }
 
 fn request_id_from_headers(headers: &HeaderMap) -> String {

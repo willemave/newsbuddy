@@ -197,7 +197,7 @@ pub async fn set_user_news_category_timezone(
     let timezone = canonicalize_timezone(timezone)?;
     let now = database_now(transaction).await?;
     let exists =
-        sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id::bigint=$1 FOR UPDATE")
+        sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id=$1::bigint FOR UPDATE")
             .bind(user_id)
             .fetch_optional(&mut **transaction)
             .await?
@@ -320,7 +320,7 @@ pub async fn prepare_due_news_category_runs(
                    next_local_date, next_window_start_at, next_window_end_at,
                    last_published_at
             FROM user_news_category_schedule
-            WHERE user_id::bigint=$1 AND next_due_at <= $2
+            WHERE user_id=$1::bigint AND next_due_at <= $2
             FOR UPDATE
             "#,
         )
@@ -377,7 +377,7 @@ pub async fn prepare_due_news_category_runs(
             UPDATE user_news_category_schedule SET
                 next_due_at=$2, next_local_date=$3, next_window_start_at=$4,
                 next_window_end_at=$5, updated_at=$6
-            WHERE user_id::bigint=$1 AND timezone_revision=$7
+            WHERE user_id=$1::bigint AND timezone_revision=$7
             "#,
         )
         .bind(row.user_id)
@@ -433,7 +433,7 @@ pub async fn settle_stale_news_category_runs(
     .await?;
     let mut settled = 0_usize;
     for user_id in user_ids {
-        sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id::bigint=$1 FOR SHARE")
+        sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id=$1::bigint FOR SHARE")
             .bind(user_id)
             .fetch_optional(&mut **transaction)
             .await?;
@@ -449,7 +449,7 @@ pub async fn settle_stale_news_category_runs(
                 ),
                 completed_at=$2,
                 updated_at=$2
-            WHERE run.user_id::bigint=$1
+            WHERE run.user_id=$1::bigint
               AND run.status IN ('scheduled','running')
               AND (
                   run.window_end_at <= $2
@@ -505,10 +505,10 @@ pub async fn begin_news_category_run(
         JOIN user_news_category_schedule AS schedule ON schedule.user_id=run.user_id
         JOIN users AS app_user ON app_user.id=run.user_id
         JOIN processing_tasks AS task ON task.id=run.task_id
-        WHERE run.id=$3 AND run.user_id::bigint=$2 AND run.task_id::bigint=$1
+        WHERE run.id=$3 AND run.user_id=$2::bigint AND run.task_id=$1::bigint
           AND run.status IN ('scheduled','running')
           AND task.task_type='recluster_news_lenses' AND task.status='processing'
-          AND task.owner_user_id::bigint=$2
+          AND task.owner_user_id=$2::bigint
           AND task.locked_by=$6 AND task.lease_token=$7
           AND task.retry_count=$8 AND task.executor_runtime=$9
           AND task.executor_version=$10 AND task.executor_namespace=$11
@@ -592,7 +592,7 @@ pub async fn finish_news_category_run(
     let Some(user_id) = user_id else {
         return Ok(false);
     };
-    sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id::bigint=$1 FOR SHARE")
+    sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id=$1::bigint FOR SHARE")
         .bind(user_id)
         .fetch_optional(&mut **transaction)
         .await?;
@@ -653,7 +653,7 @@ pub async fn finish_news_category_run(
         .execute(&mut **transaction)
         .await?;
     if status == NewsCategoryRunStatus::Published {
-        sqlx::query("UPDATE user_news_category_schedule SET last_published_at=$2, last_published_local_date=$3, updated_at=$2 WHERE user_id::bigint=$1 AND timezone_revision=$4")
+        sqlx::query("UPDATE user_news_category_schedule SET last_published_at=$2, last_published_local_date=$3, updated_at=$2 WHERE user_id=$1::bigint AND timezone_revision=$4")
             .bind(row.user_id)
             .bind(now.naive_utc())
             .bind(row.local_date)
@@ -675,7 +675,7 @@ pub async fn reserve_news_category_naming_attempt(
         return Ok(false);
     }
     let mut transaction = pool.begin().await?;
-    sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id::bigint=$1 FOR SHARE")
+    sqlx::query_scalar::<_, i64>("SELECT id::bigint FROM users WHERE id=$1::bigint FOR SHARE")
         .bind(context.run.user_id)
         .fetch_optional(&mut *transaction)
         .await?;
@@ -805,7 +805,7 @@ async fn load_schedule_for_update(
     user_id: i64,
 ) -> Result<Option<NewsCategorySchedule>, sqlx::Error> {
     let row = sqlx::query_as::<_, ScheduleRow>(
-        "SELECT user_id::bigint,timezone,timezone_revision,next_due_at,next_local_date,next_window_start_at,next_window_end_at,last_published_at,last_published_local_date FROM user_news_category_schedule WHERE user_id::bigint=$1 FOR UPDATE",
+        "SELECT user_id::bigint,timezone,timezone_revision,next_due_at,next_local_date,next_window_start_at,next_window_end_at,last_published_at,last_published_local_date FROM user_news_category_schedule WHERE user_id=$1::bigint FOR UPDATE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)

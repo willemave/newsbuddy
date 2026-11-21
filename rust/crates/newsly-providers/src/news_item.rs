@@ -10,7 +10,6 @@ use newsly_agent_runtime::{
 };
 use reqwest::Url;
 use schemars::JsonSchema;
-use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use thiserror::Error;
@@ -19,7 +18,7 @@ use crate::openrouter_embeddings::{OpenRouterEmbeddingClient, OpenRouterEmbeddin
 use crate::{ProviderCredentials, RigAgentEngine};
 
 use crate::agent_support::NoTools;
-use crate::provider_env::{ProviderEnvError, u64_from_env};
+use crate::provider_env::{ProviderEnvError, secret_env, u64_from_env};
 
 const DEFAULT_NEWS_MODEL: &str = "openai:gpt-6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "openrouter:qwen/qwen3-embedding-8b";
@@ -528,13 +527,6 @@ fn same_site(left: &str, right: &str) -> bool {
 
 fn compact(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(SecretString::from)
 }
 
 #[derive(Debug, Error)]

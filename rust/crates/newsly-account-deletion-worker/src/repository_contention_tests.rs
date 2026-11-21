@@ -48,7 +48,7 @@ fn claim_request() -> ClaimRequest {
 
 async fn assert_product_intact(pool: &PgPool, user: i64, story: i64, task: i64) {
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint=$1 AND NOT is_active)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::bigint AND NOT is_active)",
     )
     .bind(user)
     .fetch_one(pool)
@@ -56,7 +56,7 @@ async fn assert_product_intact(pool: &PgPool, user: i64, story: i64, task: i64) 
     .unwrap();
     assert!(exists);
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_id=$2",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_id=$2",
     )
     .bind(user)
     .bind(story)
@@ -67,14 +67,14 @@ async fn assert_product_intact(pool: &PgPool, user: i64, story: i64, task: i64) 
         pending, 1,
         "deletions preceding News trigger were rolled back"
     );
-    let filter_rows: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM news_filter_preferences WHERE user_id::bigint=$1)+(SELECT count(*) FROM news_filter_decisions WHERE user_id::bigint=$1)+(SELECT count(*) FROM news_filter_daily_usage WHERE user_id::bigint=$1)")
+    let filter_rows: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM news_filter_preferences WHERE user_id=$1::bigint)+(SELECT count(*) FROM news_filter_decisions WHERE user_id=$1::bigint)+(SELECT count(*) FROM news_filter_daily_usage WHERE user_id=$1::bigint)")
         .bind(user).fetch_one(pool).await.unwrap();
     assert_eq!(
         filter_rows, 3,
         "filter cleanup preceding News was rolled back"
     );
     let private: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM news_items WHERE id::bigint=$1)")
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM news_items WHERE id=$1::bigint)")
             .bind(story)
             .fetch_one(pool)
             .await
@@ -84,7 +84,7 @@ async fn assert_product_intact(pool: &PgPool, user: i64, story: i64, task: i64) 
         .bind(user).fetch_one(pool).await.unwrap();
     assert!(shared, "shared metadata scrub was rolled back");
     let payload: Value =
-        sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT payload FROM processing_tasks WHERE id=$1::bigint")
             .bind(task)
             .fetch_one(pool)
             .await
@@ -135,7 +135,7 @@ async fn grouping_busy_defers_whole_account_purge_then_completes(pool: PgPool) {
         "deferral invalidates the old exact claim"
     );
     let count: i32 = sqlx::query_scalar(
-        "SELECT deferral_count FROM news_grouping_deferrals WHERE task_id::bigint=$1",
+        "SELECT deferral_count FROM news_grouping_deferrals WHERE task_id=$1::bigint",
     )
     .bind(claim.id)
     .fetch_one(&pool)
@@ -147,7 +147,7 @@ async fn grouping_busy_defers_whole_account_purge_then_completes(pool: PgPool) {
         Some(1 + claim.id.rem_euclid(3))
     );
     guard.rollback().await.unwrap();
-    sqlx::query("UPDATE processing_tasks SET available_at=now() WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET available_at=now() WHERE id=$1::bigint")
         .bind(claim.id)
         .execute(&pool)
         .await
@@ -158,20 +158,20 @@ async fn grouping_busy_defers_whole_account_purge_then_completes(pool: PgPool) {
         apply(&queue, &retry, user).await.status,
         TaskStatus::Completed
     );
-    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE id::bigint=$1")
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE id=$1::bigint")
         .bind(user)
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(remaining, 0);
-    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM news_items WHERE id::bigint=$1")
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM news_items WHERE id=$1::bigint")
         .bind(story)
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(remaining, 0);
     let (payload, dedupe): (Value, Option<String>) =
-        sqlx::query_as("SELECT payload,dedupe_key FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_as("SELECT payload,dedupe_key FROM processing_tasks WHERE id=$1::bigint")
             .bind(claim.id)
             .fetch_one(&pool)
             .await
@@ -199,7 +199,7 @@ async fn account_grouping_budget_exhaustion_is_visible_and_keeps_product_intact(
         assert_eq!(transition.status, TaskStatus::Failed);
         assert_eq!(transition.retry_count, 0);
         let error: String =
-            sqlx::query_scalar("SELECT error_message FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query_scalar("SELECT error_message FROM processing_tasks WHERE id=$1::bigint")
                 .bind(claim.id)
                 .fetch_one(&pool)
                 .await
@@ -244,7 +244,7 @@ async fn active_work_wait_ends_a_previous_conflict_episode_without_consuming_pro
     newsly_db::news_grouping::record_deferral(&mut tx, claim.id)
         .await
         .unwrap();
-    sqlx::query("UPDATE news_grouping_deferrals SET first_deferred_at=clock_timestamp()-interval '2 hours',deferral_count=1200 WHERE task_id::bigint=$1").bind(claim.id).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE news_grouping_deferrals SET first_deferred_at=clock_timestamp()-interval '2 hours',deferral_count=1200 WHERE task_id=$1::bigint").bind(claim.id).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     let mut fence = queue
         .begin_fenced_finalization(&claim, &TaskResult::defer(30), 3)
@@ -261,7 +261,7 @@ async fn active_work_wait_ends_a_previous_conflict_episode_without_consuming_pro
     let transition = fence.finish().await.unwrap().unwrap();
     assert_eq!(transition.status, TaskStatus::Pending);
     assert_product_intact(&pool, user, story, claim.id).await;
-    let (retries,retained):(i32,i64) = sqlx::query_as("SELECT retry_count,(SELECT count(*) FROM news_grouping_deferrals WHERE task_id::bigint=$1) FROM processing_tasks WHERE id::bigint=$1").bind(claim.id).fetch_one(&pool).await.unwrap();
+    let (retries,retained):(i32,i64) = sqlx::query_as("SELECT retry_count,(SELECT count(*) FROM news_grouping_deferrals WHERE task_id=$1::bigint) FROM processing_tasks WHERE id=$1::bigint").bind(claim.id).fetch_one(&pool).await.unwrap();
     assert_eq!((retries, retained), (0, 0));
     let mut tx = pool.begin().await.unwrap();
     let next = newsly_db::news_grouping::record_deferral(&mut tx, claim.id)

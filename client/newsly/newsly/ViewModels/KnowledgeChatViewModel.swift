@@ -141,7 +141,15 @@ final class KnowledgeChatViewModel {
 
         loadErrorMessage = nil
         hasLoadMoreError = false
-        await feed.refresh()
+        if feed.items.isEmpty {
+            await feed.refresh()
+        } else {
+            // Polling and revalidation must not collapse pages the user already scrolled
+            // through back to the first page; refresh through the loaded boundary instead.
+            await feed.refreshLoadedPages { item, boundary in
+                item.id != boundary.id && item.lastActivityDate >= boundary.lastActivityDate
+            }
+        }
         loadErrorMessage = feedErrorMessage
     }
 

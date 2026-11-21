@@ -84,7 +84,7 @@ pub async fn lock_active_user(
     user_id: i64,
 ) -> Result<bool, sqlx::Error> {
     Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint=$1 AND is_active FOR SHARE",
+        "SELECT id::bigint FROM users WHERE id=$1::bigint AND is_active FOR SHARE",
     )
     .bind(user_id)
     .fetch_optional(connection)
@@ -105,7 +105,7 @@ pub async fn prepare_refresh(
     if !preference.enabled {
         return Ok(None);
     }
-    let lease_token=sqlx::query_scalar::<_,Uuid>("SELECT lease_token FROM processing_tasks WHERE id::bigint=$1 AND owner_user_id::bigint=$2 AND task_type='briefing_refresh' AND lease_token=$3 AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()) FOR SHARE")
+    let lease_token=sqlx::query_scalar::<_,Uuid>("SELECT lease_token FROM processing_tasks WHERE id=$1::bigint AND owner_user_id=$2::bigint AND task_type='briefing_refresh' AND lease_token=$3 AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()) FOR SHARE")
         .bind(task_id).bind(user_id).bind(expected_lease).fetch_one(&mut **transaction).await?;
     let mut candidates:Vec<NewsFilterCandidate>=sqlx::query_as(AssertSqlSafe(format!(r"{SUBSCRIBED_AGGREGATORS_CTE}
         SELECT {} FROM news_items news WHERE {}
@@ -177,16 +177,62 @@ pub async fn store_decisions(
     if !lock_active_user(transaction, user_id).await? {
         return Ok(false);
     }
-    let lease=sqlx::query_scalar::<_,Uuid>("SELECT lease_token FROM processing_tasks WHERE id::bigint=$1 AND owner_user_id::bigint=$2 AND lease_token=$3 AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()) FOR SHARE")
+    let lease=sqlx::query_scalar::<_,Uuid>("SELECT lease_token FROM processing_tasks WHERE id=$1::bigint AND owner_user_id=$2::bigint AND lease_token=$3 AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()) FOR SHARE")
         .bind(task_id).bind(user_id).bind(preparation.lease_token).fetch_optional(&mut **transaction).await?;
     if lease.is_none() {
         return Ok(false);
     }
-    for decision in decisions {
-        sqlx::query("INSERT INTO news_filter_decisions(user_id,news_item_id,revision,input_hash,evaluator_version,choice,no_match_probability,probabilities) SELECT $1::bigint::integer,n.id,$3,$4,$5,$6,$7,$8 FROM news_items n WHERE n.id::bigint=$2 AND n.status='ready' AND n.representative_news_item_id IS NULL AND news_filter_input_hash(n)=$4 ON CONFLICT DO NOTHING")
-            .bind(user_id).bind(decision.news_item_id).bind(preparation.preference.revision).bind(&decision.input_hash).bind(EVALUATOR_VERSION)
-            .bind(&decision.choice).bind(decision.no_match_probability).bind(&decision.probabilities).execute(&mut **transaction).await?;
+    if decisions.is_empty() {
+        return Ok(true);
     }
+    // One set-based insert per pass instead of one statement (and index probe) per decision while
+    // the user row is share-locked. Stale input hashes still match no row and are skipped.
+    let ids: Vec<i64> = decisions
+        .iter()
+        .map(|decision| decision.news_item_id)
+        .collect();
+    let hashes: Vec<&str> = decisions
+        .iter()
+        .map(|decision| decision.input_hash.as_str())
+        .collect();
+    let choices: Vec<&str> = decisions
+        .iter()
+        .map(|decision| decision.choice.as_str())
+        .collect();
+    let no_match: Vec<f64> = decisions
+        .iter()
+        .map(|decision| decision.no_match_probability)
+        .collect();
+    let probabilities: Vec<&Value> = decisions
+        .iter()
+        .map(|decision| &decision.probabilities)
+        .collect();
+    sqlx::query(
+        r"
+        INSERT INTO news_filter_decisions(
+            user_id, news_item_id, revision, input_hash, evaluator_version, choice,
+            no_match_probability, probabilities
+        )
+        SELECT $1::bigint::integer, n.id, $2, d.input_hash, $3, d.choice, d.no_match, d.probabilities
+        FROM unnest($4::bigint[], $5::text[], $6::text[], $7::float8[], $8::jsonb[])
+            AS d(news_item_id, input_hash, choice, no_match, probabilities)
+        JOIN news_items n ON n.id = d.news_item_id
+        WHERE n.status = 'ready'
+          AND n.representative_news_item_id IS NULL
+          AND news_filter_input_hash(n) = d.input_hash
+        ON CONFLICT DO NOTHING
+        ",
+    )
+    .bind(user_id)
+    .bind(preparation.preference.revision)
+    .bind(EVALUATOR_VERSION)
+    .bind(&ids)
+    .bind(&hashes)
+    .bind(&choices)
+    .bind(&no_match)
+    .bind(&probabilities)
+    .execute(&mut **transaction)
+    .await?;
     Ok(true)
 }
 
@@ -288,7 +334,7 @@ pub async fn list_news_ids(
          AND d.input_hash=news_filter_input_hash(news) AND d.evaluator_version=$4
       LEFT JOIN briefing_pending_sources p ON p.user_id=$1::bigint AND p.source_kind='news' AND p.source_id=news.id
       WHERE news.status='ready' AND news.representative_news_item_id IS NULL AND {}
-        AND ($2::bigint IS NULL OR news.id::bigint<$2) {negative_only}
+        AND ($2::bigint IS NULL OR news.id<$2::bigint) {negative_only}
     ) SELECT news_item_id,filter_status FROM items WHERE NOT $3 OR filter_status='filtered_out' ORDER BY news_item_id DESC LIMIT $5",visible_news_predicate("news"))))
       .bind(user_id).bind(before_id).bind(filtered).bind(EVALUATOR_VERSION).bind(i64::try_from(limit.min(51)).unwrap_or(51)).fetch_all(pool).await
 }

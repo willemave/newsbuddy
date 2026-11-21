@@ -186,7 +186,7 @@ pub async fn find_user_audio_episode(
 ) -> Result<Option<AudioEpisodeRecord>, AudioEpisodeRepositoryError> {
     Ok(
         sqlx::query_as::<_, AudioEpisodeRow>(AssertSqlSafe(select_audio_episode_sql(
-            "AND id::bigint = $2::bigint",
+            "AND id = $2::bigint",
         )))
         .bind(user_id)
         .bind(audio_episode_id)
@@ -203,7 +203,7 @@ pub async fn find_user_audio_episode_for_update(
 ) -> Result<Option<AudioEpisodeRecord>, AudioEpisodeRepositoryError> {
     let query = format!(
         "{} FOR UPDATE",
-        select_audio_episode_sql("AND id::bigint = $2::bigint")
+        select_audio_episode_sql("AND id = $2::bigint")
     );
     Ok(sqlx::query_as::<_, AudioEpisodeRow>(AssertSqlSafe(query))
         .bind(user_id)
@@ -241,7 +241,7 @@ pub async fn find_shared_audio_episode(
         r#"
         SELECT {AUDIO_EPISODE_COLUMNS}
         FROM audio_episodes
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
           AND share_enabled IS TRUE
           AND share_token_nonce = $2
           AND share_token_hash = $3
@@ -268,7 +268,7 @@ pub async fn reset_audio_episode_for_generation(
         UPDATE audio_episodes
         SET status = 'pending', error_message = NULL, started_at = NULL,
             completed_at = NULL, updated_at = timezone('UTC', now())
-        WHERE id::bigint = $2::bigint AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint AND user_id = $1::bigint
           AND (
               status IN ('pending', 'failed')
               OR status <> 'completed'
@@ -308,7 +308,7 @@ pub async fn prepare_audio_episode_generation(
         return Ok(PrepareAudioEpisodeGenerationOutcome::NotFound);
     };
     let user_is_active = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1::bigint AND is_active IS TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active IS TRUE)",
     )
     .bind(user_id)
     .fetch_one(&mut **transaction)
@@ -338,7 +338,7 @@ pub async fn prepare_audio_episode_generation(
         SET status = 'processing', error_message = NULL,
             started_at = timezone('UTC', clock_timestamp()), completed_at = NULL,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $2::bigint AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint AND user_id = $1::bigint
         RETURNING
             id::bigint AS id, user_id::bigint AS user_id, kind, status, title,
             source_content_id::bigint AS source_content_id,
@@ -384,11 +384,11 @@ pub async fn complete_audio_episode_generation(
             duration_seconds = $9, error_message = NULL,
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $2::bigint AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint AND user_id = $1::bigint
           AND status = 'processing' AND started_at = $3
           AND EXISTS (
               SELECT 1 FROM users
-              WHERE users.id::bigint = $1::bigint AND users.is_active IS TRUE
+              WHERE users.id = $1::bigint AND users.is_active IS TRUE
           )
         "#,
     )
@@ -461,7 +461,7 @@ pub async fn record_audio_episode_tts_chunk_usage(
             users.id, 1, $6, $7, 'USD', $8, $9, $10::jsonb,
             timezone('UTC', clock_timestamp())
         FROM users
-        WHERE users.id::bigint = $5::bigint
+        WHERE users.id = $5::bigint
           AND users.is_active IS TRUE
           AND NOT EXISTS (
               SELECT 1 FROM vendor_usage_records WHERE request_id = $1
@@ -511,7 +511,7 @@ pub async fn fail_audio_episode_generation(
             started_at = CASE WHEN $5 THEN NULL ELSE started_at END,
             completed_at = CASE WHEN $5 THEN NULL ELSE timezone('UTC', clock_timestamp()) END,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $2::bigint AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint AND user_id = $1::bigint
           AND status = 'processing' AND started_at = $3
         "#,
     )
@@ -550,7 +550,7 @@ pub async fn checkpoint_audio_episode_script(
         UPDATE audio_episodes
         SET title = $4, script = $5::jsonb, script_text = $6, model = $7,
             duration_seconds = $8, updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $2::bigint AND user_id::bigint = $1::bigint
+        WHERE id = $2::bigint AND user_id = $1::bigint
           AND status = 'processing' AND started_at = $3
         "#,
     )
@@ -604,7 +604,7 @@ pub async fn enable_audio_episode_share(
         UPDATE audio_episodes
         SET share_enabled = TRUE, share_token_nonce = $3, share_token_hash = $4,
             updated_at = timezone('UTC', now())
-        WHERE user_id::bigint = $1::bigint AND id::bigint = $2::bigint
+        WHERE user_id = $1::bigint AND id = $2::bigint
         "#,
     )
     .bind(user_id)
@@ -626,7 +626,7 @@ pub async fn disable_audio_episode_share(
         UPDATE audio_episodes
         SET share_enabled = FALSE, share_token_nonce = NULL, share_token_hash = NULL,
             updated_at = timezone('UTC', now())
-        WHERE user_id::bigint = $1::bigint AND id::bigint = $2::bigint
+        WHERE user_id = $1::bigint AND id = $2::bigint
         "#,
     )
     .bind(user_id)
@@ -679,7 +679,7 @@ fn select_audio_episode_sql(suffix: &str) -> String {
         r#"
         SELECT {AUDIO_EPISODE_COLUMNS}
         FROM audio_episodes
-        WHERE user_id::bigint = $1::bigint {suffix}
+        WHERE user_id = $1::bigint {suffix}
         "#,
     )
 }

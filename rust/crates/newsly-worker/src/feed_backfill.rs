@@ -278,7 +278,7 @@ async fn prepare_configs(
 ) -> Result<Option<PreparedFeedConfigs>, sqlx::Error> {
     let mut transaction = pool.begin().await?;
     let active = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1 AND is_active IS TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active IS TRUE)",
     )
     .bind(request.user_id)
     .fetch_one(&mut *transaction)
@@ -291,7 +291,7 @@ async fn prepare_configs(
         r"
         SELECT id::bigint AS id, scraper_type, display_name, feed_url, config::jsonb AS config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND is_active IS TRUE AND id::bigint = ANY($2::bigint[])
+        WHERE user_id = $1::bigint AND is_active IS TRUE AND id = ANY($2::bigint[])
         ORDER BY id
         FOR SHARE
         ",
@@ -369,7 +369,7 @@ impl FeedBackfillFinalizer {
         let active = sqlx::query_scalar::<_, i64>(
             r"
             SELECT id::bigint FROM users
-            WHERE id::bigint = $1 AND is_active IS TRUE
+            WHERE id = $1::bigint AND is_active IS TRUE
             FOR UPDATE
             ",
         )
@@ -566,7 +566,7 @@ async fn config_still_matches(
         r"
         SELECT id::bigint AS id, scraper_type, display_name, feed_url, config::jsonb AS config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND is_active IS TRUE AND id::bigint = $2
+        WHERE user_id = $1::bigint AND is_active IS TRUE AND id = $2::bigint
         FOR UPDATE
         ",
     )
@@ -588,7 +588,7 @@ async fn record_first_edition_progress(
     let active_run = sqlx::query_scalar::<_, i64>(
         r"
         SELECT id::bigint FROM onboarding_first_edition_runs
-        WHERE id::bigint = $1 AND user_id::bigint = $2 AND status = 'active'
+        WHERE id = $1::bigint AND user_id = $2::bigint AND status = 'active'
         FOR UPDATE
         ",
     )
@@ -607,7 +607,7 @@ async fn record_first_edition_progress(
         r"
         SELECT id::bigint, source_key, status, processed_item_count
         FROM onboarding_first_edition_sources
-        WHERE run_id::bigint = $1 AND source_key = ANY($2::text[])
+        WHERE run_id = $1::bigint AND source_key = ANY($2::text[])
         ORDER BY id
         FOR UPDATE
         ",
@@ -641,7 +641,7 @@ async fn record_first_edition_progress(
             UPDATE onboarding_first_edition_sources
             SET status = $1, processed_item_count = $2,
                 completed_at = coalesce(completed_at, timezone('UTC', now()))
-            WHERE id::bigint = $3
+            WHERE id = $3::bigint
             ",
         )
         .bind(outcome)
@@ -653,7 +653,7 @@ async fn record_first_edition_progress(
     }
     if changed {
         sqlx::query(
-            "UPDATE onboarding_first_edition_runs SET revision = revision + 1 WHERE id::bigint = $1",
+            "UPDATE onboarding_first_edition_runs SET revision = revision + 1 WHERE id = $1::bigint",
         )
         .bind(run_id)
         .execute(&mut **transaction)

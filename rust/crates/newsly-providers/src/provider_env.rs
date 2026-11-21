@@ -1,5 +1,6 @@
 use std::env;
 
+use secrecy::SecretString;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -9,6 +10,19 @@ pub enum ProviderEnvError {
         name: &'static str,
         expected: &'static str,
     },
+}
+
+/// Trimmed, non-empty environment value.
+pub(crate) fn clean_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+/// Trimmed, non-empty secret; surrounding whitespace in a pasted key is never sent upstream.
+pub(crate) fn secret_env(name: &str) -> Option<SecretString> {
+    clean_env(name).map(SecretString::from)
 }
 
 pub(crate) fn u64_from_env(

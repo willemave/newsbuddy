@@ -727,16 +727,7 @@ final class OnboardingViewModel {
 
     private func handleAudioError(_ error: Error) {
         errorMessage = error.localizedDescription
-        if let dictationError = error as? VoiceDictationError {
-            switch dictationError {
-            case .noMicrophoneAccess:
-                audioState = .failed
-            default:
-                audioState = .failed
-            }
-        } else {
-            audioState = .failed
-        }
+        audioState = .failed
         stopAudioTimer()
     }
 

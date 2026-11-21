@@ -186,6 +186,12 @@ fn is_public_ipv6(address: Ipv6Addr) -> bool {
         return is_public_ipv4(ipv4);
     }
     let segments = address.segments();
+    // The well-known NAT64 prefix forwards to the embedded IPv4 address; judge that address.
+    if segments[..6] == [0x0064, 0xff9b, 0, 0, 0, 0] {
+        let [a, b] = segments[6].to_be_bytes();
+        let [c, d] = segments[7].to_be_bytes();
+        return is_public_ipv4(Ipv4Addr::new(a, b, c, d));
+    }
     let local_nat64 = segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 1;
     let discard_only = segments[..4] == [0x0100, 0, 0, 0];
     let special_protocol_assignment = segments[0] == 0x2001
@@ -223,6 +229,8 @@ mod tests {
         assert!(PublicUrl::parse("https://user:secret@example.com/").is_err());
         assert!(PublicUrl::parse("https://192.0.0.1/private").is_err());
         assert!(PublicUrl::parse("https://[64:ff9b:1::1]/private").is_err());
+        assert!(PublicUrl::parse("https://[64:ff9b::7f00:1]/private").is_err());
+        assert!(PublicUrl::parse("https://[64:ff9b::a00:1]/private").is_err());
         assert!(PublicUrl::parse("https://[2001:2::1]/private").is_err());
         assert!(PublicUrl::parse("https://[3fff::1]/private").is_err());
         assert!(PublicUrl::parse(&format!("https://example.com/{}", "x".repeat(2_100))).is_err());
@@ -232,5 +240,6 @@ mod tests {
     fn accepts_public_https_hostname() {
         let url = PublicUrl::parse("https://example.com/article").expect("valid public URL");
         assert_eq!(url.as_str(), "https://example.com/article");
+        assert!(PublicUrl::parse("https://[64:ff9b::808:808]/").is_ok());
     }
 }

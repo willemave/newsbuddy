@@ -202,7 +202,7 @@ async fn adapted_lens_narration_is_complete_scoped_and_reuses_immutable_audio(po
         );
     }
     let first_id = chapters[0].id;
-    sqlx::query("UPDATE audio_episodes SET status = 'completed', script_text = 'Immutable script', audio_storage_path = '/test/audio.mp3' WHERE id::bigint = $1")
+    sqlx::query("UPDATE audio_episodes SET status = 'completed', script_text = 'Immutable script', audio_storage_path = '/test/audio.mp3' WHERE id = $1::bigint")
         .bind(first_id).execute(&pool).await.expect("complete first chapter");
     let reused = prepare(
         &pool,
@@ -348,9 +348,9 @@ async fn adapted_lens_narration_uses_document_chapters_for_articles_and_podcasts
         let content_id = original.source_snapshot["read_on_play"]["content_ids"][0]
             .as_i64()
             .unwrap();
-        sqlx::query("UPDATE audio_episodes SET status='completed', audio_storage_path='existing.mp3' WHERE id::bigint=$1")
+        sqlx::query("UPDATE audio_episodes SET status='completed', audio_storage_path='existing.mp3' WHERE id=$1::bigint")
             .bind(original.id).execute(&pool).await.unwrap();
-        sqlx::query("UPDATE contents SET content_metadata=jsonb_set(content_metadata::jsonb, '{summary,title}', '\"Reader headline\"'::jsonb) WHERE id::bigint=$1")
+        sqlx::query("UPDATE contents SET content_metadata=jsonb_set(content_metadata::jsonb, '{summary,title}', '\"Reader headline\"'::jsonb) WHERE id=$1::bigint")
             .bind(content_id).execute(&pool).await.unwrap();
         let replay = prepare(
             &pool,
@@ -378,7 +378,7 @@ async fn narration_retry_preserves_original_chapters_after_sources_are_read(pool
     )
     .await;
     let group = chapters[0].episode_group_id.as_deref().expect("group");
-    sqlx::query("UPDATE audio_episodes SET status = CASE WHEN id::bigint = $1 THEN 'completed' WHEN id::bigint = $2 THEN 'processing' ELSE 'failed' END, script_text = 'Saved script', error_message = 'Failed synthesis' WHERE episode_group_id = $3")
+    sqlx::query("UPDATE audio_episodes SET status = CASE WHEN id = $1::bigint THEN 'completed' WHEN id = $2::bigint THEN 'processing' ELSE 'failed' END, script_text = 'Saved script', error_message = 'Failed synthesis' WHERE episode_group_id = $3")
         .bind(chapters[0].id).bind(chapters[2].id).bind(group).execute(&pool).await.expect("chapter states");
     sqlx::query("INSERT INTO news_item_read_status (user_id, news_item_id, read_at, created_at) VALUES (100, 15, now(), now())")
         .execute(&pool).await.expect("first source consumed");

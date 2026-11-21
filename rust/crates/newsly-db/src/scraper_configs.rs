@@ -154,7 +154,7 @@ pub async fn apply_aggregator_subscription(
             r"
             UPDATE user_scraper_configs
             SET is_active = TRUE, config = $2, updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             RETURNING
                 id::bigint AS id,
                 user_id::bigint AS user_id,
@@ -236,7 +236,7 @@ async fn lock_active_user(
     user_id: i64,
 ) -> Result<(), ScraperConfigRepositoryError> {
     sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active IS TRUE FOR SHARE",
+        "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active IS TRUE FOR SHARE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)
@@ -262,7 +262,7 @@ async fn subscription_candidates(
             is_active,
             timezone('UTC', created_at) AS created_at
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = ANY($2::text[])
+        WHERE user_id = $1::bigint AND scraper_type = ANY($2::text[])
         ORDER BY id
         FOR UPDATE
         ",
@@ -310,7 +310,7 @@ pub async fn list_scraper_configs(
                     is_active,
                     timezone('UTC', created_at) AS created_at
                 FROM user_scraper_configs
-                WHERE user_id::bigint = $1
+                WHERE user_id = $1::bigint
                   AND scraper_type = ANY($2::text[])
                 ORDER BY created_at DESC
                 ",
@@ -333,7 +333,7 @@ pub async fn list_scraper_configs(
                     is_active,
                     timezone('UTC', created_at) AS created_at
                 FROM user_scraper_configs
-                WHERE user_id::bigint = $1
+                WHERE user_id = $1::bigint
                 ORDER BY created_at DESC
                 ",
             )
@@ -367,7 +367,7 @@ pub async fn find_scraper_config(
             is_active,
             timezone('UTC', created_at) AS created_at
         FROM user_scraper_configs
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
         ",
     )
     .bind(config_id)
@@ -403,7 +403,7 @@ pub async fn scraper_config_identity_exists(
         r"
         SELECT id::bigint AS id, feed_url, config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = ANY($2::text[])
+        WHERE user_id = $1::bigint AND scraper_type = ANY($2::text[])
         ",
     )
     .bind(user_id)
@@ -453,7 +453,7 @@ pub async fn create_scraper_config(
         r"
         SELECT id::bigint AS id, feed_url, config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = ANY($2::text[])
+        WHERE user_id = $1::bigint AND scraper_type = ANY($2::text[])
         ORDER BY id
         FOR UPDATE
         ",
@@ -552,7 +552,7 @@ pub async fn update_scraper_config(
             is_active,
             timezone('UTC', created_at) AS created_at
         FROM user_scraper_configs
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
         FOR UPDATE
         ",
     )
@@ -594,7 +594,7 @@ pub async fn update_scraper_config(
             config = COALESCE($5::json, config),
             is_active = COALESCE($6, is_active),
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
         RETURNING
             id::bigint AS id,
             user_id::bigint AS user_id,
@@ -630,7 +630,7 @@ pub async fn delete_scraper_config(
     let deleted = sqlx::query_scalar::<_, i64>(
         r"
         DELETE FROM user_scraper_configs
-        WHERE id::bigint = $1 AND user_id::bigint = $2
+        WHERE id = $1::bigint AND user_id = $2::bigint
         RETURNING id::bigint
         ",
     )

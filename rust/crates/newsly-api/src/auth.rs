@@ -13,7 +13,9 @@ use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
 };
 use newsly_contracts::AccessTokenResponse;
-use newsly_db::{find_user_by_api_key, find_user_by_id, is_api_key_token};
+use newsly_db::{
+    AuthenticationRepositoryError, find_user_by_api_key, find_user_by_id, is_api_key_token,
+};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -37,6 +39,9 @@ pub struct AuthConfig {
     apple_signin_audiences: Arc<[String]>,
     apple_http: reqwest::Client,
     apple_jwks: Arc<tokio::sync::RwLock<Option<CachedAppleJwks>>>,
+    /// Serializes JWKS refreshes and records the last attempt (successful or not), so unknown
+    /// `kid`s and Apple outages cause at most one fetch per interval.
+    apple_jwks_refresh: Arc<tokio::sync::Mutex<Option<Instant>>>,
     apple_token_url: reqwest::Url,
     apple_revoke_url: reqwest::Url,
     apple_client_id: Arc<str>,
@@ -164,6 +169,7 @@ impl AuthConfig {
             apple_signin_audiences: apple_signin_audiences.into(),
             apple_http,
             apple_jwks: Arc::new(tokio::sync::RwLock::new(None)),
+            apple_jwks_refresh: Arc::new(tokio::sync::Mutex::new(None)),
             apple_token_url,
             apple_revoke_url,
             apple_client_id: apple_client_id.into(),
@@ -506,36 +512,78 @@ impl AuthConfig {
 
     async fn apple_decoding_key(&self, key_id: &str) -> Result<DecodingKey, AppleIdentityError> {
         const JWKS_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
-        {
-            let cached = self.apple_jwks.read().await;
-            if let Some(cached) = cached.as_ref()
-                && cached.fetched_at.elapsed() <= JWKS_CACHE_TTL
-                && let Some(key) = cached.keys.find(key_id)
-            {
-                return DecodingKey::from_jwk(key).map_err(AppleIdentityError::Jwt);
-            }
+        // The token header's `kid` is attacker-controlled, and Apple can be slow or down: refresh
+        // attempts (successful or not) happen at most once per interval, one at a time.
+        const MIN_JWKS_REFETCH_INTERVAL: Duration = Duration::from_secs(60);
+        if let Some(key) = self.cached_apple_key(key_id, JWKS_CACHE_TTL).await {
+            return DecodingKey::from_jwk(&key).map_err(AppleIdentityError::Jwt);
         }
 
+        let mut last_attempt = self.apple_jwks_refresh.lock().await;
+        if let Some(key) = self.cached_apple_key(key_id, JWKS_CACHE_TTL).await {
+            return DecodingKey::from_jwk(&key).map_err(AppleIdentityError::Jwt);
+        }
+        if last_attempt.is_some_and(|attempted| attempted.elapsed() < MIN_JWKS_REFETCH_INTERVAL) {
+            return match self.cached_apple_key(key_id, Duration::MAX).await {
+                Some(key) => DecodingKey::from_jwk(&key).map_err(AppleIdentityError::Jwt),
+                None => Err(AppleIdentityError::UnknownKey(key_id.to_owned())),
+            };
+        }
+        *last_attempt = Some(Instant::now());
+
+        let keys = match self.fetch_apple_jwks().await {
+            Ok(keys) => keys,
+            Err(error) => {
+                // Serve a known key from an expired set rather than locking out real logins
+                // while Apple's endpoint is unavailable.
+                if let Some(key) = self.cached_apple_key(key_id, Duration::MAX).await {
+                    tracing::warn!(error = %error, "Apple JWKS refresh failed; using the last fetched key set");
+                    return DecodingKey::from_jwk(&key).map_err(AppleIdentityError::Jwt);
+                }
+                return Err(error);
+            }
+        };
+        let decoding_key = keys
+            .find(key_id)
+            .ok_or_else(|| AppleIdentityError::UnknownKey(key_id.to_owned()))
+            .and_then(|key| DecodingKey::from_jwk(key).map_err(AppleIdentityError::Jwt));
+        *self.apple_jwks.write().await = Some(CachedAppleJwks {
+            fetched_at: Instant::now(),
+            keys,
+        });
+        decoding_key
+    }
+
+    async fn fetch_apple_jwks(&self) -> Result<JwkSet, AppleIdentityError> {
         let response = self
             .apple_http
             .get(self.apple_jwks_url.clone())
             .send()
             .await?
             .error_for_status()?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_APPLE_JWKS_BYTES as u64)
+        {
+            return Err(AppleIdentityError::JwksTooLarge);
+        }
         let body = response.bytes().await?;
         if body.len() > MAX_APPLE_JWKS_BYTES {
             return Err(AppleIdentityError::JwksTooLarge);
         }
-        let keys: JwkSet = serde_json::from_slice(&body)?;
-        let decoding_key = keys
-            .find(key_id)
-            .ok_or_else(|| AppleIdentityError::UnknownKey(key_id.to_owned()))
-            .and_then(|key| DecodingKey::from_jwk(key).map_err(AppleIdentityError::Jwt))?;
-        *self.apple_jwks.write().await = Some(CachedAppleJwks {
-            fetched_at: Instant::now(),
-            keys,
-        });
-        Ok(decoding_key)
+        Ok(serde_json::from_slice(&body)?)
+    }
+
+    async fn cached_apple_key(
+        &self,
+        key_id: &str,
+        ttl: Duration,
+    ) -> Option<jsonwebtoken::jwk::Jwk> {
+        let cached = self.apple_jwks.read().await;
+        cached
+            .as_ref()
+            .filter(|cached| cached.fetched_at.elapsed() <= ttl)
+            .and_then(|cached| cached.keys.find(key_id).cloned())
     }
 }
 
@@ -693,16 +741,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
         let row = if is_api_key_token(token) {
             find_user_by_api_key(state.database.pool(), token)
                 .await
-                .map_err(|error| {
-                    tracing::error!(error = %error, "API-key authentication lookup failed");
-                    ApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal_error",
-                        "Internal server error",
-                        request_id.clone(),
-                    )
-                    .with_retryable(true)
-                })?
+                .map_err(|error| api_key_lookup_rejection(&error, request_id.clone()))?
         } else {
             let mut validation = Validation::new(Algorithm::HS256);
             validation.set_required_spec_claims(&["exp", "sub", "type"]);
@@ -758,6 +797,27 @@ fn bearer_token(header: &str) -> Option<&str> {
         return None;
     }
     Some(token)
+}
+
+/// A prefixed token with the wrong shape is a bad credential, not a retryable server fault.
+fn api_key_lookup_rejection(error: &AuthenticationRepositoryError, request_id: String) -> ApiError {
+    match error {
+        AuthenticationRepositoryError::InvalidApiKeyFormat => invalid_credentials(request_id),
+        AuthenticationRepositoryError::Sqlx(_) => {
+            tracing::error!(
+                request_id = %request_id,
+                error = %error,
+                "API-key authentication lookup failed"
+            );
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                request_id,
+            )
+            .with_retryable(true)
+        }
+    }
 }
 
 fn invalid_credentials(request_id: String) -> ApiError {
@@ -878,36 +938,9 @@ async fn bounded_apple_body(response: reqwest::Response) -> Result<Vec<u8>, Appl
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{AppleIdentityError, bearer_token, verify_apple_nonce};
-    use sha2::Digest as _;
+#[path = "auth/tests.rs"]
+mod tests;
 
-    #[test]
-    fn bearer_parser_is_case_insensitive_and_rejects_extra_parts() {
-        assert_eq!(bearer_token("Bearer token"), Some("token"));
-        assert_eq!(bearer_token("bearer token"), Some("token"));
-        assert_eq!(bearer_token("Basic token"), None);
-        assert_eq!(bearer_token("Bearer token extra"), None);
-    }
-
-    #[test]
-    fn apple_nonce_requires_the_sha256_of_the_raw_nonce() {
-        let raw_nonce = "newsly-test-nonce";
-        let expected = newsly_domain::hex_encode(&sha2::Sha256::digest(raw_nonce.as_bytes()));
-
-        assert!(verify_apple_nonce(Some(&expected), raw_nonce).is_ok());
-        assert!(matches!(
-            verify_apple_nonce(None, raw_nonce),
-            Err(AppleIdentityError::InvalidNonce)
-        ));
-        assert!(matches!(
-            verify_apple_nonce(Some("different"), raw_nonce),
-            Err(AppleIdentityError::InvalidNonce)
-        ));
-        let empty_hash = newsly_domain::hex_encode(&sha2::Sha256::digest(b""));
-        assert!(matches!(
-            verify_apple_nonce(Some(&empty_hash), ""),
-            Err(AppleIdentityError::InvalidNonce)
-        ));
-    }
-}
+#[cfg(test)]
+#[path = "auth/jwt_backend_tests.rs"]
+mod jwt_backend_tests;

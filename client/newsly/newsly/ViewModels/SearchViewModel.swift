@@ -124,6 +124,11 @@ final class SearchViewModel {
             return
         }
 
+        // A pending debounced local search would otherwise land after the mixed results and
+        // overwrite them.
+        tasks.cancel(.local)
+        isLoadingLocal = false
+        localErrorMessage = nil
         tasks.runReplacing(.mixed) { [weak self] token in
             await self?.runMixedSearch(for: query, token: token)
         }

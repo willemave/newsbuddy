@@ -228,9 +228,9 @@ async fn provider_retry_or_lease_recovery_starts_a_new_conflict_episode(pool: Pg
     let task:i64 = sqlx::query_scalar("INSERT INTO processing_tasks(task_type,status,queue_name,executor_runtime,executor_version,executor_namespace) VALUES('scrape','pending','content','rust',1,'scrape') RETURNING id::bigint").fetch_one(&pool).await.unwrap();
     let mut tx = pool.begin().await.unwrap();
     assert_eq!(record_deferral(&mut tx, task).await.unwrap().count, 1);
-    sqlx::query("UPDATE news_grouping_deferrals SET first_deferred_at=clock_timestamp()-interval '2 hours',deferral_count=$2 WHERE task_id::bigint=$1").bind(task).bind(MAX_DEFERRALS).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE news_grouping_deferrals SET first_deferred_at=clock_timestamp()-interval '2 hours',deferral_count=$2 WHERE task_id=$1::bigint").bind(task).bind(MAX_DEFERRALS).execute(&mut *tx).await.unwrap();
     assert!(record_deferral(&mut tx, task).await.unwrap().exhausted);
-    sqlx::query("UPDATE processing_tasks SET retry_count=retry_count+1 WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET retry_count=retry_count+1 WHERE id=$1::bigint")
         .bind(task)
         .execute(&mut *tx)
         .await

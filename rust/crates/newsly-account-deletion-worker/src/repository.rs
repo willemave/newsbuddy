@@ -80,7 +80,7 @@ pub(crate) async fn prepare_cleanup_plan(
         r"
         SELECT is_active
         FROM users
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR SHARE
         ",
     )
@@ -99,7 +99,7 @@ pub(crate) async fn prepare_cleanup_plan(
         r"
         SELECT refresh_token_encrypted, access_token_encrypted
         FROM user_integration_connections
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         ORDER BY id
         ",
     )
@@ -130,7 +130,7 @@ pub(crate) async fn prepare_cleanup_plan(
         r"
         SELECT audio_storage_path
         FROM audio_episodes
-        WHERE user_id::bigint = $1 AND audio_storage_path IS NOT NULL
+        WHERE user_id = $1::bigint AND audio_storage_path IS NOT NULL
         ORDER BY id
         ",
     )
@@ -155,7 +155,7 @@ pub(crate) async fn prepare_cleanup_plan(
             source_notes_html_object_key,
             NULL::text AS agent_log_object_key
         FROM learning_decks
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         UNION ALL
         SELECT
             COALESCE(artifact_object_keys, '[]'::jsonb) AS artifact_object_keys,
@@ -164,7 +164,7 @@ pub(crate) async fn prepare_cleanup_plan(
             source_notes_html_object_key,
             agent_log_object_key
         FROM learning_deck_runs
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         ",
     )
     .bind(user_id)
@@ -181,7 +181,7 @@ pub(crate) async fn prepare_cleanup_plan(
         r"
         SELECT COALESCE(artifact_manifest, '{}'::jsonb) AS artifact_manifest, agent_log_object_key
         FROM llm_tasks
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         ORDER BY id
         ",
     )
@@ -195,8 +195,8 @@ pub(crate) async fn prepare_cleanup_plan(
 
     let tracked_keys: Vec<String> = sqlx::query_scalar(
         "SELECT candidate.object_key FROM artifact_cleanup_candidates AS candidate
-         JOIN llm_tasks AS task ON task.id::bigint = candidate.llm_task_id
-         WHERE task.user_id::bigint = $1",
+         JOIN llm_tasks AS task ON task.id = candidate.llm_task_id
+         WHERE task.user_id = $1::bigint",
     )
     .bind(user_id)
     .fetch_all(&mut *transaction)
@@ -308,7 +308,7 @@ impl AccountDeletionFinalizer {
             r"
             SELECT is_active
             FROM users
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             FOR UPDATE
             ",
         )
@@ -323,7 +323,7 @@ impl AccountDeletionFinalizer {
             scrub_shared_content_metadata(transaction, self.user_id).await?;
             null_shared_approver_references(transaction, self.user_id).await?;
             delete_direct_rows(transaction, self.user_id, self.current_task_id).await?;
-            sqlx::query("DELETE FROM users WHERE id::bigint = $1")
+            sqlx::query("DELETE FROM users WHERE id = $1::bigint")
                 .bind(self.user_id)
                 .execute(&mut **transaction)
                 .await?;
@@ -335,7 +335,7 @@ impl AccountDeletionFinalizer {
             r"
             UPDATE processing_tasks
             SET payload = '{}'::json, dedupe_key = NULL
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             ",
         )
         .bind(self.current_task_id)
@@ -425,13 +425,13 @@ async fn delete_indirect_rows(
     user_id: i64,
 ) -> Result<(), sqlx::Error> {
     const DELETIONS: &[&str] = &[
-        "DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE user_id::bigint = $1)",
-        "DELETE FROM user_integration_sync_state WHERE connection_id IN (SELECT id FROM user_integration_connections WHERE user_id::bigint = $1)",
-        "DELETE FROM user_integration_synced_items WHERE connection_id IN (SELECT id FROM user_integration_connections WHERE user_id::bigint = $1)",
-        "DELETE FROM onboarding_discovery_lanes WHERE run_id IN (SELECT id FROM onboarding_discovery_runs WHERE user_id::bigint = $1)",
-        "DELETE FROM onboarding_first_edition_sources WHERE run_id IN (SELECT id FROM onboarding_first_edition_runs WHERE user_id::bigint = $1)",
-        "DELETE FROM llm_task_actions WHERE llm_task_id IN (SELECT id FROM llm_tasks WHERE user_id::bigint = $1)",
-        "DELETE FROM news_item_discussions WHERE news_item_id IN (SELECT id FROM news_items WHERE owner_user_id::bigint = $1)",
+        "DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE user_id = $1::bigint)",
+        "DELETE FROM user_integration_sync_state WHERE connection_id IN (SELECT id FROM user_integration_connections WHERE user_id = $1::bigint)",
+        "DELETE FROM user_integration_synced_items WHERE connection_id IN (SELECT id FROM user_integration_connections WHERE user_id = $1::bigint)",
+        "DELETE FROM onboarding_discovery_lanes WHERE run_id IN (SELECT id FROM onboarding_discovery_runs WHERE user_id = $1::bigint)",
+        "DELETE FROM onboarding_first_edition_sources WHERE run_id IN (SELECT id FROM onboarding_first_edition_runs WHERE user_id = $1::bigint)",
+        "DELETE FROM llm_task_actions WHERE llm_task_id IN (SELECT id FROM llm_tasks WHERE user_id = $1::bigint)",
+        "DELETE FROM news_item_discussions WHERE news_item_id IN (SELECT id FROM news_items WHERE owner_user_id = $1::bigint)",
     ];
     for statement in DELETIONS {
         sqlx::query(*statement)
@@ -447,9 +447,9 @@ async fn null_shared_approver_references(
     user_id: i64,
 ) -> Result<(), sqlx::Error> {
     const UPDATES: &[&str] = &[
-        "DELETE FROM cli_link_sessions WHERE approved_by_user_id::bigint = $1",
-        "UPDATE llm_task_actions SET approved_by_user_id = NULL WHERE approved_by_user_id::bigint = $1",
-        "UPDATE user_api_keys SET created_by_admin_user_id = NULL WHERE created_by_admin_user_id::bigint = $1",
+        "DELETE FROM cli_link_sessions WHERE approved_by_user_id = $1::bigint",
+        "UPDATE llm_task_actions SET approved_by_user_id = NULL WHERE approved_by_user_id = $1::bigint",
+        "UPDATE user_api_keys SET created_by_admin_user_id = NULL WHERE created_by_admin_user_id = $1::bigint",
     ];
     for statement in UPDATES {
         sqlx::query(*statement)
@@ -508,7 +508,7 @@ async fn scrub_shared_content_metadata(
     .await?;
     for row in rows {
         let cleaned = remove_user_references(row.content_metadata, user_id);
-        sqlx::query("UPDATE contents SET content_metadata = $1 WHERE id::bigint = $2")
+        sqlx::query("UPDATE contents SET content_metadata = $1 WHERE id = $2::bigint")
             .bind(cleaned)
             .bind(row.id)
             .execute(&mut **transaction)
@@ -688,7 +688,7 @@ mod tests {
         transaction.commit().await.unwrap();
 
         let cleaned: serde_json::Value =
-            sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id::bigint = $1")
+            sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id = $1::bigint")
                 .bind(content_id)
                 .fetch_one(&pool)
                 .await

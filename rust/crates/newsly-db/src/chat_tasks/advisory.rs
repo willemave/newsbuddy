@@ -22,7 +22,7 @@ pub async fn write_chat_partial(
         r#"
         SELECT status, stream_generation, partial_text
         FROM chat_messages
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -47,7 +47,7 @@ pub async fn write_chat_partial(
         SET partial_text = $3,
             stream_revision = COALESCE(stream_revision, 0) + 1,
             stream_updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND stream_generation = $2 AND status = 'processing'
+        WHERE id = $1::bigint AND stream_generation = $2 AND status = 'processing'
         "#,
     )
     .bind(message_id)
@@ -71,7 +71,7 @@ pub async fn write_chat_tool_progress(
         r#"
         SELECT status, stream_generation
         FROM chat_messages
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -99,7 +99,7 @@ pub async fn write_chat_tool_progress(
         UPDATE chat_messages
         SET tool_progress = $3,
             tool_progress_revision = COALESCE(tool_progress_revision, 0) + 1
-        WHERE id::bigint = $1 AND stream_generation = $2 AND status = 'processing'
+        WHERE id = $1::bigint AND stream_generation = $2 AND status = 'processing'
         "#,
     )
     .bind(message_id)
@@ -136,7 +136,7 @@ pub(super) async fn initialize_stream_attempt(
             stream_updated_at = NULL,
             tool_progress = NULL,
             tool_progress_revision = 0
-        WHERE id::bigint = $1 AND status = 'processing'
+        WHERE id = $1::bigint AND status = 'processing'
         "#,
     )
     .bind(message.id)

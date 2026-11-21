@@ -63,8 +63,8 @@ pub async fn find_onboarding_discovery_status(
             inferred_topics,
             error_message
         FROM onboarding_discovery_runs
-        WHERE id::bigint = $1::bigint
-          AND user_id::bigint = $2::bigint
+        WHERE id = $1::bigint
+          AND user_id = $2::bigint
         "#,
     )
     .bind(run_id)
@@ -83,7 +83,7 @@ pub async fn find_onboarding_discovery_status(
             COALESCE(completed_queries, 0) AS completed_queries,
             COALESCE(query_count, 0) AS query_count
         FROM onboarding_discovery_lanes
-        WHERE run_id::bigint = $1::bigint
+        WHERE run_id = $1::bigint
         ORDER BY id ASC
         "#,
     )
@@ -105,7 +105,7 @@ pub async fn find_onboarding_discovery_status(
                     rationale,
                     score
                 FROM onboarding_discovery_suggestions
-                WHERE run_id::bigint = $1::bigint
+                WHERE run_id = $1::bigint
                   AND status = 'new'
                 ORDER BY COALESCE(score, 0) DESC
                 "#,
@@ -157,7 +157,7 @@ pub async fn complete_onboarding_tutorial(
         UPDATE users
         SET has_completed_new_user_tutorial = TRUE,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
         RETURNING id::bigint
         "#,
     )
@@ -179,7 +179,7 @@ pub async fn complete_onboarding_tutorial(
         WHERE id = (
             SELECT id
             FROM onboarding_first_edition_runs
-            WHERE user_id::bigint = $1::bigint
+            WHERE user_id = $1::bigint
               AND status = 'active'
             ORDER BY id DESC
             LIMIT 1

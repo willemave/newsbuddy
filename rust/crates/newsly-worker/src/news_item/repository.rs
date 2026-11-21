@@ -179,7 +179,7 @@ pub(super) async fn prepare_processing(
             r#"
         UPDATE news_items
         SET status = 'processing', updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND status <> 'ready'
+        WHERE id = $1::bigint AND status <> 'ready'
         "#,
         )
         .bind(news_item_id)
@@ -212,7 +212,7 @@ pub(super) async fn load_relation_candidates(
             FROM news_items AS item
             WHERE item.status = 'ready'
               AND item.representative_news_item_id IS NULL
-              AND item.id::bigint <> $1
+              AND item.id <> $1::bigint
               AND item.visibility_scope = $2
               AND item.owner_user_id IS NOT DISTINCT FROM $3::bigint::integer
               AND item.ingested_at >= $4
@@ -235,7 +235,7 @@ pub(super) async fn load_relation_candidates(
             WHERE $12 <> ''
               AND item.status = 'ready'
               AND item.representative_news_item_id IS NULL
-              AND item.id::bigint <> $1
+              AND item.id <> $1::bigint
               AND item.visibility_scope = $2
               AND item.owner_user_id IS NOT DISTINCT FROM $3::bigint::integer
               AND item.ingested_at >= $4
@@ -335,7 +335,7 @@ pub(super) async fn apply_enrichment(
             canonical_story_url = COALESCE(canonical_story_url, $3),
             article_domain = COALESCE(article_domain, $4),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(plan.snapshot.id)
@@ -477,7 +477,7 @@ pub(super) async fn apply_processing(
                         '{article_relevant_links}', $2::jsonb, true
                     )::json,
                     updated_at = timezone('UTC', clock_timestamp())
-                WHERE id::bigint = $1
+                WHERE id = $1::bigint
                 "#,
             )
             .bind(plan.snapshot.id)
@@ -512,7 +512,7 @@ async fn load_news_row(
         news_row_columns!(),
         r#"
         FROM news_items
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     ))
@@ -612,7 +612,7 @@ async fn content_body_pointer(
         FROM contents AS content
         JOIN content_bodies AS body
           ON body.content_id = content.id AND body.variant = 'source'
-        WHERE content.id::bigint = $1 AND content.content_type = 'article'
+        WHERE content.id = $1::bigint AND content.content_type = 'article'
         "#,
     )
     .bind(content_id)
@@ -643,7 +643,7 @@ async fn find_reusable_exact_summary(
         FROM news_items
         WHERE status = 'ready'
           AND representative_news_item_id IS NULL
-          AND id::bigint <> $1
+          AND id <> $1::bigint
           AND visibility_scope = $2
           AND owner_user_id IS NOT DISTINCT FROM $3::bigint::integer
           AND ingested_at >= $4
@@ -831,7 +831,7 @@ async fn reset_processing_status_for_defer(
         r#"
         UPDATE news_items
         SET status = 'new', updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND status = 'processing'
+        WHERE id = $1::bigint AND status = 'processing'
         "#,
     )
     .bind(news_item_id)
@@ -860,7 +860,7 @@ async fn apply_processing_failure(
             )::json,
             processed_at = CASE WHEN $2 = 'failed' THEN $4 ELSE processed_at END,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(plan.snapshot.id)
@@ -907,7 +907,7 @@ async fn persist_summary(
             status = 'ready',
             processed_at = $6,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(plan.snapshot.id)
@@ -956,7 +956,7 @@ async fn reconcile_relation(
             UPDATE news_items
             SET representative_news_item_id = $2,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1 OR representative_news_item_id::bigint = $1
+            WHERE id = $1::bigint OR representative_news_item_id = $1::bigint
             "#,
         )
         .bind(*merged_id)
@@ -967,9 +967,9 @@ async fn reconcile_relation(
     sqlx::query(
         r#"
         UPDATE news_items
-        SET representative_news_item_id = CASE WHEN id::bigint = $2 THEN NULL ELSE $2 END,
+        SET representative_news_item_id = CASE WHEN id = $2::bigint THEN NULL ELSE $2 END,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 OR ($1 <> $2 AND representative_news_item_id::bigint = $1)
+        WHERE id = $1::bigint OR ($1 <> $2 AND representative_news_item_id = $1::bigint)
         "#,
     )
     .bind(plan.snapshot.id)
@@ -992,7 +992,7 @@ async fn recompute_cluster(
         news_row_columns!(),
         r#"
         FROM news_items
-        WHERE id::bigint = $1 OR representative_news_item_id::bigint = $1
+        WHERE id = $1::bigint OR representative_news_item_id = $1::bigint
         ORDER BY ingested_at, id
         FOR UPDATE
         "#,
@@ -1049,7 +1049,7 @@ async fn recompute_cluster(
             representative_news_item_id = NULL,
             cluster_size = $8,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(representative_id)
@@ -1066,10 +1066,10 @@ async fn recompute_cluster(
         r#"
         UPDATE news_items
         SET
-            representative_news_item_id = CASE WHEN id::bigint = $1 THEN NULL ELSE $1 END,
+            representative_news_item_id = CASE WHEN id = $1::bigint THEN NULL ELSE $1 END,
             cluster_size = $2,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = ANY($3)
+        WHERE id = ANY($3)
         "#,
     )
     .bind(representative_id)
@@ -1203,12 +1203,12 @@ async fn enqueue_ready_fanout(
         FROM unnest($2::bigint[]) AS candidate(user_id)
         LEFT JOIN LATERAL (
             SELECT enabled FROM news_filter_preferences
-            WHERE user_id::bigint = candidate.user_id
+            WHERE user_id = candidate.user_id
             ORDER BY revision DESC LIMIT 1
         ) AS preference ON TRUE
         WHERE NOT EXISTS (
             SELECT 1 FROM news_item_read_status
-            WHERE news_item_id::bigint = $1 AND user_id::bigint = candidate.user_id
+            WHERE news_item_id = $1::bigint AND user_id = candidate.user_id
         )
         ORDER BY candidate.user_id
         "#,
@@ -1237,7 +1237,7 @@ async fn enqueue_ready_fanout(
         FROM unnest($1::bigint[]) AS candidate(user_id)
         WHERE NOT EXISTS (
             SELECT 1 FROM onboarding_first_edition_runs
-            WHERE user_id::bigint = candidate.user_id
+            WHERE user_id = candidate.user_id
               AND status = 'active' AND NOT news_seed_settled
         )
         ORDER BY candidate.user_id
@@ -1254,13 +1254,13 @@ async fn enqueue_ready_fanout(
         SELECT candidate.user_id, count(pending.user_id)::bigint,
                EXISTS (
                    SELECT 1 FROM processing_tasks AS task
-                   WHERE task.owner_user_id::bigint = candidate.user_id
+                   WHERE task.owner_user_id = candidate.user_id
                      AND task.task_type = 'briefing_refresh' AND task.status = 'processing'
                      AND task.dedupe_key = 'briefing_refresh:' || candidate.user_id::text || ':append'
                )
         FROM unnest($1::bigint[]) AS candidate(user_id)
         LEFT JOIN briefing_pending_sources AS pending
-          ON pending.user_id::bigint = candidate.user_id AND pending.lens_key IS NULL
+          ON pending.user_id = candidate.user_id AND pending.lens_key IS NULL
         GROUP BY candidate.user_id
         ORDER BY candidate.user_id
         "#,
@@ -1344,7 +1344,7 @@ async fn lock_active_users(
         r#"
         SELECT id::bigint
         FROM users
-        WHERE id::bigint = ANY($1) AND is_active IS TRUE
+        WHERE id = ANY($1) AND is_active IS TRUE
         ORDER BY id
         FOR SHARE
         "#,
@@ -1363,7 +1363,7 @@ async fn visible_user_ids(
             return Ok(Vec::new());
         };
         return sqlx::query_scalar::<_, i64>(
-            "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active IS TRUE",
+            "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active IS TRUE",
         )
         .bind(owner_user_id)
         .fetch_optional(&mut **transaction)
@@ -1403,7 +1403,7 @@ pub(super) async fn persist_extraction_usage(
     writes: &[UsageWrite],
 ) -> Result<(), NewsRepositoryError> {
     let user_id = if let Some(user_id) = user_id {
-        sqlx::query_scalar("SELECT id::bigint FROM users WHERE id::bigint=$1 AND is_active IS TRUE")
+        sqlx::query_scalar("SELECT id::bigint FROM users WHERE id=$1::bigint AND is_active IS TRUE")
             .bind(user_id)
             .fetch_optional(&mut **transaction)
             .await?

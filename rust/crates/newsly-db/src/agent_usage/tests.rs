@@ -94,7 +94,7 @@ async fn response_observation_is_idempotent_and_keeps_exact_routing_metadata(poo
         )
     );
     let count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM vendor_usage_records WHERE task_id::bigint = 77")
+        sqlx::query_scalar("SELECT count(*) FROM vendor_usage_records WHERE task_id = 77")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -163,7 +163,7 @@ async fn openrouter_provider_charge_remains_authoritative(pool: PgPool) {
 #[sqlx::test]
 async fn inactive_owner_drops_attribution_without_cross_user_record(pool: PgPool) {
     let user_id = create_user(&pool).await;
-    sqlx::query("UPDATE users SET is_active = FALSE WHERE id::bigint = $1")
+    sqlx::query("UPDATE users SET is_active = FALSE WHERE id = $1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await

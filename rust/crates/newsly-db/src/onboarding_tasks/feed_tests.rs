@@ -89,7 +89,7 @@ async fn feed_discovery_reads_saved_content_summaries_from_current_metadata_sche
         assert!(![oldest, unsaved, other_saved].contains(&favorite.id));
     }
     let claim: (i64, i32) = sqlx::query_as(
-        "SELECT discovery_task_id::bigint, discovery_retry_count FROM feed_discovery_runs WHERE id::bigint = $1",
+        "SELECT discovery_task_id::bigint, discovery_retry_count FROM feed_discovery_runs WHERE id = $1::bigint",
     )
     .bind(snapshot.run_id)
     .fetch_one(&pool)
@@ -118,7 +118,7 @@ async fn feed_discovery_without_saves_resumes_its_claim_and_reuses_completed_run
         panic!("a retry should resume its existing run");
     };
     assert_eq!(retry.run_id, first.run_id);
-    sqlx::query("UPDATE feed_discovery_runs SET status = 'completed' WHERE id::bigint = $1")
+    sqlx::query("UPDATE feed_discovery_runs SET status = 'completed' WHERE id = $1::bigint")
         .bind(first.run_id)
         .execute(&pool)
         .await

@@ -121,7 +121,7 @@ async fn article_redirect_preserves_knowledge_and_x_provenance_without_duplicate
         before.items[0].knowledge_saved_at
     );
     let (status, metadata): (String, Value) =
-        sqlx::query_as("SELECT status,content_metadata FROM contents WHERE id::bigint=$1")
+        sqlx::query_as("SELECT status,content_metadata FROM contents WHERE id=$1::bigint")
             .bind(alias)
             .fetch_one(&pool)
             .await
@@ -169,7 +169,7 @@ async fn article_redirect_preserves_knowledge_and_x_provenance_without_duplicate
         .unwrap();
     transaction.commit().await.unwrap();
     let subscribed: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM user_scraper_configs WHERE user_id::bigint=$1 AND feed_url='https://example.com/feed.xml' AND is_active)",
+        "SELECT EXISTS (SELECT 1 FROM user_scraper_configs WHERE user_id=$1::bigint AND feed_url='https://example.com/feed.xml' AND is_active)",
     ).bind(user_id).fetch_one(&pool).await.unwrap();
     assert!(subscribed);
 
@@ -188,7 +188,7 @@ async fn assert_unusable_duplicate_keeps_extracted_source(
     finalizer: &ContentFinalizer,
     winner_status: &str,
 ) {
-    sqlx::query("UPDATE contents SET status=$2 WHERE id::bigint=$1")
+    sqlx::query("UPDATE contents SET status=$2 WHERE id=$1::bigint")
         .bind(winner)
         .bind(winner_status)
         .execute(pool)
@@ -228,7 +228,7 @@ async fn assert_unusable_duplicate_keeps_extracted_source(
         .is_none()
     );
     let summaries: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM processing_tasks WHERE content_id::bigint=$1 AND task_type='summarize'",
+        "SELECT count(*) FROM processing_tasks WHERE content_id=$1::bigint AND task_type='summarize'",
     ).bind(retry_alias).fetch_one(pool).await.unwrap();
     assert_eq!(summaries, 1);
 }

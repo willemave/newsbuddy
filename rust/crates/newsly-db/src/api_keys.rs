@@ -199,7 +199,7 @@ pub async fn list_api_keys(
             timezone('UTC', last_used_at) AS last_used_at,
             created_by_admin_user_id::bigint AS created_by_admin_user_id
         FROM user_api_keys
-        WHERE $1::bigint IS NULL OR user_id::bigint = $1
+        WHERE $1::bigint IS NULL OR user_id = $1::bigint
         ORDER BY created_at DESC, id DESC
         ",
     )
@@ -223,7 +223,7 @@ pub async fn revoke_api_key(
         r"
         UPDATE user_api_keys
         SET revoked_at = COALESCE(revoked_at, timezone('UTC', now()))
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         RETURNING
             id::bigint AS id,
             user_id::bigint AS user_id,

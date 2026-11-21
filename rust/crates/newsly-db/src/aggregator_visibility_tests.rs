@@ -222,7 +222,7 @@ async fn visibility_migration_normalizes_aggregator_configs(pool: PgPool) {
     )
     .await;
     let untouched_at = sqlx::query_scalar::<_, Option<chrono::NaiveDateTime>>(
-        "SELECT updated_at FROM user_scraper_configs WHERE id::bigint = $1",
+        "SELECT updated_at FROM user_scraper_configs WHERE id = $1::bigint",
     )
     .bind(canonical)
     .fetch_one(&pool)
@@ -238,7 +238,7 @@ async fn visibility_migration_normalizes_aggregator_configs(pool: PgPool) {
         let pool = pool.clone();
         async move {
             sqlx::query_as::<_, (Value, bool, Option<chrono::NaiveDateTime>)>(
-                "SELECT config::jsonb, is_active, updated_at FROM user_scraper_configs WHERE id::bigint = $1",
+                "SELECT config::jsonb, is_active, updated_at FROM user_scraper_configs WHERE id = $1::bigint",
             )
             .bind(id)
             .fetch_one(&pool)
@@ -346,7 +346,7 @@ async fn read_paths_agree_on_owned_news_and_inactive_subscriptions(pool: PgPool)
     let inactive = global_news(&pool, "arxiv", "owned-inactive", None).await;
     subscribe(&pool, owner, json!({"key": "hfpapers"})).await;
     let inactive_config = subscribe(&pool, owner, json!({"key": "arxiv"})).await;
-    sqlx::query("UPDATE user_scraper_configs SET is_active = false WHERE id::bigint = $1")
+    sqlx::query("UPDATE user_scraper_configs SET is_active = false WHERE id = $1::bigint")
         .bind(inactive_config)
         .execute(&pool)
         .await
@@ -456,7 +456,7 @@ async fn cross_listed_topics_preserve_legacy_and_research_visibility(pool: PgPoo
     }
     // Cross-list overlap must reach every existing visible-news read path.
     let item_id = global_news(&pool, "brutalist", "cross-listed", Some("science")).await;
-    sqlx::query("UPDATE news_items SET raw_metadata = jsonb_set(raw_metadata::jsonb, '{aggregator,topics}', '[\"science\",\"politics\"]')::json WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET raw_metadata = jsonb_set(raw_metadata::jsonb, '{aggregator,topics}', '[\"science\",\"politics\"]')::json WHERE id=$1::bigint")
         .bind(item_id).execute(&pool).await.unwrap();
     let subscriber = user(&pool, "cross-list-politics").await;
     subscribe(
@@ -469,4 +469,22 @@ async fn cross_listed_topics_preserve_legacy_and_research_visibility(pool: PgPoo
         visible_ids(&pool, subscriber, &[item_id]).await,
         BTreeSet::from([item_id])
     );
+}
+
+#[sqlx::test(migrations = false)]
+async fn bulk_mark_read_reports_unique_failed_ids_when_nothing_is_visible(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let hidden = global_news(&pool, "reddit", "t3_hidden", None).await;
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('mark-read-dupes','mark-read-dupes@example.com',true,false) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut transaction = pool.begin().await.unwrap();
+    let marked = mark_visible_news_items_read(&mut transaction, user_id, &[hidden, hidden, hidden])
+        .await
+        .unwrap();
+    assert_eq!(marked.marked_count, 0);
+    assert_eq!(marked.failed_ids, [hidden]);
 }

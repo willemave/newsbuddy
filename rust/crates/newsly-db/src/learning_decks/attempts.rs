@@ -40,7 +40,7 @@ pub async fn create_or_rerun_learning_deck(
     )
     .await?;
     sqlx::query(
-        "UPDATE learning_decks SET latest_task_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE id::bigint = $1",
+        "UPDATE learning_decks SET latest_task_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE id = $1::bigint",
     )
     .bind(deck_id)
     .bind(task_id)
@@ -62,7 +62,7 @@ pub async fn retry_learning_deck(
     sandbox_root: &str,
 ) -> Result<RetryLearningDeckOutcome, LearningDeckRepositoryError> {
     let owned = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM learning_decks WHERE id::bigint = $1 AND user_id::bigint = $2 AND deleted_at IS NULL FOR UPDATE",
+        "SELECT id::bigint FROM learning_decks WHERE id = $1::bigint AND user_id = $2::bigint AND deleted_at IS NULL FOR UPDATE",
     )
     .bind(deck_id)
     .bind(user_id)
@@ -103,7 +103,7 @@ pub async fn retry_learning_deck(
     )
     .await?;
     sqlx::query(
-        "UPDATE learning_decks SET latest_task_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE id::bigint = $1",
+        "UPDATE learning_decks SET latest_task_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE id = $1::bigint",
     )
     .bind(deck_id)
     .bind(task_id)
@@ -127,7 +127,7 @@ pub(super) async fn upsert_learning_deck(
         r#"
         SELECT id::bigint
         FROM learning_decks
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND source_identity = $2
           AND deleted_at IS NULL
         FOR UPDATE
@@ -145,8 +145,8 @@ pub(super) async fn upsert_learning_deck(
             r#"
                 SELECT id::bigint
                 FROM learning_decks
-                WHERE user_id::bigint = $1
-                  AND source_content_id::bigint = $2
+                WHERE user_id = $1::bigint
+                  AND source_content_id = $2::bigint
                   AND deleted_at IS NULL
                 ORDER BY updated_at DESC, id DESC
                 LIMIT 1
@@ -192,7 +192,7 @@ pub(super) async fn upsert_learning_deck(
                 sqlx::query_scalar::<_, i64>(
                     r#"
                 SELECT id::bigint FROM learning_decks
-                WHERE user_id::bigint = $1 AND source_identity = $2 AND deleted_at IS NULL
+                WHERE user_id = $1::bigint AND source_identity = $2 AND deleted_at IS NULL
                 FOR UPDATE
                 "#,
                 )
@@ -204,7 +204,7 @@ pub(super) async fn upsert_learning_deck(
         }
     };
     let existing = sqlx::query_as::<_, (String, Value)>(
-        "SELECT title, source_metadata FROM learning_decks WHERE id::bigint = $1 FOR UPDATE",
+        "SELECT title, source_metadata FROM learning_decks WHERE id = $1::bigint FOR UPDATE",
     )
     .bind(deck_id)
     .fetch_one(&mut **transaction)
@@ -235,7 +235,7 @@ pub(super) async fn upsert_learning_deck(
             source_metadata = $7,
             title = $8,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(deck_id)
@@ -260,9 +260,9 @@ pub(super) async fn active_learning_deck_attempt(
         r#"
         SELECT input_json
         FROM llm_tasks
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND task_kind = 'learning_deck'
-          AND subject_id::bigint = $3
+          AND subject_id = $3::bigint
           AND status = ANY($2)
         FOR UPDATE
         "#,
@@ -346,7 +346,7 @@ pub(super) async fn insert_learning_deck_attempt(
         r#"
         UPDATE llm_tasks
         SET workspace_path = $2
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task_id)
@@ -371,7 +371,7 @@ pub(super) async fn latest_attempt_state(
             ORDER BY (candidate.id = deck.latest_task_id) DESC, candidate.created_at DESC, candidate.id DESC
             LIMIT 1
         ) AS task ON TRUE
-        WHERE deck.id::bigint = $1
+        WHERE deck.id = $1::bigint
         "#,
     )
     .bind(deck_id)
@@ -395,7 +395,7 @@ pub(super) async fn latest_attempt_state(
             ORDER BY (candidate.id = deck.latest_run_id) DESC, candidate.created_at DESC, candidate.id DESC
             LIMIT 1
         ) AS run ON TRUE
-        WHERE deck.id::bigint = $1
+        WHERE deck.id = $1::bigint
         "#,
     )
     .bind(deck_id)

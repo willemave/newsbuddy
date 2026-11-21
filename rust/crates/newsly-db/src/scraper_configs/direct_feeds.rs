@@ -219,7 +219,7 @@ async fn activate_existing_subscription(
                 config = $5,
                 is_active = TRUE,
                 updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1 AND user_id::bigint = $2
+            WHERE id = $1::bigint AND user_id = $2::bigint
             RETURNING
                 id::bigint AS id,
                 user_id::bigint AS user_id,

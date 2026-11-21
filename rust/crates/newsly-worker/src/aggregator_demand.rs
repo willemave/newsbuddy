@@ -120,7 +120,7 @@ mod transitions {
         let queue = QueueKernel::new(pool.clone());
         enqueue_new_demand(&mut tx, &queue, &before).await.unwrap();
         let before = snapshot(&mut tx).await.unwrap();
-        sqlx::query("UPDATE user_scraper_configs SET config=$2 WHERE id::bigint=$1")
+        sqlx::query("UPDATE user_scraper_configs SET config=$2 WHERE id=$1::bigint")
             .bind(config_id)
             .bind(json!({"key":"brutalist","topics":["science","politics"]}))
             .execute(&mut *tx)
@@ -144,13 +144,13 @@ mod transitions {
                 .await
                 .unwrap();
         assert_eq!(unchanged, 2);
-        sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE id::bigint=$1")
+        sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE id=$1::bigint")
             .bind(config_id)
             .execute(&mut *tx)
             .await
             .unwrap();
         let before = snapshot(&mut tx).await.unwrap();
-        sqlx::query("UPDATE user_scraper_configs SET is_active=true WHERE id::bigint=$1")
+        sqlx::query("UPDATE user_scraper_configs SET is_active=true WHERE id=$1::bigint")
             .bind(config_id)
             .execute(&mut *tx)
             .await
@@ -219,7 +219,7 @@ mod chat_tests {
             fetches, 2,
             "chat topic expansion needs a successor even behind an active earlier snapshot"
         );
-        sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE id::bigint=$1")
+        sqlx::query("UPDATE user_scraper_configs SET is_active=false WHERE id=$1::bigint")
             .bind(created.config.id)
             .execute(&pool)
             .await

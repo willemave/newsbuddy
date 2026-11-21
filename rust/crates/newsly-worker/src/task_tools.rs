@@ -196,7 +196,25 @@ impl TaskToolExecutor {
                 let mut stderr = String::new();
                 let mut terminal = None;
                 while let Some(event) = stream.next().await {
-                    match event.map_err(tool_error)? {
+                    let event = match event {
+                        Ok(event) => event,
+                        // Keep what the command already printed: the model needs it to adapt
+                        // (for example, to pipe through `head`) instead of retrying blind.
+                        Err(error @ E2bError::OutputLimitExceeded { .. }) => {
+                            return Ok(ToolOutput {
+                                is_error: true,
+                                content: json!({
+                                    "ok": false,
+                                    "error": error.to_string(),
+                                    "stdout": tail_chars(&stdout, self.max_output_chars),
+                                    "stderr": tail_chars(&stderr, self.max_output_chars),
+                                    "truncated": true,
+                                }),
+                            });
+                        }
+                        Err(error) => return Err(tool_error(error)),
+                    };
+                    match event {
                         CommandEvent::Stdout { text, .. } | CommandEvent::Pty { text, .. } => {
                             stdout.push_str(&text);
                             events.publish(AgentEvent::ToolProgress {
@@ -227,12 +245,15 @@ impl TaskToolExecutor {
                         "command stream ended without a terminal event".to_owned(),
                     ));
                 };
+                let truncated = stdout.chars().count() > self.max_output_chars
+                    || stderr.chars().count() > self.max_output_chars;
                 Ok(ToolOutput {
                     is_error: exit_code != 0,
                     content: json!({
                         "ok": exit_code == 0,
-                        "stdout": stdout,
-                        "stderr": stderr,
+                        "stdout": tail_chars(&stdout, self.max_output_chars),
+                        "stderr": tail_chars(&stderr, self.max_output_chars),
+                        "truncated": truncated,
                         "status": format!("{status:?}").to_ascii_lowercase(),
                         "exit_code": exit_code,
                         "error": error,
@@ -935,7 +956,14 @@ fn validate_knowledge_directory(value: &str) -> Result<(), AgentRuntimeError> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_knowledge_directory;
+    use super::{tail_chars, validate_knowledge_directory};
+
+    #[test]
+    fn tool_output_keeps_the_trailing_characters_on_char_boundaries() {
+        assert_eq!(tail_chars("short", 10), "short");
+        assert_eq!(tail_chars("abcdef", 3), "def");
+        assert_eq!(tail_chars("ééééé", 2), "éé");
+    }
 
     #[test]
     fn knowledge_output_stays_below_the_canonical_task_directory() {

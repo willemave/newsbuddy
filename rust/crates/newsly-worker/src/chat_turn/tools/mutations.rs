@@ -67,8 +67,8 @@ async fn lock_current_message(
             FROM chat_messages AS message
             JOIN chat_sessions AS session ON session.id = message.session_id
             JOIN users AS account ON account.id = session.user_id
-            WHERE message.id::bigint = $1 AND session.id::bigint = $2
-                AND session.user_id::bigint = $3 AND account.is_active = TRUE
+            WHERE message.id = $1::bigint AND session.id = $2::bigint
+                AND session.user_id = $3::bigint AND account.is_active = TRUE
                 AND session.is_archived = FALSE AND message.status = 'processing'
                 AND message.stream_generation = $4
             FOR SHARE OF message, session, account
@@ -109,7 +109,7 @@ mod tests {
                 .unwrap()
         );
         tx.rollback().await.unwrap();
-        sqlx::query("UPDATE chat_sessions SET is_archived=true WHERE id::bigint=$1")
+        sqlx::query("UPDATE chat_sessions SET is_archived=true WHERE id=$1::bigint")
             .bind(session)
             .execute(&pool)
             .await
@@ -121,12 +121,12 @@ mod tests {
                 .unwrap()
         );
         tx.rollback().await.unwrap();
-        sqlx::query("UPDATE chat_sessions SET is_archived=false WHERE id::bigint=$1")
+        sqlx::query("UPDATE chat_sessions SET is_archived=false WHERE id=$1::bigint")
             .bind(session)
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE users SET is_active=false WHERE id::bigint=$1")
+        sqlx::query("UPDATE users SET is_active=false WHERE id=$1::bigint")
             .bind(user)
             .execute(&pool)
             .await

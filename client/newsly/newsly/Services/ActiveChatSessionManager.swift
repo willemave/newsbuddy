@@ -105,6 +105,11 @@ final class ActiveChatSessionManager {
             status: .processing
         )
 
+        // A session lives in exactly one dictionary; a new turn supersedes its completed entry.
+        if let stale = completedSessions.removeValue(forKey: session.id),
+           stale.itemKey != activeSession.itemKey {
+            removeSessionReference(sessionId: session.id, itemKey: stale.itemKey)
+        }
         activeSessions[session.id] = activeSession
         insertSessionReference(sessionId: session.id, itemKey: activeSession.itemKey)
         logger.info("Started tracking session \(session.id)")
@@ -117,13 +122,12 @@ final class ActiveChatSessionManager {
         pollingTasks[sessionId]?.cancel()
         pollingTasks.removeValue(forKey: sessionId)
 
-        let session = activeSessions.removeValue(forKey: sessionId) ?? completedSessions.removeValue(forKey: sessionId)
-        if let session {
-            removeSessionReference(sessionId: sessionId, itemKey: session.itemKey)
-            logger.info("Stopped tracking session \(sessionId)")
-        } else {
-            logger.info("Stopped tracking session \(sessionId)")
+        let active = activeSessions.removeValue(forKey: sessionId)
+        let completed = completedSessions.removeValue(forKey: sessionId)
+        for itemKey in Set([active?.itemKey, completed?.itemKey].compactMap { $0 }) {
+            removeSessionReference(sessionId: sessionId, itemKey: itemKey)
         }
+        logger.info("Stopped tracking session \(sessionId)")
     }
 
     func reset() {

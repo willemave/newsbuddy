@@ -390,7 +390,7 @@ mod tests {
         transaction.commit().await.unwrap();
 
         let now = Utc.with_ymd_and_hms(2026, 9, 28, 10, 10, 0).unwrap();
-        sqlx::query("UPDATE user_news_category_schedule SET next_due_at=$2,next_local_date='2026-09-28',next_window_start_at=$3,next_window_end_at=$4 WHERE user_id::bigint=$1")
+        sqlx::query("UPDATE user_news_category_schedule SET next_due_at=$2,next_local_date='2026-09-28',next_window_start_at=$3,next_window_end_at=$4 WHERE user_id=$1::bigint")
             .bind(user_id)
             .bind(now.naive_utc())
             .bind(Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap().naive_utc())
@@ -417,7 +417,7 @@ mod tests {
                    run.id, task.executor_runtime, task.priority
             FROM news_category_maintenance_runs AS run
             JOIN processing_tasks AS task ON task.id=run.task_id
-            WHERE run.user_id::bigint=$1 AND run.local_date='2026-09-28'
+            WHERE run.user_id=$1::bigint AND run.local_date='2026-09-28'
             ",
         )
         .bind(user_id)

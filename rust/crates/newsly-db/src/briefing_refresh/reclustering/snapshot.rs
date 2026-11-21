@@ -25,7 +25,7 @@ pub async fn load_snapshot(
     model: &str,
 ) -> Result<Option<NewsCategorySnapshot>, BriefingRefreshRepositoryError> {
     let version: Option<i32> = sqlx::query_scalar(
-        "SELECT s.version FROM briefing_states s JOIN users u ON u.id=s.user_id WHERE s.user_id::bigint=$1 AND u.is_active IS TRUE",
+        "SELECT s.version FROM briefing_states s JOIN users u ON u.id=s.user_id WHERE s.user_id=$1::bigint AND u.is_active IS TRUE",
     ).bind(user_id).fetch_optional(&mut **tx).await?;
     let Some(version) = version else {
         return Ok(None);
@@ -94,16 +94,16 @@ pub async fn load_snapshot(
         .map(preparation::semantic_lens_from_row)
         .collect::<Result<Vec<_>, _>>()?;
     let all_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint=$1 ORDER BY key",
+        "SELECT key FROM briefing_lenses WHERE user_id=$1::bigint ORDER BY key",
     )
     .bind(user_id)
     .fetch_all(&mut **tx)
     .await?;
     let pending = sqlx::query_as::<_, NewsCategoryPending>(
-        "SELECT id::bigint AS id, source_id::bigint AS source_id, lens_key FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news' ORDER BY id",
+        "SELECT id::bigint AS id, source_id::bigint AS source_id, lens_key FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news' ORDER BY id",
     ).bind(user_id).fetch_all(&mut **tx).await?;
     let configs: Vec<(i64, Value, bool)> = sqlx::query_as(
-        "SELECT id::bigint,config::jsonb,is_active FROM user_scraper_configs WHERE user_id::bigint=$1 AND scraper_type='aggregator' ORDER BY id",
+        "SELECT id::bigint,config::jsonb,is_active FROM user_scraper_configs WHERE user_id=$1::bigint AND scraper_type='aggregator' ORDER BY id",
     ).bind(user_id).fetch_all(&mut **tx).await?;
     let corpus_hash = input_hash(&format!("{model}|{ENCODER_VERSION}|{corpus:?}|{configs:?}"));
     let fingerprint = input_hash(&format!(
@@ -128,30 +128,30 @@ pub(super) async fn lock_snapshot_inputs(
 ) -> Result<(), sqlx::Error> {
     // Configuration mutations already share-lock the owner; an exclusive owner
     // lock also prevents new subscription rows from appearing during publication.
-    sqlx::query("SELECT id FROM users WHERE id::bigint=$1 FOR UPDATE")
+    sqlx::query("SELECT id FROM users WHERE id=$1::bigint FOR UPDATE")
         .bind(snapshot.user_id)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("SELECT user_id FROM briefing_states WHERE user_id::bigint=$1 FOR UPDATE")
+    sqlx::query("SELECT user_id FROM briefing_states WHERE user_id=$1::bigint FOR UPDATE")
         .bind(snapshot.user_id)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("SELECT id FROM briefing_lenses WHERE user_id::bigint=$1 ORDER BY id FOR UPDATE")
+    sqlx::query("SELECT id FROM briefing_lenses WHERE user_id=$1::bigint ORDER BY id FOR UPDATE")
         .bind(snapshot.user_id)
         .execute(&mut **tx)
         .await?;
     sqlx::query(
-        "SELECT id FROM briefing_pending_sources WHERE user_id::bigint=$1 ORDER BY id FOR UPDATE",
+        "SELECT id FROM briefing_pending_sources WHERE user_id=$1::bigint ORDER BY id FOR UPDATE",
     )
     .bind(snapshot.user_id)
     .execute(&mut **tx)
     .await?;
     let ids: Vec<i64> = snapshot.stories.iter().map(|s| s.source.id).collect();
-    sqlx::query("SELECT id FROM news_items WHERE id::bigint=ANY($1) ORDER BY id FOR SHARE")
+    sqlx::query("SELECT id FROM news_items WHERE id=ANY($1) ORDER BY id FOR SHARE")
         .bind(&ids)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("SELECT news_item_id FROM news_lens_embeddings WHERE news_item_id::bigint=ANY($1) AND model=$2 ORDER BY news_item_id FOR SHARE")
+    sqlx::query("SELECT news_item_id FROM news_lens_embeddings WHERE news_item_id=ANY($1) AND model=$2 ORDER BY news_item_id FOR SHARE")
         .bind(&ids).bind(&snapshot.model).execute(&mut **tx).await?;
     Ok(())
 }

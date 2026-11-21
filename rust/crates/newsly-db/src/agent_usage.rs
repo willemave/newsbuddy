@@ -116,7 +116,7 @@ pub async fn record_agent_model_usage(
             timezone('UTC', clock_timestamp())
         WHERE $18::bigint IS NULL OR EXISTS (
             SELECT 1 FROM users AS account
-            WHERE account.id::bigint = $18 AND account.is_active IS TRUE
+            WHERE account.id = $18::bigint AND account.is_active IS TRUE
         )
         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
         RETURNING id::bigint

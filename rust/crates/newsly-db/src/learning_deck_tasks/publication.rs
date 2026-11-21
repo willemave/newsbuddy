@@ -1,9 +1,8 @@
 //! Exact-lifecycle publication and its artifact/usage projection.
 use super::{
-    LearningDeckModelUsage, LearningDeckTaskRepositoryError, PublishLearningDeck,
-    PublishLearningDeckOutcome, cancel_task, cancel_task_with_reason, fail_task, i64_bound,
-    is_terminal, json_object, load_deck_for_update, load_task_for_update, status_entry,
-    string_array,
+    LearningDeckTaskRepositoryError, PublishLearningDeck, PublishLearningDeckOutcome, cancel_task,
+    cancel_task_with_reason, fail_task, is_terminal, json_object, load_deck_for_update,
+    load_task_for_update, status_entry, string_array,
 };
 use serde_json::{Map, Value, json};
 use sqlx::{Postgres, Transaction};
@@ -58,7 +57,7 @@ pub async fn publish_learning_deck(
         return Ok(PublishLearningDeckOutcome::Cancelled);
     }
     let user_active: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1 AND is_active IS TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active IS TRUE)",
     )
     .bind(task.user_id)
     .fetch_one(&mut **transaction)
@@ -119,7 +118,7 @@ pub async fn publish_learning_deck(
             completed_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp()),
             status_history = COALESCE(status_history, '[]'::jsonb) || jsonb_build_array($9::jsonb)
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(task.id)
@@ -149,7 +148,7 @@ pub async fn publish_learning_deck(
             latest_successful_task_id = $7::bigint::integer,
             source_metadata = $8,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(deck.id)
@@ -162,10 +161,6 @@ pub async fn publish_learning_deck(
     .bind(Value::Object(merged_metadata))
     .execute(&mut **transaction)
     .await?;
-
-    if let Some(usage) = publication.vendor_usage {
-        record_model_usage(transaction, task.id, task.user_id, usage).await?;
-    }
 
     let new_keys = publication
         .artifact
@@ -185,52 +180,10 @@ async fn deck_artifact_keys(
     transaction: &mut Transaction<'_, Postgres>,
     deck_id: i64,
 ) -> Result<Value, sqlx::Error> {
-    sqlx::query_scalar("SELECT artifact_object_keys FROM learning_decks WHERE id::bigint = $1")
+    sqlx::query_scalar("SELECT artifact_object_keys FROM learning_decks WHERE id = $1::bigint")
         .bind(deck_id)
         .fetch_one(&mut **transaction)
         .await
-}
-
-async fn record_model_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    task_id: i64,
-    user_id: i64,
-    usage: &LearningDeckModelUsage,
-) -> Result<(), sqlx::Error> {
-    let total = usage.input_tokens.saturating_add(usage.output_tokens);
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id, task_id, user_id,
-            input_tokens, output_tokens, total_tokens, request_count,
-            cache_read_tokens, cache_write_tokens, currency, metadata, created_at
-        )
-        SELECT
-            $1, $2, 'learning_deck_generation', 'learning_deck.generate', 'queue', $3,
-            $4::bigint::integer, users.id,
-            $5::bigint::integer, $6::bigint::integer, $7::bigint::integer,
-            $8::bigint::integer, $9::bigint::integer, $10::bigint::integer,
-            'USD', $11::jsonb,
-            timezone('UTC', clock_timestamp())
-        FROM users
-        WHERE users.id::bigint = $12 AND users.is_active IS TRUE
-        "#,
-    )
-    .bind(&usage.provider)
-    .bind(&usage.model)
-    .bind(&usage.provider_response_id)
-    .bind(task_id)
-    .bind(i64_bound(usage.input_tokens))
-    .bind(i64_bound(usage.output_tokens))
-    .bind(i64_bound(total))
-    .bind(i64_bound(usage.request_count))
-    .bind(i64_bound(usage.cache_read_tokens))
-    .bind(i64_bound(usage.cache_write_tokens))
-    .bind(Value::Object(usage.metadata.clone()))
-    .bind(user_id)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
 }
 
 fn artifact_json(publication: &PublishLearningDeck<'_>) -> Map<String, Value> {
@@ -331,7 +284,6 @@ mod publication_lifecycle_tests {
                 sandbox_id: None,
                 agent_log_object_key: None,
                 usage_json: &empty,
-                vendor_usage: None,
             },
         )
         .await

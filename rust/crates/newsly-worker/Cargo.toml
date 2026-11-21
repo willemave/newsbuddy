@@ -35,7 +35,6 @@ serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "signal", "sync"] }
 tokio-util.workspace = true
@@ -46,3 +45,6 @@ uuid.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

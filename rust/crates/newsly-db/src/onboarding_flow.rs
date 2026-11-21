@@ -97,7 +97,7 @@ pub async fn create_onboarding_audio_run(
     input: &OnboardingAudioRunInput,
 ) -> Result<OnboardingDiscoveryStatusProjection, OnboardingFlowRepositoryError> {
     let user_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1::bigint AND is_active = TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active = TRUE)",
     )
     .bind(input.user_id)
     .fetch_one(&mut **transaction)
@@ -213,8 +213,8 @@ pub async fn load_agent_onboarding_suggestions(
             feed_url,
             subreddit
         FROM onboarding_discovery_suggestions
-        WHERE run_id::bigint = $1::bigint
-          AND user_id::bigint = $2::bigint
+        WHERE run_id = $1::bigint
+          AND user_id = $2::bigint
           AND status = 'new'
         ORDER BY id ASC
         "#,
@@ -261,8 +261,8 @@ async fn require_completed_discovery_run(
         r#"
         SELECT status
         FROM onboarding_discovery_runs
-        WHERE id::bigint = $1::bigint
-          AND user_id::bigint = $2::bigint
+        WHERE id = $1::bigint
+          AND user_id = $2::bigint
         "#,
     )
     .bind(run_id)
@@ -291,7 +291,7 @@ pub async fn list_existing_onboarding_feed_configs(
             feed_url,
             COALESCE(config, '{}'::json) AS config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND scraper_type IN ('substack', 'atom', 'podcast_rss')
         ORDER BY id ASC
         "#,
@@ -473,7 +473,7 @@ async fn complete_user_onboarding(
             has_completed_onboarding = TRUE,
             reading_experience = 'briefing',
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1::bigint
+        WHERE id = $1::bigint
         "#,
     )
     .bind(user_id)
@@ -499,8 +499,8 @@ async fn validate_completion_selection(
         r#"
         SELECT status
         FROM onboarding_discovery_runs
-        WHERE id::bigint = $1::bigint
-          AND user_id::bigint = $2::bigint
+        WHERE id = $1::bigint
+          AND user_id = $2::bigint
         FOR UPDATE
         "#,
     )
@@ -527,10 +527,10 @@ async fn validate_completion_selection(
         r#"
         SELECT id::bigint
         FROM onboarding_discovery_suggestions
-        WHERE run_id::bigint = $1::bigint
-          AND user_id::bigint = $2::bigint
+        WHERE run_id = $1::bigint
+          AND user_id = $2::bigint
           AND status = 'new'
-          AND id::bigint = ANY($3::bigint[])
+          AND id = ANY($3::bigint[])
         "#,
     )
     .bind(run_id)
@@ -554,7 +554,7 @@ async fn lock_active_user(
         r#"
         SELECT has_completed_new_user_tutorial
         FROM users
-        WHERE id::bigint = $1::bigint AND is_active = TRUE
+        WHERE id = $1::bigint AND is_active = TRUE
         FOR UPDATE
         "#,
     )
@@ -581,7 +581,7 @@ async fn persist_config(
             feed_url,
             COALESCE(config, '{}'::json) AS config
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1::bigint AND scraper_type = $2
+        WHERE user_id = $1::bigint AND scraper_type = $2
         ORDER BY id ASC
         FOR UPDATE
         "#,
@@ -640,7 +640,7 @@ async fn persist_config(
         r#"
         SELECT id::bigint
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1::bigint
+        WHERE user_id = $1::bigint
           AND scraper_type = $2
           AND feed_url = $3
         ORDER BY id ASC
@@ -669,7 +669,7 @@ async fn seed_recent_news(
               AND NOT EXISTS (
                   SELECT 1
                   FROM content_status AS status
-                  WHERE status.user_id::bigint = $1::bigint
+                  WHERE status.user_id = $1::bigint
                     AND status.content_id = content.id
               )
             ORDER BY content.created_at DESC
@@ -712,7 +712,7 @@ async fn seed_selected_feed_content(
               AND NOT EXISTS (
                   SELECT 1
                   FROM content_status AS status
-                  WHERE status.user_id::bigint = $1::bigint
+                  WHERE status.user_id = $1::bigint
                     AND status.content_id = content.id
               )
             ORDER BY content.created_at DESC
@@ -748,7 +748,7 @@ async fn has_feed_discovery_task(
         SELECT EXISTS(
             SELECT 1
             FROM processing_tasks
-            WHERE owner_user_id::bigint = $1::bigint
+            WHERE owner_user_id = $1::bigint
               AND task_type = 'discover_feeds'
               AND status IN ('pending', 'processing', 'completed')
         )
@@ -771,14 +771,14 @@ async fn count_unread_inbox(
           AND EXISTS (
               SELECT 1
               FROM content_status AS status
-              WHERE status.user_id::bigint = $1::bigint
+              WHERE status.user_id = $1::bigint
                 AND status.content_id = content.id
                 AND status.status = 'inbox'
           )
           AND NOT EXISTS (
               SELECT 1
               FROM content_read_status AS read
-              WHERE read.user_id::bigint = $1::bigint
+              WHERE read.user_id = $1::bigint
                 AND read.content_id = content.id
           )
         "#,
@@ -809,7 +809,7 @@ async fn eligible_image_content_ids(
             content.content_type,
             COALESCE(content.content_metadata, '{}'::json) AS content_metadata
         FROM contents AS content
-        WHERE content.id::bigint = ANY($1::bigint[])
+        WHERE content.id = ANY($1::bigint[])
           AND content.content_type IN ('article', 'podcast')
           AND content.status IN ('awaiting_image', 'completed')
           AND NOT EXISTS (

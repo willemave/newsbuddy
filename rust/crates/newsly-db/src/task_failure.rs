@@ -28,7 +28,7 @@ pub async fn settle_failed_task(
     let (payload, retry_count): (
         sqlx::types::Json<serde_json::Map<String, serde_json::Value>>,
         i32,
-    ) = sqlx::query_as("SELECT payload, retry_count FROM processing_tasks WHERE id::bigint = $1")
+    ) = sqlx::query_as("SELECT payload, retry_count FROM processing_tasks WHERE id = $1::bigint")
         .bind(task_id)
         .fetch_one(&mut **tx)
         .await?;
@@ -56,8 +56,8 @@ pub async fn settle_failed_task(
                 error_message = $3,
                 completed_at = timezone('UTC', clock_timestamp()),
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1
-              AND user_id::bigint = $2
+            WHERE id = $1::bigint
+              AND user_id = $2::bigint
               AND status NOT IN ('completed', 'failed', 'cancelled')
             ",
         )
@@ -75,7 +75,7 @@ pub async fn settle_failed_task(
             SET status = 'failed',
                 raw_metadata = (COALESCE(raw_metadata, '{}'::json)::jsonb || jsonb_build_object('processing_error', $2::text))::json,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
               AND status IN ('pending', 'processing')
             ",
         )
@@ -93,7 +93,7 @@ pub async fn settle_failed_task(
             SET status = 'failed',
                 error_message = $2,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
               AND status NOT IN ('completed', 'failed', 'skipped')
             ",
         )
@@ -150,10 +150,10 @@ async fn settle_failed_sources(
                 completed_at = now()
             FROM onboarding_first_edition_runs AS run
             WHERE source.run_id = run.id
-              AND run.id::bigint = $1
+              AND run.id = $1::bigint
               AND run.status = 'active'
               AND ($3::bigint IS NULL
-                  OR run.user_id::bigint = $3)
+                  OR run.user_id = $3::bigint)
               AND source.source_key = ANY($2::text[])
               AND source.status NOT IN ('processed', 'unavailable')
             ",
@@ -165,7 +165,7 @@ async fn settle_failed_sources(
         .await?
         .rows_affected();
         if changed > 0 {
-            sqlx::query("UPDATE onboarding_first_edition_runs SET revision = revision + 1 WHERE id::bigint = $1").bind(run_id).execute(&mut **tx).await?;
+            sqlx::query("UPDATE onboarding_first_edition_runs SET revision = revision + 1 WHERE id = $1::bigint").bind(run_id).execute(&mut **tx).await?;
         }
     }
     Ok(())
@@ -189,16 +189,16 @@ async fn settle_related_workflow(
             SELECT message.session_id::bigint, message.stream_generation
             FROM chat_messages AS message
             JOIN chat_sessions AS session ON session.id = message.session_id
-            WHERE message.id::bigint = $1
-              AND session.user_id::bigint = $2
+            WHERE message.id = $1::bigint
+              AND session.user_id = $2::bigint
               AND message.status = 'processing'
               AND COALESCE(message.stream_generation, 0) <= $3
               AND NOT EXISTS (SELECT 1
                 FROM processing_tasks AS newer
-                WHERE newer.id::bigint > $4
+                WHERE newer.id > $4::bigint
                   AND newer.status IN ('pending', 'processing')
                   AND newer.payload ->> 'message_id' = $1::bigint::text
-                  AND newer.owner_user_id::bigint = $2)
+                  AND newer.owner_user_id = $2::bigint)
             FOR UPDATE OF message
             ",
         )
@@ -213,7 +213,7 @@ async fn settle_related_workflow(
                 r"
                 SELECT id::bigint
                 FROM llm_tasks
-                WHERE user_id::bigint = $1
+                WHERE user_id = $1::bigint
                   AND input_json ->> 'queue_task_id' = $2::bigint::text
                   AND input_json ->> 'message_id' = $3::bigint::text
                   AND status NOT IN ('completed', 'failed', 'cancelled')
@@ -249,17 +249,17 @@ async fn settle_related_workflow(
             r"
             SELECT started_at AT TIME ZONE 'UTC'
             FROM audio_episodes
-            WHERE id::bigint = $1
-              AND user_id::bigint = $2
+            WHERE id = $1::bigint
+              AND user_id = $2::bigint
               AND status = 'processing'
               AND started_at IS NOT NULL
               AND NOT EXISTS (SELECT 1
                 FROM processing_tasks AS newer
-                WHERE newer.id::bigint > $3
+                WHERE newer.id > $3::bigint
                   AND newer.task_type = 'generate_audio_episode'
                   AND newer.status IN ('pending', 'processing')
                   AND newer.payload ->> 'audio_episode_id' = $1::bigint::text
-                  AND newer.owner_user_id::bigint = $2)
+                  AND newer.owner_user_id = $2::bigint)
             FOR UPDATE
             ",
         )
@@ -279,8 +279,8 @@ async fn settle_related_workflow(
             r"
             SELECT id::bigint, discovery_retry_count
             FROM onboarding_discovery_runs
-            WHERE discovery_task_id::bigint = $1
-              AND user_id::bigint = $2
+            WHERE discovery_task_id = $1::bigint
+              AND user_id = $2::bigint
               AND status = 'processing'
               AND discovery_retry_count <= $3
             FOR UPDATE
@@ -310,8 +310,8 @@ async fn settle_related_workflow(
             r"
             SELECT id::bigint, discovery_retry_count
             FROM feed_discovery_runs
-            WHERE discovery_task_id::bigint = $1
-              AND user_id::bigint = $2
+            WHERE discovery_task_id = $1::bigint
+              AND user_id = $2::bigint
               AND status = 'processing'
               AND discovery_retry_count <= $3
             FOR UPDATE
@@ -376,12 +376,12 @@ async fn settle_failed_artwork(
         r"
         SELECT content_metadata::jsonb
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
           AND NOT EXISTS (SELECT 1
             FROM processing_tasks AS newer
-            WHERE newer.id::bigint > $2
+            WHERE newer.id > $2::bigint
               AND newer.task_type = 'generate_image'
-              AND newer.content_id::bigint = $1
+              AND newer.content_id = $1::bigint
               AND newer.status IN ('pending', 'processing'))
         FOR UPDATE
         ",
@@ -409,7 +409,7 @@ async fn settle_failed_artwork(
         UPDATE contents
         SET content_metadata = $2,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(content_id)
@@ -462,7 +462,7 @@ mod tests {
         .await
         .unwrap();
         sqlx::query(
-            "UPDATE processing_tasks SET status = 'failed', error_message = $2 WHERE id::bigint = $1",
+            "UPDATE processing_tasks SET status = 'failed', error_message = $2 WHERE id = $1::bigint",
         )
         .bind(task_id)
         .bind("preparation failed")
@@ -472,7 +472,7 @@ mod tests {
         transaction.commit().await.unwrap();
 
         let (status, error_message): (String, Option<String>) = sqlx::query_as(
-            "SELECT status, error_message FROM processing_tasks WHERE id::bigint = $1",
+            "SELECT status, error_message FROM processing_tasks WHERE id = $1::bigint",
         )
         .bind(task_id)
         .fetch_one(&pool)
@@ -522,7 +522,7 @@ mod tests {
         transaction.commit().await.unwrap();
 
         let (status, metadata): (String, serde_json::Value) = sqlx::query_as(
-            "SELECT status, content_metadata::jsonb FROM contents WHERE id::bigint = $1",
+            "SELECT status, content_metadata::jsonb FROM contents WHERE id = $1::bigint",
         )
         .bind(content_id)
         .fetch_one(&pool)

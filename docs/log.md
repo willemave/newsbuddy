@@ -27,6 +27,32 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-20 — `main` — Codebase assessment and hardening fixes
+
+- **Status:** Complete (uncommitted)
+- **Scope:** Rust queue/worker/scheduler/API/DB/providers, Python extractor, iOS services and view models. The uncommitted Briefing source-cards files were left untouched (except one export-list token in `newsly-db/src/lib.rs`).
+- **Decisions:**
+  - Assessment: 11 area finders plus adversarial verifiers produced 189 findings (183 survived). Ledger: `outputs/codebase-assessment-2026-11-20.md` (git-ignored).
+  - Column-side `int4_col::bigint = $n` casts defeated PK/FK indexes (EXPLAIN showed seq scans on `processing_tasks`, `contents`, `briefing_segments`). Rewrote 1,196 predicates in 136 files to `col = $n::bigint`, then 88 more in the 12 Briefing source-cards WIP files at the owner's request. No column-side casts remain. `scripts/architecture_guard.sh` now rejects `*id::bigint <op>` in Rust sources.
+  - Claim decoding terminalizes only structurally invalid rows; unknown task/queue names still roll back (deploy version skew).
+  - Terminal settlement runs in a savepoint; only deterministic errors (decode/protocol, SQLSTATE 22/23) are absorbed.
+  - Only the transition monitor lifts route write barriers (recorded in architecture).
+  - Deferred: image-cleanup owning-row probe (images are referenced from other projections), Dockerfile cook-layer reorder and yt-dlp builder stage (need a Docker build), `newsly-vm-bootstrap` dependency cleanup (changes the E2B template revision).
+- **Changes:** Queue delay caps, lost-wakeup fix, poison settlement and claim handling, watchdog observation outside the repair transaction, scheduler-tick and observation retention, UTC session time zone; sandbox leak kill, dead Learning Deck usage path removed, bounded bash tool output, batched chat session list; API-key 401, JWKS single-flight with a negative cache, request-id logging, mark-read shared visibility, first-page-only News total; NAT64 SSRF (Rust and Python), extractor parsing off the event loop, shared provider env/Exa URL helpers (fixes `/search/search`), concurrent HN fetch, batched News-filter decisions, drained filter calls keep billing, deterministic podcast failures no longer retry; jsonwebtoken on `aws_lc_rs` (drops the rsa/p256/ed25519 stack), test-only dependencies moved; admin errors keep cause chains; iOS chat-session tracking, transient chat-poll retry, image-cache validation, search and Knowledge chat paging fixes.
+- **Review:** Opus 5.5 verification found no rollback-worthy bug. Addressed its findings:
+  - Skipped settlements now carry a `settlement_failed:` prefix and count toward `terminal_product_mismatches`; unique and exclusion violations are no longer absorbed (law P7 updated).
+  - The API stops if the transition monitor exits.
+  - JWKS attempts, failed ones included, are rate-limited, and the stale key set is served on failure.
+  - Chat polling ends after 3 consecutive failures.
+  - Image cache writes are atomic, and undecodable entries are evicted.
+  - Not taken: product settlement for terminalized invalid claim rows (the queue crate cannot call `newsly-db`); a drain timeout per prepared transition; one retry for empty podcast transcripts.
+- **Validation:**
+  - Final Rust (after the WIP rewrite and module splits): fmt clean, workspace Clippy `-D warnings` clean, 1,244 passed / 0 failed / 8 ignored, public-contract drift check clean.
+  - Extractor: Ruff, MyPy, pytest 67 passed.
+  - iOS full unit suite: 781 passed / 15 failed, all 15 in `AuthenticationViewModelTests` (pre-existing, fails on clean `HEAD`). Affected suites rerun after the review fixes: 29 passed.
+- **Remaining:** The deferred items above. The module-size guard currently fails only on in-progress Briefing files (`newsly-api/src/briefing.rs`, `briefing_refresh/handler.rs`, `briefing_refresh/tests.rs`, `newsly-admin/src/main.rs`); the files this work grew were split back under their limits (`auth/tests.rs`, `chat/session_state.rs`, `terminal_settlement.rs`). Also about 130 open assessment findings (see ledger), including the larger explicit state-machine refactors (content status, `llm_tasks` status, `TaskResult` flags).
+- **Commits:** Uncommitted
+
 ### 2026-11-07 — `main` — Open saved-source decks and process their summaries
 
 - **Status:** Complete

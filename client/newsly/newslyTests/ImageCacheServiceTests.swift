@@ -72,6 +72,33 @@ final class ImageCacheServiceTests: XCTestCase {
         XCTAssertEqual(requests.snapshot.requestCount, 1)
     }
 
+    func testUndecodableSuccessBodyIsNotPersistedAndIsRefetched() async throws {
+        let fixture = makePNGData()
+        let requests = LockedRequestMetrics()
+        let servesImage = LockedFlag()
+        ImageCacheURLProtocol.requestHandler = { request in
+            requests.beginRequest()
+            defer { requests.endRequest() }
+            let body = servesImage.value ? fixture : Data("<html>captive portal</html>".utf8)
+            return Self.response(for: request, data: body)
+        }
+
+        let (cache, session, directory) = try makeCache()
+        defer {
+            session.invalidateAndCancel()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = URL(string: "https://images.example.test/portal.png")!
+
+        let first = await cache.image(for: url, downloadIfMissing: true, targetPixelSize: 256)
+        XCTAssertNil(first)
+
+        servesImage.value = true
+        let second = await cache.image(for: url, downloadIfMissing: true, targetPixelSize: 256)
+        XCTAssertNotNil(second)
+        XCTAssertEqual(requests.snapshot.requestCount, 2)
+    }
+
     func testTargetPixelSizeUsesStableBuckets() {
         XCTAssertNil(ImageRequestSizing.targetPixelSize(for: nil, scale: 2))
         XCTAssertEqual(
@@ -190,5 +217,15 @@ private final class LockedRequestMetrics: @unchecked Sendable {
         lock.withLock {
             concurrentCount -= 1
         }
+    }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue = false
+
+    var value: Bool {
+        get { lock.withLock { storedValue } }
+        set { lock.withLock { storedValue = newValue } }
     }
 }

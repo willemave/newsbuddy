@@ -143,7 +143,7 @@ pub async fn finalize_article_conversion(
     };
     if reused_body {
         sqlx::query(
-            "UPDATE contents SET status = 'processing', updated_at = timezone('UTC', now()) WHERE id::bigint = $1",
+            "UPDATE contents SET status = 'processing', updated_at = timezone('UTC', now()) WHERE id = $1::bigint",
         )
         .bind(content_id)
         .execute(&mut **transaction)
@@ -194,7 +194,7 @@ async fn reuse_news_body(
                     content_format, sha256, byte_size, char_count,
                     timezone('UTC', now()), timezone('UTC', now())
                 FROM content_bodies
-                WHERE content_id::bigint = $2::bigint
+                WHERE content_id = $2::bigint
                 ON CONFLICT (content_id, variant) DO NOTHING
                 "#,
             )
@@ -296,16 +296,16 @@ pub async fn prepare_feed_backfill(
             content.content_metadata::jsonb AS content_metadata,
             EXISTS (
                 SELECT 1 FROM content_status AS user_status
-                WHERE user_status.user_id::bigint = $1::bigint
+                WHERE user_status.user_id = $1::bigint
                   AND user_status.content_id = content.id
                   AND user_status.status = 'inbox'
             ) OR EXISTS (
                 SELECT 1 FROM content_knowledge_saves AS knowledge
-                WHERE knowledge.user_id::bigint = $1::bigint
+                WHERE knowledge.user_id = $1::bigint
                   AND knowledge.content_id = content.id
             ) AS is_accessible
         FROM contents AS content
-        WHERE content.id::bigint = $2::bigint
+        WHERE content.id = $2::bigint
         "#,
     )
     .bind(user_id)
@@ -667,13 +667,13 @@ pub async fn list_submission_projections(
         ) AS action ON TRUE
         LEFT JOIN contents AS content
           ON coalesce(action.action_result::jsonb ->> 'content_id', '') ~ '^[0-9]+$'
-         AND content.id::bigint = (action.action_result::jsonb ->> 'content_id')::bigint
-        WHERE task.user_id::bigint = $1::bigint
+         AND content.id = (action.action_result::jsonb ->> 'content_id')::bigint
+        WHERE task.user_id = $1::bigint
           AND task.task_kind = 'share_action'
           AND (
               $2::timestamp IS NULL
               OR task.created_at < $2::timestamp
-              OR (task.created_at = $2::timestamp AND task.id::bigint < $3::bigint)
+              OR (task.created_at = $2::timestamp AND task.id < $3::bigint)
           )
         ORDER BY task.created_at DESC, task.id DESC
         LIMIT $4::bigint
@@ -897,6 +897,6 @@ pub async fn known_feed_urls(
     user_id: i64,
     content_type: &str,
 ) -> Result<std::collections::BTreeSet<String>, sqlx::Error> {
-    Ok(sqlx::query_scalar::<_, String>("SELECT content.url FROM contents AS content JOIN content_status AS membership ON membership.content_id = content.id WHERE membership.user_id::bigint = $1 AND content.content_type = $2")
+    Ok(sqlx::query_scalar::<_, String>("SELECT content.url FROM contents AS content JOIN content_status AS membership ON membership.content_id = content.id WHERE membership.user_id = $1::bigint AND content.content_type = $2")
         .bind(user_id).bind(content_type).fetch_all(pool).await?.into_iter().collect())
 }

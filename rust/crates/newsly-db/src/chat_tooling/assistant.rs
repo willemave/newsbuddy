@@ -36,7 +36,7 @@ pub async fn list_chat_sources(
       SELECT config.id::bigint, COALESCE(NULLIF(BTRIM(display_name),''), NULLIF(BTRIM(config->>'name'),''), feed_url, 'Unnamed source') AS title,
         feed_url, CASE scraper_type WHEN 'podcast_rss' THEN 'podcast' WHEN 'aggregator' THEN 'aggregator' ELSE 'publication' END AS kind, config.is_active
       FROM user_scraper_configs config JOIN users account ON account.id=config.user_id AND account.is_active
-      WHERE config.user_id::bigint=$1 AND (NOT $4 OR config.is_active)
+      WHERE config.user_id=$1::bigint AND (NOT $4 OR config.is_active)
         AND ($2='' OR strpos(lower(COALESCE(display_name,'') || ' ' || COALESCE(config->>'name','') || ' ' || COALESCE(feed_url,'')),lower($2))>0)
         AND ($3::text IS NULL OR CASE scraper_type WHEN 'podcast_rss' THEN 'podcast' WHEN 'aggregator' THEN 'aggregator' ELSE 'publication' END=$3)
       ORDER BY config.id LIMIT $5 OFFSET $6
@@ -48,7 +48,7 @@ pub async fn find_chat_source(
     user_id: i64,
     id: i64,
 ) -> Result<Option<ChatSource>, ChatToolRepositoryError> {
-    Ok(sqlx::query_as::<_,ChatSource>("SELECT config.id::bigint,COALESCE(NULLIF(BTRIM(display_name),''),NULLIF(BTRIM(config->>'name'),''),feed_url,'Unnamed source') AS title,feed_url,CASE scraper_type WHEN 'podcast_rss' THEN 'podcast' WHEN 'aggregator' THEN 'aggregator' ELSE 'publication' END AS kind,config.is_active FROM user_scraper_configs config JOIN users account ON account.id=config.user_id AND account.is_active WHERE config.user_id::bigint=$1 AND config.id::bigint=$2").bind(user_id).bind(id).fetch_optional(pool).await?)
+    Ok(sqlx::query_as::<_,ChatSource>("SELECT config.id::bigint,COALESCE(NULLIF(BTRIM(display_name),''),NULLIF(BTRIM(config->>'name'),''),feed_url,'Unnamed source') AS title,feed_url,CASE scraper_type WHEN 'podcast_rss' THEN 'podcast' WHEN 'aggregator' THEN 'aggregator' ELSE 'publication' END AS kind,config.is_active FROM user_scraper_configs config JOIN users account ON account.id=config.user_id AND account.is_active WHERE config.user_id=$1::bigint AND config.id=$2::bigint").bind(user_id).bind(id).fetch_optional(pool).await?)
 }
 
 pub async fn search_chat_news_page(
@@ -111,7 +111,7 @@ pub async fn read_chat_news(
     id: i64,
 ) -> Result<Option<Value>, ChatToolRepositoryError> {
     let sql = format!(
-        "{SUBSCRIBED_AGGREGATORS_CTE} SELECT {NEWS_COLUMNS} {NEWS_FROM} {visibility} AND item.id::bigint = $2::bigint",
+        "{SUBSCRIBED_AGGREGATORS_CTE} SELECT {NEWS_COLUMNS} {NEWS_FROM} {visibility} AND item.id = $2::bigint",
         visibility = news_visibility_filter(),
     );
     let row = sqlx::query_as::<_, NewsHitRow>(AssertSqlSafe(sql))
@@ -138,9 +138,9 @@ pub async fn set_chat_news_read(
         r#"{SUBSCRIBED_AGGREGATORS_CTE}
         SELECT EXISTS (
             SELECT 1 FROM news_items AS item
-            JOIN users AS account ON account.id::bigint = $1::bigint AND account.is_active
+            JOIN users AS account ON account.id = $1::bigint AND account.is_active
             {visibility}
-            AND item.id::bigint = $2::bigint
+            AND item.id = $2::bigint
         )"#,
         visibility = news_visibility_filter(),
     );
@@ -155,7 +155,7 @@ pub async fn set_chat_news_read(
     let result = if is_read {
         sqlx::query("INSERT INTO news_item_read_status(user_id,news_item_id,read_at,created_at) VALUES($1::bigint::integer,$2::bigint::integer,timezone('UTC',now()),timezone('UTC',now())) ON CONFLICT(user_id,news_item_id) DO NOTHING").bind(user_id).bind(id).execute(&mut **transaction).await?
     } else {
-        sqlx::query("DELETE FROM news_item_read_status WHERE user_id::bigint=$1 AND news_item_id::bigint=$2").bind(user_id).bind(id).execute(&mut **transaction).await?
+        sqlx::query("DELETE FROM news_item_read_status WHERE user_id=$1::bigint AND news_item_id=$2::bigint").bind(user_id).bind(id).execute(&mut **transaction).await?
     };
     Ok(result.rows_affected() > 0)
 }

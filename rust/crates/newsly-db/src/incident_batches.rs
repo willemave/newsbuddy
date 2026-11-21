@@ -22,7 +22,7 @@ pub async fn archive_candidates(
         SELECT t.id::bigint FROM processing_tasks t
         JOIN contents c ON c.id = t.content_id
         JOIN content_status s ON s.content_id = c.id AND s.user_id = $2
-        WHERE t.id::bigint = ANY($1) AND t.status IN ('pending','processing')
+        WHERE t.id = ANY($1) AND t.status IN ('pending','processing')
           AND t.task_type IN ('process_content','process_podcast_media','summarize')
           AND c.status IN ('new','pending','processing') AND s.status = 'inbox'
           AND c.created_at >= $3 AND c.created_at < $4 AND c.publication_date < $5
@@ -30,7 +30,7 @@ pub async fn archive_candidates(
           AND NOT EXISTS (SELECT 1 FROM content_read_status r WHERE r.content_id = c.id)
           AND NOT EXISTS (SELECT 1 FROM content_knowledge_saves k WHERE k.content_id = c.id)
           AND NOT EXISTS (SELECT 1 FROM content_status other WHERE other.content_id = c.id AND other.user_id <> $2 AND other.status = 'inbox')
-          AND NOT EXISTS (SELECT 1 FROM processing_tasks other WHERE other.content_id = c.id AND other.status IN ('pending','processing') AND NOT (other.id::bigint = ANY($1)))
+          AND NOT EXISTS (SELECT 1 FROM processing_tasks other WHERE other.content_id = c.id AND other.status IN ('pending','processing') AND NOT (other.id = ANY($1)))
         ORDER BY t.id FOR UPDATE OF t,c,s
     ").bind(&scope.task_ids).bind(scope.user_id).bind(scope.created_from).bind(scope.created_before).bind(scope.published_before).bind(scope.config_id.to_string()).fetch_all(&mut **tx).await
 }
@@ -40,11 +40,11 @@ pub async fn apply_archive(
     scope: &ArchiveIncidentScope,
     reason: &str,
 ) -> Result<(), sqlx::Error> {
-    let content_ids: Vec<i64> = sqlx::query_scalar("UPDATE processing_tasks SET status = 'failed', completed_at = timezone('UTC',now()), error_message = $2, locked_by = NULL, locked_at = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id::bigint = ANY($1) RETURNING content_id::bigint")
+    let content_ids: Vec<i64> = sqlx::query_scalar("UPDATE processing_tasks SET status = 'failed', completed_at = timezone('UTC',now()), error_message = $2, locked_by = NULL, locked_at = NULL, lease_token = NULL, lease_expires_at = NULL WHERE id = ANY($1) RETURNING content_id::bigint")
         .bind(&scope.task_ids).bind(format!("incident_cancelled:{reason}")).fetch_all(&mut **tx).await?;
-    sqlx::query("UPDATE content_status SET status = 'archived', updated_at = timezone('UTC',now()) WHERE user_id = $1 AND content_id::bigint = ANY($2) AND status = 'inbox'")
+    sqlx::query("UPDATE content_status SET status = 'archived', updated_at = timezone('UTC',now()) WHERE user_id = $1 AND content_id = ANY($2) AND status = 'inbox'")
         .bind(scope.user_id).bind(&content_ids).execute(&mut **tx).await?;
-    sqlx::query("UPDATE contents SET status = 'failed', error_message = $2, updated_at = timezone('UTC',now()) WHERE id::bigint = ANY($1)")
+    sqlx::query("UPDATE contents SET status = 'failed', error_message = $2, updated_at = timezone('UTC',now()) WHERE id = ANY($1)")
         .bind(&content_ids).bind(format!("incident_cancelled:{reason}")).execute(&mut **tx).await?;
     Ok(())
 }
@@ -55,7 +55,7 @@ pub async fn artwork_candidates(
 ) -> Result<Vec<i64>, sqlx::Error> {
     sqlx::query_scalar(r"
         SELECT c.id::bigint FROM contents c
-        WHERE c.id::bigint = ANY($1) AND c.status IN ('completed','awaiting_image')
+        WHERE c.id = ANY($1) AND c.status IN ('completed','awaiting_image')
           AND c.content_type IN ('article','podcast')
           AND jsonb_typeof(COALESCE(c.content_metadata::jsonb #> '{processing,summary}',c.content_metadata::jsonb #> '{domain,summary}',c.content_metadata::jsonb -> 'summary')) = 'object'
           AND NULLIF(COALESCE(c.content_metadata::jsonb #> '{domain,image_generated_at}',c.content_metadata::jsonb -> 'image_generated_at'),'null'::jsonb) IS NULL
@@ -70,7 +70,7 @@ pub async fn mark_artwork_pending(
     tx: &mut Transaction<'_, Postgres>,
     ids: &[i64],
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE contents SET status = 'awaiting_image', updated_at = timezone('UTC', now()) WHERE id::bigint = ANY($1)")
+    sqlx::query("UPDATE contents SET status = 'awaiting_image', updated_at = timezone('UTC', now()) WHERE id = ANY($1)")
         .bind(ids).execute(&mut **tx).await?;
     Ok(())
 }

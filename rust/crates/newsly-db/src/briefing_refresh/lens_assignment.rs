@@ -66,7 +66,7 @@ pub async fn apply_briefing_lens_assignment(
             UPDATE briefing_lenses
             SET centroid = $4, centroid_weight = $5, centroid_model = $6,
                 updated_at = timezone('UTC', clock_timestamp())
-            WHERE user_id::bigint = $1 AND id::bigint = $2 AND key = $3
+            WHERE user_id = $1::bigint AND id = $2::bigint AND key = $3
               AND tier = 'news' AND status = 'active' AND accepts_news
             "#,
         )
@@ -253,8 +253,8 @@ pub(super) async fn live_refresh_task_is_fenced(
     Ok(sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint FROM processing_tasks
-        WHERE id::bigint = $1 AND task_type = 'briefing_refresh'
-          AND owner_user_id::bigint = $2 AND status = 'processing'
+        WHERE id = $1::bigint AND task_type = 'briefing_refresh'
+          AND owner_user_id = $2::bigint AND status = 'processing'
           AND locked_by = $3 AND lease_token = $4
           AND retry_count = $5 AND executor_runtime = $6
           AND executor_version = $7 AND executor_namespace = $8
@@ -292,7 +292,7 @@ pub(super) async fn pending_snapshot_is_current(
         r#"
         SELECT id::bigint, source_kind, source_id::bigint, lens_key
         FROM briefing_pending_sources
-        WHERE user_id::bigint = $1 AND id::bigint = ANY($2::bigint[])
+        WHERE user_id = $1::bigint AND id = ANY($2::bigint[])
         ORDER BY id
         FOR UPDATE
         "#,
@@ -331,13 +331,13 @@ pub(super) async fn lens_snapshot_is_current(
         .map(semantic_lens_from_row)
         .collect::<Result<Vec<_>, _>>()?;
     let all_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 ORDER BY key FOR SHARE",
+        "SELECT key FROM briefing_lenses WHERE user_id = $1::bigint ORDER BY key FOR SHARE",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
     .await?;
     let active_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news ORDER BY position, id FOR SHARE",
+        "SELECT key FROM briefing_lenses WHERE user_id = $1::bigint AND tier = 'news' AND status = 'active' AND accepts_news ORDER BY position, id FOR SHARE",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -390,7 +390,7 @@ pub(super) async fn next_news_position(
     user_id: i64,
 ) -> Result<i32, sqlx::Error> {
     sqlx::query_scalar::<_, i32>(
-        "SELECT COALESCE(max(position), 1) + 1 FROM briefing_lenses WHERE user_id::bigint = $1",
+        "SELECT COALESCE(max(position), 1) + 1 FROM briefing_lenses WHERE user_id = $1::bigint",
     )
     .bind(user_id)
     .fetch_one(&mut **transaction)
@@ -404,7 +404,7 @@ pub(super) async fn assign_pending_ids(
     lens_key: &str,
 ) -> Result<usize, sqlx::Error> {
     let changed = sqlx::query(
-        "UPDATE briefing_pending_sources SET lens_key = $3 WHERE user_id::bigint = $1 AND id::bigint = ANY($2::bigint[]) AND lens_key IS NULL",
+        "UPDATE briefing_pending_sources SET lens_key = $3 WHERE user_id = $1::bigint AND id = ANY($2::bigint[]) AND lens_key IS NULL",
     )
     .bind(user_id)
     .bind(ids)
@@ -414,7 +414,7 @@ pub(super) async fn assign_pending_ids(
     .rows_affected() as usize;
     if changed > 0 {
         sqlx::query(
-            "UPDATE briefing_lenses SET updated_at = timezone('UTC', clock_timestamp()) WHERE user_id::bigint = $1 AND key = $2",
+            "UPDATE briefing_lenses SET updated_at = timezone('UTC', clock_timestamp()) WHERE user_id = $1::bigint AND key = $2",
         )
         .bind(user_id)
         .bind(lens_key)

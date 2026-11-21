@@ -81,7 +81,7 @@ pub(super) async fn prepare_discussion(
             COALESCE(published_at, processed_at, ingested_at, created_at)
                 + interval '24 hours' AS merge_refresh_deadline
         FROM news_items
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         ",
     )
@@ -128,8 +128,8 @@ pub(super) async fn prepare_discussion(
             next_refresh_after = $3,
             refresh_claim_token = $4,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
-          AND news_item_id::bigint = $2
+        WHERE id = $1::bigint
+          AND news_item_id = $2::bigint
         ",
     )
     .bind(row.id)
@@ -179,7 +179,7 @@ pub(super) async fn discussion_summary_call_is_allowed(
         r"
         SELECT EXISTS (
             SELECT 1 FROM news_item_discussions
-            WHERE id::bigint = $1 AND news_item_id::bigint = $2
+            WHERE id = $1::bigint AND news_item_id = $2::bigint
               AND last_refresh_status = 'processing'
               AND refresh_claim_token = $3
               AND next_refresh_after > timezone('UTC', now())
@@ -367,7 +367,7 @@ pub(super) async fn apply_discussion_mutation(
     plan: &DiscussionFinalizationPlan,
 ) -> Result<DiscussionApplyOutcome, DiscussionRepositoryError> {
     let news_exists = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM news_items WHERE id::bigint = $1 FOR KEY SHARE",
+        "SELECT id::bigint FROM news_items WHERE id = $1::bigint FOR KEY SHARE",
     )
     .bind(plan.snapshot.news_item_id)
     .fetch_optional(&mut **transaction)
@@ -386,7 +386,7 @@ pub(super) async fn apply_discussion_mutation(
             next_refresh_after,
             refresh_claim_token
         FROM news_item_discussions
-        WHERE id::bigint = $1 AND news_item_id::bigint = $2
+        WHERE id = $1::bigint AND news_item_id = $2::bigint
         FOR UPDATE
         ",
     )
@@ -455,8 +455,8 @@ async fn apply_fetched_state(
             raw_comments_ref = $9,
             raw_comments_sha256 = $10,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
-          AND news_item_id::bigint = $2
+        WHERE id = $1::bigint
+          AND news_item_id = $2::bigint
           AND refresh_claim_token = $11
           AND last_refresh_status = 'processing'
         ",
@@ -489,7 +489,7 @@ async fn apply_summary_publication(
                 r"
                 UPDATE news_item_discussions
                 SET summary_status = CASE WHEN summary IS NULL THEN 'not_ready' ELSE summary_status END
-                WHERE id::bigint = $1 AND refresh_claim_token = $2
+                WHERE id = $1::bigint AND refresh_claim_token = $2
                 ",
             )
             .bind(plan.snapshot.discussion_id)
@@ -532,7 +532,7 @@ async fn apply_summary_publication(
                     summary_version = 1,
                     summary_model = $4,
                     summary_generated_at = $5
-                WHERE id::bigint = $1
+                WHERE id = $1::bigint
                   AND refresh_claim_token = $2
                   AND last_refresh_status = 'processing'
                 ",
@@ -566,7 +566,7 @@ async fn store_summarized_tracking(
             summary_comment_count = $4,
             summary_comment_fingerprints = $5,
             summary_incremental_update_count = $6
-        WHERE id::bigint = $1 AND refresh_claim_token = $2
+        WHERE id = $1::bigint AND refresh_claim_token = $2
         ",
     )
     .bind(plan.snapshot.discussion_id)
@@ -592,7 +592,7 @@ async fn store_seen_tracking(
             summary_seen_input_sha256 = $3,
             summary_seen_comment_count = $4,
             summary_seen_comment_fingerprints = $5
-        WHERE id::bigint = $1 AND refresh_claim_token = $2
+        WHERE id = $1::bigint AND refresh_claim_token = $2
         ",
     )
     .bind(plan.snapshot.discussion_id)
@@ -619,7 +619,7 @@ async fn complete_refresh(
             next_refresh_after = $3,
             refresh_claim_token = NULL,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND refresh_claim_token = $2
+        WHERE id = $1::bigint AND refresh_claim_token = $2
         ",
     )
     .bind(plan.snapshot.discussion_id)
@@ -650,7 +650,7 @@ async fn fail_refresh(
             next_refresh_after = $5,
             refresh_claim_token = NULL,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND refresh_claim_token = $2
+        WHERE id = $1::bigint AND refresh_claim_token = $2
         ",
     )
     .bind(plan.snapshot.discussion_id)
@@ -679,7 +679,7 @@ async fn terminal_refresh(
             next_refresh_after = NULL,
             refresh_claim_token = NULL,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND refresh_claim_token = $2
+        WHERE id = $1::bigint AND refresh_claim_token = $2
         ",
     )
     .bind(plan.snapshot.discussion_id)
@@ -704,7 +704,7 @@ async fn release_changed_identity(
             next_refresh_after = timezone('UTC', clock_timestamp()),
             refresh_claim_token = NULL,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1 AND refresh_claim_token = $2
+        WHERE id = $1::bigint AND refresh_claim_token = $2
         ",
     )
     .bind(plan.snapshot.discussion_id)
@@ -951,14 +951,14 @@ mod tests {
             DiscussionPreparation::Deferred(_)
         ));
         transaction.commit().await.unwrap();
-        sqlx::query("UPDATE news_item_discussions SET refresh_claim_token = $2 WHERE news_item_id::bigint = $1")
+        sqlx::query("UPDATE news_item_discussions SET refresh_claim_token = $2 WHERE news_item_id = $1::bigint")
             .bind(item_id).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
         assert!(
             !discussion_summary_call_is_allowed(&pool, &snapshot)
                 .await
                 .unwrap()
         );
-        sqlx::query("UPDATE news_item_discussions SET refresh_claim_token = $2, next_refresh_after = timezone('UTC', now()) - interval '1 second' WHERE news_item_id::bigint = $1")
+        sqlx::query("UPDATE news_item_discussions SET refresh_claim_token = $2, next_refresh_after = timezone('UTC', now()) - interval '1 second' WHERE news_item_id = $1::bigint")
             .bind(item_id).bind(snapshot.claim_token).execute(&pool).await.unwrap();
         assert!(
             !discussion_summary_call_is_allowed(&pool, &snapshot)

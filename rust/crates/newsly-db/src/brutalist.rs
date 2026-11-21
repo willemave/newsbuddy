@@ -140,7 +140,7 @@ mod tests {
             vec![("science".to_owned(), "Example Section".to_owned(), 12)]
         );
         transaction.rollback().await.unwrap();
-        sqlx::query("UPDATE users SET is_active=false WHERE id::bigint=$1")
+        sqlx::query("UPDATE users SET is_active=false WHERE id=$1::bigint")
             .bind(user_id)
             .execute(&mut *connection)
             .await

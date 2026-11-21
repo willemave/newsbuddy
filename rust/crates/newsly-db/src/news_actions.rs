@@ -1,4 +1,6 @@
-use sqlx::{Postgres, Transaction};
+use sqlx::{AssertSqlSafe, Postgres, Transaction};
+
+use crate::news_visibility::{SUBSCRIBED_AGGREGATORS_CTE, visible_news_predicate};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,35 +19,19 @@ pub async fn mark_visible_news_items_read(
     unique_ids.sort_unstable();
     unique_ids.dedup();
 
-    let mut visible_ids = sqlx::query_scalar::<_, i64>(
-        r#"
+    let mut visible_ids = sqlx::query_scalar::<_, i64>(AssertSqlSafe(format!(
+        r"
+        {SUBSCRIBED_AGGREGATORS_CTE}
         SELECT news_item.id::bigint
         FROM news_items AS news_item
-        WHERE news_item.id::bigint = ANY($2::bigint[])
+        WHERE news_item.id = ANY($2::bigint[])
           AND news_item.status = 'ready'
           AND news_item.representative_news_item_id IS NULL
-          AND (
-              (
-                  news_item.visibility_scope = 'user'
-                  AND news_item.owner_user_id::bigint = $1::bigint
-              )
-              OR (
-                  news_item.visibility_scope = 'global'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM user_scraper_configs AS config
-                      WHERE config.user_id = $1::bigint
-                        AND config.scraper_type = 'aggregator'
-                        AND config.is_active IS TRUE
-                        AND aggregator_config_admits(
-                            config.config::jsonb, news_item.platform, news_item.raw_metadata
-                        )
-                  )
-              )
-          )
+          AND {visibility}
         ORDER BY news_item.id
-        "#,
-    )
+        ",
+        visibility = visible_news_predicate("news_item"),
+    )))
     .bind(user_id)
     .bind(&unique_ids)
     .fetch_all(&mut **transaction)
@@ -55,7 +41,7 @@ pub async fn mark_visible_news_items_read(
     if visible_ids.is_empty() {
         return Ok(BulkNewsReadResult {
             marked_count: 0,
-            failed_ids: requested_ids.to_vec(),
+            failed_ids: unique_ids,
         });
     }
 

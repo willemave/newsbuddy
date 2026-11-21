@@ -86,6 +86,16 @@ if [[ "$invalid_python_path" == true ]]; then
   exit 1
 fi
 
+# Casting the column side of an integer key comparison (`id::bigint = $1`) hides the btree
+# index from PostgreSQL. Cast the parameter instead: `id = $1::bigint`.
+if rg -n --glob '*.rs' \
+  '\b[a-z_][a-z0-9_]*id::bigint\s*(=|<>|!=|<=|>=|<|>|IN\b)' \
+  rust/crates
+then
+  echo "SQL compares a column-side ::bigint cast; cast the bound parameter instead" >&2
+  exit 1
+fi
+
 scripts/check_module_size_guardrails.sh
 scripts/check_ios_wire_boundaries.sh
 scripts/build_agent_vm_template.sh --check >/dev/null

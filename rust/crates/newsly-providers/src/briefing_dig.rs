@@ -13,12 +13,11 @@ use serde_json::Map;
 use thiserror::Error;
 
 use crate::exa::{ExaSearchOptions, ExaSearchUsage, search_exa};
-use crate::provider_env::{ProviderEnvError, u64_from_env};
+use crate::provider_env::{ProviderEnvError, secret_env, u64_from_env};
 use crate::{ProviderCredentials, RigAgentEngine};
 
 use crate::agent_support::NoTools;
 
-const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,16 +68,8 @@ impl BriefingDigGateway {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_seconds))
             .build()?;
-        let mut exa_base = Url::parse(
-            &env::var("EXA_API_BASE_URL").unwrap_or_else(|_| DEFAULT_EXA_API_BASE.to_owned()),
-        )
-        .map_err(|error| BriefingDigGatewayError::Url(error.to_string()))?;
-        if !exa_base.path().ends_with('/') {
-            exa_base.set_path(&format!("{}/", exa_base.path().trim_end_matches('/')));
-        }
-        let exa_search_url = exa_base
-            .join("search")
-            .map_err(|error| BriefingDigGatewayError::Url(error.to_string()))?;
+        let exa_search_url =
+            crate::exa::exa_search_url_from_env().map_err(BriefingDigGatewayError::Url)?;
         let credentials = ProviderCredentials::from_env();
         let engine = RigAgentEngine::new(credentials);
         Ok(Self {
@@ -226,13 +217,6 @@ impl BriefingDigGateway {
             usage: outcome.usage,
         })
     }
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(SecretString::from)
 }
 
 fn nonempty(value: impl Into<Option<String>>) -> Option<String> {

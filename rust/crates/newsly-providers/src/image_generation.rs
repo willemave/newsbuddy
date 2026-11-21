@@ -12,6 +12,8 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
+
+use crate::provider_env::{clean_env, secret_env};
 use uuid::Uuid;
 
 use crate::public_http::{PublicHttpError, send_public};
@@ -876,17 +878,6 @@ fn resolve_models(
         return Err(ImageGenerationError::NoConfiguredModels);
     }
     Ok(models)
-}
-
-fn clean_env(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn secret_env(name: &str) -> Option<SecretString> {
-    clean_env(name).map(SecretString::from)
 }
 
 fn env_u64(name: &str, default: u64) -> Result<u64, ImageGenerationError> {

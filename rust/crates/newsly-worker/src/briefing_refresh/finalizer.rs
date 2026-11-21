@@ -56,7 +56,7 @@ impl BriefingRefreshFinalizer {
             // Retry the original Full intent under this exact lease, with the same
             // bounded neutral-conflict budget used by assignment preparation.
             let (retry_count, payload): (i32, Value) = sqlx::query_as(
-                "SELECT retry_count,COALESCE(payload,'{}'::json) FROM processing_tasks WHERE id::bigint=$1",
+                "SELECT retry_count,COALESCE(payload,'{}'::json) FROM processing_tasks WHERE id=$1::bigint",
             ).bind(self.publication.prepared.task_id).fetch_one(&mut **transaction).await?;
             let execution = super::stale_assignment::stale_assignment(
                 self.publication.prepared.task_id,
@@ -70,7 +70,7 @@ impl BriefingRefreshFinalizer {
             }
             return Ok(TaskFinalizerResult::Override(execution.task_result));
         }
-        let initial: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND news_seeded AND NOT news_seed_settled)")
+        let initial: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id=$1::bigint AND status='active' AND news_seeded AND NOT news_seed_settled)")
             .bind(user_id).fetch_one(&mut **transaction).await?;
         let delay = next_sweep_delay(
             initial,
@@ -195,7 +195,7 @@ async fn enqueue_next_sweep(
     // The exact claim is already locked. Release its key so a successful sweep can
     // atomically create its successor instead of deduplicating against itself.
     sqlx::query(
-        "UPDATE processing_tasks SET dedupe_key=NULL WHERE id::bigint=$1 AND dedupe_key=$2",
+        "UPDATE processing_tasks SET dedupe_key=NULL WHERE id=$1::bigint AND dedupe_key=$2",
     )
     .bind(current_task_id)
     .bind(&request.dedupe_key)
@@ -220,7 +220,7 @@ async fn advance_pending_sweep(
         0
     };
     // A coalesced future sweep must not swallow this earlier recovery obligation.
-    sqlx::query("UPDATE processing_tasks SET available_at=CASE WHEN retry_count=0 THEN LEAST(available_at,$2) ELSE available_at END, payload=(COALESCE(payload,'{}'::json)::jsonb || jsonb_build_object('stale_recoveries',$4::bigint,'waiting_for_news_embeddings',COALESCE((payload->>'waiting_for_news_embeddings')::boolean,false) OR $5))::json WHERE owner_user_id::bigint=$1 AND task_type='briefing_refresh' AND status='pending' AND dedupe_key=$3")
+    sqlx::query("UPDATE processing_tasks SET available_at=CASE WHEN retry_count=0 THEN LEAST(available_at,$2) ELSE available_at END, payload=(COALESCE(payload,'{}'::json)::jsonb || jsonb_build_object('stale_recoveries',$4::bigint,'waiting_for_news_embeddings',COALESCE((payload->>'waiting_for_news_embeddings')::boolean,false) OR $5))::json WHERE owner_user_id=$1::bigint AND task_type='briefing_refresh' AND status='pending' AND dedupe_key=$3")
         .bind(request.owner_user_id)
         .bind(request.available_at.map(|value| value.naive_utc()))
         .bind(&request.dedupe_key)
@@ -365,13 +365,13 @@ mod tests {
         let user_id:i64=sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES ('readiness-sweep','readiness-sweep@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
         let queue = QueueKernel::new(pool.clone());
         let task_id = queue.enqueue(sweep_request(user_id, 600)).await.unwrap();
-        sqlx::query("UPDATE processing_tasks SET retry_count=1 WHERE id::bigint=$1")
+        sqlx::query("UPDATE processing_tasks SET retry_count=1 WHERE id=$1::bigint")
             .bind(task_id)
             .execute(&pool)
             .await
             .unwrap();
         let before: chrono::NaiveDateTime =
-            sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id::bigint=$1")
+            sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE id=$1::bigint")
                 .bind(task_id)
                 .fetch_one(&pool)
                 .await
@@ -390,7 +390,7 @@ mod tests {
             .await
             .unwrap();
         tx.commit().await.unwrap();
-        let (after,marker):(chrono::NaiveDateTime,bool)=sqlx::query_as("SELECT available_at,(payload->>'waiting_for_news_embeddings')::boolean FROM processing_tasks WHERE id::bigint=$1").bind(task_id).fetch_one(&pool).await.unwrap();
+        let (after,marker):(chrono::NaiveDateTime,bool)=sqlx::query_as("SELECT available_at,(payload->>'waiting_for_news_embeddings')::boolean FROM processing_tasks WHERE id=$1::bigint").bind(task_id).fetch_one(&pool).await.unwrap();
         assert_eq!(after, before);
         assert!(marker);
     }

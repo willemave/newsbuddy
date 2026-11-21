@@ -69,7 +69,7 @@ impl SchedulerRepository {
         let Some(mut transaction) = self.begin_tick(job, scheduled_for).await? else {
             return Ok(None);
         };
-        let report = match job {
+        let mut report = match job {
             SchedulerJob::Scrape => self.enqueue_scrape(&mut transaction, config).await?,
             SchedulerJob::IntegrationSync => {
                 self.enqueue_integration_sync(&mut transaction, config)
@@ -77,11 +77,7 @@ impl SchedulerRepository {
             }
             SchedulerJob::QueueWatchdog => {
                 let report = self
-                    .repair_queue(
-                        &mut transaction,
-                        config.orphan_lease_grace,
-                        config.watchdog_alert_threshold,
-                    )
+                    .repair_queue(&mut transaction, config.orphan_lease_grace)
                     .await?;
                 ScheduledJobReport {
                     job,
@@ -116,6 +112,19 @@ impl SchedulerRepository {
         )
         .await?;
         transaction.commit().await?;
+        if let Some(maintenance) = report.maintenance.as_mut() {
+            match self
+                .observe_pipeline_health(config.watchdog_alert_threshold)
+                .await
+            {
+                Ok(pipeline) => maintenance.pipeline = pipeline,
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    error_code = "watchdog_observation_failed",
+                    "queue repair committed; health observation will retry on the next tick"
+                ),
+            }
+        }
         Ok(Some(report))
     }
 

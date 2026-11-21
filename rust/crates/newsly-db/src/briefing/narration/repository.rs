@@ -32,7 +32,7 @@ pub async fn prepare_briefing_narration(
         r#"
         SELECT id::bigint AS id, key, tier, title, deck, position
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
           AND ($2::text IS NULL OR key = $2)
           AND ($3::text IS NULL OR tier = $3)
         ORDER BY position, id
@@ -55,7 +55,7 @@ pub async fn prepare_briefing_narration(
         SELECT id::bigint AS id, lens_id::bigint AS lens_id, created_at, status,
                narration_text, blocks::jsonb AS blocks, source_keys::jsonb AS source_keys
         FROM briefing_segments
-        WHERE lens_id::bigint = ANY($1::bigint[]) AND status IN ('active', 'degraded')
+        WHERE lens_id = ANY($1::bigint[]) AND status IN ('active', 'degraded')
         ORDER BY lens_id, created_at DESC, id DESC
         "#,
     )
@@ -216,7 +216,7 @@ pub async fn retry_briefing_narration(
         UPDATE audio_episodes
         SET status = 'pending', error_message = NULL, started_at = NULL,
             completed_at = NULL, audio_storage_path = NULL, updated_at = timezone('UTC', now())
-        WHERE user_id::bigint = $1 AND kind = 'briefing_narration'
+        WHERE user_id = $1::bigint AND kind = 'briefing_narration'
           AND episode_group_id = $2 AND status = 'failed'
         "#,
     )

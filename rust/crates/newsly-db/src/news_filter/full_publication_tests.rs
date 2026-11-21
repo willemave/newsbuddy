@@ -27,7 +27,7 @@ async fn empty_full_cannot_remove_eligible_published_coverage(pool: PgPool) {
         (0, 0)
     );
     let active: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_segments WHERE user_id::bigint=$1 AND status='active'",
+        "SELECT count(*) FROM briefing_segments WHERE user_id=$1::bigint AND status='active'",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -50,7 +50,7 @@ async fn empty_full_preserves_eligible_content_but_allows_removal_from_inbox(poo
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("UPDATE briefing_segments SET source_keys=$2 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE briefing_segments SET source_keys=$2 WHERE user_id=$1::bigint")
         .bind(user_id)
         .bind(json!([format!("content:{content_id}")]))
         .execute(&pool)
@@ -64,7 +64,7 @@ async fn empty_full_preserves_eligible_content_but_allows_removal_from_inbox(poo
     tx.commit().await.unwrap();
     assert!(applied.stale);
     assert_eq!(applied.compacted_segments, 0);
-    sqlx::query("UPDATE content_status SET status='archived' WHERE user_id::bigint=$1 AND content_id::bigint=$2")
+    sqlx::query("UPDATE content_status SET status='archived' WHERE user_id=$1::bigint AND content_id=$2::bigint")
         .bind(user_id).bind(content_id).execute(&pool).await.unwrap();
     let mut tx = pool.begin().await.unwrap();
     let applied = crate::apply_briefing_refresh(&mut tx, &publication, &config())
@@ -98,10 +98,10 @@ async fn complete_full_atomically_replaces_old_coverage(pool: PgPool) {
     let (user_id, news_id, mut publication) = published_full(&pool, "full-complete").await;
     let pending: i64 = sqlx::query_scalar(
         "INSERT INTO briefing_pending_sources(user_id,lens_key,source_kind,source_id,filter_revision,filter_input_hash,filter_outcome)
-         SELECT $1,'news-test','news',id,1,news_filter_input_hash(news_items),'decided' FROM news_items WHERE id::bigint=$2 RETURNING id::bigint")
+         SELECT $1,'news-test','news',id,1,news_filter_input_hash(news_items),'decided' FROM news_items WHERE id=$2::bigint RETURNING id::bigint")
         .bind(user_id).bind(news_id).fetch_one(&pool).await.unwrap();
     publication.append_segments[0].pending_rows[0].id = pending;
-    sqlx::query("UPDATE briefing_segments SET status='degraded' WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE briefing_segments SET status='degraded' WHERE user_id=$1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await
@@ -117,7 +117,7 @@ async fn complete_full_atomically_replaces_old_coverage(pool: PgPool) {
         (1, 1)
     );
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -157,7 +157,7 @@ async fn aborted_full_pending_is_pruned_before_incremental_composition(pool: PgP
         );
         if mode == BriefingRefreshMode::Full {
             sqlx::query(
-                "UPDATE briefing_pending_sources SET lens_key='news-test' WHERE user_id::bigint=$1",
+                "UPDATE briefing_pending_sources SET lens_key='news-test' WHERE user_id=$1::bigint",
             )
             .bind(user_id)
             .execute(&mut *tx)
@@ -168,7 +168,7 @@ async fn aborted_full_pending_is_pruned_before_incremental_composition(pool: PgP
         // Assignment commits, then the Full worker dies before publication.
     }
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)

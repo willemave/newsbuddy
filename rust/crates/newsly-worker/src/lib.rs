@@ -46,7 +46,10 @@ pub mod share_actions;
 pub mod summarization;
 pub mod task_sandbox;
 mod task_tools;
+mod terminal_settlement;
 pub mod x_sync;
+
+use terminal_settlement::finish_finalization;
 
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -827,54 +830,6 @@ fn attempt_outcome(
         Ok(WorkerAttempt::FinalizationRejected { .. }) => (false, "finalization_rejected"),
         Ok(WorkerAttempt::Empty) => (false, "empty"),
         Err(_) => (false, "worker_error"),
-    }
-}
-
-async fn finish_finalization(
-    mut finalization: newsly_queue::FencedFinalization,
-    claim: &ClaimedTask,
-) -> Result<Option<TaskTransition>, QueueError> {
-    if let Some(message) = finalization.terminal_failure().map(str::to_owned) {
-        newsly_db::settle_failed_task(
-            finalization.transaction_mut(),
-            claim.id,
-            terminal_task_settlement(claim.task_type),
-            claim.content_id,
-            claim.owner_user_id,
-            &message,
-        )
-        .await
-        .map_err(QueueError::from)?;
-    }
-    finalization.finish().await
-}
-
-const fn terminal_task_settlement(task_type: TaskType) -> newsly_db::TerminalTaskSettlement {
-    use newsly_db::TerminalTaskSettlement as Settlement;
-
-    match task_type {
-        TaskType::Scrape => Settlement::Scrape,
-        TaskType::BackfillFeeds => Settlement::BackfillFeeds,
-        TaskType::AnalyzeUrl
-        | TaskType::ProcessContent
-        | TaskType::ProcessPodcastMedia
-        | TaskType::DownloadTweetVideoAudio
-        | TaskType::TranscribeTweetVideo
-        | TaskType::Summarize => Settlement::Content,
-        TaskType::ProcessNewsItem => Settlement::NewsItem,
-        TaskType::GenerateImage => Settlement::Artwork,
-        TaskType::DigDeeper | TaskType::ChatTurn => Settlement::ChatTurn,
-        TaskType::DiscoverFeeds => Settlement::FeedDiscover,
-        TaskType::OnboardingDiscover => Settlement::OnboardingDiscover,
-        TaskType::GenerateAudioEpisode => Settlement::AudioEpisode,
-        TaskType::RunLlmTask => Settlement::LlmTask,
-        TaskType::EnrichNewsItemArticle
-        | TaskType::FetchNewsItemDiscussion
-        | TaskType::SyncIntegration
-        | TaskType::BriefingRefresh
-        | TaskType::PrepareNewsLens
-        | TaskType::ReclusterNewsLenses
-        | TaskType::DeleteUserAccount => Settlement::None,
     }
 }
 

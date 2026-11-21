@@ -20,8 +20,8 @@ pub(super) async fn load_history(
         r#"
         SELECT id::bigint, message_list
         FROM chat_messages
-        WHERE session_id::bigint = $1
-          AND id::bigint <> $2
+        WHERE session_id = $1::bigint
+          AND id <> $2::bigint
           AND status = 'completed'
         ORDER BY created_at DESC, id DESC
         LIMIT $3
@@ -113,7 +113,7 @@ pub(super) async fn load_user_provider_key(
         r#"
         SELECT access_token_encrypted
         FROM user_integration_connections
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
           AND provider = $2
           AND is_active = TRUE
           AND COALESCE(access_token_encrypted, '') <> ''
@@ -156,7 +156,7 @@ pub(super) async fn get_or_create_dig_deeper_session(
         r#"
         SELECT id::bigint
         FROM chat_sessions
-        WHERE content_id::bigint = $1 AND user_id::bigint = $2 AND is_archived = FALSE
+        WHERE content_id = $1::bigint AND user_id = $2::bigint AND is_archived = FALSE
         ORDER BY id
         LIMIT 1
         FOR UPDATE
@@ -171,7 +171,7 @@ pub(super) async fn get_or_create_dig_deeper_session(
             r#"
             UPDATE chat_sessions
             SET title = $2, updated_at = timezone('UTC', clock_timestamp())
-            WHERE id::bigint = $1 AND title IS DISTINCT FROM $2
+            WHERE id = $1::bigint AND title IS DISTINCT FROM $2
             "#,
         )
         .bind(session_id)
@@ -238,7 +238,7 @@ pub(super) async fn build_dig_deeper_prompt(
         r#"
         SELECT discussion_data::jsonb AS discussion_data
         FROM content_discussions
-        WHERE content_id::bigint = $1
+        WHERE content_id = $1::bigint
         ORDER BY id DESC
         LIMIT 1
         "#,

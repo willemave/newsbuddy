@@ -12,7 +12,7 @@ P5. User-owned work rejects inactive owners and payloads that claim a different 
 
 P6. A worker may start paid provider work or publish partial or terminal state only while it owns the live lease and current attempt generation. Superseded work cannot finalize.
 
-P7. Retryable failures use a bounded retry budget, terminal failures stop, prerequisite deferrals preserve that budget, and public status remains truthful. Expired execution attempts consume that budget, bounded execution deadlines prevent endless lease renewal, and terminal queue failure settles the corresponding active product workflow. Source HTTP retry delays are respected, with positive jitter spreading recovery attempts.
+P7. Retryable failures use a bounded retry budget, terminal failures stop, prerequisite deferrals preserve that budget, and public status remains truthful. Expired execution attempts consume that budget, bounded execution deadlines prevent endless lease renewal, and terminal queue failure settles the corresponding active product workflow. If that settlement fails for a reason that would repeat on every attempt, the queue row still terminates and is marked and counted as a terminal queue/product mismatch rather than being reclaimed forever. Source HTTP retry delays are respected, with positive jitter spreading recovery attempts.
 
 P8. Cancellation or deletion prevents stale work from publishing later.
 

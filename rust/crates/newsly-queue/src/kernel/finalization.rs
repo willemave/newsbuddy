@@ -49,6 +49,19 @@ impl FencedFinalization {
         Ok(())
     }
 
+    /// Prefixes a terminal failure's durable message (for example to record that product
+    /// settlement was skipped) so operators can find and count it.
+    pub fn prefix_terminal_failure(&mut self, prefix: &str) {
+        if self.resolved.outcome == FinalizationOutcome::Failed {
+            let message = self
+                .resolved
+                .error_message
+                .take()
+                .unwrap_or_else(|| "Task failed".to_owned());
+            self.resolved.error_message = Some(format!("{prefix}{message}"));
+        }
+    }
+
     pub fn terminal_failure(&self) -> Option<&str> {
         (self.resolved.outcome == FinalizationOutcome::Failed).then(|| {
             self.resolved
@@ -64,7 +77,7 @@ impl FencedFinalization {
     /// Returns a database error; an expired lease rolls back the checkpoint.
     pub async fn checkpoint(mut self) -> Result<bool, QueueError> {
         let live: bool = sqlx::query_scalar(
-            "SELECT lease_expires_at > timezone('UTC', clock_timestamp()) FROM processing_tasks WHERE id::bigint = $1",
+            "SELECT lease_expires_at > timezone('UTC', clock_timestamp()) FROM processing_tasks WHERE id = $1::bigint",
         ).bind(self.claim.id).fetch_one(&mut *self.transaction).await?;
         if !live {
             return Ok(false);

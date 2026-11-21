@@ -43,7 +43,7 @@ pub async fn prepare_scrape_sources(
             SELECT run.user_id::bigint
             FROM onboarding_first_edition_runs AS run
             JOIN users AS owner ON owner.id = run.user_id
-            WHERE run.id::bigint = $1 AND run.status = 'active' AND owner.is_active IS TRUE
+            WHERE run.id = $1::bigint AND run.status = 'active' AND owner.is_active IS TRUE
             FOR SHARE OF run, owner
             "#,
         )
@@ -68,9 +68,9 @@ pub async fn prepare_scrape_sources(
         JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
         WHERE config.is_active IS TRUE
           AND config.scraper_type = ANY($4::text[])
-          AND ($2::bigint IS NULL OR config.id::bigint = $2)
-          AND ($3::bigint IS NULL OR config.user_id::bigint = $3)
-          AND ($1::bigint IS NULL OR config.user_id::bigint = $1)
+          AND ($2::bigint IS NULL OR config.id = $2::bigint)
+          AND ($3::bigint IS NULL OR config.user_id = $3::bigint)
+          AND ($1::bigint IS NULL OR config.user_id = $1::bigint)
         ORDER BY config.id
         FOR SHARE OF config, owner
         "#,
@@ -121,7 +121,7 @@ pub async fn matching_scrape_config_ids(
             config.config::jsonb AS config
         FROM user_scraper_configs AS config
         JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
-        WHERE config.id::bigint = ANY($1::bigint[]) AND config.is_active IS TRUE
+        WHERE config.id = ANY($1::bigint[]) AND config.is_active IS TRUE
         ORDER BY config.id
         FOR UPDATE OF config
         "#,
@@ -296,7 +296,7 @@ pub async fn persist_scraped_news(
     let raw_metadata = if record.platform == "brutalist" {
         if let Some(id) = existing_id {
             let previous: Value = sqlx::query_scalar(
-                "SELECT raw_metadata::jsonb FROM news_items WHERE id::bigint=$1",
+                "SELECT raw_metadata::jsonb FROM news_items WHERE id=$1::bigint",
             )
             .bind(id)
             .fetch_one(&mut **transaction)
@@ -352,7 +352,7 @@ pub async fn persist_scraped_news(
                 status = CASE WHEN status = 'ready' AND $18 <> 'ready' THEN status ELSE $18 END,
                 published_at = COALESCE($19, published_at),
                 updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1
+            WHERE id = $1::bigint
             "#,
         )
         .bind(news_item_id)
@@ -658,7 +658,7 @@ pub async fn record_first_edition_scrape_result(
     let run = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT id::bigint FROM onboarding_first_edition_runs
-        WHERE id::bigint = $1 AND status = 'active'
+        WHERE id = $1::bigint AND status = 'active'
         FOR UPDATE
         "#,
     )
@@ -673,7 +673,7 @@ pub async fn record_first_edition_scrape_result(
         r#"
         SELECT id::bigint AS id, source_key, source_kind, status, processed_item_count
         FROM onboarding_first_edition_sources
-        WHERE run_id::bigint = $1 AND source_kind IN ('aggregator', 'reddit')
+        WHERE run_id = $1::bigint AND source_kind IN ('aggregator', 'reddit')
         ORDER BY id
         FOR UPDATE
         "#,
@@ -719,7 +719,7 @@ pub async fn record_first_edition_scrape_result(
             SET status = $1,
                 processed_item_count = $2,
                 completed_at = COALESCE(completed_at, timezone('UTC', now()))
-            WHERE id::bigint = $3
+            WHERE id = $3::bigint
             "#,
         )
         .bind(outcome)
@@ -731,7 +731,7 @@ pub async fn record_first_edition_scrape_result(
     }
     if changed {
         sqlx::query(
-            "UPDATE onboarding_first_edition_runs SET revision = revision + 1 WHERE id::bigint = $1",
+            "UPDATE onboarding_first_edition_runs SET revision = revision + 1 WHERE id = $1::bigint",
         )
         .bind(run_id)
         .execute(&mut **transaction)

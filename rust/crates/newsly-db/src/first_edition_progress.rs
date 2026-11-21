@@ -20,16 +20,23 @@ pub async fn attach_content(
     user_id: i64,
     ids: &[i64],
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(r"INSERT INTO onboarding_first_edition_items(run_id,source_kind,source_id)
+    sqlx::query(
+        r"INSERT INTO onboarding_first_edition_items(run_id,source_kind,source_id)
         SELECT r.id,'content',c.id FROM onboarding_first_edition_runs r
         JOIN content_status s ON s.user_id=r.user_id JOIN contents c ON c.id=s.content_id
-        WHERE r.id::bigint=$1 AND r.user_id::bigint=$2 AND r.status='active' AND c.id::bigint=ANY($3)
-        ON CONFLICT DO NOTHING").bind(run_id).bind(user_id).bind(ids).execute(connection).await?;
+        WHERE r.id=$1::bigint AND r.user_id=$2::bigint AND r.status='active' AND c.id=ANY($3)
+        ON CONFLICT DO NOTHING",
+    )
+    .bind(run_id)
+    .bind(user_id)
+    .bind(ids)
+    .execute(connection)
+    .await?;
     Ok(())
 }
 
 pub async fn tiers(pool: &PgPool, run_id: i64) -> Result<Vec<FirstRunTierProjection>, sqlx::Error> {
-    sqlx::query_as(r"WITH run AS (SELECT * FROM onboarding_first_edition_runs WHERE id::bigint=$1 AND status='active'),
+    sqlx::query_as(r"WITH run AS (SELECT * FROM onboarding_first_edition_runs WHERE id=$1::bigint AND status='active'),
         items AS (
             SELECT CASE WHEN c.content_type='podcast' THEN 'audio' ELSE 'longform' END AS tier,
                 CASE
@@ -74,7 +81,7 @@ pub async fn reconcile_sources(
 ) -> Result<(), sqlx::Error> {
     expire_runs(connection, user_id).await?;
     sqlx::query(r"UPDATE onboarding_first_edition_sources s SET status='unavailable', completed_at=timezone('UTC',now())
-        FROM onboarding_first_edition_runs r WHERE s.run_id=r.id AND r.user_id::bigint=$1 AND r.status='active'
+        FROM onboarding_first_edition_runs r WHERE s.run_id=r.id AND r.user_id=$1::bigint AND r.status='active'
         AND s.status NOT IN ('processed','unavailable') AND NOT EXISTS (
           SELECT 1 FROM user_scraper_configs c WHERE c.user_id=r.user_id AND c.is_active AND (
             (s.source_kind='feed' AND s.source_key='feed:' || c.id::text)
@@ -83,7 +90,7 @@ pub async fn reconcile_sources(
         .bind(user_id).execute(&mut *connection).await?;
     sqlx::query(r"UPDATE onboarding_first_edition_sources s SET check_cutoff=now()
         FROM onboarding_first_edition_runs r, source_ingestion_health h
-        WHERE s.run_id=r.id AND r.user_id::bigint=$1 AND r.status='active' AND s.source_kind='aggregator'
+        WHERE s.run_id=r.id AND r.user_id=$1::bigint AND r.status='active' AND s.source_kind='aggregator'
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NULL
           AND h.source_key='aggregator:' || substr(s.source_key,9)
           AND h.last_success_at >= (r.started_at AT TIME ZONE 'UTC') - CASE WHEN s.source_key IN ('scraper:arxiv','scraper:hfpapers') THEN interval '135 minutes' ELSE interval '75 minutes' END
@@ -103,7 +110,7 @@ pub async fn reconcile_sources(
           AND COALESCE(n.published_at,n.ingested_at) >= timezone('UTC',s.check_cutoff)-interval '24 hours'
           AND EXISTS(SELECT 1 FROM user_scraper_configs c WHERE c.user_id=r.user_id AND c.is_active AND c.scraper_type='aggregator'
             AND aggregator_config_admits(c.config::jsonb, n.platform, n.raw_metadata))
-        WHERE r.user_id::bigint=$1 AND r.status='active' AND s.source_kind='aggregator'
+        WHERE r.user_id=$1::bigint AND r.status='active' AND s.source_kind='aggregator'
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NOT NULL GROUP BY s.id
     ) UPDATE onboarding_first_edition_sources s SET processed_item_count=c.ready,
         status=CASE WHEN c.pending=0 THEN 'processed' ELSE 'processing' END,
@@ -112,7 +119,7 @@ pub async fn reconcile_sources(
         .bind(user_id).execute(&mut *connection).await?;
     sqlx::query(r"UPDATE onboarding_first_edition_sources s SET status='unavailable',completed_at=timezone('UTC',now())
         FROM onboarding_first_edition_runs r, source_ingestion_health h
-        WHERE s.run_id=r.id AND r.user_id::bigint=$1 AND r.status='active' AND s.source_kind='aggregator'
+        WHERE s.run_id=r.id AND r.user_id=$1::bigint AND r.status='active' AND s.source_kind='aggregator'
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NULL
           AND h.source_key='aggregator:' || substr(s.source_key,9) AND h.error_code IS NOT NULL
           AND h.last_attempt_at >= r.started_at AT TIME ZONE 'UTC'
@@ -123,7 +130,7 @@ pub async fn reconcile_sources(
         .bind(user_id).execute(&mut *connection).await?;
     sqlx::query(r"UPDATE onboarding_first_edition_sources s SET status='unavailable',completed_at=timezone('UTC',now())
         FROM onboarding_first_edition_runs r
-        WHERE s.run_id=r.id AND r.user_id::bigint=$1 AND r.status='active'
+        WHERE s.run_id=r.id AND r.user_id=$1::bigint AND r.status='active'
           AND s.source_kind='aggregator' AND s.status NOT IN ('processed','unavailable')
           AND s.check_cutoff IS NULL
           AND r.started_at < timezone('UTC',now()) - interval '45 minutes'")
@@ -132,7 +139,7 @@ pub async fn reconcile_sources(
 }
 
 pub async fn expire_runs(connection: &mut PgConnection, user_id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE onboarding_first_edition_runs SET status='expired', completed_at=timezone('UTC',now()) WHERE user_id::bigint=$1 AND status='active' AND started_at < timezone('UTC',now())-interval '24 hours'")
+    sqlx::query("UPDATE onboarding_first_edition_runs SET status='expired', completed_at=timezone('UTC',now()) WHERE user_id=$1::bigint AND status='active' AND started_at < timezone('UTC',now())-interval '24 hours'")
         .bind(user_id).execute(connection).await?;
     Ok(())
 }

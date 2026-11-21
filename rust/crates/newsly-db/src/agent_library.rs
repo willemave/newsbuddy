@@ -126,8 +126,8 @@ async fn load_library_content(
                 save.content_id::bigint AS content_id,
                 min(save.saved_at) AS saved_at
             FROM content_knowledge_saves AS save
-            WHERE save.user_id::bigint = $1
-              AND ($2::bigint IS NULL OR save.content_id::bigint = $2)
+            WHERE save.user_id = $1::bigint
+              AND ($2::bigint IS NULL OR save.content_id = $2::bigint)
             GROUP BY save.content_id
         ),
         chats AS (
@@ -136,8 +136,8 @@ async fn load_library_content(
                 array_agg(session.id::bigint ORDER BY session.id) AS chat_session_ids,
                 min(session.created_at) AT TIME ZONE 'UTC' AS saved_at
             FROM chat_sessions AS session
-            WHERE session.user_id::bigint = $1
-              AND ($2::bigint IS NULL OR session.content_id::bigint = $2)
+            WHERE session.user_id = $1::bigint
+              AND ($2::bigint IS NULL OR session.content_id = $2::bigint)
               AND session.content_id IS NOT NULL
               AND session.is_archived = false
             GROUP BY session.content_id
@@ -174,7 +174,7 @@ async fn load_library_content(
             rendered_body.updated_at AS rendered_updated_at
         FROM reasons
         JOIN users AS account
-          ON account.id::bigint = $1
+          ON account.id = $1::bigint
          AND account.is_active = true
         JOIN contents AS content ON content.id = reasons.content_id
         LEFT JOIN content_bodies AS source_body
@@ -233,8 +233,8 @@ pub async fn lock_authorized_content(
         JOIN contents AS content ON TRUE
         LEFT JOIN content_knowledge_saves AS saved
           ON saved.user_id = account.id AND saved.content_id = content.id
-        WHERE account.id::bigint = $1::bigint AND account.is_active
-          AND content.id::bigint = ANY($2::bigint[])
+        WHERE account.id = $1::bigint AND account.is_active
+          AND content.id = ANY($2::bigint[])
           AND {READABLE_CONTENT_PREDICATE}
         ORDER BY content.id
         FOR SHARE OF content
@@ -292,9 +292,9 @@ pub async fn find_agent_readable_items(
           ON rendered.content_id = content.id AND rendered.variant = 'rendered'
         LEFT JOIN content_bodies AS source
           ON source.content_id = content.id AND source.variant = 'source'
-        WHERE account.id::bigint = $1
+        WHERE account.id = $1::bigint
           AND account.is_active = TRUE
-          AND content.id::bigint = ANY($2)
+          AND content.id = ANY($2)
           AND {READABLE_CONTENT_PREDICATE}
         ORDER BY array_position($2::bigint[], content.id::bigint)
         "#

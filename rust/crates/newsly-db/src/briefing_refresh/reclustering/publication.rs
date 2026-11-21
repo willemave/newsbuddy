@@ -9,7 +9,7 @@ pub async fn load_candidate(
     user_id: i64,
 ) -> Result<Option<NewsCategoryCandidate>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT input_hash,candidate,naming_result FROM news_category_candidates WHERE user_id::bigint=$1",
+        "SELECT input_hash,candidate,naming_result FROM news_category_candidates WHERE user_id=$1::bigint",
     ).bind(user_id).fetch_optional(pool).await
 }
 
@@ -39,10 +39,10 @@ pub async fn apply_partition(
     }
     validate_partition(snapshot, lenses)?;
     let user_id = snapshot.user_id;
-    sqlx::query("UPDATE briefing_lenses SET accepts_news=false WHERE user_id::bigint=$1 AND tier='news' AND key<>'misc' AND accepts_news")
+    sqlx::query("UPDATE briefing_lenses SET accepts_news=false WHERE user_id=$1::bigint AND tier='news' AND key<>'misc' AND accepts_news")
         .bind(user_id).execute(&mut **tx).await?;
     let mut next_position: i32 = sqlx::query_scalar(
-        "SELECT coalesce(max(position),1)+1 FROM briefing_lenses WHERE user_id::bigint=$1",
+        "SELECT coalesce(max(position),1)+1 FROM briefing_lenses WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&mut **tx)
@@ -81,7 +81,7 @@ pub async fn apply_partition(
     sqlx::query(
         r#"UPDATE briefing_pending_sources AS pending
            SET lens_key=NULL
-           WHERE pending.id::bigint=ANY($2::bigint[]) AND pending.user_id::bigint=$1
+           WHERE pending.id=ANY($2::bigint[]) AND pending.user_id=$1::bigint
              AND pending.source_kind='news'"#,
     )
     .bind(user_id)
@@ -91,12 +91,12 @@ pub async fn apply_partition(
     sqlx::query(r#"UPDATE briefing_lenses AS lens
         SET status='retired', retired_at=timezone('UTC',clock_timestamp()),
             updated_at=timezone('UTC',clock_timestamp())
-        WHERE lens.user_id::bigint=$1 AND lens.status='active' AND NOT lens.accepts_news
+        WHERE lens.user_id=$1::bigint AND lens.status='active' AND NOT lens.accepts_news
           AND lens.tier='news' AND lens.key<>'misc'
           AND NOT EXISTS (SELECT 1 FROM briefing_segments segment WHERE segment.lens_id=lens.id AND segment.status IN ('active','degraded'))
           AND NOT EXISTS (SELECT 1 FROM briefing_pending_sources pending WHERE pending.user_id=lens.user_id AND pending.lens_key=lens.key)"#)
         .bind(user_id).execute(&mut **tx).await?;
-    sqlx::query("UPDATE briefing_states SET version=version+1 WHERE user_id::bigint=$1")
+    sqlx::query("UPDATE briefing_states SET version=version+1 WHERE user_id=$1::bigint")
         .bind(user_id)
         .execute(&mut **tx)
         .await?;

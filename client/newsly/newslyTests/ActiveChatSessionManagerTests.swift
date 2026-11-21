@@ -83,6 +83,32 @@ final class ActiveChatSessionManagerTests: XCTestCase {
         XCTAssertNil(manager.completedSessions[42])
     }
 
+    func testRetrackingCompletedSessionLeavesNoStaleCompletedEntry() {
+        let manager = makeTestActiveChatSessionManager()
+        manager.startTracking(
+            session: Self.session(id: 42),
+            contentId: 7,
+            contentTitle: "Tracked Article",
+            messageId: 501
+        )
+        manager.handleCompletion(sessionId: 42, messageId: 501)
+        XCTAssertNotNil(manager.completedSessions[42])
+
+        manager.startTracking(
+            session: Self.session(id: 42),
+            contentId: 7,
+            contentTitle: "Tracked Article",
+            messageId: 502
+        )
+        XCTAssertNil(manager.completedSessions[42])
+        XCTAssertEqual(manager.activeSessions[42]?.messageId, 502)
+
+        manager.stopTracking(sessionId: 42)
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+        XCTAssertTrue(manager.completedSessions.isEmpty)
+        XCTAssertNil(manager.getSession(forContentId: 7))
+    }
+
     func testLifecycleSuspensionPausesAndResumesPollingWithoutDroppingTrackedSession() async {
         let service = PollingChatSessionService()
         let registry = ChatMessageCompletionRegistry(
