@@ -7,8 +7,6 @@ struct BriefingPassageView: UIViewRepresentable {
     @Environment(\.colorSchemeContrast) private var accessibilityContrast
 
     let content: BriefingAttributedTextBuilder.Result
-    var floatingExclusionSize: CGSize? = nil
-    var floatingExclusionAlignment: APIBriefingFigureAlignment = .right
     let onOpenSource: (String) -> Void
     var onOpenDiscussion: (String) -> Void = { _ in }
     var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
@@ -53,8 +51,6 @@ struct BriefingPassageView: UIViewRepresentable {
         context.coordinator.onOpenSource = onOpenSource
         context.coordinator.onOpenDiscussion = onOpenDiscussion
         context.coordinator.onSourceAction = onSourceAction
-        uiView.floatingExclusionSize = floatingExclusionSize
-        uiView.floatingExclusionAlignment = floatingExclusionAlignment
         if let scaledText = context.coordinator.scaledTextIfNeeded(
             content.attributedText,
             compatibleWith: uiView.traitCollection
@@ -78,8 +74,6 @@ struct BriefingPassageView: UIViewRepresentable {
         let measurementFingerprint = Coordinator.MeasurementFingerprint(
             contentRevision: context.coordinator.contentRevision,
             width: width,
-            floatingExclusionSize: floatingExclusionSize,
-            floatingExclusionAlignment: floatingExclusionAlignment,
             dynamicTypeSize: dynamicTypeSize,
             colorScheme: colorScheme,
             accessibilityContrast: accessibilityContrast
@@ -89,34 +83,15 @@ struct BriefingPassageView: UIViewRepresentable {
             return measurement.size
         }
         let signpostState = BriefingPerformance.signposter.beginInterval("passage-measurement")
-        // Measure on a detached view: SwiftUI probes widths it never places, and
-        // resizing the displayed view would leave its exclusion at a probe width.
+        // Measure on a detached view: SwiftUI probes widths it never places.
         let measuringView = context.coordinator.measuringView
         measuringView.attributedText = uiView.attributedText
-        measuringView.floatingExclusionSize = floatingExclusionSize
-        measuringView.floatingExclusionAlignment = floatingExclusionAlignment
-        measuringView.bounds.size.width = width
-        measuringView.updateFloatingExclusion(forWidth: width)
-        let fittingSize = measuringView.sizeThatFits(
+        let size = measuringView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
-        let minimumHeight = floatingExclusionSize?.height ?? 0
-        let size = CGSize(width: width, height: max(fittingSize.height, minimumHeight))
         BriefingPerformance.signposter.endInterval("passage-measurement", signpostState)
         context.coordinator.measurement = (measurementFingerprint, size)
         return size
-    }
-
-    /// Vertical distance between passage baselines at the given text size.
-    static func lineStep(for dynamicTypeSize: DynamicTypeSize) -> CGFloat {
-        let traits = UITraitCollection(
-            preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize)
-        )
-        let font = UIFontMetrics(forTextStyle: .callout).scaledFont(
-            for: BriefingAttributedTextBuilder.passageBodyFont(),
-            compatibleWith: traits
-        )
-        return font.lineHeight + BriefingAttributedTextBuilder.passageLineSpacing
     }
 
     static func scaledAttributedText(
@@ -145,8 +120,6 @@ struct BriefingPassageView: UIViewRepresentable {
         struct MeasurementFingerprint: Equatable {
             let contentRevision: Int
             let width: CGFloat
-            let floatingExclusionSize: CGSize?
-            let floatingExclusionAlignment: APIBriefingFigureAlignment
             let dynamicTypeSize: DynamicTypeSize
             let colorScheme: ColorScheme
             let accessibilityContrast: ColorSchemeContrast

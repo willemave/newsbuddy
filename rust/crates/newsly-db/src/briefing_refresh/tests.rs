@@ -2,15 +2,14 @@ use crate::briefing::parse_source_ids;
 use sqlx::PgPool;
 
 use super::{
-    ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION,
-    BriefingLensAssignmentPlan, BriefingRefreshConfig, BriefingRefreshMode,
-    BriefingRefreshPublication, BriefingRefreshSource, ComposedBriefingAppend,
+    ApplyBriefingLensAssignmentOutcome, BriefingLensAssignmentPlan, BriefingRefreshConfig,
+    BriefingRefreshMode, BriefingRefreshPublication, BriefingRefreshSource, ComposedBriefingAppend,
     ComposedBriefingSegment, PrepareBriefingRefreshOutcome, PreparedBriefingRefresh,
-    PreparedBriefingRefreshSeed, Utc, apply_briefing_lens_assignment, apply_briefing_refresh, json,
-    prepare_briefing_refresh, sources::briefing_context,
+    PreparedBriefingRefreshSeed, Utc, apply_briefing_lens_assignment, apply_briefing_refresh,
+    briefing_prompt_version, json, prepare_briefing_refresh, sources::briefing_context,
 };
 
-fn test_config() -> BriefingRefreshConfig {
+pub(super) fn test_config() -> BriefingRefreshConfig {
     BriefingRefreshConfig {
         masthead_title: "The Unread Times".to_owned(),
         window_min: 3,
@@ -25,7 +24,7 @@ fn test_config() -> BriefingRefreshConfig {
     }
 }
 
-async fn insert_eligible_article(pool: &PgPool) -> i64 {
+pub(super) async fn insert_eligible_article(pool: &PgPool) -> i64 {
     let user_id = sqlx::query_scalar::<_, i64>(
         r#"
             INSERT INTO users (apple_id, email, is_admin, is_active)
@@ -107,7 +106,21 @@ async fn prepare_seed(pool: &PgPool, task_id: i64, user_id: i64) -> PreparedBrie
     seed
 }
 
-async fn prepare_article(pool: &PgPool, user_id: i64) -> PreparedBriefingRefresh {
+pub(super) async fn prepare_article(pool: &PgPool, user_id: i64) -> PreparedBriefingRefresh {
+    let prepared = prepare_refresh(pool, user_id).await;
+    assert_eq!(prepared.append_batches.len(), 1);
+    prepared
+}
+
+pub(super) async fn prepare_refresh(pool: &PgPool, user_id: i64) -> PreparedBriefingRefresh {
+    // One live refresh per owner: settle any earlier test task first.
+    sqlx::query(
+        "UPDATE processing_tasks SET status = 'completed', lease_token = NULL, locked_at = NULL, locked_by = NULL, lease_expires_at = NULL WHERE owner_user_id = $1::bigint::integer AND task_type = 'briefing_refresh'",
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .expect("earlier refresh settles");
     let task_id = insert_live_briefing_task(pool, user_id).await;
     let seed = prepare_seed(pool, task_id, user_id).await;
     let plan = BriefingLensAssignmentPlan {
@@ -127,11 +140,10 @@ async fn prepare_article(pool: &PgPool, user_id: i64) -> PreparedBriefingRefresh
     let ApplyBriefingLensAssignmentOutcome::Ready(prepared) = outcome else {
         panic!("live task and unchanged source snapshot should apply");
     };
-    assert_eq!(prepared.append_batches.len(), 1);
     prepared
 }
 
-fn article_publication(prepared: PreparedBriefingRefresh) -> BriefingRefreshPublication {
+pub(super) fn article_publication(prepared: PreparedBriefingRefresh) -> BriefingRefreshPublication {
     let batch = &prepared.append_batches[0];
     let source_keys = batch
         .sources
@@ -149,7 +161,7 @@ fn article_publication(prepared: PreparedBriefingRefresh) -> BriefingRefreshPubl
                 source_keys: source_keys.clone(),
                 event_groups: source_keys.iter().cloned().map(|key| vec![key]).collect(),
                 model: "openai:gpt-5.6-luna".to_owned(),
-                prompt_version: BRIEFING_COMPOSITION_PROMPT_VERSION.to_owned(),
+                prompt_version: briefing_prompt_version(&batch.lens.tier).to_owned(),
             },
         }],
         compactions: Vec::new(),
@@ -262,7 +274,7 @@ async fn reclaimed_claim_rejects_prepared_lens_assignment(pool: PgPool) {
         usage: Vec::new(),
     };
     sqlx::query(
-            "UPDATE processing_tasks SET locked_by = 'replacement-worker', lease_token = '00000000-0000-4000-8000-000000000092'::uuid WHERE id::bigint = $1",
+            "UPDATE processing_tasks SET locked_by = 'replacement-worker', lease_token = '00000000-0000-4000-8000-000000000092'::uuid WHERE id = $1::bigint",
         )
         .bind(task_id)
         .execute(&pool)
@@ -309,42 +321,42 @@ async fn publication_atomically_replaces_pending_ownership_with_a_segment(pool: 
     assert!(!outcome.stale);
     assert_eq!(outcome.version, 1);
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint = $1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id = $1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
     .await
     .expect("pending count");
     let segments: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_segments WHERE user_id::bigint = $1 AND status = 'active'",
+        "SELECT count(*) FROM briefing_segments WHERE user_id = $1::bigint AND status = 'active'",
     )
     .bind(user_id)
     .fetch_one(&pool)
     .await
     .expect("segment count");
     let prompt_version: String = sqlx::query_scalar(
-        "SELECT prompt_version FROM briefing_segments WHERE user_id::bigint = $1 AND status = 'active'",
+        "SELECT prompt_version FROM briefing_segments WHERE user_id = $1::bigint AND status = 'active'",
     )
     .bind(user_id)
     .fetch_one(&pool)
     .await
     .expect("persisted prompt version");
     let usage: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM vendor_usage_records WHERE user_id::bigint = $1 AND feature = 'briefing_compose'",
+            "SELECT count(*) FROM vendor_usage_records WHERE user_id = $1::bigint AND feature = 'briefing_compose'",
         )
         .bind(user_id)
         .fetch_one(&pool)
         .await
         .expect("usage count");
     assert_eq!((pending, segments, usage), (0, 1, 0));
-    assert_eq!(prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
+    assert_eq!(prompt_version, crate::BRIEFING_CARD_PROMPT_VERSION);
 }
 
 #[sqlx::test]
 async fn stale_version_preserves_pending_sources_and_the_last_usable_edition(pool: PgPool) {
     let user_id = insert_eligible_article(&pool).await;
     let publication = article_publication(prepare_article(&pool, user_id).await);
-    sqlx::query("UPDATE briefing_states SET version = version + 1 WHERE user_id::bigint = $1")
+    sqlx::query("UPDATE briefing_states SET version = version + 1 WHERE user_id = $1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await
@@ -359,14 +371,14 @@ async fn stale_version_preserves_pending_sources_and_the_last_usable_edition(poo
     assert!(outcome.stale);
     assert_eq!(outcome.appended_segments, 0);
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint = $1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id = $1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
     .await
     .expect("pending count");
     let segments: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM briefing_segments WHERE user_id::bigint = $1")
+        sqlx::query_scalar("SELECT count(*) FROM briefing_segments WHERE user_id = $1::bigint")
             .bind(user_id)
             .fetch_one(&pool)
             .await
@@ -389,7 +401,7 @@ async fn ready_article_can_publish_while_news_has_no_embedding(pool: PgPool) {
         .unwrap();
     assert!(!result.stale);
     tx.commit().await.unwrap();
-    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news' AND lens_key IS NULL").bind(user_id).fetch_one(&pool).await.unwrap();
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news' AND lens_key IS NULL").bind(user_id).fetch_one(&pool).await.unwrap();
     assert_eq!(pending, 1);
     let embeddings: i64 = sqlx::query_scalar("SELECT count(*) FROM news_lens_embeddings")
         .fetch_one(&pool)
@@ -420,7 +432,7 @@ async fn normal_news_admission_is_bounded_fair_and_eventually_keeps_every_story(
         );
         tx.commit().await.unwrap();
         if expected == 40 {
-            let counts: Vec<i64> = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources p JOIN news_items n ON n.id=p.source_id WHERE p.user_id::bigint=$1 AND p.source_kind='news' GROUP BY n.platform ORDER BY n.platform")
+            let counts: Vec<i64> = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources p JOIN news_items n ON n.id=p.source_id WHERE p.user_id=$1::bigint AND p.source_kind='news' GROUP BY n.platform ORDER BY n.platform")
                 .bind(user_id).fetch_all(&pool).await.unwrap();
             assert_eq!(
                 counts[0], counts[1],
@@ -428,13 +440,13 @@ async fn normal_news_admission_is_bounded_fair_and_eventually_keeps_every_story(
             );
         }
     }
-    let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news'").bind(user_id).fetch_one(&pool).await.unwrap();
+    let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news'").bind(user_id).fetch_one(&pool).await.unwrap();
     assert_eq!(
         pending, 180,
         "older deferred stories remain eligible without duplicates"
     );
     let read: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM news_item_read_status WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT count(*) FROM news_item_read_status WHERE user_id=$1::bigint")
             .bind(user_id)
             .fetch_one(&pool)
             .await
@@ -505,7 +517,7 @@ async fn legacy_news_backlog_assigns_in_bounded_chunks_with_source_fencing(pool:
         "assigned rows do not starve the next chunk"
     );
     sqlx::query(
-        "UPDATE news_items SET summary_text='Changed after preparation' WHERE id::bigint=$1",
+        "UPDATE news_items SET summary_text='Changed after preparation' WHERE id=$1::bigint",
     )
     .bind(second.lens_assignment.pending_sources[0].source_id)
     .execute(&pool)
@@ -528,7 +540,7 @@ async fn legacy_news_backlog_assigns_in_bounded_chunks_with_source_fencing(pool:
         ApplyBriefingLensAssignmentOutcome::Stale
     ));
     tx.rollback().await.unwrap();
-    let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news'").bind(user_id).fetch_one(&pool).await.unwrap();
+    let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news'").bind(user_id).fetch_one(&pool).await.unwrap();
     assert_eq!(pending, 85);
 }
 
@@ -603,7 +615,14 @@ async fn assigned_news_backlog_composition_is_bounded_and_drains_without_losing_
         85
     );
     // Simulate covered pending identities leaving the queue, as publication does.
-    sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint=$1 AND id::bigint=ANY($2::bigint[])").bind(user_id).bind(&ids).execute(&mut *tx).await.unwrap();
+    sqlx::query(
+        "DELETE FROM briefing_pending_sources WHERE user_id=$1::bigint AND id=ANY($2::bigint[])",
+    )
+    .bind(user_id)
+    .bind(&ids)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     let next = super::preparation::load_append_batches(
         &mut tx,
         user_id,
@@ -621,7 +640,7 @@ async fn assigned_news_backlog_composition_is_bounded_and_drains_without_losing_
             .flat_map(|batch| &batch.pending_rows)
             .all(|pending| !ids.contains(&pending.id))
     );
-    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news'").bind(user_id).fetch_one(&mut *tx).await.unwrap();
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news'").bind(user_id).fetch_one(&mut *tx).await.unwrap();
     assert_eq!(pending, 45, "unselected identities remain pending");
     tx.rollback().await.unwrap();
 }

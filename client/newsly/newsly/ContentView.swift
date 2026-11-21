@@ -126,6 +126,7 @@ struct ContentView: View {
         .environment(submissionStatusViewModel)
         .environment(session.activeChatSessionManager)
         .environment(session.chatNavigation)
+        .environment(session.briefingSavedSources)
         .onAppear {
             AppChrome.configure(textSize: appTextSize)
             updateBriefingActivity()

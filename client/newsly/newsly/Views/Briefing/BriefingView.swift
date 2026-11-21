@@ -36,6 +36,7 @@ private struct BriefingSourceCommand: Identifiable {
 struct BriefingView: View {
     @Environment(RootDependencyFactory.self) private var dependencyFactory
     @Environment(ChatNavigationCoordinator.self) private var chatNavigation
+    @Environment(BriefingSavedSources.self) private var savedSources
 
     let viewModel: BriefingViewModel
     let scrollToTopRequest: Int
@@ -297,6 +298,7 @@ struct BriefingView: View {
                             screenEdgeInsets: pagerScreenEdgeInsets,
                             onOpenSource: openSource,
                             onSourceAction: handleSourceAction,
+                            savedSources: savedSources,
                             onOpenDiscussion: openDiscussion,
                             onDig: startDig,
                             onRefresh: { await viewModel.pullToRefresh() },
@@ -582,6 +584,10 @@ struct BriefingView: View {
     }
 
     private func handleSourceAction(_ sourceKey: String, action: BriefingSourceAction) {
+        if action == .addToKnowledge {
+            saveSource(sourceKey)
+            return
+        }
         guard pendingSourceCommand == nil, deckSource == nil,
               let source = viewModel.source(for: sourceKey),
               let identity = BriefingSourceActionViewModel.knowledgeSource(for: source)
@@ -607,10 +613,8 @@ struct BriefingView: View {
         }
         switch command.action {
         case .addToKnowledge:
-            if let message = await sourceActions.save(source: command.source), !Task.isCancelled {
-                dependencyFactory.toastService.showSuccess(message)
-                onSourceMutation()
-            }
+            // Saves run per source through `saveSource`, never as a queued command.
+            return
         case .chat:
             if let route = await sourceActions.startChat(source: command.source), !Task.isCancelled {
                 onSourceMutation()
@@ -629,6 +633,29 @@ struct BriefingView: View {
         }
         if !Task.isCancelled, let message = sourceActions.errorMessage {
             dependencyFactory.toastService.showError(message)
+        }
+    }
+
+    /// Saves independently per source, so saving one card never drops a save
+    /// started from another card or a passage link.
+    private func saveSource(_ sourceKey: String) {
+        let savedSources = savedSources
+        guard !savedSources.isPending(sourceKey),
+              let source = viewModel.source(for: sourceKey),
+              let identity = BriefingSourceActionViewModel.knowledgeSource(for: source)
+        else { return }
+        let toastService = dependencyFactory.toastService
+        let onSourceMutation = onSourceMutation
+        Task {
+            switch await savedSources.save(sourceKey: sourceKey, source: identity) {
+            case .saved(let message):
+                toastService.showSuccess(message)
+                onSourceMutation()
+            case .failed(let message):
+                toastService.showError(message)
+            case .ignored:
+                break
+            }
         }
     }
 

@@ -37,7 +37,7 @@ final class BriefingSourceActionsUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [opened], timeout: 3), .completed)
     }
 
-    func testArticleAndPodcastHeadlinesOfferSourceActions() {
+    func testArticleAndPodcastCardHeadersOfferSourceActions() {
         let app = launchFixture()
         for tier in ["Articles", "Podcasts"] {
             app.buttons[tier].tap()
@@ -52,6 +52,46 @@ final class BriefingSourceActionsUITests: XCTestCase {
             headline.tap()
             XCTAssertEqual(app.staticTexts["briefing.source_actions.result"].label, "Open content:42")
         }
+    }
+
+    func testCardFooterMarksReadAndSaves() {
+        let app = launchFixture()
+        let result = app.staticTexts["briefing.source_actions.result"]
+        for tier in ["Articles", "Podcasts"] {
+            app.buttons[tier].tap()
+            let markRead = app.buttons["briefing.card.mark_read.42"]
+            XCTAssertTrue(markRead.waitForExistence(timeout: 5), tier)
+            markRead.tap()
+            XCTAssertEqual(result.label, "Read 42", tier)
+            app.buttons["briefing.card.save.42"].tap()
+            XCTAssertEqual(result.label, "Add to Knowledge: content:42", tier)
+            attachScreenshot(app, name: "\(tier)-card")
+        }
+    }
+
+    func testCardSwipesMarkReadAndOfferChatOrDeck() {
+        let app = launchFixture()
+        let result = app.staticTexts["briefing.source_actions.result"]
+        app.buttons["Articles"].tap()
+        let card = app.descendants(matching: .any)["briefing.segment.42"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.3))
+
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -180, dy: 0)))
+        XCTAssertEqual(result.label, "Read 42")
+
+        let rightStart = card.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.3))
+        rightStart.press(
+            forDuration: 0.05,
+            thenDragTo: rightStart.withOffset(CGVector(dx: 160, dy: -50))
+        )
+        XCTAssertEqual(result.label, "Chat: content:42")
+
+        rightStart.press(
+            forDuration: 0.05,
+            thenDragTo: rightStart.withOffset(CGVector(dx: 160, dy: 50))
+        )
+        XCTAssertEqual(result.label, "Create Deck: content:42")
     }
 
     func testNonLinkTextSelectionRetainsDigDeeper() {

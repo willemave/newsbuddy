@@ -632,18 +632,6 @@ enum APIReadingExperience: String, Codable, CaseIterable {
 
 enum APIBriefingBlockType: String, Codable, CaseIterable {
     case passage = "passage"
-    case figure = "figure"
-    case pullquote = "pullquote"
-}
-
-enum APIBriefingFigureAlignment: String, Codable, CaseIterable {
-    case left = "left"
-    case right = "right"
-}
-
-enum APIBriefingFigurePlacement: String, Codable, CaseIterable {
-    case inset = "inset"
-    case full = "full"
 }
 
 enum APIBriefingRunKind: String, Codable, CaseIterable {

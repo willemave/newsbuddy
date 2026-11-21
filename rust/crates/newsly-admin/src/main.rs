@@ -10,6 +10,7 @@ use newsly_domain::{OwnershipTarget, OwnershipVersion, ResourceKey, ResourceKind
 use secrecy::SecretString;
 use serde::Serialize;
 mod bookmark_commands;
+mod briefing_recompose;
 mod database;
 mod e2e;
 mod evals;
@@ -248,6 +249,8 @@ enum TasksCommand {
         #[arg(long)]
         apply: bool,
     },
+    /// Preview, or with --apply start now, the sweeps that recompose stale Briefing cards.
+    BriefingRecompose(briefing_recompose::BriefingRecomposeArgs),
     /// List recent failed tasks with bounded diagnostics and no task payloads.
     Failures {
         #[arg(long, default_value_t = 24)]
@@ -263,6 +266,7 @@ impl TasksCommand {
             Self::ReconcileBookmarks { .. } => "tasks.reconcile-bookmarks",
             Self::ReconcileArchive { .. } => "tasks.reconcile-archive",
             Self::ArtworkBackfill { .. } => "tasks.artwork-backfill",
+            Self::BriefingRecompose(_) => "tasks.briefing-recompose",
             Self::Failures { .. } => "tasks.failures",
         }
     }
@@ -741,7 +745,7 @@ fn emit_success<T: Serialize>(
 
 fn emit_error(output: OutputFormat, command: &str, error: &anyhow::Error) {
     match output {
-        OutputFormat::Text => eprintln!("newsly-admin {command} failed: {error}"),
+        OutputFormat::Text => eprintln!("newsly-admin {command} failed: {error:#}"),
         OutputFormat::Json => {
             let envelope = error_envelope(command, error);
             match serde_json::to_string_pretty(&envelope) {
@@ -768,7 +772,8 @@ fn error_envelope(command: &str, error: &anyhow::Error) -> serde_json::Value {
         "command": command,
         "error": {
             "code": "operator_error",
-            "message": error.to_string(),
+            // `{:#}` keeps the cause chain (e.g. the PostgreSQL message behind a query failure).
+            "message": format!("{error:#}"),
         },
     })
 }
@@ -864,6 +869,16 @@ impl FromStr for TargetArg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_errors_keep_the_underlying_cause() {
+        let error = anyhow::Error::new(std::io::Error::other("column \"x\" does not exist"))
+            .context("database query failed");
+        let envelope = error_envelope("db query", &error);
+        let message = envelope["error"]["message"].as_str().unwrap();
+        assert!(message.contains("database query failed"), "{message}");
+        assert!(message.contains("column \"x\" does not exist"), "{message}");
+    }
 
     #[test]
     fn bookmark_reconciliation_previews_by_default_and_requires_explicit_scope() {

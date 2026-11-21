@@ -38,7 +38,8 @@ private final class BriefingSnapshotStorageLock: @unchecked Sendable {
 }
 
 struct BriefingSnapshot: Codable {
-    static let currentSchemaVersion = 3
+    /// 4: Briefing blocks became passage-only; older snapshots may hold figures.
+    static let currentSchemaVersion = 4
 
     let schemaVersion: Int
     let userID: Int

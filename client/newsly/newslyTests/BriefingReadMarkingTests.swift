@@ -857,36 +857,20 @@ final class BriefingReadMarkingTests: XCTestCase {
         XCTAssertEqual(chromeCollapse.collapse(forLens: "articles"), 80)
     }
 
-    func testDocumentGenerationPolicyPreservesOnlyEqualOrAppendedIDs() {
+    func testDocumentGenerationPolicyPreservesOnlyEqualOrAppendedCoverage() {
+        let preserves = BriefingLensDocumentGenerationPolicy.preservesGeneration
+        XCTAssertTrue(preserves([["content:3"], ["content:2"]], [["content:3"], ["content:2"]]))
         XCTAssertTrue(
-            BriefingLensDocumentGenerationPolicy.preservesGeneration(
-                previousIDs: [3, 2],
-                mergedIDs: [3, 2]
-            )
-        )
-        XCTAssertTrue(
-            BriefingLensDocumentGenerationPolicy.preservesGeneration(
-                previousIDs: [3, 2],
-                mergedIDs: [3, 2, 1]
-            )
+            preserves([["content:3"], ["content:2"]], [["content:3"], ["content:2"], ["content:1"]])
         )
         XCTAssertFalse(
-            BriefingLensDocumentGenerationPolicy.preservesGeneration(
-                previousIDs: [3, 2],
-                mergedIDs: [4, 3, 2]
-            )
+            preserves([["content:3"], ["content:2"]], [["content:4"], ["content:3"], ["content:2"]])
         )
+        XCTAssertFalse(preserves([["content:3"], ["content:2"]], [["content:3"]]))
+        XCTAssertFalse(preserves([["content:3"], ["content:2"]], [["content:2"], ["content:3"]]))
         XCTAssertFalse(
-            BriefingLensDocumentGenerationPolicy.preservesGeneration(
-                previousIDs: [3, 2],
-                mergedIDs: [3]
-            )
-        )
-        XCTAssertFalse(
-            BriefingLensDocumentGenerationPolicy.preservesGeneration(
-                previousIDs: [3, 2],
-                mergedIDs: [2, 3]
-            )
+            preserves([["news:1"], ["news:2"]], [["news:1", "news:2"]]),
+            "a consolidated roundup changes coverage"
         )
     }
 

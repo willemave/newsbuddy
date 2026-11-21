@@ -3,10 +3,7 @@ use std::fmt::Write as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{
-    BriefingCompositionBlock, BriefingCompositionLayout, BriefingCompositionRequest,
-    BriefingCompositionSource, BriefingLayoutRejection, BriefingPassageWeight,
-};
+use super::{BriefingCompositionRequest, BriefingCompositionSource, BriefingLayoutRejection};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,43 +12,42 @@ pub(super) struct BriefingNewsComposition {
     markdown: String,
 }
 
-pub(super) fn decode_composition_layout(
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BriefingCardComposition {
+    /// The card summary of the single supplied work, at most six sentences, linking the source.
+    markdown: String,
+}
+
+pub(super) fn decode_composition_passage(
     value: Option<serde_json::Value>,
     tier: &str,
     sources: &[BriefingCompositionSource],
-) -> Result<BriefingCompositionLayout, BriefingLayoutRejection> {
+) -> Result<String, BriefingLayoutRejection> {
     let value = value.ok_or(BriefingLayoutRejection::MissingStructuredOutput)?;
-    let layout = if tier == "news" {
-        let passage = serde_json::from_value::<BriefingNewsComposition>(value)
-            .map_err(|error| BriefingLayoutRejection::Decode(error.to_string()))?;
-        BriefingCompositionLayout {
-            suggested_quotes: Vec::new(),
-            blocks: vec![BriefingCompositionBlock::Passage {
-                markdown: passage.markdown,
-                weight: BriefingPassageWeight::Brief,
-            }],
-        }
+    let markdown = if tier == "news" {
+        serde_json::from_value::<BriefingNewsComposition>(value).map(|passage| passage.markdown)
     } else {
-        serde_json::from_value::<BriefingCompositionLayout>(value)
-            .map_err(|error| BriefingLayoutRejection::Decode(error.to_string()))?
-    };
-    layout.validate(tier, sources)
+        serde_json::from_value::<BriefingCardComposition>(value).map(|passage| passage.markdown)
+    }
+    .map_err(|error| BriefingLayoutRejection::Decode(error.to_string()))?;
+    super::validate_passage(markdown, tier, sources)
 }
 
 pub(super) fn composition_schema(tier: &str) -> schemars::Schema {
     if tier == "news" {
         schemars::schema_for!(BriefingNewsComposition)
     } else {
-        schemars::schema_for!(BriefingCompositionLayout)
+        schemars::schema_for!(BriefingCardComposition)
     }
 }
 
-/// Identifies the ephemeral provider response contract, not the persisted layout.
+/// Identifies the ephemeral provider response contract, not the persisted blocks.
 pub fn briefing_composition_response_contract(tier: &str) -> &'static str {
     if tier == "news" {
         "briefing_news_markdown_v1"
     } else {
-        "briefing_composer_layout_v1"
+        "briefing_card_markdown_v1"
     }
 }
 
@@ -65,17 +61,30 @@ pub(super) fn composition_user_prompt(
         request.tier,
         serde_json::to_string_pretty(&request.sources)?,
     );
+    let (shape, citation_rule) = if request.tier == "news" {
+        (
+            "the single passage paragraph",
+            "use each URI exactly once in markdown",
+        )
+    } else {
+        (
+            "the card summary for this source",
+            "link each URI at least once in markdown",
+        )
+    };
+    let _ = write!(
+        prompt,
+        "\nReturn `markdown` containing {shape}.\nRequired citation manifest ({citation_rule}):"
+    );
+    for source in &request.sources {
+        let _ = write!(
+            prompt,
+            "\n- {} => {}",
+            source.source_key,
+            super::source_link(&source.kind, source.id)
+        );
+    }
     if request.tier == "news" {
-        prompt.push_str("\nReturn `markdown` containing the single passage paragraph.");
-        prompt.push_str("\nRequired citation manifest (use each URI exactly once in markdown):");
-        for source in &request.sources {
-            let _ = write!(
-                prompt,
-                "\n- {} => {}",
-                source.source_key,
-                super::source_link(&source.kind, source.id)
-            );
-        }
         prompt.push_str("\nCite every source separately, including sources about the same event. Do not replace multiple source citations with one representative link. Before returning, check every URI above appears exactly once.");
     }
     if let Some(feedback) = feedback {

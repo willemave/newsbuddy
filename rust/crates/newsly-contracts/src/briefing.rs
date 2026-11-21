@@ -55,22 +55,6 @@ pub enum BriefingRunKind {
 #[serde(rename_all = "snake_case")]
 pub enum BriefingBlockType {
     Passage,
-    Figure,
-    Pullquote,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BriefingFigurePlacement {
-    Inset,
-    Full,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BriefingFigureAlignment {
-    Left,
-    Right,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -162,11 +146,13 @@ pub struct BriefingBlockDto {
     pub weight: Option<String>,
     pub paragraphs: Option<Vec<BriefingParagraphDto>>,
     pub source_key: Option<String>,
+    // The retired figure and pullquote fields below are always null. Installed iOS builds
+    // decode them as required keys, so they stay until those builds are no longer supported.
     pub image_url: Option<String>,
     pub thumbnail_url: Option<String>,
     pub caption: Option<String>,
-    pub placement: Option<BriefingFigurePlacement>,
-    pub alignment: Option<BriefingFigureAlignment>,
+    pub placement: Option<String>,
+    pub alignment: Option<String>,
     pub text: Option<String>,
 }
 

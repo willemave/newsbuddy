@@ -60,9 +60,85 @@ pub fn briefing_links(markdown: &str) -> Vec<BriefingLink> {
     links
 }
 
+/// Splits one paragraph at `.`, `!`, or `?` followed by whitespace or the end, ignoring
+/// terminators inside links. Composition validation and publication share this split.
+pub fn briefing_sentences(paragraph: &str) -> Vec<&str> {
+    let link_ranges = briefing_links(paragraph)
+        .into_iter()
+        .map(|link| link.range)
+        .collect::<Vec<_>>();
+    let mut sentences = Vec::new();
+    let mut start = 0_usize;
+    for (index, character) in paragraph.char_indices() {
+        if !matches!(character, '.' | '!' | '?')
+            || link_ranges.iter().any(|range| range.contains(&index))
+        {
+            continue;
+        }
+        let after = index + character.len_utf8();
+        if paragraph[after..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace)
+        {
+            let sentence = paragraph[start..after].trim();
+            if !sentence.is_empty() {
+                sentences.push(sentence);
+            }
+            start = after;
+        }
+    }
+    let tail = paragraph[start..].trim();
+    if !tail.is_empty() {
+        sentences.push(tail);
+    }
+    sentences
+}
+
+/// The spoken and counted text: link labels without targets, no bold markers, single spaces.
+pub fn briefing_plain_text(markdown: &str) -> String {
+    let mut without_links = String::new();
+    let mut cursor = 0;
+    for link in briefing_links(markdown) {
+        without_links.push_str(&markdown[cursor..link.range.start]);
+        without_links.push_str(&link.label);
+        cursor = link.range.end;
+    }
+    without_links.push_str(&markdown[cursor..]);
+    without_links
+        .replace("**", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sentences_ignore_terminators_inside_links_and_keep_unterminated_tails() {
+        let paragraph = "[A study v2.0 asks why?](newsly://briefing/content/1) It finds 3.5% gains. \
+                         Critics disagree! Is it real? Maybe not";
+        assert_eq!(
+            briefing_sentences(paragraph),
+            [
+                "[A study v2.0 asks why?](newsly://briefing/content/1) It finds 3.5% gains.",
+                "Critics disagree!",
+                "Is it real?",
+                "Maybe not",
+            ]
+        );
+        assert!(briefing_sentences("   ").is_empty());
+    }
+
+    #[test]
+    fn plain_text_keeps_link_labels_and_drops_targets_and_bold() {
+        assert_eq!(
+            briefing_plain_text("**Lead** [Source  one](newsly://briefing/content/1)\n\nends."),
+            "Lead Source one ends."
+        );
+    }
 
     #[test]
     fn citation_corpus_preserves_labels_and_exact_identity() {

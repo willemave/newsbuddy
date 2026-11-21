@@ -214,14 +214,14 @@ pub async fn seed_ios_e2e_fixture(
         upsert_inbox_status(&mut transaction, user_id, content_id).await?;
     }
     sqlx::query(
-        "DELETE FROM content_knowledge_saves WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+        "DELETE FROM content_knowledge_saves WHERE user_id = $1::bigint AND content_id = $2::bigint",
     )
     .bind(user_id)
     .bind(detail_content_id)
     .execute(&mut *transaction)
     .await?;
     sqlx::query(
-        "DELETE FROM content_read_status WHERE user_id::bigint = $1 AND content_id::bigint = ANY($2::bigint[])",
+        "DELETE FROM content_read_status WHERE user_id = $1::bigint AND content_id = ANY($2::bigint[])",
     )
     .bind(user_id)
     .bind([detail_content_id, knowledge_content_id])
@@ -321,15 +321,15 @@ async fn clear_user_fixture_graph(
     user_id: i64,
 ) -> Result<(), sqlx::Error> {
     for statement in [
-        "DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE user_id::bigint = $1)",
-        "DELETE FROM chat_sessions WHERE user_id::bigint = $1",
-        "DELETE FROM briefing_segments WHERE user_id::bigint = $1",
-        "DELETE FROM briefing_lenses WHERE user_id::bigint = $1",
-        "DELETE FROM learning_deck_runs WHERE user_id::bigint = $1",
-        "DELETE FROM learning_decks WHERE user_id::bigint = $1",
-        "DELETE FROM audio_episodes WHERE user_id::bigint = $1",
-        "DELETE FROM llm_tasks WHERE user_id::bigint = $1 AND task_kind = 'share_action'",
-        "DELETE FROM processing_tasks WHERE owner_user_id::bigint = $1 AND payload::jsonb ? 'fixture_namespace'",
+        "DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE user_id = $1::bigint)",
+        "DELETE FROM chat_sessions WHERE user_id = $1::bigint",
+        "DELETE FROM briefing_segments WHERE user_id = $1::bigint",
+        "DELETE FROM briefing_lenses WHERE user_id = $1::bigint",
+        "DELETE FROM learning_deck_runs WHERE user_id = $1::bigint",
+        "DELETE FROM learning_decks WHERE user_id = $1::bigint",
+        "DELETE FROM audio_episodes WHERE user_id = $1::bigint",
+        "DELETE FROM llm_tasks WHERE user_id = $1::bigint AND task_kind = 'share_action'",
+        "DELETE FROM processing_tasks WHERE owner_user_id = $1::bigint AND payload::jsonb ? 'fixture_namespace'",
     ] {
         sqlx::query(statement)
             .bind(user_id)
@@ -525,11 +525,6 @@ async fn seed_briefing(
             }]
         },
         {
-            "type": "pullquote",
-            "source_key": source_key,
-            "text": "Release database connections before waiting on the network."
-        },
-        {
             "type": "passage",
             "paragraphs": [{
                 "runs": [{
@@ -697,7 +692,7 @@ async fn seed_learning_surfaces(
         SET latest_run_id = $2::bigint::integer,
             latest_successful_run_id = $2::bigint::integer,
             updated_at = $3
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(deck_id)

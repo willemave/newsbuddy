@@ -8,16 +8,8 @@ pub enum BriefingLayoutRejection {
     MissingStructuredOutput,
     #[error("{0}")]
     Decode(String),
-    #[error("layout has no blocks")]
-    EmptyLayout,
-    #[error("suggested quotes must have unique bounded IDs and text")]
-    InvalidSuggestedQuotes,
     #[error("passage markdown is empty")]
     EmptyPassage,
-    #[error("figure does not reference an imaged source")]
-    InvalidFigure,
-    #[error("pullquote references an unknown or reused suggestion")]
-    InvalidPullquote,
     #[error("layout contains an unknown Briefing source link")]
     UnknownSourceLink,
     #[error("source {0} must be linked at least once")]
@@ -26,10 +18,12 @@ pub enum BriefingLayoutRejection {
     NewsSourceLinkMissing(String),
     #[error("source {0} must be linked exactly once")]
     SourceLinkDuplicated(String),
-    #[error("news layout must contain exactly one passage")]
-    NewsPassageCount,
     #[error("news layout must contain exactly one paragraph")]
     NewsParagraphCount,
+    #[error("card summary has {0} sentences; rewrite it in at most six sentences")]
+    CardSentenceCount(usize),
+    #[error("card summary has {0} words; rewrite it in at most 150 words, targeting 60-100 words")]
+    CardWordCount(usize),
 }
 
 impl BriefingLayoutRejection {
@@ -37,16 +31,13 @@ impl BriefingLayoutRejection {
         match self {
             Self::MissingStructuredOutput => "missing_structured_output",
             Self::Decode(_) => "decode_failed",
-            Self::EmptyLayout => "empty_layout",
-            Self::InvalidSuggestedQuotes => "invalid_suggested_quotes",
             Self::EmptyPassage => "empty_passage",
-            Self::InvalidFigure => "invalid_figure",
-            Self::InvalidPullquote => "invalid_pullquote",
             Self::UnknownSourceLink => "unknown_source_link",
             Self::SourceLinkMissing(_) | Self::NewsSourceLinkMissing(_) => "source_link_missing",
             Self::SourceLinkDuplicated(_) => "source_link_duplicated",
-            Self::NewsPassageCount => "news_passage_count",
             Self::NewsParagraphCount => "news_paragraph_count",
+            Self::CardSentenceCount(_) => "card_sentence_count",
+            Self::CardWordCount(_) => "card_word_count",
         }
     }
 }

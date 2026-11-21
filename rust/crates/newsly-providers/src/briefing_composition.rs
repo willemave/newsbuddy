@@ -36,7 +36,7 @@ const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
 use newsly_domain::DEFAULT_LENS_EMBEDDING_MODEL as DEFAULT_EMBEDDING_MODEL;
 const DEFAULT_OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1/";
 
-const COMPOSITION_SYSTEM_PROMPT: &str = r"Compose one source-grounded personal-news Briefing window.
+const COMPOSITION_SYSTEM_PROMPT: &str = r#"Compose one source-grounded personal-news Briefing window.
 
 Return JSON matching the supplied schema. Passage markdown must cite sources using only these URI
 forms: `[source title or descriptive phrase](newsly://briefing/content/123)` and
@@ -62,17 +62,21 @@ link or follow it with a duplicated verb or restatement. Begin directly with the
 story and vary sentence openings.
 Use a compact, informational register and simple connective prose rather than lists. Connect
 stories only when the connection adds useful information; omit abstract thematic introductions
-and conclusions. For `audio` and `longform`, treat every source as a full work rather than a headline.
-Give each source its own substantive treatment of 3-5 sentences, roughly 100-200 words, covering
-its thesis, key points, concrete evidence or counterpoints, and why it matters to the reader. Use
-the supplied `briefing_context` when present, including specific facts and attributable quotations
-when the context supports them. The app shows each deep source's title and publication or show
-name as a headline above its passage, so never restate the title, publication, or show name in
-the prose. Open directly with the work's central argument or finding, and link the source on a
-descriptive phrase about that claim or subject rather than its title. Suggest editorial pullquotes rather than
-pretending they are source quotations. Add a figure for each deep source that has an image,
-normally inset, with alternating alignment and at most one full figure. Cover every supplied source
-at least once.";
+and conclusions.
+
+For `audio` and `longform`, write a card summary of the single supplied work.
+The app card already shows the work's title, its publication or show name, its length, and its
+image above the summary, so never restate the title, publication, show, author byline, or length.
+Write at most six sentences, 60-100 words, never padding to reach the target. Open with the work's
+central argument, finding, or story, and link the source once on a descriptive phrase about that
+claim, roughly four to ten words, never the bare title. The linked phrase must be a natural noun
+phrase that reads as part of its sentence, never a fragment set off by a colon or a label. Then
+give the single strongest concrete evidence, example, number, counterpoint, or practical
+implication. Keep most sentences under 25 words so the card scans quickly. Use the supplied
+`briefing_context` when present. Write plain declarative sentences with no lists, no em dashes,
+no markdown emphasis such as asterisks or underscores, no quoted titles, and no generic
+summary-speak such as "this episode explores", "the author discusses", or "in this article".
+For podcasts, attribute claims to the speaker or guest by name when the context supports it."#;
 
 const LENS_NAMING_SYSTEM_PROMPT: &str = r"Judge a proposed category of unread Fast Reads for Newsly and name its specific common theme.
 
@@ -109,163 +113,74 @@ pub struct BriefingCompositionSource {
     pub briefing_context: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BriefingPassageWeight {
-    Feature,
-    Brief,
-}
+/// Card tiers render one source per segment, so the passage stays card-length.
+const CARD_MAX_SENTENCES: usize = 6;
+/// A generous hard cap above the prompt's 60-100 word target.
+const CARD_MAX_WORDS: usize = 150;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BriefingFigurePlacement {
-    Full,
-    Inset,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BriefingFigureAlignment {
-    Left,
-    Right,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct BriefingSuggestedQuote {
-    pub id: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum BriefingCompositionBlock {
-    Passage {
-        markdown: String,
-        weight: BriefingPassageWeight,
-    },
-    Figure {
-        source_key: String,
-        caption: String,
-        placement: BriefingFigurePlacement,
-        alignment: Option<BriefingFigureAlignment>,
-    },
-    Pullquote {
-        suggestion_id: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct BriefingCompositionLayout {
-    #[serde(default)]
-    pub suggested_quotes: Vec<BriefingSuggestedQuote>,
-    pub blocks: Vec<BriefingCompositionBlock>,
-}
-
-impl BriefingCompositionLayout {
-    fn validate(
-        self,
-        tier: &str,
-        sources: &[BriefingCompositionSource],
-    ) -> Result<Self, BriefingLayoutRejection> {
-        if self.blocks.is_empty() {
-            return Err(BriefingLayoutRejection::EmptyLayout);
-        }
-        let suggestion_ids = self
-            .suggested_quotes
-            .iter()
-            .map(|suggestion| suggestion.id.trim())
-            .collect::<BTreeSet<_>>();
-        if suggestion_ids.len() != self.suggested_quotes.len()
-            || suggestion_ids
-                .iter()
-                .any(|id| id.is_empty() || id.len() > 80)
-            || self.suggested_quotes.iter().any(|suggestion| {
-                suggestion.text.trim().is_empty() || suggestion.text.chars().count() > 360
-            })
-        {
-            return Err(BriefingLayoutRejection::InvalidSuggestedQuotes);
-        }
-        let mut selected_quotes = BTreeSet::new();
-        let mut passages = Vec::new();
-        for block in &self.blocks {
-            match block {
-                BriefingCompositionBlock::Passage { markdown, .. } => {
-                    if markdown.trim().is_empty() {
-                        return Err(BriefingLayoutRejection::EmptyPassage);
-                    }
-                    passages.push(markdown.as_str());
-                }
-                BriefingCompositionBlock::Figure {
-                    source_key,
-                    caption,
-                    ..
-                } => {
-                    if caption.trim().is_empty()
-                        || !sources.iter().any(|source| {
-                            source.source_key == *source_key
-                                && (source.image_url.is_some() || source.thumbnail_url.is_some())
-                        })
-                    {
-                        return Err(BriefingLayoutRejection::InvalidFigure);
-                    }
-                }
-                BriefingCompositionBlock::Pullquote { suggestion_id } => {
-                    if !suggestion_ids.contains(suggestion_id.trim())
-                        || !selected_quotes.insert(suggestion_id.trim())
-                    {
-                        return Err(BriefingLayoutRejection::InvalidPullquote);
-                    }
-                }
-            }
-        }
-        let joined = passages.join("\n\n");
-        let allowed_links = sources
-            .iter()
-            .map(|source| source_link(&source.kind, source.id))
-            .collect::<BTreeSet<_>>();
-        let source_links = source_links_in_markdown(&joined);
-        if source_links
-            .iter()
-            .any(|link| !allowed_links.contains(link))
-        {
-            return Err(BriefingLayoutRejection::UnknownSourceLink);
-        }
-        for source in sources {
-            let link = source_link(&source.kind, source.id);
-            let count = source_links
-                .iter()
-                .filter(|found| found.as_str() == link)
-                .count();
-            if count == 0 {
-                return Err(if tier == "news" {
-                    BriefingLayoutRejection::NewsSourceLinkMissing(source.source_key.clone())
-                } else {
-                    BriefingLayoutRejection::SourceLinkMissing(source.source_key.clone())
-                });
-            }
-            if tier == "news" && count != 1 {
-                return Err(BriefingLayoutRejection::SourceLinkDuplicated(
-                    source.source_key.clone(),
-                ));
-            }
-        }
-        if tier == "news" {
-            if self.blocks.len() != 1 || passages.len() != 1 {
-                return Err(BriefingLayoutRejection::NewsPassageCount);
-            }
-            if passages[0]
-                .split("\n\n")
-                .filter(|value| !value.trim().is_empty())
-                .count()
-                != 1
-            {
-                return Err(BriefingLayoutRejection::NewsParagraphCount);
-            }
-        }
-        Ok(self)
+/// Validates one composed passage against its sources and the tier's shape rules.
+fn validate_passage(
+    markdown: String,
+    tier: &str,
+    sources: &[BriefingCompositionSource],
+) -> Result<String, BriefingLayoutRejection> {
+    if markdown.trim().is_empty() {
+        return Err(BriefingLayoutRejection::EmptyPassage);
     }
+    let allowed_links = sources
+        .iter()
+        .map(|source| source_link(&source.kind, source.id))
+        .collect::<BTreeSet<_>>();
+    let source_links = source_links_in_markdown(&markdown);
+    if source_links
+        .iter()
+        .any(|link| !allowed_links.contains(link))
+    {
+        return Err(BriefingLayoutRejection::UnknownSourceLink);
+    }
+    for source in sources {
+        let link = source_link(&source.kind, source.id);
+        let count = source_links
+            .iter()
+            .filter(|found| found.as_str() == link)
+            .count();
+        if count == 0 {
+            return Err(if tier == "news" {
+                BriefingLayoutRejection::NewsSourceLinkMissing(source.source_key.clone())
+            } else {
+                BriefingLayoutRejection::SourceLinkMissing(source.source_key.clone())
+            });
+        }
+        if tier == "news" && count != 1 {
+            return Err(BriefingLayoutRejection::SourceLinkDuplicated(
+                source.source_key.clone(),
+            ));
+        }
+    }
+    if tier == "news" {
+        if markdown
+            .split("\n\n")
+            .filter(|value| !value.trim().is_empty())
+            .count()
+            != 1
+        {
+            return Err(BriefingLayoutRejection::NewsParagraphCount);
+        }
+        return Ok(markdown);
+    }
+    // Publication collapses whitespace before splitting sentences, so count the same text.
+    let collapsed = markdown.split_whitespace().collect::<Vec<_>>().join(" ");
+    let sentences = crate::briefing_links::briefing_sentences(&collapsed).len();
+    if sentences > CARD_MAX_SENTENCES {
+        return Err(BriefingLayoutRejection::CardSentenceCount(sentences));
+    }
+    let words = crate::briefing_links::briefing_plain_text(&markdown)
+        .split_whitespace()
+        .count();
+    if words > CARD_MAX_WORDS {
+        return Err(BriefingLayoutRejection::CardWordCount(words));
+    }
+    Ok(markdown)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,7 +274,8 @@ impl BriefingLensName {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedBriefingLayout {
-    pub layout: Result<BriefingCompositionLayout, BriefingLayoutRejection>,
+    /// The validated passage markdown, or the rejection to feed back into the next attempt.
+    pub passage: Result<String, BriefingLayoutRejection>,
     pub model: String,
     pub usage: ProviderUsage,
     pub provider_response_id: Option<String>,
@@ -460,7 +376,8 @@ impl BriefingCompositionGateway {
         self.embeddings.model()
     }
 
-    /// Produces and validates a structured Briefing layout for the requested tier and sources.
+    /// Produces and validates one Briefing passage for the requested tier and sources. Card tiers
+    /// (`audio`, `longform`) compose exactly one source.
     ///
     /// # Errors
     ///
@@ -471,14 +388,7 @@ impl BriefingCompositionGateway {
         request: &BriefingCompositionRequest,
         feedback: Option<&str>,
     ) -> Result<GeneratedBriefingLayout, BriefingCompositionGatewayError> {
-        if request.sources.is_empty() {
-            return Err(BriefingCompositionGatewayError::EmptySources);
-        }
-        if !matches!(request.tier.as_str(), "audio" | "longform" | "news") {
-            return Err(BriefingCompositionGatewayError::UnsupportedTier(
-                request.tier.clone(),
-            ));
-        }
+        check_composition_request(request)?;
         let user_prompt = news::composition_user_prompt(request, feedback)?;
         let outcome = self
             .run_structured(StructuredRunRequest {
@@ -491,13 +401,13 @@ impl BriefingCompositionGateway {
                 validation_retries: 0,
             })
             .await?;
-        let layout = news::decode_composition_layout(
+        let passage = news::decode_composition_passage(
             outcome.structured_output,
             &request.tier,
             &request.sources,
         );
         Ok(GeneratedBriefingLayout {
-            layout,
+            passage,
             model: outcome.model_name,
             usage: outcome.usage,
             provider_response_id: outcome.provider_response_id,
@@ -645,6 +555,25 @@ impl BriefingCompositionGateway {
     }
 }
 
+fn check_composition_request(
+    request: &BriefingCompositionRequest,
+) -> Result<(), BriefingCompositionGatewayError> {
+    if request.sources.is_empty() {
+        return Err(BriefingCompositionGatewayError::EmptySources);
+    }
+    if !matches!(request.tier.as_str(), "audio" | "longform" | "news") {
+        return Err(BriefingCompositionGatewayError::UnsupportedTier(
+            request.tier.clone(),
+        ));
+    }
+    if request.tier != "news" && request.sources.len() != 1 {
+        return Err(BriefingCompositionGatewayError::CardSourceCount(
+            request.sources.len(),
+        ));
+    }
+    Ok(())
+}
+
 fn source_link(kind: &str, id: i64) -> String {
     format!("newsly://briefing/{kind}/{id}")
 }
@@ -716,6 +645,8 @@ pub enum BriefingCompositionGatewayError {
     EmptyLensSources,
     #[error("unsupported Briefing tier {0:?}")]
     UnsupportedTier(String),
+    #[error("Briefing card composition requires exactly one source, got {0}")]
+    CardSourceCount(usize),
     #[error("Briefing provider returned no structured output")]
     MissingStructuredOutput,
     #[error("invalid Briefing layout: {0}")]
@@ -751,6 +682,7 @@ impl BriefingCompositionGatewayError {
             Self::Json(_) => "request_encoding_failed",
             Self::EmptySources => "empty_sources",
             Self::UnsupportedTier(_) => "unsupported_tier",
+            Self::CardSourceCount(_) => "card_source_count",
             _ => "provider_request_rejected",
         }
     }

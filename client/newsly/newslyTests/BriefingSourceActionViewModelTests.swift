@@ -9,22 +9,6 @@ final class BriefingSourceActionViewModelTests: XCTestCase {
         XCTAssertNil(BriefingSourceActionViewModel.knowledgeSource(for: source(kind: "unknown")))
     }
 
-    func testSavePreservesSameNumberedSourceNamespacesAndNeverToggles() async {
-        var requests: [KnowledgeSource] = []
-        let model = model(save: { source in
-            requests.append(source)
-            return requests.count == 1 ? "Saved" : "Already saved"
-        })
-        let first = await model.save(source: .news(7))
-        let repeated = await model.save(source: .news(7))
-        let content = await model.save(source: .content(7))
-        XCTAssertEqual(first, "Saved")
-        XCTAssertEqual(repeated, "Already saved")
-        XCTAssertEqual(content, "Already saved")
-        XCTAssertEqual(requests, [.news(7), .news(7), .content(7)])
-        XCTAssertFalse(model.isBusy)
-    }
-
     func testChatRoutesUseRequestedNamespaceAndFocusComposerWithoutSendingMessage() async {
         var requests: [KnowledgeSource] = []
         let model = model(chat: { source in
@@ -95,41 +79,39 @@ final class BriefingSourceActionViewModelTests: XCTestCase {
     }
 
     func testInFlightCommandRejectsDuplicateAndOtherCommands() async {
-        var continuation: CheckedContinuation<String, Never>?
+        var continuation: CheckedContinuation<ChatSessionRoute, Never>?
         var callCount = 0
-        let model = model(save: { _ in
+        let model = model(chat: { _ in
             callCount += 1
             return await withCheckedContinuation { continuation = $0 }
         })
-        let first = Task { await model.save(source: .news(7)) }
+        let first = Task { await model.startChat(source: .news(7)) }
         while continuation == nil { await Task.yield() }
-        XCTAssertTrue(model.isSaving)
-        let duplicate = await model.save(source: .news(7))
-        let chat = await model.startChat(source: .content(7))
+        XCTAssertTrue(model.isStartingChat)
+        let duplicate = await model.startChat(source: .news(7))
         let deck = await model.createDeck(source: .news(7), focus: nil)
         XCTAssertNil(duplicate)
-        XCTAssertNil(chat)
         XCTAssertNil(deck)
         XCTAssertEqual(callCount, 1)
-        continuation?.resume(returning: "Saved")
+        continuation?.resume(returning: ChatSessionRoute(sessionId: 8))
         let result = await first.value
-        XCTAssertEqual(result, "Saved")
+        XCTAssertEqual(result?.sessionId, 8)
         XCTAssertFalse(model.isBusy)
     }
 
     func testFailureReleasesCommandAndSuccessfulRetryClearsError() async {
         var attempts = 0
-        let model = model(save: { _ in
+        let model = model(chat: { _ in
             attempts += 1
             if attempts == 1 { throw TestFailure.failed }
-            return "Saved"
+            return ChatSessionRoute(sessionId: 8)
         })
-        let failed = await model.save(source: .content(7))
+        let failed = await model.startChat(source: .content(7))
         XCTAssertNil(failed)
         XCTAssertEqual(model.errorMessage, "Test failure")
-        XCTAssertFalse(model.isSaving)
-        let retry = await model.save(source: .content(7))
-        XCTAssertEqual(retry, "Saved")
+        XCTAssertFalse(model.isStartingChat)
+        let retry = await model.startChat(source: .content(7))
+        XCTAssertEqual(retry?.sessionId, 8)
         XCTAssertNil(model.errorMessage)
     }
 
@@ -149,11 +131,11 @@ final class BriefingSourceActionViewModelTests: XCTestCase {
     }
 
     func testCancellationSuppressesLateFailure() async {
-        var continuation: CheckedContinuation<String, Error>?
-        let model = model(save: { _ in
+        var continuation: CheckedContinuation<ChatSessionRoute, Error>?
+        let model = model(chat: { _ in
             try await withCheckedThrowingContinuation { continuation = $0 }
         })
-        let task = Task { await model.save(source: .content(7)) }
+        let task = Task { await model.startChat(source: .content(7)) }
         while continuation == nil { await Task.yield() }
         task.cancel()
         continuation?.resume(throwing: TestFailure.failed)
@@ -165,10 +147,10 @@ final class BriefingSourceActionViewModelTests: XCTestCase {
 
     func testAlreadyCancelledTaskDoesNotSubmitCommand() async {
         var callCount = 0
-        let model = model(save: { _ in callCount += 1; return "Saved" })
+        let model = model(chat: { _ in callCount += 1; return ChatSessionRoute(sessionId: 8) })
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return await model.save(source: .news(7))
+            return await model.startChat(source: .news(7))
         }
         let result = await task.value
         XCTAssertNil(result)
@@ -176,13 +158,12 @@ final class BriefingSourceActionViewModelTests: XCTestCase {
     }
 
     private func model(
-        save: @escaping (KnowledgeSource) async throws -> String = { _ in throw TestFailure.failed },
         chat: @escaping (KnowledgeSource) async throws -> ChatSessionRoute = { _ in throw TestFailure.failed },
         deck: @escaping (KnowledgeSource, String?) async throws -> LearningDeck = { _, _ in throw TestFailure.failed },
         findDeck: @escaping (KnowledgeSource) async throws -> LearningDeck? = { _ in nil }
     ) -> BriefingSourceActionViewModel {
         BriefingSourceActionViewModel(
-            saveSource: save, startSourceChat: chat, findSourceDeck: { source, _ in try await findDeck(source) },
+            startSourceChat: chat, findSourceDeck: { source, _ in try await findDeck(source) },
             createSourceDeck: deck
         )
     }

@@ -12426,23 +12426,15 @@
             ]
           },
           "placement": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/BriefingFigurePlacement"
-              }
+            "type": [
+              "string",
+              "null"
             ]
           },
           "alignment": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/BriefingFigureAlignment"
-              }
+            "type": [
+              "string",
+              "null"
             ]
           },
           "text": {
@@ -12456,9 +12448,7 @@
       "BriefingBlockType": {
         "type": "string",
         "enum": [
-          "passage",
-          "figure",
-          "pullquote"
+          "passage"
         ]
       },
       "BriefingDigSearchRequest": {
@@ -12626,20 +12616,6 @@
             "format": "date-time"
           }
         }
-      },
-      "BriefingFigureAlignment": {
-        "type": "string",
-        "enum": [
-          "left",
-          "right"
-        ]
-      },
-      "BriefingFigurePlacement": {
-        "type": "string",
-        "enum": [
-          "inset",
-          "full"
-        ]
       },
       "BriefingFirstRunPhase": {
         "type": "string",

@@ -253,9 +253,13 @@ final class BriefingScrollReadTracker {
     }
 }
 
+/// A lens keeps its document generation, and so its scroll position, while its ordered
+/// coverage is unchanged or only extended at the end. Coverage is each segment's source
+/// keys, not its database id: a card recomposed by a newer prompt is a new segment covering
+/// the same source in the same place, and must not send the reader back to the top.
 enum BriefingLensDocumentGenerationPolicy {
-    static func preservesGeneration(previousIDs: [Int], mergedIDs: [Int]) -> Bool {
-        mergedIDs == previousIDs || mergedIDs.starts(with: previousIDs)
+    static func preservesGeneration(previous: [[String]], merged: [[String]]) -> Bool {
+        merged.starts(with: previous)
     }
 }
 

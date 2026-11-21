@@ -131,17 +131,18 @@ pub use briefing::{
     recent_briefing_dig_count, record_briefing_dig_usage, retry_briefing_narration,
 };
 pub use briefing_refresh::{
-    ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION, BriefingAppendBatch,
-    BriefingCompactionBatch, BriefingDonorIdentity, BriefingEmbeddingUsage,
-    BriefingLensAssignmentPlan, BriefingLensAssignmentSnapshot, BriefingLensAssignmentUsage,
-    BriefingLensCentroidMutation, BriefingPendingIdentity, BriefingPendingLensAssignment,
-    BriefingPlannedLens, BriefingRefreshApplyOutcome, BriefingRefreshClaimFence,
-    BriefingRefreshConfig, BriefingRefreshLens, BriefingRefreshMode, BriefingRefreshPublication,
-    BriefingRefreshRepositoryError, BriefingRefreshSource, BriefingSegmentUsage,
-    BriefingSemanticLens, BriefingUnassignedSource, ComposedBriefingAppend,
+    ApplyBriefingLensAssignmentOutcome, BRIEFING_CARD_PROMPT_VERSION, BRIEFING_NEWS_PROMPT_VERSION,
+    BriefingAppendBatch, BriefingCompactionBatch, BriefingCompactionKind, BriefingDonorIdentity,
+    BriefingEmbeddingUsage, BriefingLensAssignmentPlan, BriefingLensAssignmentSnapshot,
+    BriefingLensAssignmentUsage, BriefingLensCentroidMutation, BriefingPendingIdentity,
+    BriefingPendingLensAssignment, BriefingPlannedLens, BriefingRefreshApplyOutcome,
+    BriefingRefreshClaimFence, BriefingRefreshConfig, BriefingRefreshLens, BriefingRefreshMode,
+    BriefingRefreshPublication, BriefingRefreshRepositoryError, BriefingRefreshSource,
+    BriefingSegmentUsage, BriefingSemanticLens, BriefingUnassignedSource, ComposedBriefingAppend,
     ComposedBriefingCompaction, ComposedBriefingSegment, PrepareBriefingRefreshOutcome,
-    PreparedBriefingRefresh, PreparedBriefingRefreshSeed, apply_briefing_lens_assignment,
-    apply_briefing_refresh, prepare_briefing_refresh,
+    PreparedBriefingRefresh, PreparedBriefingRefreshSeed, STALE_CARD_RECOMPOSE_LIMIT,
+    StaleCardInventory, apply_briefing_lens_assignment, apply_briefing_refresh,
+    briefing_prompt_version, prepare_briefing_refresh, stale_card_inventory,
 };
 pub use chat::{
     ChatListCursor, ChatMessageProjection, ChatMessageStatusProjection, ChatMutationOutcome,

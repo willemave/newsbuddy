@@ -9,9 +9,70 @@ use uuid::Uuid;
 
 #[cfg(test)]
 mod bookmark_reconciliation_tests;
+#[cfg(test)]
+mod source_cards_migration_tests;
+#[cfg(test)]
+mod stale_card_tests;
 
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
-pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v11-news-citations";
+/// Stamped on News segments and part of News composition fingerprints.
+pub const BRIEFING_NEWS_PROMPT_VERSION: &str = "briefing-v11-news-citations";
+/// Stamped on Articles and Podcasts cards and part of their composition fingerprints.
+/// Changing it recomposes every live card in bounded, best-effort batches during
+/// normal refreshes, so change it only when card output should change.
+pub const BRIEFING_CARD_PROMPT_VERSION: &str = "briefing-card-v1";
+/// Live cards composed by an older card prompt that one refresh recomposes: one parallel
+/// round, so a prompt change drains over consecutive sweeps without rate-limit bursts.
+pub const STALE_CARD_RECOMPOSE_LIMIT: usize = 6;
+
+/// One active user's live cards composed by an older card prompt.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow, serde::Serialize)]
+pub struct StaleCardInventory {
+    pub user_id: i64,
+    pub stale_cards: i64,
+}
+
+/// Counts live one-source Articles and Podcasts cards whose text came from an older card
+/// prompt, per active user, optionally limited to `user_ids`. It is an upper bound: refreshes
+/// skip cards whose source is no longer eligible, because repair retires those instead.
+pub async fn stale_card_inventory(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_ids: &[i64],
+    limit: i64,
+) -> Result<Vec<StaleCardInventory>, sqlx::Error> {
+    sqlx::query_as::<_, StaleCardInventory>(
+        r"
+        SELECT segment.user_id::bigint AS user_id, count(*)::bigint AS stale_cards
+        FROM briefing_segments AS segment
+        JOIN briefing_lenses AS lens ON lens.id = segment.lens_id
+        JOIN users AS app_user ON app_user.id = segment.user_id
+        WHERE segment.status IN ('active', 'degraded')
+          AND lens.status = 'active'
+          AND lens.tier <> 'news'
+          AND app_user.is_active IS TRUE
+          AND jsonb_array_length(segment.source_keys::jsonb) = 1
+          AND segment.prompt_version <> $1
+          AND (cardinality($2::bigint[]) = 0 OR segment.user_id = ANY($2::bigint[]))
+        GROUP BY segment.user_id
+        ORDER BY segment.user_id
+        LIMIT $3
+        ",
+    )
+    .bind(BRIEFING_CARD_PROMPT_VERSION)
+    .bind(user_ids)
+    .bind(limit)
+    .fetch_all(&mut **transaction)
+    .await
+}
+
+/// The composition prompt version for a lens tier.
+pub fn briefing_prompt_version(tier: &str) -> &'static str {
+    if tier == "news" {
+        BRIEFING_NEWS_PROMPT_VERSION
+    } else {
+        BRIEFING_CARD_PROMPT_VERSION
+    }
+}
 const FIXED_LENSES: [(&str, &str, &str, &str, i32); 2] = [
     (
         "podcasts",
@@ -163,6 +224,17 @@ pub struct BriefingDonorIdentity {
     pub source_keys: Vec<String>,
 }
 
+/// Why a compaction batch recomposes its donor segments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BriefingCompactionKind {
+    /// Repairs or consolidates donors into new segments. A failed composition fails the refresh.
+    Consolidate,
+    /// Rewrites one Articles or Podcasts card composed by an older card prompt. Best effort: a
+    /// failed composition keeps the donor. The replacement keeps the donor's creation time, so
+    /// the card neither moves nor reorders its lens.
+    StaleCard { created_at: NaiveDateTime },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingCompactionBatch {
     pub lens: BriefingRefreshLens,
@@ -170,6 +242,7 @@ pub struct BriefingCompactionBatch {
     pub planned_source_keys: Vec<String>,
     pub sources: Vec<BriefingRefreshSource>,
     pub repair_required: bool,
+    pub kind: BriefingCompactionKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,6 +417,7 @@ pub struct ComposedBriefingCompaction {
     pub donors: Vec<BriefingDonorIdentity>,
     pub planned_source_keys: Vec<String>,
     pub segments: Vec<ComposedBriefingSegment>,
+    pub kind: BriefingCompactionKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,7 +523,7 @@ impl From<LensRow> for BriefingRefreshLens {
     }
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 struct SegmentRow {
     id: i64,
     lens_id: i64,
@@ -460,6 +534,8 @@ struct SegmentRow {
     lens_position: i32,
     source_keys: Value,
     event_groups: Option<Value>,
+    prompt_version: String,
+    created_at: NaiveDateTime,
 }
 
 #[derive(Debug, FromRow)]

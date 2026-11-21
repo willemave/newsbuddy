@@ -12,7 +12,6 @@ pub struct BriefingRefreshWorkerConfig {
     pub compose_parallelism: usize,
     pub embedding_batch_size: usize,
     pub event_similarity: f64,
-    pub max_figures_deep: usize,
 }
 
 impl BriefingRefreshWorkerConfig {
@@ -40,7 +39,6 @@ impl BriefingRefreshWorkerConfig {
             )?)?,
             embedding_batch_size: parse_usize("BRIEFING_CATEGORY_EMBEDDING_BATCH_SIZE", 32)?,
             event_similarity: parse_f64("BRIEFING_NEWS_EVENT_SIMILARITY", 0.78)?,
-            max_figures_deep: parse_usize("BRIEFING_MAX_FIGURES_DEEP", 12)?,
         };
         config.validate()?;
         Ok(config)
@@ -63,11 +61,6 @@ impl BriefingRefreshWorkerConfig {
         if !(0.0..=1.0).contains(&self.event_similarity) || !self.event_similarity.is_finite() {
             return Err(BriefingRefreshWorkerConfigError::Range(
                 "BRIEFING_NEWS_EVENT_SIMILARITY",
-            ));
-        }
-        if self.max_figures_deep > 50 {
-            return Err(BriefingRefreshWorkerConfigError::Range(
-                "BRIEFING_MAX_FIGURES_DEEP",
             ));
         }
         Ok(())
@@ -159,7 +152,6 @@ mod tests {
             compose_parallelism: 6,
             embedding_batch_size: 32,
             event_similarity: 0.78,
-            max_figures_deep: 12,
         }
     }
 

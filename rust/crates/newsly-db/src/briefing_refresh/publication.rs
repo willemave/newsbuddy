@@ -1,10 +1,11 @@
 //! Final Briefing publication, compaction, retirement, and usage persistence.
 
 use super::{
-    BTreeMap, BTreeSet, BriefingRefreshApplyOutcome, BriefingRefreshConfig, BriefingRefreshMode,
-    BriefingRefreshPublication, BriefingRefreshRepositoryError, ComposedBriefingAppend,
-    ComposedBriefingCompaction, ComposedBriefingSegment, DEFAULT_MASTHEAD_DECK, HashSet,
-    NaiveDateTime, Postgres, PreparedBriefingRefresh, Transaction, Utc, Value, json,
+    BTreeMap, BTreeSet, BriefingCompactionKind, BriefingRefreshApplyOutcome, BriefingRefreshConfig,
+    BriefingRefreshMode, BriefingRefreshPublication, BriefingRefreshRepositoryError,
+    ComposedBriefingAppend, ComposedBriefingCompaction, ComposedBriefingSegment,
+    DEFAULT_MASTHEAD_DECK, HashSet, NaiveDateTime, Postgres, PreparedBriefingRefresh, Transaction,
+    Utc, Value, json,
     preparation::{ensure_state, lock_state},
     sources::{json_strings, load_eligible_sources_for_keys, load_read_source_keys, u64_to_i32},
 };
@@ -43,7 +44,7 @@ pub async fn apply_briefing_refresh(
             r#"
             UPDATE briefing_segments
             SET status = 'compacted', updated_at = timezone('UTC', clock_timestamp())
-            WHERE user_id::bigint = $1 AND status IN ('active', 'degraded')
+            WHERE user_id = $1::bigint AND status IN ('active', 'degraded')
             "#,
         )
         .bind(prepared.user_id)
@@ -53,14 +54,14 @@ pub async fn apply_briefing_refresh(
     }
     if append_current {
         for composed in &publication.append_segments {
-            persist_segment(transaction, prepared, &composed.segment).await?;
+            persist_segment(transaction, prepared, &composed.segment, None).await?;
             let ids = composed
                 .pending_rows
                 .iter()
                 .map(|row| row.id)
                 .collect::<Vec<_>>();
             let deleted = sqlx::query(
-                "DELETE FROM briefing_pending_sources WHERE user_id::bigint = $1 AND id::bigint = ANY($2::bigint[])",
+                "DELETE FROM briefing_pending_sources WHERE user_id = $1::bigint AND id = ANY($2::bigint[])",
             )
             .bind(prepared.user_id)
             .bind(&ids)
@@ -76,8 +77,13 @@ pub async fn apply_briefing_refresh(
     if !version_stale {
         for plan in &publication.compactions {
             if compaction_is_current(transaction, prepared.user_id, plan).await? {
+                // A recomposed card keeps its donor's place in the lens.
+                let created_at = match plan.kind {
+                    BriefingCompactionKind::Consolidate => None,
+                    BriefingCompactionKind::StaleCard { created_at } => Some(created_at),
+                };
                 for segment in &plan.segments {
-                    persist_segment(transaction, prepared, segment).await?;
+                    persist_segment(transaction, prepared, segment, created_at).await?;
                 }
                 let donor_ids = plan
                     .donors
@@ -88,7 +94,7 @@ pub async fn apply_briefing_refresh(
                     r#"
                     UPDATE briefing_segments
                     SET status = 'compacted', updated_at = timezone('UTC', clock_timestamp())
-                    WHERE user_id::bigint = $1 AND id::bigint = ANY($2::bigint[])
+                    WHERE user_id = $1::bigint AND id = ANY($2::bigint[])
                     "#,
                 )
                 .bind(prepared.user_id)
@@ -122,7 +128,7 @@ pub async fn apply_briefing_refresh(
         UPDATE briefing_states
         SET version = $2,
             masthead_deck = COALESCE($3, masthead_deck)
-        WHERE user_id::bigint = $1
+        WHERE user_id = $1::bigint
         "#,
     )
     .bind(prepared.user_id)
@@ -132,7 +138,7 @@ pub async fn apply_briefing_refresh(
     .await?;
     if prepared.mode == BriefingRefreshMode::Sweep {
         sqlx::query(
-            "UPDATE processing_tasks SET dedupe_key = NULL WHERE id::bigint = $1 AND task_type = 'briefing_refresh' AND status = 'processing'",
+            "UPDATE processing_tasks SET dedupe_key = NULL WHERE id = $1::bigint AND task_type = 'briefing_refresh' AND status = 'processing'",
         )
         .bind(prepared.task_id)
         .execute(&mut **transaction)
@@ -156,7 +162,7 @@ async fn full_publication_preserves_coverage(
 ) -> Result<bool, sqlx::Error> {
     let old = sqlx::query_scalar::<_, Value>(
         "SELECT source_keys::jsonb FROM briefing_segments
-         WHERE user_id::bigint=$1 AND status IN ('active','degraded') FOR UPDATE",
+         WHERE user_id=$1::bigint AND status IN ('active','degraded') FOR UPDATE",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -194,13 +200,11 @@ pub(super) async fn append_publication_is_current(
         .filter(|(kind, _, _)| kind == "news")
         .map(|(_, id, _)| *id)
         .collect::<Vec<_>>();
-    sqlx::query(
-        "SELECT id FROM news_items WHERE id::bigint=ANY($1::bigint[]) ORDER BY id FOR SHARE",
-    )
-    .bind(news_ids)
-    .execute(&mut **transaction)
-    .await?;
-    let stale:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM briefing_pending_sources p WHERE p.user_id=$1::bigint AND p.id::bigint=ANY($2::bigint[]) AND p.source_kind='news' AND NOT COALESCE(news_filter_pending_admits($1,p.source_id,p.filter_revision,p.filter_input_hash,p.filter_outcome),false))")
+    sqlx::query("SELECT id FROM news_items WHERE id=ANY($1::bigint[]) ORDER BY id FOR SHARE")
+        .bind(news_ids)
+        .execute(&mut **transaction)
+        .await?;
+    let stale:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM briefing_pending_sources p WHERE p.user_id=$1::bigint AND p.id=ANY($2::bigint[]) AND p.source_kind='news' AND NOT COALESCE(news_filter_pending_admits($1,p.source_id,p.filter_revision,p.filter_input_hash,p.filter_outcome),false))")
         .bind(user_id).bind(&ids).fetch_one(&mut **transaction).await?;
     if stale {
         return Ok(false);
@@ -209,7 +213,7 @@ pub(super) async fn append_publication_is_current(
         r#"
         SELECT id::bigint, source_kind, source_id::bigint, lens_key
         FROM briefing_pending_sources
-        WHERE user_id::bigint = $1 AND id::bigint = ANY($2::bigint[])
+        WHERE user_id = $1::bigint AND id = ANY($2::bigint[])
         FOR UPDATE
         "#,
     )
@@ -246,7 +250,7 @@ pub(super) async fn compaction_is_current(
         r#"
         SELECT id::bigint, source_keys::jsonb
         FROM briefing_segments
-        WHERE user_id::bigint = $1 AND id::bigint = ANY($2::bigint[])
+        WHERE user_id = $1::bigint AND id = ANY($2::bigint[])
           AND status IN ('active', 'degraded')
         FOR UPDATE
         "#,
@@ -282,6 +286,7 @@ pub(super) async fn persist_segment(
     transaction: &mut Transaction<'static, Postgres>,
     prepared: &PreparedBriefingRefresh,
     segment: &ComposedBriefingSegment,
+    created_at: Option<NaiveDateTime>,
 ) -> Result<(), BriefingRefreshRepositoryError> {
     sqlx::query(
         r#"
@@ -292,7 +297,7 @@ pub(super) async fn persist_segment(
         VALUES (
             $1::bigint::integer, $2::bigint::integer, $3, $4, $5, $6, $7,
             'active', $8, $9, '[]'::jsonb,
-            timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
+            COALESCE($10, timezone('UTC', clock_timestamp())), timezone('UTC', clock_timestamp())
         )
         "#,
     )
@@ -305,6 +310,7 @@ pub(super) async fn persist_segment(
     .bind(json!(segment.event_groups))
     .bind(&segment.model)
     .bind(&segment.prompt_version)
+    .bind(created_at)
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -353,7 +359,7 @@ pub(super) async fn retire_read_segments(
     user_id: i64,
 ) -> Result<usize, BriefingRefreshRepositoryError> {
     let segments = sqlx::query_as::<_, (i64, Value)>(
-        "SELECT id::bigint, source_keys::jsonb FROM briefing_segments WHERE user_id::bigint = $1 AND status IN ('active', 'degraded') FOR UPDATE",
+        "SELECT id::bigint, source_keys::jsonb FROM briefing_segments WHERE user_id = $1::bigint AND status IN ('active', 'degraded') FOR UPDATE",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -374,7 +380,7 @@ pub(super) async fn retire_read_segments(
         return Ok(0);
     }
     Ok(sqlx::query(
-        "UPDATE briefing_segments SET status = 'retired', updated_at = timezone('UTC', clock_timestamp()) WHERE id::bigint = ANY($1::bigint[])",
+        "UPDATE briefing_segments SET status = 'retired', updated_at = timezone('UTC', clock_timestamp()) WHERE id = ANY($1::bigint[])",
     )
     .bind(&ids)
     .execute(&mut **transaction)
@@ -392,7 +398,7 @@ pub(super) async fn retire_idle_lenses(
         UPDATE briefing_lenses AS lens
         SET status = 'retired', retired_at = timezone('UTC', clock_timestamp()),
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE lens.user_id::bigint = $1 AND lens.status = 'active'
+        WHERE lens.user_id = $1::bigint AND lens.status = 'active'
           AND lens.key NOT IN ('podcasts', 'articles')
           AND (NOT lens.accepts_news OR lens.updated_at < timezone('UTC', clock_timestamp()) - ($2::text || ' days')::interval)
           AND NOT EXISTS (
@@ -417,7 +423,7 @@ pub(super) async fn masthead_deck(
     user_id: i64,
 ) -> Result<String, sqlx::Error> {
     let titles = sqlx::query_scalar::<_, String>(
-        "SELECT title FROM briefing_lenses WHERE user_id::bigint = $1 AND status = 'active' ORDER BY position LIMIT 4",
+        "SELECT title FROM briefing_lenses WHERE user_id = $1::bigint AND status = 'active' ORDER BY position LIMIT 4",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -446,7 +452,7 @@ pub(super) async fn next_sweep_delay(
             FROM briefing_pending_sources AS pending
             LEFT JOIN briefing_lenses AS lens
               ON lens.user_id = pending.user_id AND lens.key = pending.lens_key
-            WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'news'
+            WHERE pending.user_id = $1::bigint AND pending.source_kind = 'news'
               AND (
                   pending.lens_key IS NULL
                   OR (lens.status = 'active' AND lens.tier = 'news')
@@ -482,7 +488,7 @@ pub(super) async fn bump_first_edition_revision(
         r#"
         UPDATE onboarding_first_edition_runs
         SET revision = revision + 1
-        WHERE user_id::bigint = $1 AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
         "#,
     )
     .bind(user_id)

@@ -1,28 +1,11 @@
 import SwiftUI
 
-enum BriefingDisplayBlock: Identifiable {
-    case single(Int, APIBriefingBlock)
-    case floatingFigure(
-        Int,
-        figure: APIBriefingBlock,
-        passage: APIBriefingBlock,
-        passageIndex: Int,
-        alignment: APIBriefingFigureAlignment
-    )
-
-    var id: Int {
-        switch self {
-        case .single(let index, _), .floatingFigure(let index, _, _, _, _):
-            return index
-        }
-    }
-}
-
 final class BriefingSegmentRenderModel: Identifiable {
     let segment: APIBriefingSegment
     let sourcesByKey: [String: APIBriefingSource]
-    let headline: BriefingSegmentHeadline?
-    let displayBlocks: [BriefingDisplayBlock]
+    /// Present for one-source article and podcast segments, which render as cards.
+    let card: BriefingSourceCard?
+    let passageBlockIndices: [Int]
     let discussionChipsByBlockIndex: [Int: [String: BriefingDiscussionChip]]
     let passageContentByBlockIndex: [Int: BriefingAttributedTextBuilder.Result]
     let allSourcesRead: Bool
@@ -37,14 +20,8 @@ final class BriefingSegmentRenderModel: Identifiable {
         )
         self.segment = segment
         self.sourcesByKey = segmentSourcesByKey
-        self.headline = BriefingSegmentHeadline(
-            segment: segment,
-            sourcesByKey: segmentSourcesByKey
-        )
-        self.displayBlocks = Self.displayBlocks(
-            for: segment.blocks,
-            sourcesByKey: segmentSourcesByKey
-        )
+        self.card = BriefingSourceCard(segment: segment, sourcesByKey: segmentSourcesByKey)
+        self.passageBlockIndices = segment.blocks.indices.filter { segment.blocks[$0].type == .passage }
         let discussionChipsByBlockIndex = Self.discussionChipsByBlockIndex(
             for: segment.blocks,
             sourcesByKey: segmentSourcesByKey
@@ -55,12 +32,11 @@ final class BriefingSegmentRenderModel: Identifiable {
         }
         let textBuilder = BriefingAttributedTextBuilder()
         self.passageContentByBlockIndex = Dictionary(
-            uniqueKeysWithValues: segment.blocks.enumerated().compactMap { index, block in
-                guard block.type == .passage else { return nil }
-                return (
+            uniqueKeysWithValues: passageBlockIndices.map { index in
+                (
                     index,
                     textBuilder.build(
-                        paragraphs: block.paragraphs ?? [],
+                        paragraphs: segment.blocks[index].paragraphs ?? [],
                         discussionChips: discussionChipsByBlockIndex[index] ?? [:],
                         aggregatorMonograms: aggregatorMonograms
                     )
@@ -69,56 +45,6 @@ final class BriefingSegmentRenderModel: Identifiable {
         )
         self.allSourcesRead = !segment.sourceKeys.isEmpty
             && segment.sourceKeys.allSatisfy { segmentSourcesByKey[$0]?.read ?? true }
-    }
-
-    /// Inset figures adjacent to a meaty passage float inside it (text wraps);
-    /// everything else renders block-by-block as before.
-    private static func displayBlocks(
-        for blocks: [APIBriefingBlock],
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> [BriefingDisplayBlock] {
-        var items: [BriefingDisplayBlock] = []
-        var index = 0
-        var inlineFigureIndex = 0
-        while index < blocks.count {
-            let block = blocks[index]
-            if index + 1 < blocks.count,
-               canFloatFigure(block, beside: blocks[index + 1], sourcesByKey: sourcesByKey) {
-                items.append(.floatingFigure(
-                    index,
-                    figure: block,
-                    passage: blocks[index + 1],
-                    passageIndex: index + 1,
-                    alignment: BriefingFigureLayoutPolicy.alignment(
-                        block.alignment,
-                        fallbackIndex: inlineFigureIndex
-                    )
-                ))
-                inlineFigureIndex += 1
-                index += 2
-                continue
-            }
-            if block.type == .passage,
-               index + 1 < blocks.count,
-               canFloatFigure(blocks[index + 1], beside: block, sourcesByKey: sourcesByKey) {
-                items.append(.floatingFigure(
-                    index,
-                    figure: blocks[index + 1],
-                    passage: block,
-                    passageIndex: index,
-                    alignment: BriefingFigureLayoutPolicy.alignment(
-                        blocks[index + 1].alignment,
-                        fallbackIndex: inlineFigureIndex
-                    )
-                ))
-                inlineFigureIndex += 1
-                index += 2
-                continue
-            }
-            items.append(.single(index, block))
-            index += 1
-        }
-        return items
     }
 
     /// Assigns each discussion-bearing source an inline chip on the first
@@ -145,41 +71,14 @@ final class BriefingSegmentRenderModel: Identifiable {
         }
         return chipsByBlockIndex
     }
-
-    private static func canFloatFigure(
-        _ figure: APIBriefingBlock,
-        beside passage: APIBriefingBlock,
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> Bool {
-        figure.type == .figure
-            && passage.type == .passage
-            && BriefingFigureLayoutPolicy.usesInlineLayout(
-                placement: figure.placement,
-                hasImage: hasImage(figure, sourcesByKey: sourcesByKey),
-                passageTextLength: plainTextLength(of: passage)
-            )
-    }
-
-    private static func plainTextLength(of block: APIBriefingBlock) -> Int {
-        (block.paragraphs ?? []).reduce(0) { total, paragraph in
-            total + paragraph.runs.reduce(0) { $0 + $1.text.count }
-        }
-    }
-
-    private static func hasImage(
-        _ block: APIBriefingBlock,
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> Bool {
-        let source = block.sourceKey.flatMap { sourcesByKey[$0] }
-        let url = block.imageUrl ?? block.thumbnailUrl ?? source?.imageUrl ?? source?.thumbnailUrl
-        return url?.isEmpty == false
-    }
 }
 
 final class BriefingLensRenderModel {
     let hasMore: Bool
     let segments: [BriefingSegmentRenderModel]
     let timelineSeparatorSegmentIDs: Set<Int>
+    /// Articles and Podcasts present each work as a card; News stays prose.
+    let usesCards: Bool
 
     init(
         lens: APIBriefingLensResponse,
@@ -191,6 +90,7 @@ final class BriefingLensRenderModel {
             uniquingKeysWith: { current, _ in current }
         )
         self.hasMore = lens.hasMore
+        self.usesCards = lens.lens.tier != .news
         let previousSegmentsByID = Dictionary(
             uniqueKeysWithValues: (previous?.segments ?? []).map { ($0.id, $0) }
         )
@@ -238,6 +138,7 @@ struct BriefingLensPageView: View, Equatable {
     var screenEdgeInsets = EdgeInsets()
     let onOpenSource: (String) -> Void
     var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
+    var savedSources: BriefingSavedSources? = nil
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
     let onRefresh: () async -> Void
@@ -280,6 +181,7 @@ struct BriefingLensPageView: View, Equatable {
             && lhs.collapsibleChromeHeight == rhs.collapsibleChromeHeight
             && lhs.topContentInset == rhs.topContentInset
             && lhs.screenEdgeInsets == rhs.screenEdgeInsets
+            && lhs.savedSources === rhs.savedSources
     }
 
     /// One scroll observer owns both chrome movement and read passage. The
@@ -354,7 +256,7 @@ struct BriefingLensPageView: View, Equatable {
                 let firstSegmentID = renderModel.segments.first?.id
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 24) {
+                        LazyVStack(alignment: .leading, spacing: renderModel.usesCards ? 20 : 24) {
                             Color.clear
                                 .frame(height: 0)
                                 .id(Self.topAnchor)
@@ -366,33 +268,21 @@ struct BriefingLensPageView: View, Equatable {
                                         BriefingTimelineSeparator(date: segment.createdAt)
                                     }
 
-                                    BriefingSegmentView(
-                                        model: segmentModel,
-                                        onOpenSource: onOpenSource,
-                                        onSourceAction: onSourceAction,
-                                        onOpenDiscussion: onOpenDiscussion,
-                                        onDig: onDig
-                                    )
-                                    .onAppear {
-                                        guard segment.id == firstSegmentID,
-                                              !hasReportedFirstPassage else { return }
-                                        hasReportedFirstPassage = true
-                                        onFirstPassageVisible()
-                                    }
-                                    .id(segment.id)
-                                    .onGeometryChange(for: CGRect.self) { proxy in
-                                        proxy.frame(in: .named(contentIdentity))
-                                    } action: { _, frame in
-                                        recordSegmentFrame(frame, segmentID: segment.id)
-                                    }
+                                    segmentView(segmentModel)
+                                        .onAppear {
+                                            guard segment.id == firstSegmentID,
+                                                  !hasReportedFirstPassage else { return }
+                                            hasReportedFirstPassage = true
+                                            onFirstPassageVisible()
+                                        }
+                                        .id(segment.id)
+                                        .onGeometryChange(for: CGRect.self) { proxy in
+                                            proxy.frame(in: .named(contentIdentity))
+                                        } action: { _, frame in
+                                            recordSegmentFrame(frame, segmentID: segment.id)
+                                        }
                                 }
                                 .padding(.horizontal, Spacing.appHorizontalMargin)
-                                // Headed stories get a longer pause, like a new column item.
-                                .padding(
-                                    .top,
-                                    segmentModel.headline != nil && segment.id != firstSegmentID
-                                        ? 14 : 0
-                                )
                             }
 
                             if let firstRunProgress, firstRunProgress.processing > 0 || firstRunProgress.pendingSources > 0 || firstRunProgress.failed > 0 {
@@ -509,6 +399,40 @@ struct BriefingLensPageView: View, Equatable {
         .onChange(of: readTrackingConfiguration, initial: true) { _, configuration in
             updateReadConfiguration(configuration)
         }
+    }
+
+    @ViewBuilder
+    private func segmentView(_ segmentModel: BriefingSegmentRenderModel) -> some View {
+        if let card = segmentModel.card {
+            BriefingSourceCardView(
+                model: segmentModel,
+                card: card,
+                savedSources: savedSources,
+                onOpenSource: onOpenSource,
+                onSourceAction: onSourceAction,
+                onOpenDiscussion: { openDiscussion(forSourceKey: $0, in: segmentModel) },
+                onDig: onDig,
+                onMarkRead: { onMarkSegmentSeen(segmentModel.segment) }
+            )
+            // One centered column on wide screens; phones fill the margins.
+            .frame(maxWidth: Self.maximumCardWidth)
+            .frame(maxWidth: .infinity)
+        } else {
+            BriefingSegmentView(
+                model: segmentModel,
+                onOpenSource: onOpenSource,
+                onSourceAction: onSourceAction,
+                onOpenDiscussion: onOpenDiscussion,
+                onDig: onDig
+            )
+        }
+    }
+
+    private static let maximumCardWidth: CGFloat = 640
+
+    private func openDiscussion(forSourceKey sourceKey: String, in segmentModel: BriefingSegmentRenderModel) {
+        guard let source = segmentModel.sourcesByKey[sourceKey] else { return }
+        onOpenDiscussion(source)
     }
 
     @ViewBuilder
@@ -653,6 +577,7 @@ private struct BriefingTimelineSeparator: View {
     }
 }
 
+/// News segments: compact roundup prose with inline source and discussion links.
 private struct BriefingSegmentView: View {
     let model: BriefingSegmentRenderModel
     let onOpenSource: (String) -> Void
@@ -662,33 +587,18 @@ private struct BriefingSegmentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let headline = model.headline {
-                BriefingSegmentHeadlineView(
-                    headline: headline,
-                    segmentID: model.segment.id,
-                    onOpenSource: onOpenSource,
-                    onSourceAction: onSourceAction
-                )
-            }
-            ForEach(model.displayBlocks) { item in
-                switch item {
-                case .single(let index, let block):
-                    blockView(block, blockIndex: index)
-                case .floatingFigure(
-                    _, let figure, let passage, let passageIndex, let alignment
-                ):
-                    BriefingFloatingFigurePassage(
-                        figure: figure,
-                        passageContent: model.passageContentByBlockIndex[passageIndex],
-                        source: source(for: figure),
-                        alignment: alignment,
-                        figureOpacity: readOpacity(for: figure.briefingDirectSourceKeys),
-                        passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
+            ForEach(model.passageBlockIndices, id: \.self) { index in
+                if let content = model.passageContentByBlockIndex[index] {
+                    let opacity = readOpacity(for: model.segment.blocks[index].briefingFallbackReadSourceKeys)
+                    BriefingPassageView(
+                        content: content,
                         onOpenSource: onOpenSource,
-                        onSourceAction: onSourceAction,
                         onOpenDiscussion: openDiscussion(forSourceKey:),
+                        onSourceAction: onSourceAction,
                         onDig: onDig
                     )
+                    .opacity(opacity)
+                    .animation(.easeInOut(duration: 0.35), value: opacity)
                 }
             }
         }
@@ -705,223 +615,9 @@ private struct BriefingSegmentView: View {
         onOpenDiscussion(source)
     }
 
-    @ViewBuilder
-    private func blockView(_ block: APIBriefingBlock, blockIndex: Int) -> some View {
-        switch block.type {
-        case .passage:
-            if let content = model.passageContentByBlockIndex[blockIndex] {
-                BriefingPassageView(
-                    content: content,
-                    onOpenSource: onOpenSource,
-                    onOpenDiscussion: openDiscussion(forSourceKey:),
-                    onSourceAction: onSourceAction,
-                    onDig: onDig
-                )
-                .opacity(readOpacity(for: block.briefingFallbackReadSourceKeys))
-                .animation(
-                    .easeInOut(duration: 0.35),
-                    value: readOpacity(for: block.briefingFallbackReadSourceKeys)
-                )
-            }
-        case .figure:
-            BriefingFigureView(
-                block: block,
-                source: source(for: block),
-                onOpenSource: onOpenSource,
-                onSourceAction: onSourceAction
-            )
-            .opacity(readOpacity(for: block.briefingDirectSourceKeys))
-            .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
-        case .pullquote:
-            BriefingPullquoteView(
-                block: block,
-                source: source(for: block),
-                onOpenSource: onOpenSource,
-                onSourceAction: onSourceAction
-            )
-            .opacity(readOpacity(for: block.briefingDirectSourceKeys))
-            .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
-        }
-    }
-
     private func readOpacity(for sourceKeys: [String]) -> Double {
         guard !model.allSourcesRead, !sourceKeys.isEmpty else { return 1 }
         return sourceKeys.allSatisfy { model.sourcesByKey[$0]?.read ?? true } ? 0.72 : 1
-    }
-
-    private func source(for block: APIBriefingBlock) -> APIBriefingSource? {
-        block.sourceKey.flatMap { model.sourcesByKey[$0] }
-    }
-}
-
-private struct BriefingFloatingFigurePassage: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    let figure: APIBriefingBlock
-    let passageContent: BriefingAttributedTextBuilder.Result?
-    let source: APIBriefingSource?
-    let alignment: APIBriefingFigureAlignment
-    let figureOpacity: Double
-    let passageOpacity: Double
-    let onOpenSource: (String) -> Void
-    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
-    var onOpenDiscussion: (String) -> Void = { _ in }
-    let onDig: (String, String) -> Void
-
-    var body: some View {
-        let metrics = BriefingFigureLayoutPolicy.metrics(
-            for: horizontalSizeClass,
-            lineStep: BriefingPassageView.lineStep(for: dynamicTypeSize)
-        )
-        ZStack(alignment: alignment == .left ? .topLeading : .topTrailing) {
-            if let passageContent {
-                BriefingPassageView(
-                    content: passageContent,
-                    floatingExclusionSize: metrics.exclusionSize,
-                    floatingExclusionAlignment: alignment,
-                    onOpenSource: onOpenSource,
-                    onOpenDiscussion: onOpenDiscussion,
-                    onSourceAction: onSourceAction,
-                    onDig: onDig
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .opacity(passageOpacity)
-                .animation(.easeInOut(duration: 0.35), value: passageOpacity)
-            }
-
-            Button {
-                if let sourceKey = figure.sourceKey ?? source?.sourceKey {
-                    onOpenSource(sourceKey)
-                }
-            } label: {
-                CachedAsyncImage(
-                    url: ServerImageURL.resolve(figure.imageUrl ?? source?.imageUrl),
-                    thumbnailUrl: ServerImageURL.resolve(figure.thumbnailUrl ?? source?.thumbnailUrl),
-                    targetSize: metrics.imageSize
-                ) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.surfaceSecondary)
-                }
-                .frame(width: metrics.imageSize.width, height: metrics.imageSize.height)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.outlineVariant, lineWidth: 1)
-                }
-            }
-            .buttonStyle(.plain)
-            .briefingSourceMenu(sourceKey: figure.sourceKey ?? source?.sourceKey, onAction: onSourceAction)
-            .opacity(figureOpacity)
-            .animation(.easeInOut(duration: 0.35), value: figureOpacity)
-            .accessibilityLabel(source?.title ?? "Article image")
-        }
-    }
-}
-
-private struct BriefingFigureView: View {
-    let block: APIBriefingBlock
-    let source: APIBriefingSource?
-    let onOpenSource: (String) -> Void
-    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
-
-    private var figureHeight: CGFloat {
-        BriefingFigureLayoutPolicy.canonicalPlacement(block.placement) == .inset ? 176 : 216
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            CachedAsyncImage(
-                url: ServerImageURL.resolve(block.imageUrl ?? source?.imageUrl),
-                thumbnailUrl: ServerImageURL.resolve(block.thumbnailUrl ?? source?.thumbnailUrl),
-                targetSize: CGSize(width: 640, height: 360)
-            ) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: figureHeight)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } placeholder: {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.surfaceSecondary)
-                    .frame(height: figureHeight)
-                    .overlay {
-                        Image(systemName: "photo")
-                            .font(.appSymbol(size: 24, weight: .light))
-                            .foregroundStyle(Color.onSurfaceTertiary)
-                    }
-            }
-
-            if let caption = block.caption ?? source?.title {
-                Button {
-                    if let sourceKey = block.sourceKey ?? source?.sourceKey {
-                        onOpenSource(sourceKey)
-                    }
-                } label: {
-                    Text(caption)
-                        .font(.appCaption)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .briefingSourceMenu(sourceKey: block.sourceKey ?? source?.sourceKey, onAction: onSourceAction)
-            }
-        }
-    }
-}
-
-private struct BriefingPullquoteView: View {
-    let block: APIBriefingBlock
-    let source: APIBriefingSource?
-    let onOpenSource: (String) -> Void
-    var onSourceAction: ((String, BriefingSourceAction) -> Void)? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(block.text ?? "")
-                .font(.appSerifItalic(size: 15, relativeTo: .title3))
-                .foregroundStyle(Color.readerBodyText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .accessibilityIdentifier("briefing.pullquote.text")
-
-            if let sourceKey = block.sourceKey ?? source?.sourceKey {
-                Button {
-                    onOpenSource(sourceKey)
-                } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text(source?.title ?? "Open source")
-                            .lineLimit(2)
-                        Image(systemName: "arrow.up.right")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .briefingSourceMenu(sourceKey: block.sourceKey ?? source?.sourceKey, onAction: onSourceAction)
-                .accessibilityLabel(
-                    source.map { "Open source: \($0.title)" } ?? "Open source"
-                )
-            }
-        }
-        .padding(.leading, 14)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.brandPrimary)
-                .frame(width: 3)
-        }
-        .accessibilityElement(children: .contain)
     }
 }
 

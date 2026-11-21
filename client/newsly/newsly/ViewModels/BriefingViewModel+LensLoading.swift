@@ -290,11 +290,9 @@ extension BriefingViewModel {
         var state = lensStates[key] ?? BriefingLensState()
         let previousLens = state.document
         let previousRenderModel = state.renderModel
-        let previousIDs = previousLens?.segments.map(\.id) ?? []
-        let mergedIDs = lens.segments.map(\.id)
         if !BriefingLensDocumentGenerationPolicy.preservesGeneration(
-            previousIDs: previousIDs,
-            mergedIDs: mergedIDs
+            previous: previousLens?.segments.map(\.sourceKeys) ?? [],
+            merged: lens.segments.map(\.sourceKeys)
         ) {
             state.documentGeneration += 1
         }

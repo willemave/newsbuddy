@@ -18,7 +18,7 @@ impl BriefingComposer for RejectedComposer {
     ) -> Result<GeneratedBriefingLayout, BriefingCompositionGatewayError> {
         self.0.lock().unwrap().push(feedback.map(str::to_owned));
         Ok(GeneratedBriefingLayout {
-            layout: Err(
+            passage: Err(
                 newsly_providers::BriefingLayoutRejection::NewsSourceLinkMissing(
                     "content:1".to_owned(),
                 ),
@@ -98,7 +98,7 @@ async fn correction_budget_survives_new_jobs_and_changed_input_recovers(pool: Pg
         user_id: user,
         fence: &fence,
     };
-    let error = compose_unit(&fake, unit("Title [Update]"), 3, 0, context)
+    let error = compose_unit(&fake, unit("Title [Update]"), 3, context)
         .await
         .unwrap_err();
     assert!(!error.retryable());
@@ -123,7 +123,7 @@ async fn correction_budget_survives_new_jobs_and_changed_input_recovers(pool: Pg
         fence: &next_fence,
     };
     assert!(
-        compose_unit(&fake, unit("Title [Update]"), 3, 0, next_context)
+        compose_unit(&fake, unit("Title [Update]"), 3, next_context)
             .await
             .is_err()
     );
@@ -133,7 +133,7 @@ async fn correction_budget_survives_new_jobs_and_changed_input_recovers(pool: Pg
         "a new task does not reset the correction budget"
     );
     assert!(
-        compose_unit(&fake, unit("Changed source input"), 3, 0, next_context)
+        compose_unit(&fake, unit("Changed source input"), 3, next_context)
             .await
             .is_err()
     );
@@ -155,7 +155,7 @@ async fn correction_budget_survives_new_jobs_and_changed_input_recovers(pool: Pg
     .await
     .unwrap();
     assert!(
-        compose_unit(&fake, unit("Title [Update]"), 3, 0, next_context)
+        compose_unit(&fake, unit("Title [Update]"), 3, next_context)
             .await
             .is_err()
     );
@@ -179,27 +179,27 @@ async fn progressive_readiness_skips_only_the_exact_cooling_input(pool: PgPool) 
         fence: &fence,
     };
     assert!(
-        composition_is_ready(fake.model_spec(), 0, &unit("Cooling category"), context)
+        composition_is_ready(fake.model_spec(), &unit("Cooling category"), context)
             .await
             .unwrap()
     );
     assert!(
-        compose_unit(&fake, unit("Cooling category"), 1, 0, context)
+        compose_unit(&fake, unit("Cooling category"), 1, context)
             .await
             .is_err()
     );
     assert!(
-        !composition_is_ready(fake.model_spec(), 0, &unit("Cooling category"), context)
+        !composition_is_ready(fake.model_spec(), &unit("Cooling category"), context)
             .await
             .unwrap()
     );
     assert!(
-        composition_is_ready(fake.model_spec(), 0, &unit("Next category"), context)
+        composition_is_ready(fake.model_spec(), &unit("Next category"), context)
             .await
             .unwrap()
     );
     assert!(
-        composition_is_ready("different:model", 0, &unit("Cooling category"), context)
+        composition_is_ready("different:model", &unit("Cooling category"), context)
             .await
             .unwrap()
     );
@@ -282,7 +282,6 @@ async fn progressive_selection_keeps_articles_and_podcasts_with_one_ready_news(p
     };
     let fingerprint = composition_fingerprint(
         services.gateway.model_spec(),
-        services.config.max_figures_deep,
         &composition_request(&cooling_unit),
     );
     sqlx::query("INSERT INTO briefing_composition_cooldowns(user_id,fingerprint,retry_after) VALUES($1,$2,now() + interval '24 hours')")
@@ -366,11 +365,11 @@ async fn prior_response_contract_cooldown_does_not_block_revised_news(pool: PgPo
         fence: &fence,
     };
     assert!(
-        composition_is_ready(fake.model_spec(), 0, &news, context)
+        composition_is_ready(fake.model_spec(), &news, context)
             .await
             .unwrap()
     );
-    assert!(compose_unit(&fake, news, 1, 0, context).await.is_err());
+    assert!(compose_unit(&fake, news, 1, context).await.is_err());
     assert_eq!(
         fake.0.lock().unwrap().len(),
         1,

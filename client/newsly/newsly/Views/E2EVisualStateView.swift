@@ -30,6 +30,8 @@ struct E2EVisualStateView: View {
             E2EBriefingSourceActionsVisualState()
         case "briefing-list-metadata":
             E2EBriefingListMetadataVisualState()
+        case "briefing-card-swipe":
+            E2EBriefingCardSwipeVisualState()
         case "briefing-loading":
             BriefingLoadingView()
         case "briefing-header":

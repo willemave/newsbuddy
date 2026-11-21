@@ -2,13 +2,13 @@
 
 use super::{
     AssertSqlSafe, BTreeMap, BTreeSet, BriefingAppendBatch, BriefingCompactionBatch,
-    BriefingDonorIdentity, BriefingLensAssignmentSnapshot, BriefingPendingIdentity,
-    BriefingRefreshClaimFence, BriefingRefreshConfig, BriefingRefreshLens, BriefingRefreshMode,
-    BriefingRefreshRepositoryError, BriefingRefreshSource, BriefingSemanticLens,
-    BriefingUnassignedSource, DEFAULT_MASTHEAD_DECK, FIXED_LENSES, HashMap, HashSet, LensRow,
-    NaiveDateTime, PendingContentRow, PendingNewsRow, Postgres, PrepareBriefingRefreshOutcome,
-    PreparedBriefingRefreshSeed, SegmentRow, SemanticLensRow, Transaction, UnassignedNewsRow, Utc,
-    Uuid,
+    BriefingCompactionKind, BriefingDonorIdentity, BriefingLensAssignmentSnapshot,
+    BriefingPendingIdentity, BriefingRefreshClaimFence, BriefingRefreshConfig, BriefingRefreshLens,
+    BriefingRefreshMode, BriefingRefreshRepositoryError, BriefingRefreshSource,
+    BriefingSemanticLens, BriefingUnassignedSource, DEFAULT_MASTHEAD_DECK, FIXED_LENSES, HashMap,
+    HashSet, LensRow, NaiveDateTime, PendingContentRow, PendingNewsRow, Postgres,
+    PrepareBriefingRefreshOutcome, PreparedBriefingRefreshSeed, SegmentRow, SemanticLensRow,
+    Transaction, UnassignedNewsRow, Utc, Uuid, briefing_prompt_version,
     lens_assignment::next_news_position,
     sources::{
         event_group_count, json_strings, load_eligible_sources_for_keys, source_from_content,
@@ -65,12 +65,12 @@ pub async fn prepare_briefing_refresh(
         // settled work. Retain its exact policy/evidence identity without repeating inference.
         // Lock evidence through reseeding so an intervening summary edit cannot inherit it.
         let retained_unavailable: Vec<i64> = sqlx::query_scalar(
-            "SELECT news.id::bigint FROM briefing_pending_sources pending JOIN news_items news ON news.id=pending.source_id WHERE pending.user_id::bigint=$1 AND pending.source_kind='news' AND pending.filter_outcome='unavailable' AND pending.filter_revision=$2 AND pending.filter_input_hash=news_filter_input_hash(news) ORDER BY news.id FOR SHARE OF news"
+            "SELECT news.id::bigint FROM briefing_pending_sources pending JOIN news_items news ON news.id=pending.source_id WHERE pending.user_id=$1::bigint AND pending.source_kind='news' AND pending.filter_outcome='unavailable' AND pending.filter_revision=$2 AND pending.filter_input_hash=news_filter_input_hash(news) ORDER BY news.id FOR SHARE OF news"
         ).bind(user_id).bind(preference.revision).fetch_all(&mut **transaction).await?;
         unavailable_ids.extend(retained_unavailable);
         unavailable_ids.sort_unstable();
         unavailable_ids.dedup();
-        sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id::bigint = $1")
+        sqlx::query("DELETE FROM briefing_pending_sources WHERE user_id = $1::bigint")
             .bind(user_id)
             .execute(&mut **transaction)
             .await?;
@@ -136,8 +136,8 @@ pub(super) async fn load_briefing_refresh_claim_fence(
         SELECT locked_by, lease_token, retry_count, executor_runtime,
                executor_version, executor_namespace
         FROM processing_tasks
-        WHERE id::bigint = $1 AND task_type = 'briefing_refresh'
-          AND owner_user_id::bigint = $2 AND status = 'processing'
+        WHERE id = $1::bigint AND task_type = 'briefing_refresh'
+          AND owner_user_id = $2::bigint AND status = 'processing'
           AND locked_by IS NOT NULL AND lease_token IS NOT NULL
           AND lease_expires_at > timezone('UTC', clock_timestamp())
         FOR SHARE
@@ -191,7 +191,7 @@ pub(super) async fn state_version(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
 ) -> Result<i32, sqlx::Error> {
-    sqlx::query_scalar("SELECT version FROM briefing_states WHERE user_id::bigint = $1")
+    sqlx::query_scalar("SELECT version FROM briefing_states WHERE user_id = $1::bigint")
         .bind(user_id)
         .fetch_one(&mut **transaction)
         .await
@@ -201,7 +201,7 @@ pub(super) async fn lock_state(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
 ) -> Result<i32, sqlx::Error> {
-    sqlx::query_scalar("SELECT version FROM briefing_states WHERE user_id::bigint = $1 FOR UPDATE")
+    sqlx::query_scalar("SELECT version FROM briefing_states WHERE user_id = $1::bigint FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut **transaction)
         .await
@@ -212,7 +212,7 @@ pub(super) async fn active_user_exists(
     user_id: i64,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1 AND is_active IS TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active IS TRUE)",
     )
     .bind(user_id)
     .fetch_one(&mut **transaction)
@@ -281,7 +281,7 @@ pub(super) async fn seed_content_pending(
         FROM contents AS content
         JOIN content_status AS membership
           ON membership.content_id = content.id
-         AND membership.user_id::bigint = $1
+         AND membership.user_id = $1::bigint
          AND membership.status = 'inbox'
         WHERE content.status = 'completed'
           AND content.content_type IN ('article', 'podcast')
@@ -297,7 +297,7 @@ pub(super) async fn seed_content_pending(
           ), 'null'::jsonb) IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM content_read_status AS read_status
-              WHERE read_status.user_id::bigint = $1
+              WHERE read_status.user_id = $1::bigint
                 AND read_status.content_id = content.id
           )
           AND (
@@ -340,7 +340,7 @@ async fn seed_filtered_news_pending(
     examined_all: bool,
     filter_enabled: bool,
 ) -> Result<usize, sqlx::Error> {
-    let active_run = sqlx::query_as::<_, (i64, bool, bool)>("SELECT id::bigint, news_seeded, news_seed_settled FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' ORDER BY id DESC LIMIT 1 FOR UPDATE")
+    let active_run = sqlx::query_as::<_, (i64, bool, bool)>("SELECT id::bigint, news_seeded, news_seed_settled FROM onboarding_first_edition_runs WHERE user_id=$1::bigint AND status='active' ORDER BY id DESC LIMIT 1 FOR UPDATE")
         .bind(user_id).fetch_optional(&mut **transaction).await?;
     let mut cohort_run_id = active_run
         .filter(|(_, _, settled)| !settled)
@@ -351,9 +351,9 @@ async fn seed_filtered_news_pending(
                 WITH visible_news AS ({visible_news}), ranked AS (
                     SELECT n.id, COALESCE(n.published_at,n.ingested_at) AS arrival,
                            row_number() OVER (PARTITION BY n.platform, n.raw_metadata::jsonb #>> '{{aggregator,topic}}' ORDER BY COALESCE(n.published_at,n.ingested_at) DESC, n.id DESC) AS source_rank
-                    FROM visible_news n WHERE (NOT $5::boolean OR news_filter_admits($1,n.id,n.id::bigint=ANY($4::bigint[]))) AND NOT EXISTS (
+                    FROM visible_news n WHERE (NOT $5::boolean OR news_filter_admits($1,n.id,n.id=ANY($4::bigint[]))) AND NOT EXISTS (
                         SELECT 1 FROM news_item_read_status r JOIN news_items m ON m.id=r.news_item_id
-                        WHERE r.user_id::bigint=$1 AND COALESCE(m.representative_news_item_id,m.id)=n.id
+                        WHERE r.user_id=$1::bigint AND COALESCE(m.representative_news_item_id,m.id)=n.id
                     )
                 )
                 INSERT INTO onboarding_first_edition_items(run_id,source_kind,source_id)
@@ -362,12 +362,12 @@ async fn seed_filtered_news_pending(
             "#, visible_news=visible_news_sql())))
                 .bind(user_id).bind(run_id).bind(NEWS_REFRESH_BATCH_SIZE).bind(unavailable_ids).bind(filter_enabled).execute(&mut **transaction).await?;
             // Leave an empty corpus open until ready news actually arrives.
-            sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=$2 OR EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news') WHERE id::bigint=$1")
+            sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=$2 OR EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id=$1::bigint AND source_kind='news') WHERE id=$1::bigint")
                 .bind(run_id).bind(examined_all).execute(&mut **transaction).await?;
         }
         if !settled {
             let settled_rows = sqlx::query(AssertSqlSafe(format!(r"WITH visible_news AS ({visible_news})
-                UPDATE onboarding_first_edition_runs r SET news_seed_settled=TRUE WHERE r.id::bigint=$2 AND r.news_seeded AND NOT EXISTS (
+                UPDATE onboarding_first_edition_runs r SET news_seed_settled=TRUE WHERE r.id=$2::bigint AND r.news_seeded AND NOT EXISTS (
                     SELECT 1 FROM onboarding_first_edition_items i JOIN visible_news n ON n.id=i.source_id
                     WHERE i.run_id=r.id AND i.source_kind='news' AND NOT news_filter_settled($1,n.id)
                       AND NOT EXISTS(SELECT 1 FROM briefing_segments s WHERE s.user_id=r.user_id AND s.status IN ('active','degraded') AND s.source_keys::jsonb ? ('news:' || n.id::text))
@@ -394,17 +394,17 @@ async fn seed_filtered_news_pending(
                timezone('UTC', clock_timestamp()),
                COALESCE((SELECT revision FROM news_filter_preferences WHERE user_id=$1::bigint ORDER BY revision DESC LIMIT 1),0),
                news_filter_input_hash(news::news_items),
-               CASE WHEN news.id::bigint=ANY($4::bigint[]) THEN 'unavailable' ELSE 'decided' END
+               CASE WHEN news.id=ANY($4::bigint[]) THEN 'unavailable' ELSE 'decided' END
         FROM visible_news AS news
-        WHERE (NOT $5::boolean OR news_filter_admits($1,news.id,news.id::bigint=ANY($4::bigint[]))) AND NOT EXISTS (
+        WHERE (NOT $5::boolean OR news_filter_admits($1,news.id,news.id=ANY($4::bigint[]))) AND NOT EXISTS (
               SELECT 1 FROM briefing_pending_sources p
-              WHERE p.user_id::bigint = $1 AND p.source_kind = 'news' AND p.source_id = news.id
+              WHERE p.user_id = $1::bigint AND p.source_kind = 'news' AND p.source_id = news.id
           )
           AND NOT EXISTS (
             SELECT 1
             FROM news_items AS member
             JOIN news_item_read_status AS read_status ON read_status.news_item_id = member.id
-            WHERE read_status.user_id::bigint = $1
+            WHERE read_status.user_id = $1::bigint
               AND coalesce(member.representative_news_item_id, member.id) = news.id
         )
           AND (
@@ -412,7 +412,7 @@ async fn seed_filtered_news_pending(
                   SELECT 1
                   FROM briefing_segments AS segment,
                        jsonb_array_elements_text(segment.source_keys::jsonb) AS source_key(value)
-                  WHERE segment.user_id::bigint = $1
+                  WHERE segment.user_id = $1::bigint
                     AND segment.status IN ('active', 'degraded')
                     AND source_key.value = 'news:' || news.id::text
               )
@@ -445,7 +445,7 @@ pub(super) async fn prune_ineligible_pending(
     // A failed Full may leave replacement rows for sources still in the old edition.
     // Published membership also supplies discussion demand; these rows are redundant.
     let covered = sqlx::query(
-        "DELETE FROM briefing_pending_sources pending WHERE pending.user_id::bigint=$1
+        "DELETE FROM briefing_pending_sources pending WHERE pending.user_id=$1::bigint
          AND EXISTS (SELECT 1 FROM briefing_segments segment
              WHERE segment.user_id=pending.user_id AND segment.status IN ('active','degraded')
              AND segment.source_keys::jsonb ? (pending.source_kind || ':' || pending.source_id::text))",
@@ -520,7 +520,7 @@ pub(super) async fn assign_nonsemantic_pending_lenses(
         UPDATE briefing_pending_sources AS pending
         SET lens_key = CASE WHEN content.content_type = 'podcast' THEN 'podcasts' ELSE 'articles' END
         FROM contents AS content
-        WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'content'
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'content'
           AND pending.source_id = content.id AND pending.lens_key IS NULL
         "#,
     )
@@ -553,13 +553,13 @@ pub(super) async fn load_lens_assignment_snapshot(
         .map(semantic_lens_from_row)
         .collect::<Result<Vec<_>, _>>()?;
     let all_lens_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 ORDER BY key",
+        "SELECT key FROM briefing_lenses WHERE user_id = $1::bigint ORDER BY key",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
     .await?;
     let active_news_lens_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news ORDER BY position, id",
+        "SELECT key FROM briefing_lenses WHERE user_id = $1::bigint AND tier = 'news' AND status = 'active' AND accepts_news ORDER BY position, id",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -589,7 +589,7 @@ pub(super) async fn unassigned_news_rows(
                news.published_at, news.processed_at, news.ingested_at, news.created_at
         FROM briefing_pending_sources AS pending
         JOIN news_items AS news ON news.id = pending.source_id
-        WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'news'
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'news'
           AND pending.lens_key IS NULL
         ORDER BY pending.enqueued_at, pending.id
         LIMIT $2
@@ -610,7 +610,7 @@ pub(super) async fn semantic_lens_rows(
         SELECT id::bigint AS id, key, title, deck, position, centroid::jsonb AS centroid,
                centroid_weight, centroid_model, routing_rule, updated_at
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news AND key <> 'misc'
+        WHERE user_id = $1::bigint AND tier = 'news' AND status = 'active' AND accepts_news AND key <> 'misc'
         ORDER BY position, id
         FOR SHARE
         "#,
@@ -740,7 +740,7 @@ pub(super) async fn active_lenses(
         r#"
         SELECT id::bigint AS id, key, tier, title, deck, position
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND status = 'active'
+        WHERE user_id = $1::bigint AND status = 'active'
         ORDER BY position, id
         "#,
     )
@@ -765,7 +765,7 @@ pub(super) async fn pending_content_rows(
                content.publication_date
         FROM briefing_pending_sources AS pending
         JOIN contents AS content ON content.id = pending.source_id
-        WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'content'
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'content'
           AND pending.lens_key IS NOT NULL
         ORDER BY pending.lens_key, pending.enqueued_at, pending.id
         "#,
@@ -792,7 +792,7 @@ pub(super) async fn pending_news_rows(
         JOIN news_items AS news ON news.id = pending.source_id
         JOIN briefing_lenses AS lens ON lens.user_id = pending.user_id AND lens.key = pending.lens_key
           AND lens.status = 'active' AND lens.tier = 'news'
-        WHERE pending.user_id::bigint = $1 AND pending.source_kind = 'news'
+        WHERE pending.user_id = $1::bigint AND pending.source_kind = 'news'
           AND pending.lens_key IS NOT NULL
         ORDER BY row_number() OVER (
             PARTITION BY pending.lens_key ORDER BY pending.enqueued_at, pending.id
@@ -816,10 +816,11 @@ pub(super) async fn load_compaction_batches(
                lens.key AS lens_key, lens.tier AS lens_tier, lens.title AS lens_title,
                lens.deck AS lens_deck, lens.position AS lens_position,
                segment.source_keys::jsonb AS source_keys,
-               segment.event_groups::jsonb AS event_groups
+               segment.event_groups::jsonb AS event_groups,
+               segment.prompt_version, segment.created_at
         FROM briefing_segments AS segment
         JOIN briefing_lenses AS lens ON lens.id = segment.lens_id
-        WHERE segment.user_id::bigint = $1 AND segment.status IN ('active', 'degraded')
+        WHERE segment.user_id = $1::bigint AND segment.status IN ('active', 'degraded')
           AND lens.status = 'active'
         ORDER BY lens.position, lens.id, segment.created_at DESC, segment.id DESC
         "#,
@@ -842,7 +843,7 @@ pub(super) async fn load_compaction_batches(
         by_lens.entry(segment.lens_id).or_default().push(segment);
     }
     let draining: HashSet<i64> = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM briefing_lenses WHERE user_id::bigint=$1 AND NOT accepts_news",
+        "SELECT id::bigint FROM briefing_lenses WHERE user_id=$1::bigint AND NOT accepts_news",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -850,6 +851,7 @@ pub(super) async fn load_compaction_batches(
     .into_iter()
     .collect();
     let mut batches = Vec::new();
+    let mut stale_cards = Vec::new();
     for (lens_id, lens_segments) in by_lens {
         let mut repair_ids = HashSet::new();
         let mut regular_ids = Vec::new();
@@ -875,6 +877,14 @@ pub(super) async fn load_compaction_batches(
         }
         let repair_required = !repair_ids.is_empty();
         repair_ids.extend(regular_ids);
+        stale_cards.extend(
+            lens_segments
+                .iter()
+                .filter(|segment| {
+                    is_stale_card(segment, &sources) && !repair_ids.contains(&segment.id)
+                })
+                .cloned(),
+        );
         if repair_ids.is_empty() {
             continue;
         }
@@ -913,7 +923,63 @@ pub(super) async fn load_compaction_batches(
             planned_source_keys: replacement_keys,
             sources: replacement_sources,
             repair_required,
+            kind: BriefingCompactionKind::Consolidate,
         });
     }
+    batches.extend(stale_card_batches(stale_cards, &sources));
     Ok(batches)
+}
+
+/// A live one-source Articles or Podcasts card whose source is still eligible and whose
+/// text came from an older card prompt.
+pub(super) fn is_stale_card(
+    segment: &SegmentRow,
+    sources: &HashMap<String, BriefingRefreshSource>,
+) -> bool {
+    let keys = json_strings(&segment.source_keys);
+    segment.lens_tier != "news"
+        && keys.len() == 1
+        && sources.contains_key(&keys[0])
+        && segment.prompt_version != briefing_prompt_version(&segment.lens_tier)
+}
+
+/// Every stale card, newest first, one best-effort batch each. The worker skips cards whose
+/// input is cooling down and then recomposes at most `STALE_CARD_RECOMPOSE_LIMIT` per refresh.
+pub(super) fn stale_card_batches(
+    mut stale_cards: Vec<SegmentRow>,
+    sources: &HashMap<String, BriefingRefreshSource>,
+) -> Vec<BriefingCompactionBatch> {
+    stale_cards.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then(right.id.cmp(&left.id))
+    });
+    stale_cards
+        .into_iter()
+        .filter_map(|segment| {
+            let keys = json_strings(&segment.source_keys);
+            let source = sources.get(&keys[0])?.clone();
+            Some(BriefingCompactionBatch {
+                lens: BriefingRefreshLens {
+                    id: segment.lens_id,
+                    key: segment.lens_key,
+                    tier: segment.lens_tier,
+                    title: segment.lens_title,
+                    deck: segment.lens_deck,
+                    position: segment.lens_position,
+                },
+                donors: vec![BriefingDonorIdentity {
+                    segment_id: segment.id,
+                    source_keys: keys.clone(),
+                }],
+                planned_source_keys: keys,
+                sources: vec![source],
+                repair_required: true,
+                kind: BriefingCompactionKind::StaleCard {
+                    created_at: segment.created_at,
+                },
+            })
+        })
+        .collect()
 }

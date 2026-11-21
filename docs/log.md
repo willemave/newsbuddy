@@ -53,6 +53,112 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** The deferred items above. The module-size guard currently fails only on in-progress Briefing files (`newsly-api/src/briefing.rs`, `briefing_refresh/handler.rs`, `briefing_refresh/tests.rs`, `newsly-admin/src/main.rs`); the files this work grew were split back under their limits (`auth/tests.rs`, `chat/session_state.rs`, `terminal_settlement.rs`). Also about 130 open assessment findings (see ledger), including the larger explicit state-machine refactors (content status, `llm_tasks` status, `TaskResult` flags).
 - **Commits:** Uncommitted
 
+### 2026-11-21 — `main` — Swipe actions on Briefing cards
+
+- **Status:** Complete (uncommitted)
+- **Scope:**
+  - iOS: `BriefingCardSwipe.swift` (new: pure swipe model, UIKit pan recognizer, mark-read reveal, options rail), `BriefingSourceCardView`, card E2E fixtures, tests.
+  - Laws B11 and B18.
+- **Decisions (owner-chosen):**
+  - A right-to-left swipe marks the card read past 72pt.
+  - A left-to-right swipe shows Chat above and Deck below the finger's starting height, at the card's right edge. Vertical movement past an 18pt dead zone selects one; it runs on release past 56pt. A straight swipe does nothing.
+  - A horizontal swipe that starts on a card wins over the lens pager: the pager's paging pan waits for the card pan to fail, and the card pan fails for vertical drags.
+  - The card's offset is visual only, so read-tracking frames are unaffected.
+- **Validation:**
+  - 6 swipe model unit tests.
+  - 6 Briefing source-action UI tests, including a new swipe test (mark read, up to Chat, down to Deck).
+  - Real app on the lens pager (temporary :8010 API): the left swipe marked a podcast read without changing lens, and the right-and-up swipe started Chat. That chat request returned 500 because the local database is missing migrations after `20261002`; this is unrelated to the swipe.
+  - The frozen mid-swipe visual state (`briefing-card-swipe`) was checked in light and dark.
+  - Real mid-gesture captures, held by a temporary UI test (not kept), led to two changes: the Read indicator now follows the finger's height because cards are taller than the screen, and the selected option uses the slate accent so it stays distinct over dark artwork.
+  - Owner redesign: the actions are now large panels set into the card's background. Chat and Deck each take 30% of the card's height (60% together, each kept between 88 and 260pt) and half its width, stacked at the finger's height. Read is one panel the size of that block, on the left half (the direction of the drag). The card follows the finger, resists past 120pt, shrinks to 90% with an ease-out, and fades to 12% so the panels show through. Re-captured on real cards in light and dark.
+- **Remaining:** None for the gesture. Swipes aren't offered to VoiceOver; the same actions already exist as named accessibility actions on the card header.
+- **Commits:** Uncommitted
+
+### 2026-11-21 — `main` — Recompose live Briefing cards on card-prompt changes
+
+- **Status:** Complete (uncommitted)
+- **Scope:**
+  - `newsly-db` Briefing refresh preparation and publication.
+  - `newsly-worker` Briefing refresh handler.
+  - New `newsly-admin tasks briefing-recompose` command.
+  - iOS lens document identity.
+  - Laws B5 and B9, and the architecture notes.
+- **Decisions:**
+  - News and card prompt versions are now separate. News stays `briefing-v11-news-citations`; cards use `briefing-card-v1`. A News-only prompt edit never recomposes cards.
+  - Stale live cards become one-donor `StaleCard` compaction batches during normal append and sweep refreshes. Full and first-run progressive refreshes skip them.
+  - Stale cards are composed only after the refresh's required units succeed, filtered by cooldown, newest first, at most 6 per refresh.
+  - Failures are best effort: a failed card keeps its text, and transport failures also cool down.
+  - A replacement keeps the donor's `created_at`.
+  - Clients now key document generation on ordered source keys rather than segment ids, so a replacement does not reset scroll.
+  - The admin command previews the inventory. `--apply` records an operator batch (targets = the requested scope) and starts the scheduler-identical deduplicated sweep now, advancing any pending one.
+  - Sweeps chain every 5 minutes, so draining is automatic: 6 cards per sweep.
+- **Validation:**
+  - Rust: fmt, workspace Clippy `-D warnings`; tests for db 314, worker 347, admin 29 (including apply/advance/replay database tests), api 119, providers 219, contracts 15.
+  - iOS: 124 Briefing unit tests, including a recomposed card keeping its document generation.
+  - A local preview of the admin command returned correct counts.
+- **Review:** The Opus 5.5 review raised cost and scheduling issues, all fixed:
+  - stale compositions were discarded when an append failed, so they now run as a second phase;
+  - cooling cards crowded out others, so the worker now filters by cooldown before applying the cap;
+  - transport failures retried on every sweep, so they now start a cooldown;
+  - clients reset scroll on new ids, so document identity now follows source keys;
+  - `--apply` was a no-op against a pending sweep, so it now advances it;
+  - replaying a batch ID conflicted after the user set changed, so the target is now the requested scope;
+  - the law wording was corrected.
+- **Remaining:**
+  - Pre-existing: sweep-mode append units do not check cooldown before composing, unlike progressive mode.
+  - Production rollout: deploy, run the preview, optionally `--apply`, and watch the inventory reach zero before shipping iOS.
+- **Commits:** Uncommitted
+
+### 2026-11-20 — `main` — Build Briefing source cards for Articles and Podcasts
+
+- **Status:** Complete (uncommitted)
+- **Scope:**
+  - iOS Briefing card renderer, save store, and source actions.
+  - Rust composer card schema and prompt, normalizer, contracts, the figure strip migration, and the API read guard.
+  - Laws B5, B11, B14, B18 and the architecture notes.
+- **Decisions:**
+  - Cards render from existing one-source segments.
+  - Card text comes from a markdown-only schema validated to at most 6 sentences and 150 words.
+  - Figures and pullquotes are removed everywhere.
+  - Six always-null legacy block fields remain, because installed iOS builds require those keys.
+  - The API drops non-passage blocks on read to cover the online-deploy overlap, until a follow-up re-strip.
+  - Save state is session-local per source (`BriefingSavedSources`).
+  - The chip shows length only.
+  - The uncommitted figure-alternation work was dropped.
+  - As-built deviations are recorded in the initiative plan, §11.
+- **Validation:**
+  - Rust: fmt; warning-denied Clippy; tests for providers 218, db 308 (including the migration test), worker 342, api 114, contracts 15; contract drift check clean.
+  - Canary eval: 12/12 real items accepted, 65–100 words.
+  - iOS: app builds with no warnings; 775 unit tests pass; `AuthenticationViewModelTests` fails identically on clean `HEAD` (17 tests, 42 assertion failures; pre-existing and unrelated); 5 Briefing source-action UI tests pass, including a new card-footer test.
+  - Simulator: checked light, dark, and accessibility sizes on real local data.
+- **Review:** The Opus 5.5 implementation review found no correctness breaks. Fixed:
+  - the hero image's tap area overflowed the card (`contentShape`);
+  - hero images decoded too small for 3x phones (960pt target);
+  - the migration took locks in the opposite order to live writers, so it now locks state rows first in user order;
+  - saved marks outlived sign-out, so `BriefingSavedSources` moved to `AuthenticatedSession`;
+  - the launch fixture still wrote a figure block;
+  - the API guard now drops only `figure` and `pullquote`, so unknown blocks still fail;
+  - card accessibility actions and values now reflect read and saved state;
+  - the normalizer's dead paragraph split is gone;
+  - the legacy placement and alignment fields are plain optional strings, so their enums were deleted.
+- **Deploy order:** The server must deploy before any iOS build containing this change ships. The new app rejects responses from a server that still returns figure blocks, which was verified locally against the old :8000 binary. A new API on :8010 with the read guard served the same database without errors.
+- **Remaining:**
+  - Refresh the stale Maestro dark baseline `briefing-articles.png` (Maestro is not installed on this machine).
+  - Add a follow-up re-strip migration, then remove the API passage guard.
+  - Remove the six legacy block fields once old app versions are unsupported.
+  - A formatter run reflowed whitespace in the unrelated WIP file `newsly-worker/src/learning_deck/agent/session.rs`.
+- **Commits:** Uncommitted
+
+### 2026-11-20 — `main` — Plan Briefing source cards for Articles and Podcasts
+
+- **Status:** In progress (planning)
+- **Scope:** `docs/initiatives/briefing-source-cards-2026-11/` (plan and A3 mockup). No code changes.
+- **Decisions:** Owner chose mockup A3 from eight rendered variants: a near-square hero with overlaid title, a glass length chip, a 1–2 paragraph summary, and a footer with date, Mark read, and Save. Cards render from existing one-source segments. Card-length text comes from the composer, not a client clamp. Figures and pullquotes go away for these lenses.
+- **Validation:** Mockups rendered with real local content, app tokens, and fonts.
+- **Review:** Opus 5.5 planning review. All material findings were verified and folded in. The composer gets a dedicated markdown card schema, validated by a sentence cap rather than a paragraph cap. Figure and pullquote blocks are removed by migration, since the block enum is closed and no Full rebuild producer exists. Saved state is session-local. The Play chip is display only, pending a decision.
+- **Remaining:** Owner locked D4 (the chip shows length only, no per-card audio) and D9 (drop the uncommitted figure-alternation work when Phase 1 starts). Next: Phase 1.
+- **Commits:** Uncommitted
+
 ### 2026-11-07 — `main` — Open saved-source decks and process their summaries
 
 - **Status:** Complete
@@ -4060,6 +4166,14 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Validation:** `newsly` built and launched on iPhone 17 (iOS 26.4). The `briefing-list-metadata` fixture reproduced the stacked article header at Accessibility Large before the change and showed a single line afterward; Articles and Podcasts also checked at normal size, including long and absent publishers. All 9 `BriefingSegmentHeadlineTests` passed. Screenshots: `test-results/briefing-metadata-2026-11-03/`. Simulator text size restored to Large.
 - **Remaining:** None for the local fix. The screenshot's older three-line layout requires a newer distributed iOS build; no Apple distribution was requested or verified.
 - **Delivery:** Commit and push to `main` authorized on 2026-11-04; Apple build/distribution status remains unverified.
+
+### 2026-11-04 — `main` — Alternate Briefing images across the list
+
+- **Status:** Complete locally; uncommitted and unreleased.
+- **Scope:** Native Briefing floating-figure layout, render-model reuse, regression/visual fixtures, and law B14. Preserve the existing metadata delivery log entry.
+- **Cause and change:** The old counter restarted per segment and explicit server alignment bypassed its fallback. Floating figures now alternate right/left across displayed lens order, counting only actual wrapped figure/passage pairs. Page appends retain prefix sides; read-state rebuilds reuse unaffected models only when starting parity matches. Prepending follows the new display order. Full-width and standalone figures retain their layout.
+- **Validation:** Reproduced consecutive left-side figures in the real renderer on iPhone 17 (iOS 26.4), scheme `newsly`; the initial six sequence regressions failed before the fix. Afterward, 72 focused native tests passed, then all eight sequence tests passed including two additional prepend/default checks (74 distinct tests overall). Articles and Podcasts visual fixtures show right/left image placeholders and wrapped text; screenshots are under `test-results/briefing-image-alternation-2026-11-04/`. Build, diff and module-size checks passed (943 files). Explicit Claude Opus 5.5 design and final implementation reviews found no material issue; starting-parity reuse and production pagination/read-update paths were independently verified.
+- **Compatibility:** Keep the server/API alignment field for existing distributed clients. Once no supported client reads it, retire the server alignment field, prompt instruction, normalization and consecutive-alignment warning together. No server or stored-content rewrite is needed for this fix. No commit, push, deployment or Apple distribution was requested.
 
 ### 2026-11-13 — `codex/briefing-read-marks` — Briefing read-mark latency
 

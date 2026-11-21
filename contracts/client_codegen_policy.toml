@@ -159,16 +159,6 @@ targets = ["app_swift"]
 open = false
 
 [[enums]]
-schema = "BriefingFigureAlignment"
-targets = ["app_swift"]
-open = false
-
-[[enums]]
-schema = "BriefingFigurePlacement"
-targets = ["app_swift"]
-open = false
-
-[[enums]]
 schema = "BriefingRunKind"
 targets = ["app_swift"]
 open = false

@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let observation = match result {
         Ok(generated) => {
             let rejection_code = generated
-                .layout
+                .passage
                 .as_ref()
                 .err()
                 .map(newsly_providers::BriefingLayoutRejection::code);
@@ -44,11 +44,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "provider_succeeded": true,
                 "validation": "canonical_provider_layout",
                 "rejection_code": rejection_code,
-                "accepted": generated.layout.is_ok(),
+                "accepted": generated.passage.is_ok(),
                 "model": generated.model,
                 "usage": generated.usage,
                 "provider_response_id": generated.provider_response_id,
-                "layout": generated.layout.ok(),
+                "passage": generated.passage.ok(),
             })
         }
         Err(error) => serde_json::json!({

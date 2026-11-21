@@ -216,6 +216,9 @@ pub(super) async fn execute_tasks_command(
             )
             .await?;
         }
+        TasksCommand::BriefingRecompose(args) => {
+            super::briefing_recompose::execute(database, args, output).await?;
+        }
         TasksCommand::Failures {
             window_hours,
             limit,

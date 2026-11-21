@@ -588,7 +588,8 @@ final class BriefingRenderModelTests: XCTestCase {
 
         XCTAssertEqual(segmentModel.id, 44)
         XCTAssertTrue(segmentModel.allSourcesRead)
-        XCTAssertEqual(segmentModel.displayBlocks.count, 1)
+        XCTAssertEqual(segmentModel.passageBlockIndices, [0])
+        XCTAssertNil(segmentModel.card)
         XCTAssertEqual(
             segmentModel.discussionChipsByBlockIndex[0]?["news:2"]?.commentCount,
             17

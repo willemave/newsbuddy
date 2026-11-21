@@ -1210,6 +1210,23 @@ Dedicated models own Content, News, Briefing, Knowledge, audio, chat, onboarding
 settings, submissions, sources, integrations, and Learning Deck flows.
 `BriefingViewModel` owns data/lens state;
 `BriefingNarrationController` owns narration preparation and playback.
+Articles and Podcasts lens pages render each one-source content segment as a
+`BriefingSourceCardView` built from the same segment render model as News prose,
+so read tracking, paging, snapshots, and source actions are shared. Article and
+podcast composition uses a markdown-only card schema; Briefing blocks are
+passages only. Card Save state is session-local in `BriefingSavedSources`, owned
+by `AuthenticatedSession` so it never outlives one account: the Briefing index carries no saved flag,
+because that would make every Knowledge writer change the Briefing version.
+News and card compositions carry separate prompt versions
+(`BRIEFING_NEWS_PROMPT_VERSION`, `BRIEFING_CARD_PROMPT_VERSION`). Bumping the
+card version makes normal refreshes recompose stale live cards as best-effort
+`StaleCard` compaction batches: composed only after the refresh's required units
+succeed, filtered by composition cooldown, at most `STALE_CARD_RECOMPOSE_LIMIT`
+per refresh, keeping each donor's `created_at`. A failed stale card keeps its
+text and cools down (transport failures included). Clients identify a lens
+document by ordered source keys, not segment ids, so a replacement does not reset
+scroll. `newsly-admin tasks briefing-recompose` previews the stale inventory and,
+with `--apply`, starts each affected user's deduplicated sweep now.
 Briefing Play sends the captured lens key with narration scope `lens`. The server
 plans that lens's eligible unread sources and snapshots its tier for adapted script
 generation. Playback sessions and immutable episode groups retain their originating

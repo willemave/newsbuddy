@@ -66,11 +66,6 @@ BEGIN
    INSERT INTO briefing_segments(lens_id,user_id,blocks,markdown_raw,narration_text,source_keys,status,model,prompt_version,warnings,created_at,updated_at,event_groups)
    VALUES(lid,uid,blocks,s.title||E'\n\n'||s.intro||E'\n\n'||s.context||E'\n\n'||s.takeaway,s.intro||' '||s.context||' '||s.takeaway,jsonb_build_array(sk),'active','editorial-demo','visual-demo-v1','[]',now()-s.position*interval '1 minute',now(),'[]');
  END LOOP;
- -- Retain the existing source-linked NASA image as the lead of the Space edition.
- SELECT id INTO cid FROM contents WHERE content_metadata->>'fixture_namespace'='appstore-launch' AND source='NASA' AND content_metadata::jsonb ? 'image_url' ORDER BY id LIMIT 1;
- IF cid IS NOT NULL THEN
-   UPDATE briefing_segments SET blocks=jsonb_insert(briefing_segments.blocks,'{1}',jsonb_build_object('type','figure','image_url',(SELECT content_metadata->>'image_url' FROM contents WHERE id=cid),'caption','Pillars of Creation · NASA, ESA, CSA, STScI','placement','full')) WHERE id=(SELECT id FROM briefing_segments WHERE user_id=uid ORDER BY created_at DESC LIMIT 1);
- END IF;
  DELETE FROM content_read_status WHERE user_id=uid;
  UPDATE briefing_states SET version=version+1,masthead_deck='Space, our planet, and the energy that connects them.' WHERE user_id=uid;
 END $$;

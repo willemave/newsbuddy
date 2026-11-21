@@ -19,6 +19,9 @@ final class AuthenticatedSession {
     let tabCoordinator: TabCoordinatorViewModel
     let knowledgeViewModel: KnowledgeTimelineViewModel
     let submissionStatusViewModel: SubmissionStatusViewModel
+    /// Briefing card saves for this account only; content ids are global, so
+    /// saved marks must never outlive the account that made them.
+    let briefingSavedSources: BriefingSavedSources
 
     @ObservationIgnored
     private var handledActivationGeneration: UInt64?
@@ -38,6 +41,7 @@ final class AuthenticatedSession {
         tabCoordinator: TabCoordinatorViewModel,
         knowledgeViewModel: KnowledgeTimelineViewModel,
         submissionStatusViewModel: SubmissionStatusViewModel,
+        briefingSavedSources: BriefingSavedSources,
         detachNotificationRouting: @escaping @MainActor () -> Void
     ) {
         self.user = user
@@ -50,6 +54,7 @@ final class AuthenticatedSession {
         self.tabCoordinator = tabCoordinator
         self.knowledgeViewModel = knowledgeViewModel
         self.submissionStatusViewModel = submissionStatusViewModel
+        self.briefingSavedSources = briefingSavedSources
         self.detachNotificationRouting = detachNotificationRouting
     }
 

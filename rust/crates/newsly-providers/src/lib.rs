@@ -48,13 +48,11 @@ pub use audio_episode::{
 pub use briefing_composition::{
     BRIEFING_LENS_NAMING_MAX_CATEGORIES, BRIEFING_LENS_NAMING_MAX_INPUT_BYTES,
     BRIEFING_LENS_NAMING_MAX_OUTPUT_TOKENS, BRIEFING_LENS_NAMING_MAX_STORIES_PER_CATEGORY,
-    BriefingCompositionBlock, BriefingCompositionGateway, BriefingCompositionGatewayError,
-    BriefingCompositionLayout, BriefingCompositionRequest, BriefingCompositionSource,
-    BriefingEmbeddingBatch, BriefingFigureAlignment, BriefingFigurePlacement,
-    BriefingLayoutRejection, BriefingLensName, BriefingLensNamingBatch,
-    BriefingLensNamingBatchRequest, BriefingLensNamingCategory, BriefingLensNamingResult,
-    BriefingLensNamingStory, BriefingPassageWeight, BriefingSuggestedQuote,
-    GeneratedBriefingLayout, GeneratedBriefingLensName, GeneratedBriefingLensNamingBatch,
+    BriefingCompositionGateway, BriefingCompositionGatewayError, BriefingCompositionRequest,
+    BriefingCompositionSource, BriefingEmbeddingBatch, BriefingLayoutRejection, BriefingLensName,
+    BriefingLensNamingBatch, BriefingLensNamingBatchRequest, BriefingLensNamingCategory,
+    BriefingLensNamingResult, BriefingLensNamingStory, GeneratedBriefingLayout,
+    GeneratedBriefingLensName, GeneratedBriefingLensNamingBatch,
     briefing_composition_response_contract,
 };
 pub use briefing_dig::{

@@ -18,7 +18,7 @@ async fn publication(pool: &PgPool, label: &str) -> (i64, i64, BriefingRefreshPu
         .bind(user_id).fetch_one(pool).await.unwrap();
     sqlx::query("INSERT INTO briefing_states(user_id,version,masthead_title,masthead_deck) VALUES($1::bigint::integer,0,'Test edition','Evidence')")
         .bind(user_id).execute(pool).await.unwrap();
-    let pending_id:i64=sqlx::query_scalar("INSERT INTO briefing_pending_sources(user_id,lens_key,source_kind,source_id,enqueued_at,filter_revision,filter_input_hash,filter_outcome) SELECT $1::bigint::integer,'news-test','news',id,timezone('UTC',now()),1,news_filter_input_hash(news_items),'decided' FROM news_items WHERE id::bigint=$2 RETURNING id::bigint")
+    let pending_id:i64=sqlx::query_scalar("INSERT INTO briefing_pending_sources(user_id,lens_key,source_kind,source_id,enqueued_at,filter_revision,filter_input_hash,filter_outcome) SELECT $1::bigint::integer,'news-test','news',id,timezone('UTC',now()),1,news_filter_input_hash(news_items),'decided' FROM news_items WHERE id=$2::bigint RETURNING id::bigint")
         .bind(user_id).bind(news_id).fetch_one(pool).await.unwrap();
     let key = format!("news:{news_id}");
     let publication = BriefingRefreshPublication {
@@ -53,7 +53,7 @@ async fn publication(pool: &PgPool, label: &str) -> (i64, i64, BriefingRefreshPu
                 source_keys: vec![key.clone()],
                 event_groups: vec![vec![key]],
                 model: "test".into(),
-                prompt_version: crate::BRIEFING_COMPOSITION_PROMPT_VERSION.into(),
+                prompt_version: crate::BRIEFING_NEWS_PROMPT_VERSION.into(),
             },
         }],
         compactions: vec![],
@@ -79,7 +79,7 @@ async fn settings_apply_rejects_already_composed_pending_news_at_publication(poo
     assert!(applied.stale);
     assert_eq!(applied.appended_segments, 0);
     let count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM briefing_segments WHERE user_id::bigint=$1")
+        sqlx::query_scalar("SELECT count(*) FROM briefing_segments WHERE user_id=$1::bigint")
             .bind(user_id)
             .fetch_one(&pool)
             .await
@@ -94,7 +94,7 @@ async fn settings_apply_rejects_already_composed_pending_news_at_publication(poo
 async fn summary_change_rejects_already_composed_news_at_publication(pool: PgPool) {
     let (user_id, news_id, publication) = publication(&pool, "publication-summary").await;
     sqlx::query(
-        "UPDATE news_items SET summary_text='Materially changed evidence' WHERE id::bigint=$1",
+        "UPDATE news_items SET summary_text='Materially changed evidence' WHERE id=$1::bigint",
     )
     .bind(news_id)
     .execute(&pool)
@@ -108,7 +108,7 @@ async fn summary_change_rejects_already_composed_news_at_publication(pool: PgPoo
     assert!(applied.stale);
     assert_eq!(applied.appended_segments, 0);
     let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -172,14 +172,14 @@ async fn settings_dedupe_does_not_wait_on_finalizer_processing_task_lock(pool: P
     let user_id = user(&pool, "lock-order").await;
     let task_id = task(&pool, user_id).await;
     let key = format!("briefing_refresh:{user_id}:append");
-    sqlx::query("UPDATE processing_tasks SET dedupe_key=$2 WHERE id::bigint=$1")
+    sqlx::query("UPDATE processing_tasks SET dedupe_key=$2 WHERE id=$1::bigint")
         .bind(task_id)
         .bind(&key)
         .execute(&pool)
         .await
         .unwrap();
     let mut finalizer = pool.begin().await.unwrap();
-    sqlx::query("SELECT id FROM processing_tasks WHERE id::bigint=$1 FOR UPDATE")
+    sqlx::query("SELECT id FROM processing_tasks WHERE id=$1::bigint FOR UPDATE")
         .bind(task_id)
         .execute(&mut *finalizer)
         .await
@@ -247,13 +247,13 @@ async fn queued_settings_edit_cannot_deadlock_prepare_against_finalizer(pool: Pg
     let user_id = user(&pool, "three-way-lock").await;
     let task_id = task(&pool, user_id).await;
     let expected_lease: Uuid =
-        sqlx::query_scalar("SELECT lease_token FROM processing_tasks WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT lease_token FROM processing_tasks WHERE id=$1::bigint")
             .bind(task_id)
             .fetch_one(&pool)
             .await
             .unwrap();
     let mut finalizer = pool.begin().await.unwrap();
-    sqlx::query("SELECT id FROM processing_tasks WHERE id::bigint=$1 FOR UPDATE")
+    sqlx::query("SELECT id FROM processing_tasks WHERE id=$1::bigint FOR UPDATE")
         .bind(task_id)
         .execute(&mut *finalizer)
         .await
@@ -340,7 +340,7 @@ async fn queued_settings_edit_cannot_deadlock_prepare_against_finalizer(pool: Pg
 #[sqlx::test]
 async fn matching_replacement_summary_cannot_authorize_already_composed_old_evidence(pool: PgPool) {
     let (user_id, news_id, publication) = publication(&pool, "publication-new-cache").await;
-    sqlx::query("UPDATE news_items SET summary_text='Replacement evidence' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET summary_text='Replacement evidence' WHERE id=$1::bigint")
         .bind(news_id)
         .execute(&pool)
         .await
@@ -368,13 +368,13 @@ async fn matching_replacement_summary_cannot_authorize_already_composed_old_evid
 #[sqlx::test]
 async fn full_rebuild_preserves_exact_unavailable_pending_but_not_changed_evidence(pool: PgPool) {
     let (user_id, news_id, publication) = publication(&pool, "full-unavailable").await;
-    sqlx::query("DELETE FROM news_filter_decisions WHERE user_id::bigint=$1")
+    sqlx::query("DELETE FROM news_filter_decisions WHERE user_id=$1::bigint")
         .bind(user_id)
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query(
-        "UPDATE briefing_pending_sources SET filter_outcome='unavailable' WHERE user_id::bigint=$1",
+        "UPDATE briefing_pending_sources SET filter_outcome='unavailable' WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .execute(&pool)
@@ -405,14 +405,14 @@ async fn full_rebuild_preserves_exact_unavailable_pending_but_not_changed_eviden
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    let retained:Vec<(i64,String,i64,bool)>=sqlx::query_as("SELECT p.source_id::bigint,p.filter_outcome,p.filter_revision,p.filter_input_hash=news_filter_input_hash(n) FROM briefing_pending_sources p JOIN news_items n ON n.id=p.source_id WHERE p.user_id::bigint=$1 AND p.source_kind='news'")
+    let retained:Vec<(i64,String,i64,bool)>=sqlx::query_as("SELECT p.source_id::bigint,p.filter_outcome,p.filter_revision,p.filter_input_hash=news_filter_input_hash(n) FROM briefing_pending_sources p JOIN news_items n ON n.id=p.source_id WHERE p.user_id=$1::bigint AND p.source_kind='news'")
         .bind(user_id).fetch_all(&pool).await.unwrap();
     assert_eq!(
         retained,
         vec![(news_id, "unavailable".into(), 1, true)],
         "Full must preserve current unavailable provenance through delete/reseed"
     );
-    sqlx::query("UPDATE news_items SET summary_text='Different evidence' WHERE id::bigint=$1")
+    sqlx::query("UPDATE news_items SET summary_text='Different evidence' WHERE id=$1::bigint")
         .bind(news_id)
         .execute(&pool)
         .await
@@ -430,7 +430,7 @@ async fn full_rebuild_preserves_exact_unavailable_pending_but_not_changed_eviden
     .await
     .unwrap();
     tx.commit().await.unwrap();
-    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news'").bind(user_id).fetch_one(&pool).await.unwrap();
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint AND source_kind='news'").bind(user_id).fetch_one(&pool).await.unwrap();
     assert_eq!(
         pending, 0,
         "old unavailable evidence cannot authorize changed News during Full"
@@ -462,7 +462,7 @@ async fn partial_full_rebuild_retains_published_news_outside_filter_window(pool:
     .unwrap();
     let old_segment_id: i64 = sqlx::query_scalar(
         "UPDATE briefing_segments SET source_keys=$2,event_groups=$3
-         WHERE user_id::bigint=$1 RETURNING id::bigint",
+         WHERE user_id=$1::bigint RETURNING id::bigint",
     )
     .bind(user_id)
     .bind(json!([
@@ -503,7 +503,7 @@ async fn partial_full_rebuild_retains_published_news_outside_filter_window(pool:
     // Model a bounded routing pass: A is assigned/composed, while B remains pending.
     let routed_pending: i64 = sqlx::query_scalar(
         "UPDATE briefing_pending_sources SET lens_key='news-test'
-         WHERE user_id::bigint=$1 AND source_kind='news' AND source_id::bigint=$2
+         WHERE user_id=$1::bigint AND source_kind='news' AND source_id=$2::bigint
          RETURNING id::bigint",
     )
     .bind(user_id)
@@ -522,7 +522,7 @@ async fn partial_full_rebuild_retains_published_news_outside_filter_window(pool:
         .unwrap();
     tx.commit().await.unwrap();
     let old_status: String =
-        sqlx::query_scalar("SELECT status FROM briefing_segments WHERE id::bigint=$1")
+        sqlx::query_scalar("SELECT status FROM briefing_segments WHERE id=$1::bigint")
             .bind(old_segment_id)
             .fetch_one(&pool)
             .await
@@ -558,7 +558,7 @@ async fn partial_full_rebuild_retains_published_news_outside_filter_window(pool:
     .unwrap();
     tx.commit().await.unwrap();
     let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1",
+        "SELECT count(*) FROM briefing_pending_sources WHERE user_id=$1::bigint",
     )
     .bind(user_id)
     .fetch_one(&pool)

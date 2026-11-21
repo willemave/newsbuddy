@@ -14,8 +14,7 @@ The overlay replaces the seeded user's Briefing with eight source-linked article
 four Space, two Earth, and two Energy. Each has an introduction, context, and a
 takeaway, with matching article summaries. Source URLs are in the dataset. These
 are curated evergreen explainers, not claims of breaking news or provider output.
-Publication dates are not invented. An existing NASA image in the launch fixture
-is retained when available; a fresh standard seed works without it.
+Publication dates are not invented.
 
 The transaction rejects other database names and missing fixture namespaces.
 Rerunning replaces the edition without duplicate stories. Read state resets for

@@ -14,14 +14,13 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::NaiveDateTime;
 use newsly_contracts::{
-    BRIEFING_DIG_FRAGMENT_MAX_LENGTH, BriefingBlockDto, BriefingDigSearchRequest,
-    BriefingDigSearchResponse, BriefingDigSearchResult, BriefingDigSummarizeRequest,
-    BriefingDigSummarizeResponse, BriefingDiscussionDto, BriefingFirstRunPhase,
-    BriefingFirstRunProgress, BriefingFirstRunSourceOutcome, BriefingFirstRunSourceProgress,
-    BriefingIndexResponse, BriefingLensResponse, BriefingLensSummary, BriefingReadMarkRequest,
-    BriefingReadMarkResponse, BriefingRefreshResponse, BriefingRefreshStatus,
-    BriefingRefreshStatusResponse, BriefingSegmentDto, BriefingSourceDto, BriefingTier,
-    ContentType,
+    BRIEFING_DIG_FRAGMENT_MAX_LENGTH, BriefingDigSearchRequest, BriefingDigSearchResponse,
+    BriefingDigSearchResult, BriefingDigSummarizeRequest, BriefingDigSummarizeResponse,
+    BriefingDiscussionDto, BriefingFirstRunPhase, BriefingFirstRunProgress,
+    BriefingFirstRunSourceOutcome, BriefingFirstRunSourceProgress, BriefingIndexResponse,
+    BriefingLensResponse, BriefingLensSummary, BriefingReadMarkRequest, BriefingReadMarkResponse,
+    BriefingRefreshResponse, BriefingRefreshStatus, BriefingRefreshStatusResponse,
+    BriefingSegmentDto, BriefingSourceDto, BriefingTier, ContentType,
 };
 use newsly_db::{
     BriefingDiscussionProjection, BriefingFirstRunProjection, BriefingIndexProjection,
@@ -49,6 +48,7 @@ pub(crate) mod narration;
 use narration::{chaptered_narration, legacy_narration, narration_status, retry_narration};
 #[cfg(test)]
 mod cursor_tests;
+mod legacy_blocks;
 mod presentation;
 
 const BRIEFING_LENS_PAGE_MAX: usize = 12;
@@ -716,7 +716,7 @@ fn present_lens(
         .segments
         .iter()
         .map(|segment| {
-            let blocks = serde_json::from_value::<Vec<BriefingBlockDto>>(segment.blocks.clone())
+            let blocks = legacy_blocks::passage_blocks(&segment.blocks)
                 .map_err(|error| internal_error(error, request_id))?;
             Ok(BriefingSegmentDto {
                 id: segment.id,

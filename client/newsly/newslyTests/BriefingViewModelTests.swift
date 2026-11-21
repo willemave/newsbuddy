@@ -497,7 +497,7 @@ final class BriefingViewModelTests: XCTestCase {
         ]
         service.lensPageResponses["today"] = [
             makeLens(key: "today", version: 1, segments: [makeSegment(id: 10)]),
-            makeLens(key: "today", version: 2, segments: [makeSegment(id: 11)])
+            makeLens(key: "today", version: 2, segments: [makeSegment(id: 11, sourceKeys: ["content:2"])])
         ]
         let viewModel = BriefingViewModel(service: service)
 
@@ -509,6 +509,30 @@ final class BriefingViewModelTests: XCTestCase {
         }
 
         XCTAssertEqual(viewModel.documentGeneration(for: "today"), 1)
+    }
+
+    func testRecomposedCardForTheSameSourceKeepsDocumentGeneration() async {
+        let service = MockBriefingService()
+        let summary = makeLensSummary(key: "today")
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [summary]), etag: "v1"),
+            .value(makeIndex(version: 2, lenses: [summary]), etag: "v2")
+        ]
+        // A newer card prompt replaced segment 10 with segment 11 for the same source.
+        service.lensPageResponses["today"] = [
+            makeLens(key: "today", version: 1, segments: [makeSegment(id: 10)]),
+            makeLens(key: "today", version: 2, segments: [makeSegment(id: 11)])
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
+        await viewModel.refreshIndex()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.segments.map(\.id) == [11]
+        }
+
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
     }
 
     func testOrderedLensesAreStoredAndRefreshAfterLocalReadMarks() async {

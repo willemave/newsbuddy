@@ -17,31 +17,26 @@ fn source(id: i64) -> BriefingCompositionSource {
     }
 }
 
+fn content_source(id: i64) -> BriefingCompositionSource {
+    BriefingCompositionSource {
+        source_key: format!("content:{id}"),
+        kind: "content".to_owned(),
+        ..source(id)
+    }
+}
+
 #[test]
 fn citation_corpus_validates_brackets_but_rejects_bare_and_code_uris() {
     for label in ["A [study]", r"A \[study\]", "你好 (Update)!"] {
-        let layout = BriefingCompositionLayout {
-            suggested_quotes: vec![],
-            blocks: vec![BriefingCompositionBlock::Passage {
-                markdown: format!("[{label}](newsly://briefing/news/1) explains the result."),
-                weight: BriefingPassageWeight::Brief,
-            }],
-        };
-        assert!(layout.validate("news", &[source(1)]).is_ok());
+        let markdown = format!("[{label}](newsly://briefing/news/1) explains the result.");
+        assert!(validate_passage(markdown, "news", &[source(1)]).is_ok());
     }
     for markdown in [
         "newsly://briefing/news/1",
         "`[Title](newsly://briefing/news/1)`",
         "[Ten](newsly://briefing/news/10)",
     ] {
-        let layout = BriefingCompositionLayout {
-            suggested_quotes: vec![],
-            blocks: vec![BriefingCompositionBlock::Passage {
-                markdown: markdown.to_owned(),
-                weight: BriefingPassageWeight::Brief,
-            }],
-        };
-        assert!(layout.validate("news", &[source(1)]).is_err());
+        assert!(validate_passage(markdown.to_owned(), "news", &[source(1)]).is_err());
     }
 }
 
@@ -144,14 +139,9 @@ fn lens_naming_prompt_requires_a_specific_theme_and_explicit_outlier_exclusion()
 
 #[test]
 fn news_layout_requires_one_link_per_source() {
-    let layout = BriefingCompositionLayout {
-        suggested_quotes: Vec::new(),
-        blocks: vec![BriefingCompositionBlock::Passage {
-            markdown: "[First source](newsly://briefing/news/1) meets [second source](newsly://briefing/news/2).".to_owned(),
-            weight: BriefingPassageWeight::Brief,
-        }],
-    };
-    assert!(layout.validate("news", &[source(1), source(2)]).is_ok());
+    let markdown =
+        "[First source](newsly://briefing/news/1) meets [second source](newsly://briefing/news/2).";
+    assert!(validate_passage(markdown.to_owned(), "news", &[source(1), source(2)]).is_ok());
 }
 
 #[test]
@@ -172,53 +162,158 @@ fn news_prompt_requests_newspaper_briefs() {
 }
 
 #[test]
-fn deep_prompt_requests_full_source_treatment() {
-    assert!(COMPOSITION_SYSTEM_PROMPT.contains("treat every source as a full work"));
-    assert!(COMPOSITION_SYSTEM_PROMPT.contains("3-5 sentences, roughly 100-200 words"));
-    assert!(COMPOSITION_SYSTEM_PROMPT.contains("concrete evidence or counterpoints"));
-    assert!(COMPOSITION_SYSTEM_PROMPT.contains("supplied `briefing_context`"));
-    assert!(
-        COMPOSITION_SYSTEM_PROMPT.contains("never restate the title, publication, or show name")
-    );
-    assert!(!COMPOSITION_SYSTEM_PROMPT.contains("Identify the exact title"));
+fn card_prompt_requests_short_source_summaries_without_figures_or_quotes() {
+    // Compare on collapsed whitespace so rewrapping the prompt never breaks the test.
+    let card = COMPOSITION_SYSTEM_PROMPT[COMPOSITION_SYSTEM_PROMPT
+        .find("For `audio` and `longform`")
+        .unwrap()..]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for required in [
+        "already shows the work's title, its publication or show name, its length, and its image",
+        "never restate the title, publication, show, author byline, or length",
+        "at most six sentences, 60-100 words, never padding to reach the target",
+        "central argument, finding, or story",
+        "link the source once on a descriptive phrase",
+        "roughly four to ten words, never the bare title",
+        "natural noun phrase that reads as part of its sentence",
+        "single strongest concrete evidence, example, number, counterpoint, or practical implication",
+        "Keep most sentences under 25 words",
+        "`briefing_context` when present",
+        "no lists, no em dashes",
+        "no markdown emphasis such as asterisks or underscores, no quoted titles",
+        "\"this episode explores\", \"the author discusses\", or \"in this article\"",
+        "attribute claims to the speaker or guest by name",
+    ] {
+        assert!(card.contains(required), "{required}");
+    }
+    for removed in [
+        "pullquote",
+        "figure",
+        "quotation",
+        "100-200 words",
+        "substantive treatment",
+    ] {
+        assert!(!card.contains(removed), "{removed}");
+    }
+    assert!(!COMPOSITION_SYSTEM_PROMPT.contains("Suggest editorial pullquotes"));
+    assert!(!COMPOSITION_SYSTEM_PROMPT.contains("Add a figure"));
 }
 
 #[test]
 fn news_layout_rejects_duplicate_source_link() {
-    let layout = BriefingCompositionLayout {
-        suggested_quotes: Vec::new(),
-        blocks: vec![BriefingCompositionBlock::Passage {
-            markdown: "[First](newsly://briefing/news/1), then [again](newsly://briefing/news/1)."
-                .to_owned(),
-            weight: BriefingPassageWeight::Brief,
-        }],
-    };
-    assert!(layout.validate("news", &[source(1)]).is_err());
+    let markdown = "[First](newsly://briefing/news/1), then [again](newsly://briefing/news/1).";
+    assert!(validate_passage(markdown.to_owned(), "news", &[source(1)]).is_err());
 }
 
 #[test]
 fn news_layout_counts_complete_source_uris() {
-    let layout = BriefingCompositionLayout {
-        suggested_quotes: Vec::new(),
-        blocks: vec![BriefingCompositionBlock::Passage {
-            markdown: "[One](newsly://briefing/news/1) and [ten](newsly://briefing/news/10)."
-                .to_owned(),
-            weight: BriefingPassageWeight::Brief,
-        }],
-    };
-    assert!(layout.validate("news", &[source(1), source(10)]).is_ok());
+    let markdown = "[One](newsly://briefing/news/1) and [ten](newsly://briefing/news/10).";
+    assert!(validate_passage(markdown.to_owned(), "news", &[source(1), source(10)]).is_ok());
 }
 
 #[test]
 fn layout_rejects_unknown_source_links() {
-    let layout = BriefingCompositionLayout {
-        suggested_quotes: Vec::new(),
-        blocks: vec![BriefingCompositionBlock::Passage {
-            markdown:
-                "[Known](newsly://briefing/news/1) meets [invented](newsly://briefing/news/2)."
-                    .to_owned(),
-            weight: BriefingPassageWeight::Brief,
-        }],
+    let markdown = "[Known](newsly://briefing/news/1) meets [invented](newsly://briefing/news/2).";
+    for tier in ["news", "longform"] {
+        let error = validate_passage(markdown.to_owned(), tier, &[source(1)]).unwrap_err();
+        assert_eq!(error.code(), "unknown_source_link");
+    }
+}
+
+const CARD_LEAD: &str =
+    "[A study of remote work output](newsly://briefing/content/1) finds teams ship more.";
+
+fn card(extra_sentences: usize, words_per_sentence: usize) -> String {
+    let filler = vec!["word"; words_per_sentence.saturating_sub(1)].join(" ");
+    let evidence = format!(" Evidence {filler}.");
+    format!("{CARD_LEAD}{}", evidence.repeat(extra_sentences))
+}
+
+#[test]
+fn card_requests_compose_exactly_one_source() {
+    let request = |tier: &str, count: i64| BriefingCompositionRequest {
+        lens_title: "Reading".to_owned(),
+        tier: tier.to_owned(),
+        sources: (1..=count).map(content_source).collect(),
     };
-    assert!(layout.validate("news", &[source(1)]).is_err());
+    for tier in ["audio", "longform"] {
+        assert!(check_composition_request(&request(tier, 1)).is_ok());
+        let error = check_composition_request(&request(tier, 2)).unwrap_err();
+        assert_eq!(error.reason_code(), "card_source_count");
+        assert!(!error.retryable());
+        assert_eq!(
+            check_composition_request(&request(tier, 0))
+                .unwrap_err()
+                .reason_code(),
+            "empty_sources"
+        );
+    }
+    assert!(check_composition_request(&request("news", 3)).is_ok());
+}
+
+#[test]
+fn card_passages_link_the_source_at_least_once() {
+    for tier in ["audio", "longform"] {
+        assert!(validate_passage(card(2, 8), tier, &[content_source(1)]).is_ok());
+        let twice = format!("{CARD_LEAD} The [same study](newsly://briefing/content/1) agrees.");
+        assert!(validate_passage(twice, tier, &[content_source(1)]).is_ok());
+        let error = validate_passage(
+            "Teams ship more without a citation.".to_owned(),
+            tier,
+            &[content_source(1)],
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "source_link_missing");
+        assert_eq!(
+            error.to_string(),
+            "source content:1 must be linked at least once"
+        );
+    }
+}
+
+#[test]
+fn card_passages_allow_six_sentences_and_reject_seven() {
+    assert!(validate_passage(card(5, 8), "longform", &[content_source(1)]).is_ok());
+    let error = validate_passage(card(6, 8), "longform", &[content_source(1)]).unwrap_err();
+    assert_eq!(error.code(), "card_sentence_count");
+    assert_eq!(
+        error.to_string(),
+        "card summary has 7 sentences; rewrite it in at most six sentences"
+    );
+}
+
+#[test]
+fn card_sentence_count_matches_publication_splitting() {
+    // Terminators inside the link, decimals, and raw paragraph breaks do not add sentences.
+    let markdown = "[Version 2.0 of the study asks why?](newsly://briefing/content/1) Output rose 3.5%.\n\nTeams agree. One. Two. Three. Four";
+    assert!(validate_passage(markdown.to_owned(), "audio", &[content_source(1)]).is_ok());
+    let seven = format!("{markdown}. Five.");
+    let error = validate_passage(seven, "audio", &[content_source(1)]).unwrap_err();
+    assert_eq!(error, BriefingLayoutRejection::CardSentenceCount(7));
+}
+
+#[test]
+fn card_word_cap_counts_visible_words_and_has_its_own_code() {
+    // Six sentences of 25 visible words: the lead link's target URI is not counted.
+    let at_cap = card(5, 25);
+    let words = crate::briefing_links::briefing_plain_text(&at_cap)
+        .split_whitespace()
+        .count();
+    assert_eq!(words, 135);
+    assert!(validate_passage(at_cap, "audio", &[content_source(1)]).is_ok());
+    let over = card(5, 30);
+    let error = validate_passage(over, "audio", &[content_source(1)]).unwrap_err();
+    assert_eq!(error.code(), "card_word_count");
+    assert_eq!(
+        error.to_string(),
+        "card summary has 160 words; rewrite it in at most 150 words, targeting 60-100 words"
+    );
+}
+
+#[test]
+fn card_passages_do_not_validate_paragraph_counts() {
+    let markdown = format!("{CARD_LEAD}\n\nA second paragraph.\n\nA third paragraph.");
+    assert!(validate_passage(markdown, "longform", &[content_source(1)]).is_ok());
 }

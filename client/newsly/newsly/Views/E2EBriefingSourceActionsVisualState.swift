@@ -41,7 +41,8 @@ struct E2EBriefingSourceActionsVisualState: View {
                 onOpenDiscussion: { result = "Discussion \($0.sourceKey)" },
                 onDig: { _, _ in result = "Dig Deeper" },
                 onRefresh: {}, onLoad: {}, onRetry: {}, onFirstPassageVisible: {},
-                onScrolledDown: {}, onMarkSegmentSeen: { _ in }, onSetHeaderPinned: { _ in }
+                onScrolledDown: {}, onMarkSegmentSeen: { result = "Read \($0.id)" },
+                onSetHeaderPinned: { _ in }
             )
             .id(tier)
         }

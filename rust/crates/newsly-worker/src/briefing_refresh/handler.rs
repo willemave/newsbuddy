@@ -5,11 +5,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use futures_util::stream::{self, StreamExt};
 use newsly_db::{
-    ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION,
-    BriefingEmbeddingUsage, BriefingPendingIdentity, BriefingRefreshLens, BriefingRefreshMode,
-    BriefingRefreshPublication, BriefingRefreshSource, BriefingSegmentUsage,
-    ComposedBriefingAppend, ComposedBriefingCompaction, ComposedBriefingSegment,
-    PrepareBriefingRefreshOutcome, PreparedBriefingRefresh, apply_briefing_lens_assignment,
+    ApplyBriefingLensAssignmentOutcome, BriefingCompactionKind, BriefingEmbeddingUsage,
+    BriefingPendingIdentity, BriefingRefreshLens, BriefingRefreshMode, BriefingRefreshPublication,
+    BriefingRefreshSource, BriefingSegmentUsage, ComposedBriefingAppend,
+    ComposedBriefingCompaction, ComposedBriefingSegment, PrepareBriefingRefreshOutcome,
+    PreparedBriefingRefresh, apply_briefing_lens_assignment, briefing_prompt_version,
     prepare_briefing_refresh,
 };
 use newsly_providers::{
@@ -25,15 +25,17 @@ use crate::{HandlerExecution, HandlerFuture, HandlerInterruptionPolicy, LeaseHea
 
 use super::config::BriefingRefreshWorkerConfig;
 use super::finalizer::BriefingRefreshFinalizer;
-use super::normalize::normalize_layout;
+use super::normalize::normalize_passage;
 use super::stale_assignment::{defer_after_other_wait, stale_assignment};
 
 mod diagnostics;
 mod semantic_failure;
+mod stale_cards;
 use super::planning::{PlannedBriefingWindow, plan_windows};
 use super::semantic_lenses::plan_semantic_lenses;
 use super::{EMBEDDING_PROVIDER, nonempty, split_model_spec};
 use diagnostics::normalization_rejection_code;
+use stale_cards::recompose_stale_cards;
 
 #[derive(Debug, Clone)]
 pub struct BriefingRefreshWorkerServices {
@@ -124,7 +126,7 @@ async fn execute_refresh(
     // Nightly maintenance has its own worker. Avoid starting paid composition
     // while it holds this user's routing generation; nightly work reciprocally
     // defers behind an already running normal refresh.
-    match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE owner_user_id::bigint=$1 AND task_type='recluster_news_lenses' AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()))")
+    match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE owner_user_id=$1::bigint AND task_type='recluster_news_lenses' AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()))")
         .bind(user_id).fetch_one(&services.pool).await {
         Ok(true) => return defer_after_other_wait(plan.task_id, 30),
         Ok(false) => {},
@@ -132,7 +134,7 @@ async fn execute_refresh(
     }
 
     let mut repository_config = services.config.repository.clone();
-    let initial = match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND NOT news_seed_settled)").bind(user_id).fetch_one(&services.pool).await {
+    let initial = match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id=$1::bigint AND status='active' AND NOT news_seed_settled)").bind(user_id).fetch_one(&services.pool).await {
         Ok(value) => value, Err(error) => return plain_failure(error.to_string(), true),
     };
     let progressive = initial && mode != BriefingRefreshMode::Full;
@@ -490,14 +492,7 @@ async fn select_append_units(
                 kind: CompositionUnitKind::Append { pending_rows },
             };
             if progressive {
-                if !composition_is_ready(
-                    services.gateway.model_spec(),
-                    services.config.max_figures_deep,
-                    &unit,
-                    context,
-                )
-                .await?
-                {
+                if !composition_is_ready(services.gateway.model_spec(), &unit, context).await? {
                     continue;
                 }
                 units.push(unit);
@@ -532,6 +527,7 @@ async fn build_publication(
         select_append_units(services, &prepared, progressive, new_category_keys, context).await?;
     let mut ordinal = units.len();
 
+    let mut stale_card_candidates = Vec::new();
     for (batch_index, batch) in prepared
         .compaction_batches
         .iter()
@@ -559,30 +555,51 @@ async fn build_publication(
         if !batch.repair_required && planned.windows.len() >= batch.donors.len() {
             continue;
         }
-        compaction_selected[batch_index] = true;
+        let is_stale_card = matches!(batch.kind, BriefingCompactionKind::StaleCard { .. });
+        if !is_stale_card {
+            compaction_selected[batch_index] = true;
+        }
         for window in planned.windows {
-            units.push(CompositionUnit {
+            let unit = CompositionUnit {
                 ordinal,
                 lens: batch.lens.clone(),
                 window,
                 kind: CompositionUnitKind::Compaction { batch_index },
-            });
+            };
             ordinal += 1;
+            if is_stale_card {
+                stale_card_candidates.push((batch_index, unit));
+            } else {
+                units.push(unit);
+            }
         }
     }
 
-    let parallelism = services.config.compose_parallelism.min(units.len().max(1));
     let gateway = &services.gateway;
     let max_attempts = super::config::MAX_COMPOSE_ATTEMPTS;
-    let max_figures_deep = services.config.max_figures_deep;
-    let mut composed = stream::iter(units.into_iter().map(|unit| async move {
-        compose_unit(gateway, unit, max_attempts, max_figures_deep, context).await
-    }))
+    let parallelism = services.config.compose_parallelism;
+    // Required work first. Older cards are recomposed only once it has all succeeded, so a
+    // failed append never throws away paid card compositions.
+    let mut composed = stream::iter(
+        units
+            .into_iter()
+            .map(|unit| async move { compose_unit(gateway, unit, max_attempts, context).await }),
+    )
     .buffer_unordered(parallelism)
     .collect::<Vec<_>>()
     .await
     .into_iter()
     .collect::<Result<Vec<_>, _>>()?;
+    composed.extend(
+        recompose_stale_cards(
+            gateway,
+            stale_card_candidates,
+            &mut compaction_selected,
+            parallelism,
+            context,
+        )
+        .await?,
+    );
     composed.sort_by_key(|unit| unit.ordinal);
 
     let mut append_segments = Vec::new();
@@ -610,6 +627,7 @@ async fn build_publication(
                 donors: batch.donors.clone(),
                 planned_source_keys: batch.planned_source_keys.clone(),
                 segments,
+                kind: batch.kind,
             })
         })
         .collect();
@@ -693,14 +711,11 @@ fn composition_request(unit: &CompositionUnit) -> BriefingCompositionRequest {
     }
 }
 
-fn composition_fingerprint(
-    model: &str,
-    max_figures_deep: usize,
-    request: &BriefingCompositionRequest,
-) -> String {
+fn composition_fingerprint(model: &str, request: &BriefingCompositionRequest) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(format!(
-        "{BRIEFING_COMPOSITION_PROMPT_VERSION}|{}|{model}|{max_figures_deep}|{request:?}",
+        "{}|{}|{model}|{request:?}",
+        briefing_prompt_version(&request.tier),
         newsly_providers::briefing_composition_response_contract(&request.tier)
     ));
     digest
@@ -713,11 +728,10 @@ fn composition_fingerprint(
 
 async fn composition_is_ready(
     model: &str,
-    max_figures_deep: usize,
     unit: &CompositionUnit,
     context: CompositionContext<'_>,
 ) -> Result<bool, BriefingRefreshExecutionError> {
-    let fingerprint = composition_fingerprint(model, max_figures_deep, &composition_request(unit));
+    let fingerprint = composition_fingerprint(model, &composition_request(unit));
     Ok(
         !newsly_db::briefing_attempts::cooling_down(context.pool, context.user_id, &fingerprint)
             .await?,
@@ -728,11 +742,10 @@ async fn compose_unit(
     gateway: &impl BriefingComposer,
     unit: CompositionUnit,
     max_attempts: usize,
-    max_figures_deep: usize,
     context: CompositionContext<'_>,
 ) -> Result<ComposedUnit, BriefingRefreshExecutionError> {
     let request = composition_request(&unit);
-    let fingerprint = composition_fingerprint(gateway.model_spec(), max_figures_deep, &request);
+    let fingerprint = composition_fingerprint(gateway.model_spec(), &request);
     if newsly_db::briefing_attempts::cooling_down(context.pool, context.user_id, &fingerprint)
         .await?
     {
@@ -802,26 +815,18 @@ async fn compose_unit(
         };
         let mut rejection = None;
         let normalized = generated
-            .layout
+            .passage
             .map_err(|error| {
                 rejection = Some(("layout", error.code()));
                 error.to_string()
             })
-            .and_then(|layout| {
-                normalize_layout(
-                    &layout,
-                    &unit.window.sources,
-                    &unit.lens.tier,
-                    if unit.lens.tier == "news" {
-                        0
-                    } else {
-                        max_figures_deep
+            .and_then(|markdown| {
+                normalize_passage(&markdown, &unit.window.sources, &unit.lens.tier).map_err(
+                    |error| {
+                        rejection = Some(("normalization", normalization_rejection_code(&error)));
+                        error.to_string()
                     },
                 )
-                .map_err(|error| {
-                    rejection = Some(("normalization", normalization_rejection_code(&error)));
-                    error.to_string()
-                })
             });
         if let Some((stage, reason_code)) = rejection {
             tracing::warn!(task_id = context.task_id, user_id = context.user_id,
@@ -855,17 +860,14 @@ async fn compose_unit(
                 continue;
             }
         };
-        let mut warnings = normalized.warnings;
         if matches!(&unit.kind, CompositionUnitKind::Compaction { .. }) {
-            warnings.push("compaction_segment".to_owned());
-        }
-        if !warnings.is_empty() {
             tracing::warn!(
                 lens_key = unit.lens.key,
-                warnings = ?warnings,
+                warnings = ?["compaction_segment"],
                 "briefing composition completed with warnings"
             );
         }
+        let prompt_version = briefing_prompt_version(&unit.lens.tier).to_owned();
         return Ok(ComposedUnit {
             ordinal: unit.ordinal,
             kind: unit.kind,
@@ -882,7 +884,7 @@ async fn compose_unit(
                     .collect(),
                 event_groups: unit.window.event_groups,
                 model: gateway.model_spec().to_owned(),
-                prompt_version: BRIEFING_COMPOSITION_PROMPT_VERSION.to_owned(),
+                prompt_version,
             },
         });
     }

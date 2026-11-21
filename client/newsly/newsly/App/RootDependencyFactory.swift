@@ -112,6 +112,7 @@ final class RootDependencyFactory {
                 badgeStatsStore: badgeStatsStore
             ),
             submissionStatusViewModel: makeSubmissionStatusViewModel(),
+            briefingSavedSources: makeBriefingSavedSources(),
             detachNotificationRouting: {
                 [localNotificationService = dependencies.localNotificationService] in
                 localNotificationService.clearChatRouteHandler()
@@ -161,18 +162,21 @@ final class RootDependencyFactory {
         DiscussionSummaryCoordinator(contentService: dependencies.contentService)
     }
 
+    private func makeBriefingSavedSources() -> BriefingSavedSources {
+        BriefingSavedSources(saveSource: { [contentService = dependencies.contentService] source in
+            switch source {
+            case .news(let id):
+                _ = try await contentService.convertNewsItemToArticle(id: id)
+                return "Saved to Knowledge"
+            case .content(let id):
+                let response = try await contentService.saveToKnowledge(id: id)
+                return response.message
+            }
+        })
+    }
+
     func makeBriefingSourceActionViewModel() -> BriefingSourceActionViewModel {
         BriefingSourceActionViewModel(
-            saveSource: { [contentService = dependencies.contentService] source in
-                switch source {
-                case .news(let id):
-                    _ = try await contentService.convertNewsItemToArticle(id: id)
-                    return "Saved to Knowledge"
-                case .content(let id):
-                    let response = try await contentService.saveToKnowledge(id: id)
-                    return response.message
-                }
-            },
             startSourceChat: { [chatService = dependencies.chatService] source in
                 let existing = try await chatService.existingSourceChat(for: source)
                 try Task.checkCancellation()
