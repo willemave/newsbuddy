@@ -4043,6 +4043,15 @@ Planning and implementation reviewed through explicit Claude Opus 5.5. Verified 
 - **Validation:** Prior focused implementation checks are recorded above. A fresh explicit Claude Opus 5.5 release review and the canonical complete gate, including paid live provider/E2B smoke, are required before push.
 - **Delivery:** Reconciled with current `origin/main`; gate artifacts will be stored under `test-results/release-gate/<sha>/`. Push only the clean tested SHA, wait for its Docker Deploy workflow, and independently prove active image, migration state, operator health and public readiness. Apple distribution remains outside this release.
 
+### 2026-11-01 — `main` — Production CVE-2026-98432 mitigation
+
+- **Scope:** User authorized the host firewall mitigation, then explicitly deferred kernel installation and reboot until a production patch is available. No packages, kernel, boot configuration, application deployment, commit, or push changed.
+- **Changes:** On `news-app-server` (AlmaLinux 8.10, kernel `4.18.0-553.144.1.el8_10.x86_64`), applied the AlmaLinux IPv4-options drop rule in the dedicated `ip cve_2026_98432` table at prerouting priority -300. Root-owned `/etc/nftables/cve-2026-98432.nft` and enabled oneshot `/etc/systemd/system/cve-2026-98432.service` restore it after firewalld and before network setup/Docker. The conflicting `nftables.service` remains disabled. MPTCP was already disabled with no listeners on the host or all seven containers.
+- **Validation:** Explicit Claude Opus 5.5 plan review (with auxiliary Haiku checks); nft syntax and systemd validation; isolated network namespace tests proved ordinary TCP succeeds and IPv4-options TCP is dropped with an incrementing counter. A second options probe used a closed port. A timed automatic rollback protected application and was cancelled after fresh independent SSH, both local API health checks, public `/health` and `/server-health`, seven unchanged container uptimes, and operator health passed. Task completions increased from 256276 to 256277. All pre-existing firewall rules, kernel packages and boot entries compared unchanged.
+- **Operations:** Root-only backup, exact applied files, validation record and scoped rollback are under `/var/backups/newsly-cve-2026-98432-20261101/`. Host maintenance owns removal: after booting vendor-confirmed fixed AlmaLinux 8 kernel `4.18.0-553.180.2.el8_10` or later, disable the dedicated unit, delete its table and remove its two configuration files. Do not restore/flush the complete firewall ruleset.
+- **Remaining:** The kernel remains vulnerable; the firewall reduces remote exposure but does not cover every path inside container/new network namespaces. Kernel patch and reboot remain deferred by the user. Startup persistence is configured and validated, but a reboot was not performed. Recheck the service and table after any later reboot. No automatic patch monitoring was configured.
+
+
 ### 2026-11-03 — `main` — Keep Briefing headline metadata on one line
 
 - **Status:** Complete locally.
