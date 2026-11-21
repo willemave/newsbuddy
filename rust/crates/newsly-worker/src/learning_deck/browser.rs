@@ -429,7 +429,7 @@ const specs = {
             const matrix=element.ownerSVGElement&&typeof element.getScreenCTM==='function'?element.getScreenCTM():null;
             const size=(parseFloat(getComputedStyle(element).fontSize)||0)*(matrix?Math.hypot(matrix.a,matrix.b):scale);
             words+=text.split(/\s+/).length; smallest=Math.min(smallest,size);
-            if(size<10.5){smallChars+=text.length; sample||=text.slice(0,48)}
+            if(portrait&&size<10.5){smallChars+=text.length; sample||=text.slice(0,48)}
             if(box.top<safeTop-6*scale||box.bottom>safeBottom+6*scale)covered+=1;
             inkTop=Math.min(inkTop,box.top); inkBottom=Math.max(inkBottom,box.bottom);
           }

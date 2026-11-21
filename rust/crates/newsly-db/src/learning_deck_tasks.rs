@@ -560,7 +560,11 @@ async fn prepare_content_source(
         content_status: content.status,
         body: ContentBodyMaterial {
             storage_key,
-            fallback_text: source_body_fallback(&content.content_type, &metadata),
+            fallback_text: crate::content_metadata::legacy_deck_source_text(
+                &content.content_type,
+                &content.content_metadata,
+            )
+            .map(str::to_owned),
         },
     }))
 }
@@ -816,20 +820,6 @@ fn github_snapshot(deck: &DeckRow) -> Map<String, Value> {
     ]);
     snapshot.retain(|_, value| !value.is_null());
     snapshot
-}
-
-fn source_body_fallback(content_type: &str, metadata: &Map<String, Value>) -> Option<String> {
-    let keys: &[&str] = match content_type {
-        "podcast" => &["transcript", "content_to_summarize"],
-        "article" | "news" => &["content_to_summarize", "content"],
-        _ => &[],
-    };
-    keys.iter().find_map(|key| {
-        metadata
-            .get(*key)
-            .and_then(Value::as_str)
-            .and_then(|value| clean_string(Some(value)))
-    })
 }
 
 fn source_wait_delay_seconds(started_at: DateTime<Utc>) -> i64 {

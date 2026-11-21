@@ -119,12 +119,12 @@ final class KnowledgeChatViewModel {
             initiallyAvailable: initialVoiceDictationAvailable
         )
         self.activeChatPollIntervalNanoseconds = activeChatPollIntervalNanoseconds
-        feed = PaginatedFeed(loadPageWithGeneration: { [weak self] cursor, generation in
+        feed = PaginatedFeed { [weak self] cursor in
             guard let self else {
                 return Page(items: [], nextCursor: nil, hasMore: false)
             }
-            return try await self.loadHistoryPage(cursor: cursor, generation: generation)
-        })
+            return try await self.loadHistoryPage(cursor: cursor)
+        }
         voiceInput.configure(
             onTranscriptReady: { [weak self] transcript in
                 guard let self else { return }
@@ -141,14 +141,13 @@ final class KnowledgeChatViewModel {
 
         loadErrorMessage = nil
         hasLoadMoreError = false
-        if feed.items.isEmpty {
-            await feed.refresh()
-        } else {
-            // Polling and revalidation must not collapse pages the user already scrolled
-            // through back to the first page; refresh through the loaded boundary instead.
-            await feed.refreshLoadedPages { item, boundary in
-                item.id != boundary.id && item.lastActivityDate >= boundary.lastActivityDate
-            }
+        let requestStartRevision = sessionMutationRevision
+        beginSessionListRequest()
+        defer { finishSessionListRequest() }
+        await feed.refreshLoadedPages(reconcilingItems: { loaded in
+            self.reconcileRefreshedSessions(loaded, requestStartRevision: requestStartRevision)
+        }) { item, boundary in
+            item.id != boundary.id && item.lastActivityDate >= boundary.lastActivityDate
         }
         loadErrorMessage = feedErrorMessage
     }
@@ -181,7 +180,9 @@ final class KnowledgeChatViewModel {
         }
 
         hasLoadMoreError = false
-        await feed.loadNextPage()
+        beginSessionListRequest()
+        defer { finishSessionListRequest() }
+        await feed.loadNextPage(reconcilingItems: visibleSessions)
         hasLoadMoreError = feedErrorMessage != nil
     }
 
@@ -310,38 +311,21 @@ final class KnowledgeChatViewModel {
         return message
     }
 
-    private func loadHistoryPage(
-        cursor: String?,
-        generation: Int
-    ) async throws -> Page<ChatSessionSummary> {
-        let requestStartRevision = sessionMutationRevision
-        beginSessionListRequest()
-        defer { finishSessionListRequest() }
-
+    private func loadHistoryPage(cursor: String?) async throws -> Page<ChatSessionSummary> {
         let response = try await chatService.listSessionsPage(
             contentId: nil,
             newsItemId: nil,
             limit: historyPageLimit,
             cursor: cursor
         )
-        let loadedSessions: [ChatSessionSummary]
-        if cursor == nil, feed.isCurrentRequest(generation) {
-            loadedSessions = reconcileInitialSessions(
-                response.sessions,
-                requestStartRevision: requestStartRevision
-            )
-        } else {
-            loadedSessions = visibleSessions(response.sessions)
-        }
-
         return Page(
-            items: loadedSessions,
+            items: visibleSessions(response.sessions),
             nextCursor: response.meta.nextCursor,
             hasMore: response.meta.hasMore
         )
     }
 
-    private func reconcileInitialSessions(
+    private func reconcileRefreshedSessions(
         _ loadedSessions: [ChatSessionSummary],
         requestStartRevision: Int
     ) -> [ChatSessionSummary] {

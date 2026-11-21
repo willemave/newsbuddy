@@ -5,6 +5,81 @@ use super::super::model::PreparedSummarizationAttempt;
 use super::*;
 
 #[sqlx::test]
+async fn reused_deck_summary_dispatches_pending_share_chat(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (apple_id, email, is_admin, is_active)
+         VALUES ('summary-chat', 'summary-chat@example.test', FALSE, TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let content_id: i64 = sqlx::query_scalar(
+        "INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata)
+         VALUES ('article', 'https://example.test/summary-chat', FALSE, 'processing', $1)
+         RETURNING id::bigint",
+    )
+    .bind(json!({
+        "content": "Stored article",
+        "summary": {"one_line": "Existing deck summary"},
+        "processing": {
+            "deck_source_only": false,
+            "share_and_chat_requests": [{"user_id": user_id, "initial_message": "Discuss this."}],
+            "share_and_chat_user_ids": [user_id]
+        },
+    }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let snapshot = load_summarization_snapshot(&mut tx, content_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let plan = SummarizationFinalizationPlan {
+        attempt: PreparedSummarizationAttempt {
+            content: snapshot,
+            input_fingerprint: input_fingerprint("article", "Stored article"),
+        },
+        mutation: SummarizationMutation::Unchanged,
+        finalized_at: chrono::Utc::now(),
+    };
+    let SummarizationApplyOutcome::Applied(applied) =
+        apply_summarization_state(&mut tx, &plan).await.unwrap()
+    else {
+        panic!("reuse should publish the existing summary");
+    };
+    assert_eq!(
+        applied.metadata["summary"]["one_line"],
+        "Existing deck summary"
+    );
+    for field in ["share_and_chat_requests", "share_and_chat_user_ids"] {
+        assert!(applied.metadata["processing"].get(field).is_none());
+    }
+    crate::summarization::fanout::enqueue_summary_followups(
+        &mut tx,
+        &QueueKernel::new(pool.clone()),
+        &applied,
+        0,
+        1,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let prompts: Vec<String> = sqlx::query_scalar(
+        "SELECT payload->>'initial_message' FROM processing_tasks
+         WHERE task_type = 'dig_deeper' AND content_id = $1::bigint AND owner_user_id = $2::bigint",
+    )
+    .bind(content_id)
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(prompts, ["Discuss this."]);
+}
+
+#[sqlx::test]
 async fn repaired_ordinary_summary_preserves_readiness_and_queues_artwork(pool: PgPool) {
     newsly_db::run_migrations(&pool).await.unwrap();
     let user_id: i64 = sqlx::query_scalar(

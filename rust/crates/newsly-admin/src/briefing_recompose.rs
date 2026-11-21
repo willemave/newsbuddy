@@ -85,14 +85,16 @@ async fn briefing_recompose(
     };
 
     let mut tx = pool.begin().await?;
-    let inventory = newsly_db::stale_card_inventory(&mut tx, &user_ids, command.limit).await?;
+    let mut inventory =
+        newsly_db::stale_card_inventory(&mut tx, &user_ids, command.limit + 1).await?;
+    let limit = usize::try_from(command.limit)?;
+    let truncated = inventory.len() > limit;
+    inventory.truncate(limit);
     let affected_users = inventory.iter().map(|row| row.user_id).collect::<Vec<_>>();
     let mut replayed = false;
     let mut queued_task_ids = Vec::new();
     let mut already_pending_task_ids = Vec::new();
-    if let Some((batch_id, actor, reason)) = authority
-        && !affected_users.is_empty()
-    {
+    if let Some((batch_id, actor, reason)) = authority {
         // The requested scope, not the computed user set, so replaying a batch ID after some
         // users finish draining reports a replay instead of a conflict.
         let targets = serde_json::json!({
@@ -110,7 +112,7 @@ async fn briefing_recompose(
         )
         .await?;
         replayed = !fresh;
-        if fresh {
+        if fresh && !affected_users.is_empty() {
             (queued_task_ids, already_pending_task_ids) =
                 enqueue_briefing_sweeps(pool, &mut tx, &affected_users).await?;
         }
@@ -133,7 +135,7 @@ async fn briefing_recompose(
         "cards_per_refresh": per_refresh,
         "applied": command.apply,
         "replayed": replayed,
-        "truncated": i64::try_from(inventory.len())? == command.limit,
+        "truncated": truncated,
         "users": inventory,
         "total_stale_cards": total_stale_cards,
         "refreshes_needed": refreshes_needed,
@@ -238,12 +240,22 @@ mod tests {
     #[sqlx::test(migrations = false)]
     async fn preview_counts_only_stale_one_source_cards_and_writes_nothing(pool: PgPool) {
         let user_id = seed_stale_card(&pool).await;
-        let report = briefing_recompose(&pool, command(&[], false, uuid::Uuid::new_v4()))
-            .await
-            .unwrap();
+        let report = briefing_recompose(
+            &pool,
+            BriefingRecomposeCommand {
+                limit: 1,
+                ..command(&[], false, uuid::Uuid::new_v4())
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(report["total_stale_cards"], 1);
         assert_eq!(report["users"][0]["user_id"], user_id);
         assert_eq!(report["applied"], false);
+        assert_eq!(
+            report["truncated"], false,
+            "one user exactly fills the limit"
+        );
         let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM processing_tasks")
             .fetch_one(&pool)
             .await
@@ -296,6 +308,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(replay["replayed"], true);
+        sqlx::query("UPDATE briefing_segments SET prompt_version = $1 WHERE user_id = $2::bigint")
+            .bind(newsly_db::BRIEFING_CARD_PROMPT_VERSION)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let drained = briefing_recompose(&pool, command(&[user_id], true, batch))
+            .await
+            .unwrap();
+        assert_eq!(drained["replayed"], true);
+        assert_eq!(drained["total_stale_cards"], 0);
+        assert!(
+            briefing_recompose(&pool, command(&[], true, batch))
+                .await
+                .is_err()
+        );
         let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM processing_tasks")
             .fetch_one(&pool)
             .await

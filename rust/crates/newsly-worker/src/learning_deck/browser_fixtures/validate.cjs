@@ -38,6 +38,7 @@ try {
   assert.equal(tiny.status,0);
   const small=tiny.report.portrait.review.find(item=>item.issue==='small_text');
   assert.deepEqual(small.slides,['first','second']);
+  assert.equal(tiny.report.landscape.review.some(item=>item.issue==='small_text'),false);
   assert.equal(run('good').report.portrait.review.some(item=>item.issue==='small_text'),false);
   const overflow=run('overflow').report;
   assert.equal(overflow.repairable,true);

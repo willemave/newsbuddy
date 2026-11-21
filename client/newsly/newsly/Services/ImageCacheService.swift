@@ -69,9 +69,10 @@ actor ImageCacheService {
     
     // MARK: - Public API
     
-    /// Get an image from cache (memory first, then disk).
+    /// Return an image from cache, optionally downloading it once for all concurrent callers.
     func image(
         for url: URL,
+        downloadIfMissing: Bool = false,
         targetPixelSize: Int? = nil,
         cacheIdentifier: String? = nil
     ) async -> UIImage? {
@@ -80,60 +81,39 @@ actor ImageCacheService {
             targetPixelSize: targetPixelSize,
             cacheIdentifier: cacheIdentifier
         )
-        let diskKey = diskCacheKey(for: url, cacheIdentifier: cacheIdentifier)
-        
-        // Check memory cache first
-        if let cachedImage = memoryCache.object(forKey: memoryKey as NSString) {
-            return cachedImage
-        }
-        
-        // Check disk cache
-        if let diskImage = await loadFromDisk(key: diskKey, targetPixelSize: targetPixelSize) {
-            storeInMemory(diskImage, forKey: memoryKey)
-            return diskImage
-        }
-        
-        return nil
-    }
-
-    /// Return an image from cache, optionally downloading it once for all concurrent callers.
-    func image(
-        for url: URL,
-        downloadIfMissing: Bool,
-        targetPixelSize: Int? = nil,
-        cacheIdentifier: String? = nil
-    ) async -> UIImage? {
-        if let cached = await image(
-            for: url,
-            targetPixelSize: targetPixelSize,
-            cacheIdentifier: cacheIdentifier
-        ) {
+        if let cached = memoryCache.object(forKey: memoryKey as NSString) {
             return cached
         }
 
-        guard downloadIfMissing else {
-            return nil
+        func loadImage() async -> UIImage? {
+            let diskKey = diskCacheKey(for: url, cacheIdentifier: cacheIdentifier)
+            let decoded: UIImage
+            if let cached = loadFromDisk(key: diskKey, targetPixelSize: targetPixelSize) {
+                decoded = cached
+            } else if downloadIfMissing, let downloaded = await downloadDecodedImage(
+                for: url,
+                targetPixelSize: targetPixelSize,
+                cacheIdentifier: cacheIdentifier,
+                diskKey: diskKey
+            ) {
+                decoded = downloaded
+            } else {
+                return nil
+            }
+            let image = await decoded.byPreparingForDisplay() ?? decoded
+            storeInMemory(image, forKey: memoryKey)
+            return image
         }
 
-        let key = cacheKey(
-            for: url,
-            targetPixelSize: targetPixelSize,
-            cacheIdentifier: cacheIdentifier
-        )
-        if let task = inFlightImagePreparations[key] {
+        guard downloadIfMissing else { return await loadImage() }
+        if let task = inFlightImagePreparations[memoryKey] {
             return await task.value
         }
 
-        let task = Task {
-            await self.downloadAndCache(
-                url: url,
-                targetPixelSize: targetPixelSize,
-                cacheIdentifier: cacheIdentifier
-            )
-        }
-        inFlightImagePreparations[key] = task
+        let task = Task { await loadImage() }
+        inFlightImagePreparations[memoryKey] = task
         let image = await task.value
-        inFlightImagePreparations[key] = nil
+        inFlightImagePreparations[memoryKey] = nil
         return image
     }
     
@@ -174,14 +154,19 @@ actor ImageCacheService {
         cacheDirectory.appendingPathComponent("\(key).image")
     }
     
-    private func loadFromDisk(key: String, targetPixelSize: Int?) async -> UIImage? {
-        guard let data = await loadDataFromDisk(key: key) else {
+    private func loadFromDisk(key: String, targetPixelSize: Int?) -> UIImage? {
+        guard let data = loadDataFromDisk(key: key) else {
             return nil
         }
-        return await preparedImage(from: data, targetPixelSize: targetPixelSize)
+        guard let image = decodedImage(from: data, targetPixelSize: targetPixelSize) else {
+            // Evict the corrupt bytes before a download can replace them.
+            try? fileManager.removeItem(at: diskCacheURL(for: key))
+            return nil
+        }
+        return image
     }
 
-    private func loadDataFromDisk(key: String) async -> Data? {
+    private func loadDataFromDisk(key: String) -> Data? {
         let fileURL = diskCacheURL(for: key)
         
         guard fileManager.fileExists(atPath: fileURL.path) else {
@@ -213,7 +198,7 @@ actor ImageCacheService {
         }
     }
     
-    private func saveDataToDisk(_ data: Data, key: String) async {
+    private func saveDataToDisk(_ data: Data, key: String) {
         let fileURL = diskCacheURL(for: key)
 
         do {
@@ -227,83 +212,41 @@ actor ImageCacheService {
         }
     }
     
-    private func downloadAndCache(
-        url: URL,
-        targetPixelSize: Int?,
-        cacheIdentifier: String?
-    ) async -> UIImage? {
-        guard let data = await cachedOrDownloadedData(
-            for: url,
-            cacheIdentifier: cacheIdentifier
-        ), !Task.isCancelled else {
-            return nil
-        }
-
-        guard let image = await preparedImage(from: data, targetPixelSize: targetPixelSize) else {
-            // Header-valid but undecodable (for example truncated) data must not stay cached.
-            try? fileManager.removeItem(
-                at: diskCacheURL(for: diskCacheKey(for: url, cacheIdentifier: cacheIdentifier))
-            )
-            return nil
-        }
-
-        storeInMemory(
-            image,
-            forKey: cacheKey(
-                for: url,
-                targetPixelSize: targetPixelSize,
-                cacheIdentifier: cacheIdentifier
-            )
-        )
-        return image
-    }
-
-    /// Coalesce the raw transfer by URL so thumbnail/full-size decode variants share one request.
-    private func cachedOrDownloadedData(
+    private func downloadDecodedImage(
         for url: URL,
-        cacheIdentifier: String? = nil
-    ) async -> Data? {
-        let diskKey = diskCacheKey(for: url, cacheIdentifier: cacheIdentifier)
-        if let cached = await loadDataFromDisk(key: diskKey) {
-            if Self.isDecodableImageData(cached) {
-                return cached
-            }
-            // A corrupt entry would otherwise mask the image until it ages out; refetch instead.
-            try? fileManager.removeItem(at: diskCacheURL(for: diskKey))
-        }
-
+        targetPixelSize: Int?,
+        cacheIdentifier: String?,
+        diskKey: String
+    ) async -> UIImage? {
+        // Coalesce the raw transfer across requested decode sizes.
         let downloadKey = sourceCacheKey(for: url, cacheIdentifier: cacheIdentifier)
-        if let task = inFlightDataDownloads[downloadKey] {
-            return await task.value
+        let task: Task<Data?, Never>
+        let ownsDownload: Bool
+        if let inFlight = inFlightDataDownloads[downloadKey] {
+            task = inFlight
+            ownsDownload = false
+        } else {
+            task = Task { await self.downloadData(for: url) }
+            inFlightDataDownloads[downloadKey] = task
+            ownsDownload = true
         }
 
-        let task = Task { await self.downloadData(for: url) }
-        inFlightDataDownloads[downloadKey] = task
         let data = await task.value
-        inFlightDataDownloads[downloadKey] = nil
-
-        guard let data, Self.isDecodableImageData(data) else {
-            if data != nil {
-                imageCacheLogger.error(
-                    "Discarded undecodable image response | url=\(url.absoluteString, privacy: .public)"
-                )
-            }
+        if ownsDownload {
+            inFlightDataDownloads[downloadKey] = nil
+        }
+        guard let data, !Task.isCancelled else { return nil }
+        guard let decoded = decodedImage(from: data, targetPixelSize: targetPixelSize) else {
+            imageCacheLogger.error(
+                "Discarded undecodable image response | url=\(url.absoluteString, privacy: .public)"
+            )
             return nil
         }
-        if !Task.isCancelled {
-            await saveDataToDisk(data, key: diskKey)
-        }
-        return data
-    }
 
-    /// Header-level check (no pixel decode): a captive-portal page or CDN error body served with
-    /// a 2xx status must never be persisted as an image.
-    nonisolated static func isDecodableImageData(_ data: Data) -> Bool {
-        let options = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-            return false
+        if ownsDownload {
+            saveDataToDisk(data, key: diskKey)
         }
-        return CGImageSourceGetType(source) != nil && CGImageSourceGetCount(source) > 0
+        return decoded
     }
 
     private func downloadData(for url: URL) async -> Data? {
@@ -326,15 +269,11 @@ actor ImageCacheService {
         }
     }
 
-    private func preparedImage(from data: Data, targetPixelSize: Int?) async -> UIImage? {
-        let image: UIImage?
+    private func decodedImage(from data: Data, targetPixelSize: Int?) -> UIImage? {
         if let targetPixelSize, targetPixelSize > 0 {
-            image = downsampledImage(from: data, maxPixelSize: targetPixelSize) ?? UIImage(data: data)
-        } else {
-            image = UIImage(data: data)
+            return downsampledImage(from: data, maxPixelSize: targetPixelSize) ?? UIImage(data: data)
         }
-        guard let image else { return nil }
-        return await image.byPreparingForDisplay() ?? image
+        return UIImage(data: data)
     }
 
     private func downsampledImage(from data: Data, maxPixelSize: Int) -> UIImage? {

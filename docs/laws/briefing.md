@@ -28,7 +28,7 @@ B7. One user-scoped version identifies the complete visible Briefing. Every visi
 
 B8. Paging at one fixed version returns the same ordered segments, sources, read flags, and summary as the complete lens.
 
-B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. A manual refresh observes its exact durable task, so successful same-version completion terminates without waiting for a version-change deadline. Failed or stale work leaves the last usable edition intact.
+B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. Recomposing a live card preserves its identity and position in the lens. A manual refresh observes its exact durable task, so successful same-version completion terminates without waiting for a version-change deadline. Failed or stale work leaves the last usable edition intact.
 
 When the Articles and Podcasts card prompt changes, normal refreshes replace live cards with recomposed ones, a bounded number per refresh, newest first, and only after that refresh's required work has succeeded. A replacement covers the same source, keeps the card's position and original Briefed time, and does not move the reader's place in the list. A card that fails to recompose keeps its previous text, does not block the rest of the refresh, and waits out a cooldown before it is retried. A News prompt change never recomposes published News. Operators may start those refreshes early; they never start a Full rebuild.
 

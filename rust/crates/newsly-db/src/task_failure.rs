@@ -1,11 +1,14 @@
 use sqlx::{Postgres, Transaction};
 
+use crate::{AudioEpisodeRepositoryError, ChatTaskRepositoryError, OnboardingTaskRepositoryError};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalTaskSettlement {
     None,
     Scrape,
     BackfillFeeds,
     Content,
+    Summarization,
     Artwork,
     LlmTask,
     NewsItem,
@@ -28,10 +31,13 @@ pub async fn settle_failed_task(
     let (payload, retry_count): (
         sqlx::types::Json<serde_json::Map<String, serde_json::Value>>,
         i32,
-    ) = sqlx::query_as("SELECT payload, retry_count FROM processing_tasks WHERE id = $1::bigint")
-        .bind(task_id)
-        .fetch_one(&mut **tx)
-        .await?;
+    ) = sqlx::query_as(
+        "SELECT COALESCE(NULLIF(payload::jsonb, 'null'::jsonb), '{}'::jsonb), retry_count
+         FROM processing_tasks WHERE id = $1::bigint",
+    )
+    .bind(task_id)
+    .fetch_one(&mut **tx)
+    .await?;
     let payload = &payload.0;
     if let Some(user_id) = owner_user_id {
         settle_related_workflow(
@@ -86,7 +92,10 @@ pub async fn settle_failed_task(
     }
     if settlement == TerminalTaskSettlement::Artwork {
         settle_failed_artwork(tx, task_id, content_id, message).await?;
-    } else if settlement == TerminalTaskSettlement::Content {
+    } else if matches!(
+        settlement,
+        TerminalTaskSettlement::Content | TerminalTaskSettlement::Summarization
+    ) {
         sqlx::query(
             r"
             UPDATE contents
@@ -95,10 +104,12 @@ pub async fn settle_failed_task(
                 updated_at = timezone('UTC', clock_timestamp())
             WHERE id = $1::bigint
               AND status NOT IN ('completed', 'failed', 'skipped')
+              AND (NOT $3 OR status <> 'awaiting_image')
             ",
         )
         .bind(content_id)
         .bind(message)
+        .bind(settlement == TerminalTaskSettlement::Summarization)
         .execute(&mut **tx)
         .await?;
     }
@@ -240,7 +251,10 @@ async fn settle_related_workflow(
                 },
             )
             .await
-            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+            .map_err(|error| match error {
+                ChatTaskRepositoryError::Sqlx(source) => source,
+                domain => sqlx::Error::Protocol(domain.to_string()),
+            })?;
         }
     }
     if settlement == TerminalTaskSettlement::AudioEpisode {
@@ -271,7 +285,10 @@ async fn settle_related_workflow(
         if let Some(started) = started {
             crate::fail_audio_episode_generation(tx, user_id, id, started, message, false)
                 .await
-                .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+                .map_err(|error| match error {
+                    AudioEpisodeRepositoryError::Sqlx(source) => source,
+                    domain => sqlx::Error::Protocol(domain.to_string()),
+                })?;
         }
     }
     if settlement == TerminalTaskSettlement::OnboardingDiscover {
@@ -302,7 +319,7 @@ async fn settle_related_workflow(
                 message,
             )
             .await
-            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+            .map_err(onboarding_settlement_error)?;
         }
     }
     if settlement == TerminalTaskSettlement::FeedDiscover {
@@ -333,10 +350,19 @@ async fn settle_related_workflow(
                 message,
             )
             .await
-            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+            .map_err(onboarding_settlement_error)?;
         }
     }
     Ok(())
+}
+
+fn onboarding_settlement_error(error: OnboardingTaskRepositoryError) -> sqlx::Error {
+    match error {
+        OnboardingTaskRepositoryError::Sqlx(source) => source,
+        domain @ OnboardingTaskRepositoryError::Json(_) => {
+            sqlx::Error::Protocol(domain.to_string())
+        }
+    }
 }
 
 fn required_payload_id(

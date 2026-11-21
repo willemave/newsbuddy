@@ -74,8 +74,8 @@ const fn terminal_task_settlement(task_type: TaskType) -> newsly_db::TerminalTas
         | TaskType::ProcessContent
         | TaskType::ProcessPodcastMedia
         | TaskType::DownloadTweetVideoAudio
-        | TaskType::TranscribeTweetVideo
-        | TaskType::Summarize => Settlement::Content,
+        | TaskType::TranscribeTweetVideo => Settlement::Content,
+        TaskType::Summarize => Settlement::Summarization,
         TaskType::ProcessNewsItem => Settlement::NewsItem,
         TaskType::GenerateImage => Settlement::Artwork,
         TaskType::DigDeeper | TaskType::ChatTurn => Settlement::ChatTurn,
@@ -90,5 +90,147 @@ const fn terminal_task_settlement(task_type: TaskType) -> newsly_db::TerminalTas
         | TaskType::PrepareNewsLens
         | TaskType::ReclusterNewsLenses
         | TaskType::DeleteUserAccount => Settlement::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use newsly_domain::{ResourceKey, RuntimeOwner};
+    use newsly_queue::{
+        ClaimRequest, ClaimRuntimeScope, EnqueueRequest, QueueKernel, TaskQueue, TaskResult,
+    };
+    use serde_json::json;
+    use sqlx::PgPool;
+
+    use super::{QueueError, TaskType, finish_finalization};
+
+    #[sqlx::test]
+    async fn summarization_terminal_failure_preserves_ready_source(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let queue = QueueKernel::new(pool.clone());
+        let scope = ClaimRuntimeScope::namespaces(
+            RuntimeOwner::Rust,
+            [ResourceKey::new("summarize").unwrap()],
+        )
+        .unwrap();
+        let claim_request = ClaimRequest::for_queue("summary-failure", TaskQueue::Content, scope);
+        for (before, after) in [
+            ("awaiting_image", "awaiting_image"),
+            ("processing", "failed"),
+        ] {
+            let content_id: i64 = sqlx::query_scalar(
+                "INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata)
+                 VALUES ('article', $1, FALSE, $2, '{}') RETURNING id::bigint",
+            )
+            .bind(format!("https://example.test/summary-{before}"))
+            .bind(before)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            let mut request = EnqueueRequest::new(TaskType::Summarize);
+            request.content_id = Some(content_id);
+            let task_id = queue.enqueue(request).await.unwrap();
+            // Both SQL NULL and JSON null are accepted as empty payloads by the queue.
+            sqlx::query("UPDATE processing_tasks SET payload = $2::json WHERE id = $1::bigint")
+                .bind(task_id)
+                .bind((before == "awaiting_image").then_some("null"))
+                .execute(&pool)
+                .await
+                .unwrap();
+            let claim = queue.claim(&claim_request).await.unwrap().unwrap();
+            let result = TaskResult::fail(Some("Provider failed".to_owned()), false);
+            let finalization = queue
+                .begin_fenced_finalization(&claim, &result, 0)
+                .await
+                .unwrap()
+                .unwrap();
+            finish_finalization(finalization, &claim)
+                .await
+                .unwrap()
+                .unwrap();
+            let (status, queue_status, error): (String, String, String) = sqlx::query_as(
+                "SELECT content.status, task.status, task.error_message
+                 FROM contents AS content JOIN processing_tasks AS task ON task.content_id = content.id
+                 WHERE task.id = $1::bigint",
+            )
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                (status.as_str(), queue_status.as_str(), error.as_str()),
+                (after, "failed", "Provider failed")
+            );
+        }
+    }
+
+    #[sqlx::test]
+    async fn transient_product_settlement_rolls_back_the_terminal_queue_transition(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (apple_id, email, is_admin, is_active)
+             VALUES ('settlement-retry', 'settlement-retry@example.test', FALSE, TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let episode_id: i64 = sqlx::query_scalar(
+            "INSERT INTO audio_episodes (user_id, kind, status, title, input_hash, source_item_ids,
+                                         source_snapshot, prompt_version, audio_content_type, share_enabled, started_at)
+             VALUES ($1::bigint::integer, 'briefing', 'processing', 'Test', 'hash', '[]', '{}', 1,
+                     'audio/mpeg', FALSE, timezone('UTC', now())) RETURNING id::bigint",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(
+            "CREATE FUNCTION fixture_settlement_conflict() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION 'transient settlement fixture' USING ERRCODE = '40001'; END; $$;
+             CREATE TRIGGER fixture_settlement_conflict BEFORE UPDATE ON audio_episodes
+             FOR EACH ROW EXECUTE FUNCTION fixture_settlement_conflict();",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let queue = QueueKernel::new(pool.clone());
+        let mut request = EnqueueRequest::new(TaskType::GenerateAudioEpisode);
+        request.owner_user_id = Some(user_id);
+        request.payload = json!({"audio_episode_id": episode_id, "user_id": user_id})
+            .as_object()
+            .cloned();
+        let task_id = queue.enqueue(request).await.unwrap();
+        let scope = ClaimRuntimeScope::namespaces(
+            RuntimeOwner::Rust,
+            [ResourceKey::new("generate_audio_episode").unwrap()],
+        )
+        .unwrap();
+        let claim = queue
+            .claim(&ClaimRequest::for_queue(
+                "settlement-retry",
+                TaskQueue::AudioEpisode,
+                scope,
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let result = TaskResult::fail(Some("Audio provider failed".to_owned()), false);
+        let finalization = queue
+            .begin_fenced_finalization(&claim, &result, 0)
+            .await
+            .unwrap()
+            .unwrap();
+        let error = finish_finalization(finalization, &claim).await.unwrap_err();
+        assert!(
+            matches!(error, QueueError::Sqlx(sqlx::Error::Database(error)) if error.code().as_deref() == Some("40001"))
+        );
+        let state: (String, bool, Option<String>) = sqlx::query_as(
+            "SELECT status, lease_token IS NOT NULL, error_message FROM processing_tasks WHERE id = $1::bigint",
+        )
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, ("processing".to_owned(), true, None));
     }
 }

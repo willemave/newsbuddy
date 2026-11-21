@@ -5,23 +5,20 @@
 -- changed (law B7). Removed blocks are not recoverable; nothing produces them anymore, and a
 -- rerun finds nothing to strip.
 -- Live publication, compaction, and read-marking lock briefing_states before briefing_segments.
--- Take every affected user's state row first, in a fixed order, so an online deploy cannot
--- deadlock with them.
-SELECT 1
-FROM briefing_states AS state
-WHERE state.user_id IN (
-    SELECT segment.user_id
-    FROM briefing_segments AS segment
-    WHERE jsonb_typeof(segment.blocks) = 'array'
-      AND jsonb_path_exists(
-          segment.blocks,
-          '$[*] ? (@.type == "figure" || @.type == "pullquote")'
-      )
-)
-ORDER BY state.user_id
-FOR UPDATE;
-
-WITH stripped AS (
+-- Use one statement snapshot for candidate selection, state locks, and mutation so a worker
+-- cannot introduce a newly affected user between the state lock and the strip.
+WITH candidates AS MATERIALIZED (
+    SELECT id, user_id
+    FROM briefing_segments
+    WHERE jsonb_typeof(blocks) = 'array'
+      AND jsonb_path_exists(blocks, '$[*] ? (@.type == "figure" || @.type == "pullquote")')
+), locked_states AS MATERIALIZED (
+    SELECT state.user_id
+    FROM briefing_states AS state
+    WHERE state.user_id IN (SELECT user_id FROM candidates)
+    ORDER BY state.user_id
+    FOR UPDATE
+), stripped AS (
     UPDATE briefing_segments AS segment
     SET blocks = (
             SELECT COALESCE(jsonb_agg(item.block ORDER BY item.position), '[]'::jsonb)
@@ -29,7 +26,13 @@ WITH stripped AS (
             WHERE NOT COALESCE(item.block ->> 'type' IN ('figure', 'pullquote'), false)
         ),
         updated_at = timezone('UTC', clock_timestamp())
-    WHERE jsonb_typeof(segment.blocks) = 'array'
+    FROM candidates AS candidate
+    WHERE segment.id = candidate.id
+      AND (
+          candidate.user_id IN (SELECT user_id FROM locked_states)
+          OR NOT EXISTS (SELECT 1 FROM briefing_states AS state WHERE state.user_id = candidate.user_id)
+      )
+      AND jsonb_typeof(segment.blocks) = 'array'
       AND jsonb_path_exists(
           segment.blocks,
           '$[*] ? (@.type == "figure" || @.type == "pullquote")'

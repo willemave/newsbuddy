@@ -439,6 +439,7 @@ fn db_tool_error(error: impl std::fmt::Display) -> AgentRuntimeError {
 
 fn success(content: Value) -> ToolOutput {
     ToolOutput {
+        images: Vec::new(),
         content,
         is_error: false,
     }
@@ -446,6 +447,7 @@ fn success(content: Value) -> ToolOutput {
 
 fn failure(message: String) -> ToolOutput {
     ToolOutput {
+        images: Vec::new(),
         content: json!({"ok": false, "error": message}),
         is_error: true,
     }

@@ -177,7 +177,10 @@ fn canonical_template_revision(template_id: &str) -> String {
     let mut digest = Sha256::new();
     digest.update(template_id.as_bytes());
     digest.update([0]);
-    for (label, bytes) in TEMPLATE_REVISION_INPUTS {
+    for (label, bytes) in TEMPLATE_REVISION_INPUTS
+        .into_iter()
+        .chain(crate::learning_deck::DECK_KIT_FILES)
+    {
         digest.update(label.as_bytes());
         digest.update([0]);
         digest.update(bytes);

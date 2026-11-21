@@ -1,6 +1,8 @@
 //! Content and News source resolution or conversion for Learning Deck creation.
 
-use crate::content_metadata::{legacy_summarization_text, runtime_metadata, summary_is_readable};
+use crate::content_metadata::{
+    legacy_deck_source_text, legacy_summarization_text, runtime_metadata, summary_is_readable,
+};
 
 use super::{
     ContentSourceOutcome, ContentSourceRow, ConvertedNewsSource, LearningDeckRepositoryError,
@@ -31,7 +33,7 @@ pub async fn resolve_content_learning_deck_source(
         return Ok(ContentSourceOutcome::NotFoundOrNotReady);
     };
     if !row.body_available
-        && legacy_summarization_text(&row.content_type, &row.content_metadata).is_none()
+        && legacy_deck_source_text(&row.content_type, &row.content_metadata).is_none()
     {
         return Ok(ContentSourceOutcome::TextUnavailable);
     }

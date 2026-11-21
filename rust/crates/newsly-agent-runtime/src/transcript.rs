@@ -42,6 +42,26 @@ impl NewslyTranscript {
         Ok(())
     }
 
+    /// Verify a transcript that will be stored durably. Inline images are model context for one
+    /// in-memory run only; persisting them would copy screenshots into long-lived rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for any [`validate`](Self::validate) failure or an inline image part.
+    pub fn validate_durable(&self) -> Result<(), TranscriptError> {
+        self.validate()?;
+        for (index, message) in self.messages.iter().enumerate() {
+            if message
+                .parts
+                .iter()
+                .any(|part| matches!(part, MessagePart::Request(RequestPart::Image { .. })))
+            {
+                return Err(TranscriptError::InlineImage(index));
+            }
+        }
+        Ok(())
+    }
+
     /// Convert the frozen `PydanticAI` history representation into the Newsly-owned transcript.
     ///
     /// # Errors
@@ -130,6 +150,18 @@ pub enum RequestPart {
         message: String,
         tool_call_id: Option<String>,
     },
+    /// An image a tool produced, delivered to the model after the batch's tool results.
+    Image {
+        media_type: ImageMediaType,
+        data_base64: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageMediaType {
+    Jpeg,
+    Png,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -430,6 +462,8 @@ pub enum TranscriptError {
     UnsupportedVersion(u16),
     #[error("transcript message {0} has no parts")]
     EmptyMessage(usize),
+    #[error("transcript message {0} carries an inline image and cannot be stored")]
+    InlineImage(usize),
 }
 
 #[derive(Debug, Error)]
@@ -535,5 +569,47 @@ mod tests {
         let decoded: NewslyTranscript =
             serde_json::from_value(encoded).expect("transcript should deserialize");
         assert_eq!(decoded, transcript);
+    }
+}
+
+#[cfg(test)]
+mod durable_tests {
+    use super::*;
+
+    fn message(parts: Vec<MessagePart>) -> NewslyMessage {
+        NewslyMessage {
+            id: None,
+            role: MessageRole::User,
+            parts,
+            created_at: Utc::now(),
+            run_id: None,
+            provider: None,
+            model: None,
+            finish_reason: None,
+            usage: ProviderUsage::default(),
+            metadata: Map::new(),
+        }
+    }
+
+    #[test]
+    fn durable_transcripts_reject_inline_images_but_runs_accept_them() {
+        let mut transcript = NewslyTranscript::default();
+        transcript
+            .messages
+            .push(message(vec![MessagePart::Request(RequestPart::Text {
+                text: "Hello".into(),
+            })]));
+        transcript.validate_durable().unwrap();
+        transcript
+            .messages
+            .push(message(vec![MessagePart::Request(RequestPart::Image {
+                media_type: ImageMediaType::Jpeg,
+                data_base64: "AAAA".into(),
+            })]));
+        transcript.validate().unwrap();
+        assert!(matches!(
+            transcript.validate_durable(),
+            Err(TranscriptError::InlineImage(1))
+        ));
     }
 }

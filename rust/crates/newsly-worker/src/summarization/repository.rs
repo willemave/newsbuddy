@@ -132,14 +132,9 @@ pub(super) async fn apply_summarization_state(
 
     let pending_chat_requests = match &plan.mutation {
         SummarizationMutation::Complete { summary } => {
-            let pending = extract_pending_chat_requests(&content.content_metadata);
-            apply_completed_summary(&mut content, plan, summary);
-            pending
+            apply_completed_summary(&mut content, plan, summary)
         }
-        SummarizationMutation::Unchanged => {
-            apply_unchanged_summary(&mut content, plan);
-            Vec::new()
-        }
+        SummarizationMutation::Unchanged => apply_unchanged_summary(&mut content, plan),
         SummarizationMutation::Failed {
             reason,
             retry_scheduled,
@@ -209,7 +204,7 @@ fn apply_completed_summary(
     content: &mut LockedContent,
     plan: &SummarizationFinalizationPlan,
     summary: &Value,
-) {
+) -> Vec<PendingChatRequest> {
     let mut metadata = metadata_map(&content.content_metadata);
     set_field(&mut metadata, "summary", summary.clone());
     set_field(
@@ -234,10 +229,6 @@ fn apply_completed_summary(
         "summarization_input_fingerprint",
         Value::String(plan.attempt.input_fingerprint.clone()),
     );
-    remove_processing_fields(
-        &mut metadata,
-        &["share_and_chat_user_ids", "share_and_chat_requests"],
-    );
     if plan.attempt.content.body_pointer().is_some() {
         for field in RAW_BODY_KEYS {
             remove_field(&mut metadata, field);
@@ -255,29 +246,31 @@ fn apply_completed_summary(
     {
         content.title = Some(title.chars().take(500).collect());
     }
-    complete_readable_summary(content, metadata, plan.finalized_at.naive_utc());
+    complete_readable_summary(content, metadata, plan.finalized_at.naive_utc())
 }
 
-fn apply_unchanged_summary(content: &mut LockedContent, plan: &SummarizationFinalizationPlan) {
+fn apply_unchanged_summary(
+    content: &mut LockedContent,
+    plan: &SummarizationFinalizationPlan,
+) -> Vec<PendingChatRequest> {
     let mut metadata = metadata_map(&content.content_metadata);
     set_field(
         &mut metadata,
         "summarization_input_fingerprint",
         Value::String(plan.attempt.input_fingerprint.clone()),
     );
-    complete_readable_summary(content, metadata, plan.finalized_at.naive_utc());
+    complete_readable_summary(content, metadata, plan.finalized_at.naive_utc())
 }
 
 fn complete_readable_summary(
     content: &mut LockedContent,
     mut metadata: Map<String, Value>,
     processed_at: NaiveDateTime,
-) {
+) -> Vec<PendingChatRequest> {
+    let pending_chat_requests = take_pending_chat_requests(&mut metadata);
     let artwork_pending = !is_deck_source_only(&metadata)
         && matches!(content.content_type.as_str(), "article" | "podcast")
-        && runtime_metadata_view(&Value::Object(metadata.clone()))
-            .get("image_generated_at")
-            .is_none_or(Value::is_null);
+        && runtime_value(&metadata, "image_generated_at").is_none_or(Value::is_null);
     if artwork_pending {
         if content.status != "completed" {
             "awaiting_image".clone_into(&mut content.status);
@@ -289,6 +282,7 @@ fn complete_readable_summary(
     content.content_metadata = Value::Object(metadata);
     content.error_message = None;
     content.processed_at = Some(processed_at);
+    pending_chat_requests
 }
 
 fn apply_failure(
@@ -376,12 +370,10 @@ fn applied_context(
     }
 }
 
-fn extract_pending_chat_requests(metadata: &Value) -> Vec<PendingChatRequest> {
-    let view = runtime_metadata_view(metadata);
+fn take_pending_chat_requests(metadata: &mut Map<String, Value>) -> Vec<PendingChatRequest> {
     let mut requests = Vec::new();
-    if let Some(values) = view
-        .get("share_and_chat_requests")
-        .and_then(Value::as_array)
+    if let Some(values) =
+        runtime_value(metadata, "share_and_chat_requests").and_then(Value::as_array)
     {
         for value in values {
             let Some(object) = value.as_object() else {
@@ -407,13 +399,12 @@ fn extract_pending_chat_requests(metadata: &Value) -> Vec<PendingChatRequest> {
             }
         }
     }
-    let legacy = view
-        .get("share_and_chat_user_ids")
+    let legacy = runtime_value(metadata, "share_and_chat_user_ids")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .into_iter()
+        .flatten();
     for value in legacy {
-        if let Some(user_id) = positive_i64(&value)
+        if let Some(user_id) = positive_i64(value)
             && !requests.iter().any(|request| request.user_id == user_id)
         {
             requests.push(PendingChatRequest {
@@ -422,17 +413,14 @@ fn extract_pending_chat_requests(metadata: &Value) -> Vec<PendingChatRequest> {
             });
         }
     }
+    for field in ["share_and_chat_user_ids", "share_and_chat_requests"] {
+        remove_field(metadata, field);
+    }
     requests
 }
 
 fn metadata_map(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
-}
-
-fn remove_processing_fields(metadata: &mut Map<String, Value>, keys: &[&str]) {
-    for key in keys {
-        remove_field(metadata, key);
-    }
 }
 
 fn positive_i64(value: &Value) -> Option<i64> {

@@ -16,8 +16,13 @@ pub struct BriefingLink {
 pub fn briefing_links(markdown: &str) -> Vec<BriefingLink> {
     let mut links = Vec::new();
     let mut current: Option<BriefingLink> = None;
+    let mut strong_ranges = Vec::new();
     for (event, range) in Parser::new(markdown).into_offset_iter() {
         match event {
+            Event::Start(Tag::Strong) => strong_ranges.push(range),
+            Event::End(TagEnd::Strong) => {
+                strong_ranges.pop();
+            }
             Event::Start(Tag::Link {
                 link_type: LinkType::Inline,
                 dest_url,
@@ -45,11 +50,12 @@ pub fn briefing_links(markdown: &str) -> Vec<BriefingLink> {
             Event::End(TagEnd::Link) => {
                 if let Some(mut link) = current.take() {
                     link.range.end = range.end;
-                    if markdown[..link.range.start].ends_with("**")
-                        && markdown[link.range.end..].starts_with("**")
+                    if let Some(wrapper) = strong_ranges.last()
+                        && wrapper.start + 2 == link.range.start
+                        && wrapper.end == link.range.end + 2
+                        && markdown[wrapper.clone()].starts_with("**")
                     {
-                        link.range.start -= 2;
-                        link.range.end += 2;
+                        link.range = wrapper.clone();
                     }
                     links.push(link);
                 }
@@ -138,6 +144,18 @@ mod tests {
             briefing_plain_text("**Lead** [Source  one](newsly://briefing/content/1)\n\nends."),
             "Lead Source one ends."
         );
+    }
+
+    #[test]
+    fn adjacent_citation_ranges_remain_disjoint() {
+        let markdown = "**[A](newsly://briefing/news/1)**[B](newsly://briefing/news/2)**";
+        let links = briefing_links(markdown);
+        assert_eq!(links.len(), 2);
+        assert!(links[0].range.end <= links[1].range.start);
+        assert_eq!(briefing_plain_text(markdown), "AB");
+
+        let wrapped = "**[A](newsly://briefing/news/1)**";
+        assert_eq!(briefing_links(wrapped)[0].range, 0..wrapped.len());
     }
 
     #[test]

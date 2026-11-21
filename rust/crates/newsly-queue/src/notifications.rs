@@ -115,20 +115,12 @@ impl QueueNotificationWaiter {
     }
 
     async fn wait_connected(&mut self, poll_interval: Duration) -> QueueWakeOutcome {
-        // A notification that committed after the caller's last claim snapshot but before this
-        // wait began is still unseen; consume it now instead of adopting it as the baseline.
-        if self.generation.has_changed().unwrap_or(true) {
-            self.generation.borrow_and_update();
-            return QueueWakeOutcome::Notification;
-        }
-        let generation = *self.generation.borrow();
         match timeout(poll_interval, async {
             loop {
                 tokio::select! {
-                    changed = self.generation.changed() => {
-                        if changed.is_err() || *self.generation.borrow_and_update() != generation {
-                            return QueueWakeOutcome::Notification;
-                        }
+                    // `changed` also delivers a notification received before the wait began.
+                    Ok(()) = self.generation.changed() => {
+                        return QueueWakeOutcome::Notification;
                     }
                     changed = self.connection_state.changed() => {
                         if changed.is_err() || !*self.connection_state.borrow() {

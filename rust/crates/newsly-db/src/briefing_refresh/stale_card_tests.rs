@@ -48,7 +48,7 @@ async fn stale_card_recomposes_in_place_and_keeps_its_position(pool: PgPool) {
     let prepared = prepare_refresh(&pool, user_id).await;
     assert_eq!(prepared.compaction_batches.len(), 1);
     let batch = prepared.compaction_batches[0].clone();
-    assert_eq!(batch.kind, BriefingCompactionKind::StaleCard { created_at });
+    assert_eq!(batch.kind, BriefingCompactionKind::StaleCard);
     assert!(batch.repair_required);
     assert_eq!(batch.donors.len(), 1);
     assert_eq!(batch.donors[0].segment_id, segment_id);
@@ -75,6 +75,24 @@ async fn stale_card_recomposes_in_place_and_keeps_its_position(pool: PgPool) {
         finalized_at: Utc::now(),
         prepared,
     };
+    let tied_peer: i64 = sqlx::query_scalar(
+        "INSERT INTO briefing_segments (lens_id,user_id,blocks,markdown_raw,narration_text,source_keys,status,model,prompt_version,warnings,created_at)
+         SELECT lens_id,user_id,'[]','','','[\"content:999999\"]','active',model,$2,'[]',created_at
+         FROM briefing_segments WHERE id = $1::bigint RETURNING id::bigint",
+    )
+    .bind(segment_id)
+    .bind(crate::BRIEFING_CARD_PROMPT_VERSION)
+    .fetch_one(&pool)
+    .await
+    .expect("same-timestamp peer");
+    let ordered_ids = || {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT id::bigint FROM briefing_segments WHERE user_id = $1::bigint AND status = 'active' ORDER BY created_at DESC, id DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&pool)
+    };
+    assert_eq!(ordered_ids().await.unwrap(), vec![tied_peer, segment_id]);
     let mut transaction = pool.begin().await.expect("recompose transaction");
     let outcome = apply_briefing_refresh(&mut transaction, &publication, &test_config())
         .await
@@ -82,23 +100,25 @@ async fn stale_card_recomposes_in_place_and_keeps_its_position(pool: PgPool) {
     transaction.commit().await.expect("recompose commit");
 
     assert!(!outcome.stale);
-    assert_eq!(outcome.compacted_segments, 1);
-    let donor_status: String =
-        sqlx::query_scalar("SELECT status FROM briefing_segments WHERE id = $1::bigint")
-            .bind(segment_id)
-            .fetch_one(&pool)
-            .await
-            .expect("donor status");
-    assert_eq!(donor_status, "compacted");
-    let (active_created_at, active_version): (chrono::NaiveDateTime, String) = sqlx::query_as(
-        "SELECT created_at, prompt_version FROM briefing_segments WHERE user_id = $1::bigint AND status = 'active'",
+    assert_eq!(outcome.compacted_segments, 0);
+    assert_eq!(outcome.recomposed_cards, 1);
+    assert_eq!(outcome.version, publication.prepared.starting_version + 1);
+    assert_eq!(ordered_ids().await.unwrap(), vec![tied_peer, segment_id]);
+    let (active_created_at, active_version, markdown): (chrono::NaiveDateTime, String, String) = sqlx::query_as(
+        "SELECT created_at, prompt_version, markdown_raw FROM briefing_segments WHERE id = $1::bigint AND status = 'active'",
     )
-    .bind(user_id)
+    .bind(segment_id)
     .fetch_one(&pool)
     .await
     .expect("exactly one active replacement");
     assert_eq!(active_created_at, created_at, "the card keeps its place");
     assert_eq!(active_version, crate::BRIEFING_CARD_PROMPT_VERSION);
+    assert_eq!(markdown, "Card summary");
+    sqlx::query("DELETE FROM briefing_segments WHERE id = $1::bigint")
+        .bind(tied_peer)
+        .execute(&pool)
+        .await
+        .unwrap();
     assert!(
         prepare_refresh(&pool, user_id)
             .await
@@ -211,6 +231,9 @@ fn stale_card_selection_is_newest_first_and_card_only() {
         (1..=20).rev().collect::<Vec<_>>(),
         "every candidate, newest first; the worker applies the per-refresh cap"
     );
-    assert!(batches.iter().all(|batch| batch.repair_required
-        && matches!(batch.kind, BriefingCompactionKind::StaleCard { .. })));
+    assert!(
+        batches
+            .iter()
+            .all(|batch| batch.repair_required && batch.kind == BriefingCompactionKind::StaleCard)
+    );
 }

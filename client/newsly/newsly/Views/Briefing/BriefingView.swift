@@ -647,7 +647,9 @@ struct BriefingView: View {
         let toastService = dependencyFactory.toastService
         let onSourceMutation = onSourceMutation
         Task {
-            switch await savedSources.save(sourceKey: sourceKey, source: identity) {
+            let outcome = await savedSources.save(sourceKey: sourceKey, source: identity)
+            guard !savedSources.isDetached, !Task.isCancelled else { return }
+            switch outcome {
             case .saved(let message):
                 toastService.showSuccess(message)
                 onSourceMutation()

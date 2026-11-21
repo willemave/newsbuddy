@@ -64,6 +64,7 @@ pub async fn publish_chat_turn(
     if !owned_session {
         return Ok(ChatTerminalMutationOutcome::Missing);
     }
+    publication.turn_transcript.validate_durable()?;
     let message_list = serde_json::to_string(publication.turn_transcript)?;
     sqlx::query(
         r#"

@@ -4,8 +4,8 @@ use rig_core::message::{Reasoning, ReasoningContent};
 use serde_json::json;
 
 use super::{
-    assistant_content, enforce_request_limit, newsly_assistant_parts, provider_reported_cost_usd,
-    response_reports_usage,
+    enforce_request_limit, provider_reported_cost_usd, response_reports_usage,
+    transcript::{assistant_content, newsly_assistant_parts},
 };
 
 #[test]

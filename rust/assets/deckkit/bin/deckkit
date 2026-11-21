@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Newsly Deck Kit CLI. Run from the task workspace root.
+set -euo pipefail
+KIT="${DECKKIT_HOME:-/opt/deckkit}"
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  new)
+    mkdir -p output/assets/fonts
+    cp "$KIT/kit.css" "$KIT/kit-init.js" output/assets/
+    cp "$KIT"/fonts/*.woff2 output/assets/fonts/
+    [ -f output/index.html ] || TITLE="${1:-Learning Deck}" node -e '
+      const fs = require("fs");
+      const t = process.env.TITLE.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      fs.writeFileSync("output/index.html", fs.readFileSync(process.argv[1], "utf8").split("__TITLE__").join(t));
+    ' "$KIT/skeleton.html"
+    echo "kit assets copied to output/assets; skeleton at output/index.html" ;;
+  math)
+    rc=0; node "$KIT/bin/math.mjs" output/index.html || rc=$?
+    # KaTeX assets count against the deck's asset budget, so ship them only with math.
+    if grep -q 'data-k="1"' output/index.html; then
+      mkdir -p output/assets/katex/fonts
+      cp "$KIT/node_modules/katex/dist/katex.min.css" output/assets/katex/
+      cp "$KIT"/node_modules/katex/dist/fonts/*.woff2 output/assets/katex/fonts/
+      grep -q 'assets/katex/katex.min.css' output/index.html ||
+        sed -i 's|<link rel="stylesheet" href="assets/kit.css">|<link rel="stylesheet" href="assets/katex/katex.min.css">\n<link rel="stylesheet" href="assets/kit.css">|' output/index.html
+    fi
+    exit "$rc" ;;
+  svg) node "$KIT/bin/svg.mjs" "$@" ;;
+  mermaid) node "$KIT/bin/mermaid.mjs" "$@" ;;
+  inline) node "$KIT/bin/inline.mjs" ;;
+  *) echo "usage: deckkit new [title] | math | svg <entry> <out.svg> | mermaid <in.mmd> <out.svg> | inline"; cat "$KIT/README.md" ;;
+esac

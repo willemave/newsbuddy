@@ -10,7 +10,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{NewslyTranscript, ProviderUsage};
+use crate::{ImageMediaType, NewslyTranscript, ProviderUsage};
 
 pub type BoxToolFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ToolOutput, AgentRuntimeError>> + Send + 'a>>;
@@ -203,6 +203,15 @@ pub struct ToolCall {
 pub struct ToolOutput {
     pub content: Value,
     pub is_error: bool,
+    /// Images for the model to see. The engine sends them after the batch's tool results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ToolImage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolImage {
+    pub media_type: ImageMediaType,
+    pub data_base64: String,
 }
 
 pub trait ToolExecutor: std::fmt::Debug + Send + Sync {

@@ -202,6 +202,7 @@ impl TaskToolExecutor {
                         // (for example, to pipe through `head`) instead of retrying blind.
                         Err(error @ E2bError::OutputLimitExceeded { .. }) => {
                             return Ok(ToolOutput {
+                                images: Vec::new(),
                                 is_error: true,
                                 content: json!({
                                     "ok": false,
@@ -248,6 +249,7 @@ impl TaskToolExecutor {
                 let truncated = stdout.chars().count() > self.max_output_chars
                     || stderr.chars().count() > self.max_output_chars;
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     is_error: exit_code != 0,
                     content: json!({
                         "ok": exit_code == 0,
@@ -269,6 +271,7 @@ impl TaskToolExecutor {
                 }
                 self.write_text(&input.path, input.text).await?;
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({"ok": true, "path": input.path, "written": true}),
                     is_error: false,
                 })
@@ -303,6 +306,7 @@ impl TaskToolExecutor {
                 }
                 self.write_text(&input.path, edited).await?;
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({
                         "ok": true,
                         "path": input.path,
@@ -320,6 +324,7 @@ impl TaskToolExecutor {
                     .clamp(1, MAX_FILE_LIMIT);
                 let text = self.read_text(&input.path, maximum).await?;
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({"ok": true, "path": input.path, "text": text}),
                     is_error: false,
                 })
@@ -354,6 +359,7 @@ impl TaskToolExecutor {
                 let result = stream.collect_result().await.map_err(tool_error)?;
                 if result.exit_code != 0 {
                     return Ok(ToolOutput {
+                        images: Vec::new(),
                         content: json!({
                             "ok": false,
                             "error": result.output.stderr,
@@ -373,6 +379,7 @@ impl TaskToolExecutor {
                     .map(|line| line.strip_prefix(&prefix).unwrap_or(line).to_owned())
                     .collect::<Vec<_>>();
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({"ok": true, "path": relative, "files": files}),
                     is_error: false,
                 })
@@ -416,6 +423,7 @@ impl TaskToolExecutor {
                     text: format!("web_search returned {} results", outcome.results.len()),
                 });
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({"ok": true, "query": query, "results": outcome.results}),
                     is_error: false,
                 })
@@ -428,6 +436,7 @@ impl TaskToolExecutor {
                         .await
                         .map_err(tool_error)?;
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({"ok": true, "results": results}),
                     is_error: false,
                 })
@@ -448,6 +457,7 @@ impl TaskToolExecutor {
                     .expect("serialized Knowledge output is an object")
                     .insert("ok".to_owned(), serde_json::Value::Bool(true));
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content,
                     is_error: false,
                 })
@@ -535,6 +545,7 @@ impl TaskToolExecutor {
                     return Err(error);
                 }
                 Ok(ToolOutput {
+                    images: Vec::new(),
                     content: json!({
                         "ok": true,
                         "paths": paths,
@@ -932,6 +943,7 @@ fn tool_error(error: impl std::fmt::Display) -> AgentRuntimeError {
 
 fn tool_failure(message: String) -> ToolOutput {
     ToolOutput {
+        images: Vec::new(),
         content: json!({"ok": false, "error": message}),
         is_error: true,
     }

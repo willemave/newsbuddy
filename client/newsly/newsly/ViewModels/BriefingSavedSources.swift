@@ -17,8 +17,11 @@ final class BriefingSavedSources {
         case ignored
     }
 
-    private(set) var savedSourceKeys: Set<String> = []
-    private(set) var pendingSourceKeys: Set<String> = []
+    private var savedSourceKeys: Set<String> = []
+    private var pendingSaves: [String: Task<String, Error>] = [:]
+
+    @ObservationIgnored
+    private(set) var isDetached = false
 
     @ObservationIgnored
     private let saveSource: (KnowledgeSource) async throws -> String
@@ -32,24 +35,42 @@ final class BriefingSavedSources {
     }
 
     func isPending(_ sourceKey: String) -> Bool {
-        pendingSourceKeys.contains(sourceKey)
+        pendingSaves[sourceKey] != nil
     }
 
     func save(sourceKey: String, source: KnowledgeSource) async -> Outcome {
-        guard !pendingSourceKeys.contains(sourceKey), !Task.isCancelled else { return .ignored }
-        pendingSourceKeys.insert(sourceKey)
-        defer { pendingSourceKeys.remove(sourceKey) }
+        guard !isDetached, !isPending(sourceKey), !Task.isCancelled else { return .ignored }
+        let task = Task { [saveSource] in
+            try Task.checkCancellation()
+            return try await saveSource(source)
+        }
+        pendingSaves[sourceKey] = task
+        defer { pendingSaves[sourceKey] = nil }
 
         do {
-            let message = try await saveSource(source)
+            let message = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            guard !isDetached else { return .ignored }
             // The server accepted the save even if the caller went away.
             savedSourceKeys.insert(sourceKey)
             return Task.isCancelled ? .ignored : .saved(message: message)
         } catch {
-            guard !Task.isCancelled, ClientFailure.classify(error) != .cancelled else {
+            guard !isDetached, !Task.isCancelled, ClientFailure.classify(error) != .cancelled else {
                 return .ignored
             }
             return .failed(message: error.localizedDescription)
         }
+    }
+
+    func detach() {
+        isDetached = true
+        for task in pendingSaves.values {
+            task.cancel()
+        }
+        pendingSaves.removeAll()
+        savedSourceKeys.removeAll()
     }
 }

@@ -26,7 +26,7 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::{AppState, request_id_from_headers};
 
-const MAX_APPLE_JWKS_BYTES: usize = 64 * 1024;
+const MAX_APPLE_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub struct AuthConfig {
@@ -561,16 +561,9 @@ impl AuthConfig {
             .send()
             .await?
             .error_for_status()?;
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_APPLE_JWKS_BYTES as u64)
-        {
-            return Err(AppleIdentityError::JwksTooLarge);
-        }
-        let body = response.bytes().await?;
-        if body.len() > MAX_APPLE_JWKS_BYTES {
-            return Err(AppleIdentityError::JwksTooLarge);
-        }
+        let body = read_apple_response(response)
+            .await?
+            .ok_or(AppleIdentityError::JwksTooLarge)?;
         Ok(serde_json::from_slice(&body)?)
     }
 
@@ -923,18 +916,29 @@ pub(crate) enum AppleAccountError {
 }
 
 async fn bounded_apple_body(response: reqwest::Response) -> Result<Vec<u8>, AppleAccountError> {
-    const MAX_APPLE_RESPONSE_BYTES: u64 = 64 * 1024;
+    read_apple_response(response)
+        .await?
+        .ok_or(AppleAccountError::ResponseTooLarge)
+}
+
+/// Returns no body when the configured limit is exceeded.
+async fn read_apple_response(
+    mut response: reqwest::Response,
+) -> Result<Option<Vec<u8>>, reqwest::Error> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_APPLE_RESPONSE_BYTES)
+        .is_some_and(|length| length > MAX_APPLE_RESPONSE_BYTES as u64)
     {
-        return Err(AppleAccountError::ResponseTooLarge);
+        return Ok(None);
     }
-    let body = response.bytes().await?;
-    if body.len() > usize::try_from(MAX_APPLE_RESPONSE_BYTES).expect("response bound fits usize") {
-        return Err(AppleAccountError::ResponseTooLarge);
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if chunk.len() > MAX_APPLE_RESPONSE_BYTES - body.len() {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
     }
-    Ok(body.to_vec())
+    Ok(Some(body))
 }
 
 #[cfg(test)]

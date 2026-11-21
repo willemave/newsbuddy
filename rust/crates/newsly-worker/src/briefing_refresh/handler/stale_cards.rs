@@ -5,7 +5,7 @@ use newsly_providers::BriefingCompositionGateway;
 
 use super::{
     BriefingRefreshExecutionError, ComposedUnit, CompositionContext, CompositionUnit, compose_unit,
-    composition_fingerprint, composition_is_ready, composition_request,
+    composition_fingerprint, composition_request,
 };
 
 /// Recomposes up to `STALE_CARD_RECOMPOSE_LIMIT` cards written by an older card prompt,
@@ -20,24 +20,31 @@ pub(super) async fn recompose_stale_cards(
     parallelism: usize,
     context: CompositionContext<'_>,
 ) -> Result<Vec<ComposedUnit>, BriefingRefreshExecutionError> {
-    let mut selected = Vec::new();
-    for (batch_index, unit) in candidates {
-        if selected.len() == newsly_db::STALE_CARD_RECOMPOSE_LIMIT {
-            break;
-        }
-        if composition_is_ready(gateway.model_spec(), &unit, context).await? {
-            let fingerprint =
-                composition_fingerprint(gateway.model_spec(), &composition_request(&unit));
-            selected.push((batch_index, fingerprint, unit));
-        }
+    if candidates.is_empty() {
+        return Ok(Vec::new());
     }
+    let fingerprints = candidates
+        .iter()
+        .map(|(_, unit)| composition_fingerprint(gateway.model_spec(), &composition_request(unit)))
+        .collect::<Vec<_>>();
+    let cooling_down = newsly_db::briefing_attempts::cooling_down_fingerprints(
+        context.pool,
+        context.user_id,
+        &fingerprints,
+    )
+    .await?;
+    let selected = candidates
+        .into_iter()
+        .zip(fingerprints)
+        .filter(|(_, fingerprint)| !cooling_down.contains(fingerprint))
+        .take(newsly_db::STALE_CARD_RECOMPOSE_LIMIT);
     let max_attempts = super::super::config::MAX_COMPOSE_ATTEMPTS;
-    let results = stream::iter(selected.into_iter().map(
-        |(batch_index, fingerprint, unit)| async move {
+    let results = stream::iter(
+        selected.map(|((batch_index, unit), fingerprint)| async move {
             let result = compose_unit(gateway, unit, max_attempts, context).await;
             (batch_index, fingerprint, result)
-        },
-    ))
+        }),
+    )
     .buffer_unordered(parallelism)
     .collect::<Vec<_>>()
     .await;

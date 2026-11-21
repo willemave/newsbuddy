@@ -229,10 +229,8 @@ pub struct BriefingDonorIdentity {
 pub enum BriefingCompactionKind {
     /// Repairs or consolidates donors into new segments. A failed composition fails the refresh.
     Consolidate,
-    /// Rewrites one Articles or Podcasts card composed by an older card prompt. Best effort: a
-    /// failed composition keeps the donor. The replacement keeps the donor's creation time, so
-    /// the card neither moves nor reorders its lens.
-    StaleCard { created_at: NaiveDateTime },
+    /// Rewrites one Articles or Podcasts card in place. A failed composition keeps its text.
+    StaleCard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -442,6 +440,7 @@ pub struct BriefingRefreshApplyOutcome {
     pub version: i32,
     pub appended_segments: usize,
     pub compacted_segments: usize,
+    pub recomposed_cards: usize,
     pub retired_segments: usize,
     pub stale: bool,
     pub next_sweep_delay_seconds: i64,
@@ -576,6 +575,8 @@ pub enum BriefingRefreshRepositoryError {
     InvalidStoredCentroid,
     #[error("Briefing pending-source ownership changed during publication")]
     PendingOwnershipLost,
+    #[error("Briefing card recomposition must replace one donor with the same source coverage")]
+    InvalidCardRecomposition,
     #[error("Briefing refresh PostgreSQL operation failed")]
     Sqlx(#[from] sqlx::Error),
 }

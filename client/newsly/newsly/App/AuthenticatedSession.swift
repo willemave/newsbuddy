@@ -96,6 +96,7 @@ final class AuthenticatedSession {
         chatNavigation.clear()
         detachNotificationRouting()
         tabCoordinator.briefingVM.setActive(false)
+        briefingSavedSources.detach()
         knowledgeViewModel.suspendAutomaticReads()
         handledActivationGeneration = nil
     }

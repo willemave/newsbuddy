@@ -3,9 +3,9 @@ use std::sync::Arc;
 use chrono::Utc;
 use newsly_agent_runtime::{
     AgentEvent, AgentEventSink, AgentModelUsageObservation, AgentOutcome, AgentRequest,
-    AgentRuntimeError, AssistantPart, ChatBudget, MessagePart, MessageRole, NewslyMessage,
-    ProviderUsage, ReasoningContentKind, RequestPart, ResponseContract, ToolCall as NewslyToolCall,
-    ToolExecutor, TranscriptFinishReason,
+    AgentRuntimeError, ChatBudget, MessagePart, MessageRole, NewslyMessage, ProviderUsage,
+    RequestPart, ResponseContract, ToolCall as NewslyToolCall, ToolExecutor,
+    TranscriptFinishReason,
 };
 use reqwest::Client;
 use rig_core::client::CompletionClient;
@@ -13,10 +13,7 @@ use rig_core::completion::{
     AssistantContent, CompletionModel, CompletionRequest, CompletionResponse, FinishReason,
     Message, ToolDefinition as RigToolDefinition,
 };
-use rig_core::message::{
-    ProviderCallId, Reasoning, ReasoningContent, ToolCall as RigToolCall, ToolCallId, ToolChoice,
-    ToolFunction, ToolResultContent, UserContent,
-};
+use rig_core::message::{ToolChoice, ToolResultContent, UserContent};
 use rig_core::providers::{anthropic, gemini, openai, openrouter};
 use secrecy::ExposeSecret;
 use serde_json::{Map, Value};
@@ -31,6 +28,8 @@ use chat_budget::{CHAT_FINAL_ANSWER_INSTRUCTION, ChatBudgetState, normalize_fina
 mod openai_response;
 mod structured;
 pub(crate) use structured::{RunStructuredError, StructuredRunRequest};
+mod transcript;
+use transcript::{newsly_assistant_parts, rig_history_from_transcript, rig_image};
 
 #[derive(Debug, Clone)]
 pub struct RigAgentEngine {
@@ -312,6 +311,8 @@ impl RigAgentEngine {
                 if calls.len() > remaining as usize {
                     return Err(AgentRuntimeError::ToolCallLimitExceeded);
                 }
+                let mut images = Vec::new();
+                let mut image_sources = Vec::new();
                 for call in calls {
                     tool_call_count = tool_call_count.saturating_add(1);
                     let call_id = call.id.as_str().to_owned();
@@ -319,7 +320,7 @@ impl RigAgentEngine {
                         id: call_id.clone(),
                         name: call.function.name.clone(),
                     })?;
-                    let output = tools
+                    let mut output = tools
                         .execute(
                             NewslyToolCall {
                                 id: call_id.clone(),
@@ -329,6 +330,14 @@ impl RigAgentEngine {
                             Arc::clone(&events),
                         )
                         .await?;
+                    if !output.images.is_empty() {
+                        image_sources.push(format!(
+                            "{} ({})",
+                            call.function.name,
+                            output.images.len()
+                        ));
+                    }
+                    images.append(&mut output.images);
                     events.publish(AgentEvent::ToolCallFinished {
                         id: call_id.clone(),
                         is_error: output.is_error,
@@ -364,6 +373,41 @@ impl RigAgentEngine {
                             content: output.content,
                             is_error: output.is_error,
                         })],
+                        created_at: Utc::now(),
+                        run_id: response.response_id.clone(),
+                        provider: Some(response.provider.clone()),
+                        model: response.model.clone().or_else(|| Some(model_name.clone())),
+                        finish_reason: None,
+                        usage: ProviderUsage::default(),
+                        metadata: Map::new(),
+                    });
+                }
+                // Providers accept images in a user turn only after every tool result of the
+                // batch, so tool images travel together in one follow-up user message.
+                if !images.is_empty() {
+                    // Label the images so the model reads them as tool output, not a person.
+                    let label = format!(
+                        "Images returned by this batch's tool calls, in order: {}.",
+                        image_sources.join(", ")
+                    );
+                    history.push(Message::User {
+                        content: std::iter::once(UserContent::text(label.clone()))
+                            .chain(images.iter().map(rig_image))
+                            .collect(),
+                    });
+                    transcript.messages.push(NewslyMessage {
+                        id: Some(Uuid::new_v4()),
+                        role: MessageRole::User,
+                        parts: std::iter::once(MessagePart::Request(RequestPart::Text {
+                            text: label,
+                        }))
+                        .chain(images.into_iter().map(|image| {
+                            MessagePart::Request(RequestPart::Image {
+                                media_type: image.media_type,
+                                data_base64: image.data_base64,
+                            })
+                        }))
+                        .collect(),
                         created_at: Utc::now(),
                         run_id: response.response_id.clone(),
                         provider: Some(response.provider.clone()),
@@ -648,256 +692,6 @@ impl RigModel {
     }
 }
 
-fn rig_history_from_transcript(
-    transcript: &newsly_agent_runtime::NewslyTranscript,
-) -> Result<Vec<Message>, AgentRuntimeError> {
-    transcript
-        .messages
-        .iter()
-        .map(rig_message)
-        .collect::<Result<Vec<_>, _>>()
-}
-
-fn rig_message(message: &NewslyMessage) -> Result<Message, AgentRuntimeError> {
-    match message.role {
-        MessageRole::System => {
-            let text = request_text(&message.parts)?;
-            Ok(Message::system(text))
-        }
-        MessageRole::User | MessageRole::Tool => {
-            let content = request_content(&message.parts)?;
-            Ok(Message::User { content })
-        }
-        MessageRole::Assistant => {
-            let content = assistant_content(&message.parts)?;
-            Ok(Message::Assistant {
-                id: message
-                    .metadata
-                    .get("message_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                content,
-            })
-        }
-    }
-}
-
-fn request_text(parts: &[MessagePart]) -> Result<String, AgentRuntimeError> {
-    parts
-        .iter()
-        .map(|part| match part {
-            MessagePart::Request(RequestPart::Text { text }) => Ok(text.clone()),
-            _ => Err(invalid_history("message role and part type do not agree")),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|parts| parts.join("\n"))
-}
-
-fn request_content(parts: &[MessagePart]) -> Result<Vec<UserContent>, AgentRuntimeError> {
-    parts
-        .iter()
-        .map(|part| match part {
-            MessagePart::Request(RequestPart::Text { text }) => Ok(UserContent::text(text.clone())),
-            MessagePart::Request(RequestPart::Retry { message, .. }) => {
-                Ok(UserContent::text(message.clone()))
-            }
-            MessagePart::Request(RequestPart::ToolResult {
-                tool_call_id,
-                provider_call_id,
-                provider_item_id,
-                tool_name,
-                content,
-                is_error,
-            }) => {
-                let call = nonempty_call_id(tool_call_id)?;
-                let provider = provider_call_id
-                    .as_ref()
-                    .and_then(|id| ProviderCallId::new(id.clone()))
-                    .map(|provider| match provider_item_id {
-                        Some(item_id) => provider.with_item_id(item_id.clone()),
-                        None => provider,
-                    });
-                let value = if *is_error {
-                    serde_json::json!({"error": content})
-                } else {
-                    content.clone()
-                };
-                Ok(UserContent::tool_result_for(
-                    call,
-                    provider,
-                    tool_name.clone(),
-                    vec![ToolResultContent::json(value)],
-                ))
-            }
-            MessagePart::Assistant(_) => Err(invalid_history(
-                "request message contains assistant content",
-            )),
-        })
-        .collect()
-}
-
-fn assistant_content(parts: &[MessagePart]) -> Result<Vec<AssistantContent>, AgentRuntimeError> {
-    let mut content = Vec::with_capacity(parts.len());
-    for part in parts {
-        let next = match part {
-            MessagePart::Assistant(AssistantPart::Text { text }) => {
-                Ok(AssistantContent::text(text.clone()))
-            }
-            MessagePart::Assistant(AssistantPart::ToolCall {
-                tool_call_id,
-                provider_call_id,
-                provider_item_id,
-                tool_name,
-                arguments,
-                signature,
-                additional_params,
-            }) => {
-                let provider = provider_call_id
-                    .as_ref()
-                    .and_then(|id| ProviderCallId::new(id.clone()))
-                    .map(|provider| match provider_item_id {
-                        Some(item_id) => provider.with_item_id(item_id.clone()),
-                        None => provider,
-                    });
-                Ok(AssistantContent::ToolCall(RigToolCall {
-                    id: nonempty_call_id(tool_call_id)?,
-                    provider,
-                    function: ToolFunction::new(tool_name.clone(), arguments.clone()),
-                    signature: signature.clone(),
-                    additional_params: additional_params.clone(),
-                }))
-            }
-            MessagePart::Assistant(AssistantPart::Reasoning {
-                provider_item_id,
-                content_kind,
-                text,
-                signature,
-                encrypted_content,
-            }) => {
-                let reasoning_content = match content_kind {
-                    Some(ReasoningContentKind::Text) => ReasoningContent::Text {
-                        text: text
-                            .clone()
-                            .ok_or_else(|| invalid_history("reasoning text is missing"))?,
-                        signature: signature.clone(),
-                    },
-                    Some(ReasoningContentKind::Encrypted) => ReasoningContent::Encrypted(
-                        encrypted_content
-                            .clone()
-                            .ok_or_else(|| invalid_history("encrypted reasoning is missing"))?,
-                    ),
-                    Some(ReasoningContentKind::Redacted) => ReasoningContent::Redacted {
-                        data: encrypted_content
-                            .clone()
-                            .ok_or_else(|| invalid_history("redacted reasoning is missing"))?,
-                    },
-                    Some(ReasoningContentKind::Summary) => ReasoningContent::Summary(
-                        text.clone()
-                            .ok_or_else(|| invalid_history("reasoning summary is missing"))?,
-                    ),
-                    None => match (text, encrypted_content, signature) {
-                        (Some(text), _, _) => ReasoningContent::Text {
-                            text: text.clone(),
-                            signature: signature.clone(),
-                        },
-                        (_, Some(encrypted), _) => ReasoningContent::Encrypted(encrypted.clone()),
-                        (_, _, Some(redacted)) => ReasoningContent::Redacted {
-                            data: redacted.clone(),
-                        },
-                        _ => return Err(invalid_history("reasoning part has no durable content")),
-                    },
-                };
-                if let Some(AssistantContent::Reasoning(previous)) = content.last_mut()
-                    && previous.id == *provider_item_id
-                {
-                    previous.content.push(reasoning_content);
-                    continue;
-                }
-                Ok(AssistantContent::Reasoning(Reasoning {
-                    id: provider_item_id.clone(),
-                    content: vec![reasoning_content],
-                }))
-            }
-            MessagePart::Request(_) => Err(invalid_history(
-                "assistant message contains request content",
-            )),
-        }?;
-        content.push(next);
-    }
-    Ok(content)
-}
-
-fn newsly_assistant_parts(content: &[AssistantContent]) -> Vec<MessagePart> {
-    content
-        .iter()
-        .flat_map(|part| match part {
-            AssistantContent::Text(text) => vec![MessagePart::Assistant(AssistantPart::Text {
-                text: text.text.clone(),
-            })],
-            AssistantContent::ToolCall(call) => {
-                vec![MessagePart::Assistant(AssistantPart::ToolCall {
-                    tool_call_id: call.id.as_str().to_owned(),
-                    provider_call_id: call
-                        .provider
-                        .as_ref()
-                        .map(|provider| provider.call_id.clone()),
-                    provider_item_id: call
-                        .provider
-                        .as_ref()
-                        .and_then(|provider| provider.item_id.clone()),
-                    tool_name: call.function.name.clone(),
-                    arguments: call.function.arguments.clone(),
-                    signature: call.signature.clone(),
-                    additional_params: call.additional_params.clone(),
-                })]
-            }
-            AssistantContent::Reasoning(reasoning) => reasoning
-                .content
-                .iter()
-                .map(|content| match content {
-                    ReasoningContent::Text { text, signature } => {
-                        MessagePart::Assistant(AssistantPart::Reasoning {
-                            provider_item_id: reasoning.id.clone(),
-                            content_kind: Some(ReasoningContentKind::Text),
-                            text: Some(text.clone()),
-                            signature: signature.clone(),
-                            encrypted_content: None,
-                        })
-                    }
-                    ReasoningContent::Encrypted(content) => {
-                        MessagePart::Assistant(AssistantPart::Reasoning {
-                            provider_item_id: reasoning.id.clone(),
-                            content_kind: Some(ReasoningContentKind::Encrypted),
-                            text: None,
-                            signature: None,
-                            encrypted_content: Some(content.clone()),
-                        })
-                    }
-                    ReasoningContent::Redacted { data } => {
-                        MessagePart::Assistant(AssistantPart::Reasoning {
-                            provider_item_id: reasoning.id.clone(),
-                            content_kind: Some(ReasoningContentKind::Redacted),
-                            text: None,
-                            signature: None,
-                            encrypted_content: Some(data.clone()),
-                        })
-                    }
-                    ReasoningContent::Summary(text) => {
-                        MessagePart::Assistant(AssistantPart::Reasoning {
-                            provider_item_id: reasoning.id.clone(),
-                            content_kind: Some(ReasoningContentKind::Summary),
-                            text: Some(text.clone()),
-                            signature: None,
-                            encrypted_content: None,
-                        })
-                    }
-                })
-                .collect(),
-            AssistantContent::Image(_) => Vec::new(),
-        })
-        .collect()
-}
-
 fn provider_usage(response: &CompletionResponse) -> ProviderUsage {
     // Rig reports Anthropic cache reads/writes separately from input_tokens,
     // while OpenAI includes them. The Newsly ledger always stores inclusive input.
@@ -966,15 +760,6 @@ fn transcript_finish_reason(reason: Option<&FinishReason>) -> TranscriptFinishRe
     }
 }
 
-fn nonempty_call_id(value: &str) -> Result<ToolCallId, AgentRuntimeError> {
-    ToolCallId::new(value.to_owned())
-        .ok_or_else(|| invalid_history("tool call id must not be empty"))
-}
-
-fn invalid_history(message: &str) -> AgentRuntimeError {
-    AgentRuntimeError::InvalidRequest(format!("invalid Newsly transcript: {message}"))
-}
-
 fn insert_optional(metadata: &mut Map<String, Value>, key: &str, value: Option<String>) {
     if let Some(value) = value {
         metadata.insert(key.to_owned(), Value::String(value));
@@ -997,3 +782,6 @@ mod tests;
 
 #[cfg(test)]
 mod chat_budget_tests;
+
+#[cfg(test)]
+mod tool_image_tests;

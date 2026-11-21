@@ -1,0 +1,25 @@
+# Daylight matplotlib style. Use: plt.style.use("/opt/deckkit/deck.mplstyle")
+# Size portrait figures at figsize=(6.24, 5) with dpi=200 and save as SVG or PNG into output/assets/.
+figure.facecolor: faf8f3
+axes.facecolor: faf8f3
+savefig.facecolor: faf8f3
+axes.edgecolor: 4a4740
+axes.labelcolor: 1c1b18
+axes.titlecolor: 1c1b18
+axes.spines.top: False
+axes.spines.right: False
+axes.grid: True
+grid.color: e2dccf
+grid.linewidth: 0.8
+axes.prop_cycle: cycler(color=['0e7a5c', '7a756a', 'a8502a', '1c1b18', 'b9b3a6'])
+font.family: sans-serif
+font.sans-serif: Inter, DejaVu Sans
+font.size: 13
+axes.titlesize: 15
+axes.labelsize: 13
+xtick.color: 4a4740
+ytick.color: 4a4740
+lines.linewidth: 2.4
+legend.frameon: False
+savefig.bbox: tight
+svg.fonttype: path

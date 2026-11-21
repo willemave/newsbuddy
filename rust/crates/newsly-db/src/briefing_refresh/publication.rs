@@ -39,6 +39,7 @@ pub async fn apply_briefing_refresh(
 
     let mut appended = 0_usize;
     let mut compacted = 0_usize;
+    let mut recomposed = 0_usize;
     if prepared.mode == BriefingRefreshMode::Full && append_current {
         compacted += sqlx::query(
             r#"
@@ -54,7 +55,7 @@ pub async fn apply_briefing_refresh(
     }
     if append_current {
         for composed in &publication.append_segments {
-            persist_segment(transaction, prepared, &composed.segment, None).await?;
+            persist_segment(transaction, prepared, &composed.segment).await?;
             let ids = composed
                 .pending_rows
                 .iter()
@@ -77,13 +78,15 @@ pub async fn apply_briefing_refresh(
     if !version_stale {
         for plan in &publication.compactions {
             if compaction_is_current(transaction, prepared.user_id, plan).await? {
-                // A recomposed card keeps its donor's place in the lens.
-                let created_at = match plan.kind {
-                    BriefingCompactionKind::Consolidate => None,
-                    BriefingCompactionKind::StaleCard { created_at } => Some(created_at),
-                };
+                if plan.kind == BriefingCompactionKind::StaleCard {
+                    if append_current {
+                        recompose_card(transaction, plan).await?;
+                        recomposed += 1;
+                    }
+                    continue;
+                }
                 for segment in &plan.segments {
-                    persist_segment(transaction, prepared, segment, created_at).await?;
+                    persist_segment(transaction, prepared, segment).await?;
                 }
                 let donor_ids = plan
                     .donors
@@ -110,6 +113,7 @@ pub async fn apply_briefing_refresh(
     let idle_retired = retire_idle_lenses(transaction, prepared.user_id, config).await?;
     let visible_mutation = appended > 0
         || compacted > 0
+        || recomposed > 0
         || retired > 0
         || idle_retired > 0
         || prepared.prepared_state_changed;
@@ -149,6 +153,7 @@ pub async fn apply_briefing_refresh(
         version,
         appended_segments: appended,
         compacted_segments: compacted,
+        recomposed_cards: recomposed,
         retired_segments: retired + idle_retired,
         stale: version_stale || !append_current,
         next_sweep_delay_seconds: delay,
@@ -282,11 +287,44 @@ pub(super) async fn compaction_is_current(
             .collect::<BTreeSet<_>>())
 }
 
+async fn recompose_card(
+    transaction: &mut Transaction<'static, Postgres>,
+    plan: &ComposedBriefingCompaction,
+) -> Result<(), BriefingRefreshRepositoryError> {
+    let ([donor], [segment]) = (plan.donors.as_slice(), plan.segments.as_slice()) else {
+        return Err(BriefingRefreshRepositoryError::InvalidCardRecomposition);
+    };
+    if donor.source_keys != segment.source_keys {
+        return Err(BriefingRefreshRepositoryError::InvalidCardRecomposition);
+    }
+    // `compaction_is_current` already fenced this row. Keep both the timestamp and
+    // segment ID, the lens's secondary sort key, so tied cards retain their order.
+    sqlx::query(
+        r#"
+        UPDATE briefing_segments
+        SET blocks = $2, markdown_raw = $3, narration_text = $4, event_groups = $5,
+            model = $6, prompt_version = $7, status = 'active', warnings = '[]'::jsonb,
+            input_tokens = NULL, output_tokens = NULL, generation_ms = NULL,
+            updated_at = timezone('UTC', clock_timestamp())
+        WHERE id = $1::bigint
+        "#,
+    )
+    .bind(donor.segment_id)
+    .bind(&segment.blocks)
+    .bind(&segment.markdown_raw)
+    .bind(&segment.narration_text)
+    .bind(json!(segment.event_groups))
+    .bind(&segment.model)
+    .bind(&segment.prompt_version)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 pub(super) async fn persist_segment(
     transaction: &mut Transaction<'static, Postgres>,
     prepared: &PreparedBriefingRefresh,
     segment: &ComposedBriefingSegment,
-    created_at: Option<NaiveDateTime>,
 ) -> Result<(), BriefingRefreshRepositoryError> {
     sqlx::query(
         r#"
@@ -297,7 +335,7 @@ pub(super) async fn persist_segment(
         VALUES (
             $1::bigint::integer, $2::bigint::integer, $3, $4, $5, $6, $7,
             'active', $8, $9, '[]'::jsonb,
-            COALESCE($10, timezone('UTC', clock_timestamp())), timezone('UTC', clock_timestamp())
+            timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
         )
         "#,
     )
@@ -310,7 +348,6 @@ pub(super) async fn persist_segment(
     .bind(json!(segment.event_groups))
     .bind(&segment.model)
     .bind(&segment.prompt_version)
-    .bind(created_at)
     .execute(&mut **transaction)
     .await?;
     Ok(())

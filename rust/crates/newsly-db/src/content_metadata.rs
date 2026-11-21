@@ -172,6 +172,23 @@ pub fn legacy_summarization_text<'a>(content_type: &str, metadata: &'a Value) ->
         "podcast" => ["transcript", "content_to_summarize"],
         _ => return None,
     };
+    legacy_source_text(metadata, &keys)
+}
+
+/// Finds legacy deck source text, retaining the deck reader's preference for extracted text.
+pub(crate) fn legacy_deck_source_text<'a>(
+    content_type: &str,
+    metadata: &'a Value,
+) -> Option<&'a str> {
+    let keys = match content_type {
+        "article" | "news" => ["content_to_summarize", "content"],
+        "podcast" => ["transcript", "content_to_summarize"],
+        _ => return None,
+    };
+    legacy_source_text(metadata, &keys)
+}
+
+fn legacy_source_text<'a>(metadata: &'a Value, keys: &[&str]) -> Option<&'a str> {
     let root = metadata.as_object()?;
     keys.iter()
         .filter_map(|key| runtime_value(root, key))
@@ -217,8 +234,33 @@ pub fn summary_is_readable(runtime: &Map<String, Value>, content_type: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{runtime_metadata, summary_is_readable};
+    use super::{
+        legacy_deck_source_text, legacy_summarization_text, runtime_metadata, summary_is_readable,
+    };
     use serde_json::json;
+
+    #[test]
+    fn legacy_readers_keep_their_text_preference_and_recover_root_text() {
+        let metadata = json!({"content": "Raw article", "content_to_summarize": "Extracted text"});
+        assert_eq!(
+            legacy_deck_source_text("article", &metadata),
+            Some("Extracted text")
+        );
+        assert_eq!(
+            legacy_summarization_text("article", &metadata),
+            Some("Raw article")
+        );
+
+        let metadata = json!({"content": "Legacy article", "domain": {"content": null}});
+        assert_eq!(
+            legacy_deck_source_text("article", &metadata),
+            Some("Legacy article")
+        );
+        assert_eq!(
+            legacy_summarization_text("article", &metadata),
+            Some("Legacy article")
+        );
+    }
 
     #[test]
     fn writes_route_processing_keys_without_reshaping_other_fields() {

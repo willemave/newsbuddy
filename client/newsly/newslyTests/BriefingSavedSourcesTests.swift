@@ -18,7 +18,8 @@ final class BriefingSavedSourcesTests: XCTestCase {
         XCTAssertEqual(requests, [.news(7), .content(7)])
         XCTAssertTrue(store.isSaved("news:7"))
         XCTAssertTrue(store.isSaved("content:7"))
-        XCTAssertTrue(store.pendingSourceKeys.isEmpty)
+        XCTAssertFalse(store.isPending("news:7"))
+        XCTAssertFalse(store.isPending("content:7"))
     }
 
     func testRepeatedSaveIsIdempotentAndNeverToggles() async {
@@ -107,6 +108,29 @@ final class BriefingSavedSourcesTests: XCTestCase {
         let result = await task.value
         XCTAssertEqual(result, .ignored)
         XCTAssertTrue(store.isSaved("content:7"))
+    }
+
+    func testDetachCancelsPendingSaveAndDiscardsItsLateSuccess() async {
+        var continuation: CheckedContinuation<String, Never>?
+        var cancellationObserved = false
+        let store = BriefingSavedSources(saveSource: { _ in
+            let message = await withCheckedContinuation { continuation = $0 }
+            cancellationObserved = Task.isCancelled
+            return message
+        })
+        let task = Task { await store.save(sourceKey: "content:7", source: .content(7)) }
+        while continuation == nil { await Task.yield() }
+
+        store.detach()
+        XCTAssertFalse(store.isPending("content:7"))
+        let newSave = await store.save(sourceKey: "content:8", source: .content(8))
+        XCTAssertEqual(newSave, .ignored)
+        continuation?.resume(returning: "Saved")
+
+        let result = await task.value
+        XCTAssertEqual(result, .ignored)
+        XCTAssertTrue(cancellationObserved)
+        XCTAssertFalse(store.isSaved("content:7"))
     }
 
     func testAlreadyCancelledTaskDoesNotSubmit() async {

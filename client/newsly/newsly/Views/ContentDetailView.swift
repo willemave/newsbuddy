@@ -614,12 +614,7 @@ private struct ContentDetailContentView: View {
                     return
                 }
 
-                let url = deck.viewerAvailable
-                    ? try? await dependencyFactory.learningDeckService.viewerURL(deckId: deck.id)
-                    : nil
-                guard !Task.isCancelled,
-                      navigationContext.contentId(at: currentIndex) == content.id else { return }
-                deckReader = LearningDeckReaderDestination(deck: deck, url: url)
+                deckReader = LearningDeckReaderDestination(deck: deck, url: nil)
             } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
@@ -633,6 +628,7 @@ private struct ContentDetailContentView: View {
     private func cancelDeckLookup() {
         deckLookupTask?.cancel()
         deckLookupTask = nil
+        showsDeckLookupError = false
     }
 
     // MARK: - Sheets

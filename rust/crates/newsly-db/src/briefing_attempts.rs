@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{BriefingRefreshClaimFence, BriefingSegmentUsage};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -9,6 +11,23 @@ pub async fn cooling_down(
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM briefing_composition_cooldowns WHERE user_id = $1 AND fingerprint = $2 AND retry_after > now())")
         .bind(user_id).bind(fingerprint).fetch_one(pool).await
+}
+
+pub async fn cooling_down_fingerprints(
+    pool: &PgPool,
+    user_id: i64,
+    fingerprints: &[String],
+) -> Result<HashSet<String>, sqlx::Error> {
+    Ok(sqlx::query_scalar(
+        "SELECT fingerprint FROM briefing_composition_cooldowns
+         WHERE user_id = $1 AND fingerprint = ANY($2::text[]) AND retry_after > now()",
+    )
+    .bind(user_id)
+    .bind(fingerprints)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect())
 }
 
 /// Accounting commits independently of edition publication but only under the original live claim.
@@ -118,6 +137,12 @@ mod tests {
         );
         assert!(cooling_down(&pool, user, "input-v1").await.unwrap());
         assert!(!cooling_down(&pool, user, "input-v2").await.unwrap());
+        assert_eq!(
+            cooling_down_fingerprints(&pool, user, &["input-v1".to_owned(), "input-v2".to_owned()])
+                .await
+                .unwrap(),
+            HashSet::from(["input-v1".to_owned()])
+        );
         sqlx::query("UPDATE processing_tasks SET lease_token = $1 WHERE id = $2")
             .bind(Uuid::new_v4())
             .bind(task)

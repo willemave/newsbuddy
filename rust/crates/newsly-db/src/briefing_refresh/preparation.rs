@@ -976,9 +976,7 @@ pub(super) fn stale_card_batches(
                 planned_source_keys: keys,
                 sources: vec![source],
                 repair_required: true,
-                kind: BriefingCompactionKind::StaleCard {
-                    created_at: segment.created_at,
-                },
+                kind: BriefingCompactionKind::StaleCard,
             })
         })
         .collect()

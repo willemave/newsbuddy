@@ -376,6 +376,41 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page", nil, "next-page"])
     }
 
+    func testRevalidationPreservesChatMutationsDuringSecondPage() async {
+        let firstPage = makeSessionListResponse(
+            sessions: [makeSession(id: 3), makeSession(id: 2)],
+            nextCursor: "next-page",
+            hasMore: true
+        )
+        let secondPage = makeSessionListResponse(
+            sessions: [makeSession(id: 1)],
+            nextCursor: nil,
+            hasMore: false
+        )
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [
+                .success(firstPage), .success(secondPage),
+                .success(firstPage), .success(secondPage),
+            ],
+            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 91))]
+        )
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+        await viewModel.loadChats()
+        await viewModel.loadMoreSessions()
+
+        chatService.pauseNextPageResponse(after: 1)
+        let refreshTask = Task { await viewModel.loadChats() }
+        await chatService.waitForPageResponsePause()
+
+        await viewModel.deleteSession(viewModel.sessions[0])
+        _ = await viewModel.startChat(message: "What changed?")
+        chatService.resumePageResponse()
+        await refreshTask.value
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [91, 2, 1])
+        XCTAssertEqual(chatService.deletedSessionIDs, [3])
+    }
+
     func testLoadMoreAppendsUniqueSessions() async {
         let chatService = MockKnowledgeChatService(
             pageResponses: [
@@ -835,7 +870,7 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
     private var pageResponses: [Result<ChatSessionListResponse, Error>]
     private var turnResponses: [Result<AssistantTurnResponse, Error>]
     private let deleteError: Error?
-    private var shouldPauseNextPageResponse = false
+    private var responsesBeforePause: Int?
     private var pageResponseContinuation: CheckedContinuation<Void, Never>?
     private var pageResponsePausedContinuation: CheckedContinuation<Void, Never>?
 
@@ -866,12 +901,16 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
         }
 
         let response = try pageResponses.removeFirst().get()
-        if shouldPauseNextPageResponse {
-            shouldPauseNextPageResponse = false
-            await withCheckedContinuation { continuation in
-                pageResponseContinuation = continuation
-                pageResponsePausedContinuation?.resume()
-                pageResponsePausedContinuation = nil
+        if let responsesBeforePause {
+            if responsesBeforePause == 0 {
+                self.responsesBeforePause = nil
+                await withCheckedContinuation { continuation in
+                    pageResponseContinuation = continuation
+                    pageResponsePausedContinuation?.resume()
+                    pageResponsePausedContinuation = nil
+                }
+            } else {
+                self.responsesBeforePause = responsesBeforePause - 1
             }
         }
         return response
@@ -923,8 +962,8 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
         return try startResponses.removeFirst().get()
     }
 
-    func pauseNextPageResponse() {
-        shouldPauseNextPageResponse = true
+    func pauseNextPageResponse(after earlierResponses: Int = 0) {
+        responsesBeforePause = earlierResponses
     }
 
     func waitForPageResponsePause() async {

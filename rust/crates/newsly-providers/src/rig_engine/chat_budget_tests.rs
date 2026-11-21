@@ -1,9 +1,13 @@
 use super::*;
+use newsly_agent_runtime::AssistantPart;
 use newsly_agent_runtime::{
     AgentLimits, BoxToolFuture, ChatBudget, NewslyTranscript, ToolDefinition, ToolOutput,
     ToolPolicy,
 };
 use rig_core::completion::Usage;
+use rig_core::message::{
+    ProviderCallId, Reasoning, ReasoningContent, ToolCall as RigToolCall, ToolCallId, ToolFunction,
+};
 use std::{sync::Mutex, time::Duration};
 
 #[derive(Debug)]
@@ -32,6 +36,7 @@ impl ToolExecutor for Tools {
             let content = call.arguments.get("result_bytes").and_then(Value::as_u64)
                 .map_or_else(|| serde_json::json!({"confirmed":true}), |size| serde_json::json!({"source_evidence": "e".repeat(usize::try_from(size).expect("fixture size"))}));
             Ok(ToolOutput {
+                images: Vec::new(),
                 content,
                 is_error: false,
             })

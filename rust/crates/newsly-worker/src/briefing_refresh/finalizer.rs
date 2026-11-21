@@ -116,6 +116,7 @@ impl BriefingRefreshFinalizer {
             version = outcome.version,
             appended_segments = outcome.appended_segments,
             compacted_segments = outcome.compacted_segments,
+            recomposed_cards = outcome.recomposed_cards,
             retired_segments = outcome.retired_segments,
             stale = outcome.stale,
             next_sweep_delay_seconds = outcome.next_sweep_delay_seconds,

@@ -103,25 +103,31 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
 
     /// Refresh every loaded page so background observation preserves scroll
     /// depth and can update processing items beyond the first page.
+    /// Reconcile the complete response with local mutations just before installing it.
     @discardableResult
     func refreshLoadedPages(
+        reconcilingItems: (([Item]) -> [Item])? = nil,
         isOrderedBefore: @escaping (Item, Item) -> Bool
     ) async -> PageReadResult {
-        guard let boundary = items.last else { return await refresh() }
+        let precedesLoadedBoundary: ((Item) -> Bool)? = items.last.map { boundary in
+            { isOrderedBefore($0, boundary) }
+        }
         return await requestPage(
             cursor: nil,
             loadingPhase: items.isEmpty ? .initialLoading : .loaded,
             mode: .replace(clearExistingItems: false),
-            precedesLoadedBoundary: { isOrderedBefore($0, boundary) }
+            precedesLoadedBoundary: precedesLoadedBoundary,
+            reconcilingItems: reconcilingItems
         )
     }
 
-    func loadNextPage() async {
+    func loadNextPage(reconcilingItems: (([Item]) -> [Item])? = nil) async {
         guard requestTask == nil, hasMore, let nextCursor else { return }
         await requestPage(
             cursor: nextCursor,
             loadingPhase: .loadingMore,
-            mode: .append
+            mode: .append,
+            reconcilingItems: reconcilingItems
         )
     }
 
@@ -175,7 +181,8 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         cursor: String?,
         loadingPhase: LoadPhase,
         mode: RequestMode,
-        precedesLoadedBoundary: ((Item) -> Bool)? = nil
+        precedesLoadedBoundary: ((Item) -> Bool)? = nil,
+        reconcilingItems: (([Item]) -> [Item])? = nil
     ) async -> PageReadResult {
         requestGeneration += 1
         let generation = requestGeneration
@@ -222,7 +229,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
             try Task.checkCancellation()
             guard generation == requestGeneration else { return .cancelled }
 
-            apply(page: page, mode: mode)
+            apply(page: page, items: reconcilingItems?(page.items) ?? page.items, mode: mode)
             phase = items.isEmpty ? .empty : .loaded
             requestTask = nil
             phaseBeforeRequest = nil
@@ -245,16 +252,16 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         }
     }
 
-    private func apply(page: Page<Item>, mode: RequestMode) {
+    private func apply(page: Page<Item>, items loadedItems: [Item], mode: RequestMode) {
         nextCursor = page.nextCursor
         hasMore = page.hasMore
 
         switch mode {
         case .replace:
-            items = page.items
+            items = loadedItems
         case .append:
             let existingIDs = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
+            items.append(contentsOf: loadedItems.filter { !existingIDs.contains($0.id) })
         }
     }
 }

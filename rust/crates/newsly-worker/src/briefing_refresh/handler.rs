@@ -555,7 +555,7 @@ async fn build_publication(
         if !batch.repair_required && planned.windows.len() >= batch.donors.len() {
             continue;
         }
-        let is_stale_card = matches!(batch.kind, BriefingCompactionKind::StaleCard { .. });
+        let is_stale_card = batch.kind == BriefingCompactionKind::StaleCard;
         if !is_stale_card {
             compaction_selected[batch_index] = true;
         }

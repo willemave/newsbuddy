@@ -92,11 +92,46 @@ final class ImageCacheServiceTests: XCTestCase {
 
         let first = await cache.image(for: url, downloadIfMissing: true, targetPixelSize: 256)
         XCTAssertNil(first)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
 
         servesImage.value = true
         let second = await cache.image(for: url, downloadIfMissing: true, targetPixelSize: 256)
         XCTAssertNotNil(second)
         XCTAssertEqual(requests.snapshot.requestCount, 2)
+    }
+
+    func testCorruptDiskEntryIsRefetchedOnFirstLookup() async throws {
+        let fixture = makePNGData()
+        let requests = LockedRequestMetrics()
+        ImageCacheURLProtocol.requestHandler = { request in
+            requests.beginRequest()
+            defer { requests.endRequest() }
+            return Self.response(for: request, data: fixture)
+        }
+
+        let (cache, session, directory) = try makeCache()
+        defer {
+            session.invalidateAndCancel()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = URL(string: "https://images.example.test/corrupt.png")!
+        let initial = await cache.image(for: url, downloadIfMissing: true, targetPixelSize: 256)
+        XCTAssertNotNil(initial)
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )
+        let file = try XCTUnwrap(entries.first)
+        // Preserve the PNG signature and IHDR, without any pixel data.
+        try Data(fixture.prefix(33)).write(to: file, options: .atomic)
+
+        let freshCache = ImageCacheService(
+            session: session, cacheDirectory: directory, schedulesInitialCleanup: false
+        )
+        let recovered = await freshCache.image(for: url, downloadIfMissing: true, targetPixelSize: 256)
+
+        XCTAssertNotNil(recovered)
+        XCTAssertEqual(requests.snapshot.requestCount, 2)
+        XCTAssertEqual(try Data(contentsOf: file), fixture)
     }
 
     func testTargetPixelSizeUsesStableBuckets() {
