@@ -1,11 +1,10 @@
 //! One durable clock and private candidates survive fresh sandbox attempts.
 use super::{
     AcquiredTaskSandbox, AgentOutcome, AgentRuntimeError, Arc, CancellationToken, Duration,
-    HOUSE_DESIGN_APPENDIX, Instant, LearningDeckAgentError, LearningDeckAgentRunResult,
-    LearningDeckAgentRuntime, LearningDeckArtifactError, LearningDeckArtifactStore,
-    LearningDeckEvents, LearningDeckGenerationClaimFence, LearningDeckTaskSnapshot, Map,
-    NewslyTranscript, SandboxHandle, TaskToolExecutor, Value, agent_network_policy,
-    build_user_prompt, json,
+    Instant, LearningDeckAgentError, LearningDeckAgentRunResult, LearningDeckAgentRuntime,
+    LearningDeckArtifactError, LearningDeckArtifactStore, LearningDeckEvents,
+    LearningDeckGenerationClaimFence, LearningDeckTaskSnapshot, Map, NewslyTranscript,
+    SandboxHandle, TaskToolExecutor, Value, agent_network_policy, build_user_prompt, json,
 };
 use super::{
     candidate::{capture_candidate, restore_candidate},
@@ -229,7 +228,11 @@ impl LearningDeckAgentRuntime {
             outcome = match attempt
                 .model(
                     NewslyTranscript::default(),
-                    build_user_prompt(source, task.interests_prompt.as_deref()),
+                    build_user_prompt(
+                        source,
+                        task.interests_prompt.as_deref(),
+                        GenerationBudget::remaining(budget.initial_deadline())?,
+                    ),
                     budget.initial_deadline(),
                 )
                 .await
@@ -475,7 +478,7 @@ fn input_fingerprint(
     tool_policy: &Map<String, Value>,
 ) -> Result<String, serde_json::Error> {
     Ok(digest(&serde_json::to_vec(
-        &json!({"source":source,"interests":interests,"tool_policy":tool_policy,"prompt":include_str!("../../../../../assets/prompts/learning_decks/agent.md"),"house":HOUSE_DESIGN_APPENDIX,"validator":include_str!("../browser.rs"),"draft_version":1}),
+        &json!({"source":source,"interests":interests,"tool_policy":tool_policy,"prompt":include_str!("../../../../../assets/prompts/learning_decks/agent.md"),"validator":include_str!("../browser.rs"),"draft_version":2}),
     )?))
 }
 fn candidate_digest(candidate: &DeckCandidate) -> Result<String, serde_json::Error> {

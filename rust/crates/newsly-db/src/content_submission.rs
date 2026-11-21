@@ -28,7 +28,7 @@ pub struct ContentSubmissionInput<'a> {
     pub share_and_chat: bool,
     pub chat_initial_message: Option<&'a str>,
     pub save_to_knowledge_and_mark_read: bool,
-    /// Keep a deck-only URL as readable source text without the editorial content pipeline.
+    /// Keep source readiness independent of summary generation and omit generated artwork.
     pub deck_source_only: bool,
     pub user_id: i64,
     pub submitted_via: &'a str,
@@ -184,7 +184,7 @@ async fn lock_active_user(
     user_id: i64,
 ) -> Result<(), ContentSubmissionRepositoryError> {
     let active = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1::bigint AND is_active = TRUE FOR SHARE",
+        "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active = TRUE FOR SHARE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)
@@ -244,7 +244,7 @@ async fn find_content_for_update(
             r"
             SELECT id::bigint AS id, content_type, status, platform, source,
                    source_url, title, content_metadata
-            FROM contents WHERE id::bigint = $1 FOR UPDATE
+            FROM contents WHERE id = $1::bigint FOR UPDATE
             ",
         )
         .bind(canonical_id)
@@ -404,7 +404,7 @@ async fn update_existing_content(
                 content_metadata = $5,
                 status = $6,
                 updated_at = timezone('UTC', now())
-            WHERE id::bigint = $1::bigint
+            WHERE id = $1::bigint
             ",
         )
         .bind(content.id)
@@ -491,7 +491,7 @@ async fn resolve_existing_analysis_task(
         SELECT id::bigint AS id, payload
         FROM processing_tasks
         WHERE
-            content_id::bigint = $1::bigint
+            content_id = $1::bigint
             AND task_type = 'analyze_url'
             AND status IN ('pending', 'processing')
         ORDER BY id
@@ -516,7 +516,7 @@ async fn resolve_existing_analysis_task(
         if input.subscribe_to_feed {
             payload.insert("subscribe_to_feed".to_owned(), Value::Bool(true));
         }
-        sqlx::query("UPDATE processing_tasks SET payload = $2 WHERE id::bigint = $1::bigint")
+        sqlx::query("UPDATE processing_tasks SET payload = $2 WHERE id = $1::bigint")
             .bind(task.id)
             .bind(Value::Object(payload))
             .execute(&mut **transaction)
@@ -530,7 +530,7 @@ async fn resolve_existing_analysis_task(
             SELECT id::bigint
             FROM processing_tasks
             WHERE
-                content_id::bigint = $1::bigint
+                content_id = $1::bigint
                 AND task_type = 'process_content'
                 AND status IN ('pending', 'processing')
             ORDER BY id
@@ -568,11 +568,11 @@ async fn is_generated_image_candidate(
         SELECT
             EXISTS(
                 SELECT 1 FROM content_status
-                WHERE content_id::bigint = $1::bigint AND status = 'inbox'
+                WHERE content_id = $1::bigint AND status = 'inbox'
             )
             OR EXISTS(
                 SELECT 1 FROM content_knowledge_saves
-                WHERE content_id::bigint = $1::bigint
+                WHERE content_id = $1::bigint
             )
         ",
     )
@@ -587,7 +587,7 @@ async fn is_generated_image_candidate(
         SELECT EXISTS(
             SELECT 1 FROM processing_tasks
             WHERE
-                content_id::bigint = $1::bigint
+                content_id = $1::bigint
                 AND task_type = 'generate_image'
                 AND status IN ('pending', 'processing')
         )
@@ -655,7 +655,7 @@ mod tests {
             SubmissionTaskResolution::EnqueueAnalyze
         );
 
-        sqlx::query("UPDATE contents SET status = 'completed' WHERE id::bigint = $1")
+        sqlx::query("UPDATE contents SET status = 'completed' WHERE id = $1::bigint")
             .bind(first.content_id)
             .execute(&pool)
             .await
@@ -681,7 +681,7 @@ mod tests {
             .unwrap();
         transaction.commit().await.unwrap();
         let source_only = sqlx::query_scalar::<_, bool>(
-            "SELECT (content_metadata->'processing'->>'deck_source_only')::bool FROM contents WHERE id::bigint = $1",
+            "SELECT (content_metadata->'processing'->>'deck_source_only')::bool FROM contents WHERE id = $1::bigint",
         )
         .bind(first.content_id)
         .fetch_one(&pool)

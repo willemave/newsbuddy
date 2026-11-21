@@ -73,8 +73,9 @@ pub(super) struct SummarizationFinalizationPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum SummarizationApplyOutcome {
     Applied(AppliedSummarization),
-    ContentMissing,
+    ContentUnavailable,
     SourceChanged,
+    SourceDeferred,
 }
 
 #[derive(Debug, Clone, PartialEq)]

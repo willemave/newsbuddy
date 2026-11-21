@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use chrono::{Duration, Utc};
+use newsly_db::content_metadata::is_deck_source_only;
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -131,9 +132,10 @@ async fn image_is_eligible(
         return Ok(false);
     }
     let metadata = runtime_metadata_view(&applied.metadata);
-    if metadata
-        .get("image_generated_at")
-        .is_some_and(|value| !value.is_null())
+    if is_deck_source_only(&metadata)
+        || metadata
+            .get("image_generated_at")
+            .is_some_and(|value| !value.is_null())
         || !metadata.get("summary").is_some_and(Value::is_object)
     {
         return Ok(false);
@@ -143,11 +145,11 @@ async fn image_is_eligible(
         SELECT
             EXISTS (
                 SELECT 1 FROM content_status
-                WHERE content_id::bigint = $1 AND status = 'inbox'
+                WHERE content_id = $1::bigint AND status = 'inbox'
             )
             OR EXISTS (
                 SELECT 1 FROM content_knowledge_saves
-                WHERE content_id::bigint = $1
+                WHERE content_id = $1::bigint
             )
         ",
     )
@@ -166,7 +168,7 @@ async fn prepare_briefing_requests(
         r"
         SELECT content_type
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
           AND status = 'completed'
           AND content_type IN ('article', 'podcast')
           AND NULLIF(COALESCE(
@@ -195,7 +197,7 @@ async fn prepare_briefing_requests(
         LEFT JOIN content_read_status AS reads
           ON reads.user_id = status.user_id
          AND reads.content_id = status.content_id
-        WHERE status.content_id::bigint = $1
+        WHERE status.content_id = $1::bigint
           AND status.status = 'inbox'
           AND reads.id IS NULL
         ORDER BY status.user_id::bigint
@@ -237,7 +239,7 @@ async fn prepare_briefing_requests(
             r"
             SELECT count(*)::bigint
             FROM briefing_pending_sources
-            WHERE user_id::bigint = $1 AND lens_key = $2
+            WHERE user_id = $1::bigint AND lens_key = $2
             ",
         )
         .bind(user_id)
@@ -268,7 +270,7 @@ async fn active_user_exists(
     user_id: i64,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id::bigint = $1 AND is_active IS TRUE)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::bigint AND is_active IS TRUE)",
     )
     .bind(user_id)
     .fetch_one(&mut **transaction)

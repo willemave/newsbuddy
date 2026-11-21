@@ -15,11 +15,16 @@ const OUTPUT_TOKEN_LIMIT: u64 = 128_000;
 
 pub(super) fn learning_deck_model_parameters(model: &ModelSpec) -> Map<String, Value> {
     if model.provider == ModelProvider::OpenRouter && model.model.starts_with("anthropic/") {
-        // Keep Claude's high-effort thinking and signatures available for tool-result replay.
-        Map::from_iter([(
-            "reasoning".to_owned(),
-            json!({"enabled": true, "effort": "high"}),
-        )])
+        Map::from_iter([
+            // Keep Claude's high-effort thinking and signatures available for tool-result replay.
+            (
+                "reasoning".to_owned(),
+                json!({"enabled": true, "effort": "high"}),
+            ),
+            // The agent loop resends its whole growing transcript on every request. Automatic
+            // caching moves one breakpoint to the end of the conversation each turn.
+            ("cache_control".to_owned(), json!({"type": "ephemeral"})),
+        ])
     } else {
         Map::new()
     }
@@ -79,6 +84,7 @@ mod tests {
                 json!({"enabled": true, "effort": "high"})
             );
             assert!(parameters["reasoning"].get("exclude").is_none());
+            assert_eq!(parameters["cache_control"], json!({"type": "ephemeral"}));
         }
         for model in [
             "anthropic:claude-sonnet-5-5",

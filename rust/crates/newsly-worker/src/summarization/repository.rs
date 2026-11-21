@@ -1,5 +1,7 @@
 use chrono::NaiveDateTime;
-use newsly_db::content_metadata::{RAW_BODY_KEYS, remove_field, set_field};
+use newsly_db::content_metadata::{
+    RAW_BODY_KEYS, is_deck_source_only, remove_field, runtime_value, set_field,
+};
 use serde_json::{Map, Value, json};
 use sqlx::{FromRow, Postgres, Transaction};
 use thiserror::Error;
@@ -34,12 +36,51 @@ pub(super) async fn load_summarization_snapshot(
         LEFT JOIN content_bodies AS body
           ON body.content_id = content.id
          AND body.variant = 'source'
-        WHERE content.id::bigint = $1
+        WHERE content.id = $1::bigint
         ",
     )
     .bind(content_id)
     .fetch_optional(&mut **transaction)
     .await?)
+}
+
+pub(super) const SOURCE_PREPARATION_RECHECK_SECONDS: i64 = 30;
+
+/// An ordinary submission can promote a deck source while its summary is already queued.
+/// Let active preparation establish the ordinary handoff before publishing summary state.
+pub(super) async fn source_preparation_is_active(
+    transaction: &mut Transaction<'_, Postgres>,
+    content_id: i64,
+    status: &str,
+    metadata: &Value,
+) -> Result<bool, sqlx::Error> {
+    if !matches!(status, "new" | "pending" | "processing") || !source_was_promoted(metadata) {
+        return Ok(false);
+    }
+    sqlx::query_scalar(
+        r"
+        SELECT EXISTS (
+            SELECT 1 FROM processing_tasks
+            WHERE content_id = $1
+              AND status IN ('pending', 'processing')
+              AND task_type IN (
+                'analyze_url', 'process_content', 'process_podcast_media',
+                'download_tweet_video_audio', 'transcribe_tweet_video'
+              )
+        )
+        ",
+    )
+    .bind(content_id)
+    .fetch_one(&mut **transaction)
+    .await
+}
+
+fn source_was_promoted(metadata: &Value) -> bool {
+    metadata
+        .as_object()
+        .and_then(|metadata| runtime_value(metadata, "deck_source_only"))
+        .and_then(Value::as_bool)
+        == Some(false)
 }
 
 /// Applies content state only inside the exact queue lease transaction.
@@ -48,9 +89,36 @@ pub(super) async fn apply_summarization_state(
     plan: &SummarizationFinalizationPlan,
 ) -> Result<SummarizationApplyOutcome, SummarizationRepositoryError> {
     let Some(mut content) = load_locked_content(transaction, plan.attempt.content.id).await? else {
-        return Ok(SummarizationApplyOutcome::ContentMissing);
+        return Ok(SummarizationApplyOutcome::ContentUnavailable);
     };
+    if source_preparation_is_active(
+        transaction,
+        content.id,
+        &content.status,
+        &content.content_metadata,
+    )
+    .await?
+    {
+        return Ok(SummarizationApplyOutcome::SourceDeferred);
+    }
+    if matches!(content.status.as_str(), "failed" | "skipped")
+        && source_was_promoted(&content.content_metadata)
+    {
+        return Ok(SummarizationApplyOutcome::ContentUnavailable);
+    }
     if !source_is_current(&content, plan) {
+        // The ordinary handoff may already have deduped onto this delivery. Re-read the
+        // new source even when the deck summary has used its provider retry budget.
+        if source_was_promoted(&content.content_metadata)
+            && plan
+                .attempt
+                .content
+                .content_metadata
+                .as_object()
+                .is_some_and(is_deck_source_only)
+        {
+            return Ok(SummarizationApplyOutcome::SourceDeferred);
+        }
         return Ok(SummarizationApplyOutcome::SourceChanged);
     }
     if matches!(content.status.as_str(), "failed" | "skipped")
@@ -119,7 +187,7 @@ async fn load_locked_content(
         LEFT JOIN content_bodies AS body
           ON body.content_id = content.id
          AND body.variant = 'source'
-        WHERE content.id::bigint = $1
+        WHERE content.id = $1::bigint
         FOR UPDATE OF content
         ",
     )
@@ -205,12 +273,15 @@ fn complete_readable_summary(
     mut metadata: Map<String, Value>,
     processed_at: NaiveDateTime,
 ) {
-    let artwork_pending = matches!(content.content_type.as_str(), "article" | "podcast")
+    let artwork_pending = !is_deck_source_only(&metadata)
+        && matches!(content.content_type.as_str(), "article" | "podcast")
         && runtime_metadata_view(&Value::Object(metadata.clone()))
             .get("image_generated_at")
             .is_none_or(Value::is_null);
     if artwork_pending {
-        "awaiting_image".clone_into(&mut content.status);
+        if content.status != "completed" {
+            "awaiting_image".clone_into(&mut content.status);
+        }
         set_field(&mut metadata, "artwork_status", Value::from("pending"));
     } else {
         "completed".clone_into(&mut content.status);
@@ -228,7 +299,13 @@ fn apply_failure(
     skipped: bool,
 ) {
     let mut metadata = metadata_map(&content.content_metadata);
-    if !retry_scheduled {
+    let source_ready = matches!(content.status.as_str(), "completed" | "awaiting_image")
+        && (is_deck_source_only(&metadata)
+            || matches!(
+                plan.attempt.content.status.as_str(),
+                "completed" | "awaiting_image"
+            ));
+    if !retry_scheduled && !source_ready {
         remove_field(&mut metadata, "summary");
     }
     let mut errors = runtime_metadata_view(&Value::Object(metadata.clone()))
@@ -243,16 +320,18 @@ fn apply_failure(
         "timestamp": plan.finalized_at.to_rfc3339(),
     }));
     set_field(&mut metadata, "processing_errors", Value::Array(errors));
-    let status = if retry_scheduled {
-        "processing"
-    } else if skipped {
-        "skipped"
-    } else {
-        "failed"
-    };
-    status.clone_into(&mut content.status);
-    content.error_message = Some(reason.chars().take(500).collect());
-    content.processed_at = (!retry_scheduled).then_some(plan.finalized_at.naive_utc());
+    if !source_ready {
+        let status = if retry_scheduled {
+            "processing"
+        } else if skipped {
+            "skipped"
+        } else {
+            "failed"
+        };
+        status.clone_into(&mut content.status);
+        content.error_message = Some(reason.chars().take(500).collect());
+        content.processed_at = (!retry_scheduled).then_some(plan.finalized_at.naive_utc());
+    }
     content.content_metadata = Value::Object(metadata);
 }
 
@@ -270,7 +349,7 @@ async fn persist_locked_content(
             error_message = $5,
             processed_at = $6,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(content.id)
@@ -368,6 +447,9 @@ pub(super) enum SummarizationRepositoryError {
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 }
+
+#[cfg(test)]
+mod deck_summary_tests;
 
 #[cfg(test)]
 mod readiness_tests {

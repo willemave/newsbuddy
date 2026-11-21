@@ -1,3 +1,4 @@
+use newsly_db::content_metadata::legacy_summarization_text;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -9,26 +10,15 @@ pub(super) fn build_summarization_payload(
     source_text: Option<&str>,
 ) -> String {
     let view = runtime_metadata_view(metadata);
-    let empty = Map::new();
-    let root = metadata.as_object().unwrap_or(&empty);
+    let text = source_text
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| legacy_summarization_text(content_type, metadata))
+        .unwrap_or_default();
     match content_type {
-        "article" => append_video_transcript(
-            first_text(
-                source_text,
-                [&view, root],
-                &["content", "content_to_summarize"],
-            ),
-            &view,
-        ),
+        "article" => append_video_transcript(text.to_owned(), &view),
         "news" => {
-            let article = append_video_transcript(
-                first_text(
-                    source_text,
-                    [&view, root],
-                    &["content", "content_to_summarize"],
-                ),
-                &view,
-            );
+            let article = append_video_transcript(text.to_owned(), &view);
             let context = build_news_context(&view);
             if !article.trim().is_empty() && !context.is_empty() {
                 format!("Context:\n{context}\n\nArticle Content:\n{article}")
@@ -36,11 +26,7 @@ pub(super) fn build_summarization_payload(
                 article
             }
         }
-        "podcast" => first_text(
-            source_text,
-            [&view, root],
-            &["transcript", "content_to_summarize"],
-        ),
+        "podcast" => text.to_owned(),
         _ => String::new(),
     }
 }
@@ -65,25 +51,6 @@ pub(super) fn runtime_metadata_view(metadata: &Value) -> Map<String, Value> {
         .as_object()
         .map(newsly_db::content_metadata::runtime_metadata)
         .unwrap_or_default()
-}
-
-fn first_text(source_text: Option<&str>, maps: [&Map<String, Value>; 2], keys: &[&str]) -> String {
-    if let Some(text) = source_text.map(str::trim).filter(|value| !value.is_empty()) {
-        return text.to_owned();
-    }
-    for map in maps {
-        for key in keys {
-            if let Some(text) = map
-                .get(*key)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                return text.to_owned();
-            }
-        }
-    }
-    String::new()
 }
 
 fn append_video_transcript(mut text: String, metadata: &Map<String, Value>) -> String {

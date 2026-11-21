@@ -45,7 +45,7 @@ fn created(outcome: CreateLearningDeckOutcome) -> (i64, i64) {
 async fn distinct_sources_queue_while_same_source_reuses_waiting_or_running_attempt(pool: PgPool) {
     let user = user(&pool).await;
     let (first_deck, first_task) = created(create(&pool, user, "first").await);
-    sqlx::query("UPDATE llm_tasks SET status='running' WHERE id::bigint=$1")
+    sqlx::query("UPDATE llm_tasks SET status='running' WHERE id=$1::bigint")
         .bind(first_task)
         .execute(&pool)
         .await
@@ -97,7 +97,7 @@ async fn concurrent_same_source_requests_create_exactly_one_attempt(pool: PgPool
     let existing = CreateLearningDeckOutcome::ExistingActiveAttempt { deck_id: deck };
     assert!(first == existing || second == existing);
     let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM llm_tasks WHERE user_id::bigint=$1 AND task_kind='learning_deck'",
+        "SELECT count(*) FROM llm_tasks WHERE user_id=$1::bigint AND task_kind='learning_deck'",
     )
     .bind(user)
     .fetch_one(&pool)
@@ -110,7 +110,7 @@ async fn concurrent_same_source_requests_create_exactly_one_attempt(pool: PgPool
 async fn retry_queues_behind_another_deck_and_keeps_original_instructions(pool: PgPool) {
     let user = user(&pool).await;
     let (failed_deck, failed_task) = created(create(&pool, user, "failed").await);
-    sqlx::query("UPDATE llm_tasks SET status='failed' WHERE id::bigint=$1")
+    sqlx::query("UPDATE llm_tasks SET status='failed' WHERE id=$1::bigint")
         .bind(failed_task)
         .execute(&pool)
         .await
@@ -131,7 +131,7 @@ async fn retry_queues_behind_another_deck_and_keeps_original_instructions(pool: 
         RetryLearningDeckOutcome::ExistingActiveRetry { deck_id }
     );
     tx.commit().await.unwrap();
-    let input: Value = sqlx::query_scalar("SELECT input_json FROM llm_tasks WHERE id::bigint=$1")
+    let input: Value = sqlx::query_scalar("SELECT input_json FROM llm_tasks WHERE id=$1::bigint")
         .bind(task_id)
         .fetch_one(&pool)
         .await
@@ -193,7 +193,7 @@ async fn source_wait_backoff_starts_at_preparation_after_a_long_queue_wait(pool:
             .unwrap(),
     );
     tx.commit().await.unwrap();
-    sqlx::query("UPDATE llm_tasks SET created_at=timezone('UTC',now())-interval '2 hours' WHERE id::bigint=$1")
+    sqlx::query("UPDATE llm_tasks SET created_at=timezone('UTC',now())-interval '2 hours' WHERE id=$1::bigint")
         .bind(task).execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO processing_tasks(task_type,content_id,status,executor_runtime,executor_version,executor_namespace) VALUES('process_content',$1,'pending','rust',1,'process_content')")
         .bind(content).execute(&pool).await.unwrap();
@@ -221,4 +221,109 @@ async fn source_wait_backoff_starts_at_preparation_after_a_long_queue_wait(pool:
         "{result:?}"
     );
     tx.commit().await.unwrap();
+}
+
+#[sqlx::test]
+async fn deck_summary_repairs_readable_canonical_source_without_replacing_active_work(
+    pool: PgPool,
+) {
+    let user_id = user(&pool).await;
+    let content_id: i64 = sqlx::query_scalar(
+        "INSERT INTO contents (content_type, url, status, content_metadata, is_aggregate)
+         VALUES ('article', 'https://example.test/legacy-source', 'completed', $1, FALSE)
+         RETURNING id::bigint",
+    )
+    .bind(json!({
+        "content": "  ",
+        "processing": {"deck_source_only": true, "content_to_summarize": "Stored article text"},
+        "domain": {"summary": {"title": "Title without a summary"}},
+    }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let alias_id: i64 = sqlx::query_scalar(
+        "INSERT INTO contents (content_type, url, status, content_metadata, is_aggregate)
+         VALUES ('article', 'https://example.test/alias', 'skipped', $1, FALSE)
+         RETURNING id::bigint",
+    )
+    .bind(json!({"canonical_content_id": content_id}))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    save_content_to_knowledge(&mut tx, user_id, content_id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        resolve_content_learning_deck_source(&mut tx, user_id, content_id)
+            .await
+            .unwrap(),
+        ContentSourceOutcome::Ready(_)
+    ));
+    assert_eq!(
+        learning_deck_source_needing_summary(&mut tx, Some(alias_id))
+            .await
+            .unwrap(),
+        Some(content_id),
+    );
+    assert_eq!(
+        learning_deck_source_needing_summary(&mut tx, None)
+            .await
+            .unwrap(),
+        None,
+    );
+    let task_id: i64 = sqlx::query_scalar(
+        "INSERT INTO processing_tasks (task_type, content_id, status, queue_name, executor_runtime, executor_version, executor_namespace)
+         VALUES ('summarize', $1, 'pending', 'content', 'rust', 1, 'summarize') RETURNING id::bigint",
+    )
+    .bind(content_id)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(
+        learning_deck_source_needing_summary(&mut tx, Some(content_id))
+            .await
+            .unwrap(),
+        None,
+    );
+    sqlx::query("UPDATE processing_tasks SET status = 'failed' WHERE id = $1")
+        .bind(task_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        learning_deck_source_needing_summary(&mut tx, Some(content_id))
+            .await
+            .unwrap(),
+        Some(content_id),
+    );
+    sqlx::query("UPDATE contents SET content_metadata = $2 WHERE id = $1")
+        .bind(content_id)
+        .bind(json!({"content": "Ordinary legacy text"}))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        learning_deck_source_needing_summary(&mut tx, Some(content_id))
+            .await
+            .unwrap(),
+        Some(content_id),
+    );
+    for metadata in [
+        json!({"deck_source_only": true, "content": "Stored article text", "summary": {"one_line": "Already readable"}}),
+        json!({"deck_source_only": true}),
+    ] {
+        sqlx::query("UPDATE contents SET content_metadata = $2 WHERE id = $1")
+            .bind(content_id)
+            .bind(metadata)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            learning_deck_source_needing_summary(&mut tx, Some(content_id))
+                .await
+                .unwrap(),
+            None,
+        );
+    }
 }

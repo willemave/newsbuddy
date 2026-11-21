@@ -40,7 +40,7 @@ async fn content_finalization_locks_user_before_content(pool: PgPool) {
     .expect("test content should insert");
 
     let mut submission = pool.begin().await.expect("submission transaction");
-    sqlx::query("SELECT id FROM users WHERE id::bigint = $1 FOR UPDATE")
+    sqlx::query("SELECT id FROM users WHERE id = $1::bigint FOR UPDATE")
         .bind(user_id)
         .execute(&mut *submission)
         .await
@@ -89,7 +89,7 @@ async fn content_finalization_locks_user_before_content(pool: PgPool) {
         .execute(&mut *submission)
         .await
         .expect("submission lock timeout should set");
-    sqlx::query("SELECT id FROM contents WHERE id::bigint = $1 FOR UPDATE")
+    sqlx::query("SELECT id FROM contents WHERE id = $1::bigint FOR UPDATE")
         .bind(content_id)
         .execute(&mut *submission)
         .await
@@ -168,4 +168,110 @@ fn x_bookmark_fallback_only_applies_to_bookmark_submissions() {
 
 fn object(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap()
+}
+
+#[sqlx::test(migrations = false)]
+async fn deck_article_handoffs_commit_readable_source_and_summary_together(pool: PgPool) {
+    use newsly_queue::QueueKernel;
+
+    use super::{ContentFinalizationPlan, ContentFinalizer, ContentMutation, StagedContentBody};
+    use crate::content::model::ExtractedArticle;
+
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let queue = QueueKernel::new(pool.clone());
+    let body = StagedContentBody {
+        storage_provider: "local",
+        storage_key: "fixture/source.txt".to_owned(),
+        content_format: "text",
+        sha256: "a".repeat(64),
+        byte_size: 600,
+        char_count: 600,
+    };
+    let analysis = ContentMutation::AnalyzeSuccess {
+        content_type: "article".to_owned(),
+        platform: None,
+        title: "Classified deck article".to_owned(),
+        body: body.clone(),
+        body_char_count: 600,
+        feed_candidates: vec![],
+        extraction_method: "fixture".to_owned(),
+        warnings: vec![],
+        timings: vec![],
+        metadata_updates: Map::new(),
+        instruction_links: vec![],
+        subscribe_to_feed: false,
+        scrub_instruction: false,
+    };
+    let article_url = "https://example.test/deck-article";
+    let article = ExtractedArticle {
+        original_url: article_url.to_owned(),
+        final_url: article_url.to_owned(),
+        title: "Extracted deck article".to_owned(),
+        author: None,
+        published_at: None,
+        body: "Source text".repeat(60),
+        feed_candidates: vec![],
+        extraction_method: "fixture".to_owned(),
+        warnings: vec![],
+        timings: vec![],
+        used_firecrawl: false,
+    };
+    let process = ContentMutation::ProcessArticle {
+        article,
+        body,
+        subscribe_to_feed: false,
+    };
+    for (kind, url, mutation) in [
+        ("unknown", "https://example.test/classify-deck", analysis),
+        ("article", article_url, process),
+    ] {
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO contents (content_type, url, platform, status, content_metadata, is_aggregate)
+             VALUES ($1, $2, 'twitter', 'pending', $3, FALSE) RETURNING id::bigint",
+        )
+        .bind(kind)
+        .bind(url)
+        .bind(json!({"processing": {"deck_source_only": true}, "has_video": true}))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let finalizer = ContentFinalizer::new(
+            queue.clone(),
+            ContentFinalizationPlan {
+                task_id: 1,
+                content_id: id,
+                mutation,
+                usage: vec![],
+            },
+        );
+        let mut tx = pool.begin().await.unwrap();
+        finalizer.apply_inner(&mut tx).await.unwrap();
+        tx.rollback().await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        finalizer.apply_inner(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        finalizer.apply_inner(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let stored: Vec<(String, i32, String, String)> = sqlx::query_as(
+            "SELECT content.status, body.char_count, task.task_type, task.dedupe_key
+             FROM contents AS content
+             JOIN content_bodies AS body ON body.content_id = content.id AND body.variant = 'source'
+             JOIN processing_tasks AS task ON task.content_id = content.id WHERE content.id = $1",
+        )
+        .bind(id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            [(
+                "completed".to_owned(),
+                600,
+                "summarize".to_owned(),
+                format!("content|summarize|content:{id}")
+            )]
+        );
+    }
 }

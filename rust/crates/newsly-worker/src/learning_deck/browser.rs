@@ -51,6 +51,9 @@ struct OrientationResult {
     vertical_occupancy: OccupancyRange,
     #[serde(default)]
     overflow_details: Vec<Value>,
+    /// Advisory reading-quality notes for the generator. They never fail validation.
+    #[serde(default)]
+    review: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -402,7 +405,8 @@ const specs = {
       if(pageErrors.length||failed.length) throw artifactFailure('deck emitted browser or asset errors','asset_load',{pageErrors,failed});
       phase='measurement';
       const measured = await page.evaluate(async ({name,spec})=>{
-        const reveal=window.Reveal; const slides=reveal.getSlides(); const overflow=[]; const overflowDetails=[]; const occupancy=[];
+        const reveal=window.Reveal; const slides=reveal.getSlides(); const overflow=[]; const overflowDetails=[]; const occupancy=[]; const findings=new Map();
+        const portrait=name==='portrait'; const scale=typeof reveal.getScale==='function'?reveal.getScale():1; const range=document.createRange();
         const normalizeIndices=value=>({h:value?.h??0,v:value?.v??0,f:value?.f??-1});
         for(let i=0;i<slides.length;i++){
           const slide=slides[i]; const slideIndices=reveal.getIndices(slide); reveal.slide(slideIndices.h,slideIndices.v); await new Promise(r=>setTimeout(r,30));
@@ -412,9 +416,32 @@ const specs = {
           const top=visible.length?Math.min(...visible.map(box=>box.top)):rect.top;
           const bottom=visible.length?Math.max(...visible.map(box=>box.bottom)):rect.top;
           occupancy.push(Math.max(0,(bottom-top)/Math.max(rect.height,1)));
+          const slideId=current.id||`slide-${i+1}`;
+          const note=(issue,severity,detail)=>{const found=findings.get(issue)||{issue,slides:[],severity:-Infinity,worst:''}; found.slides.push(slideId); if(severity>found.severity){found.severity=severity; found.worst=`${slideId}: ${detail}`} findings.set(issue,found)};
+          // Reader controls cover the top 110 and bottom 120 canvas pixels of an upright phone.
+          const safeTop=rect.top+(portrait?110*scale:0); const safeBottom=rect.bottom-(portrait?120*scale:0);
+          let words=0; let smallChars=0; let smallest=Infinity; let sample=''; let covered=0; let inkTop=Infinity; let inkBottom=-Infinity;
+          const walker=document.createTreeWalker(current,NodeFilter.SHOW_TEXT);
+          for(let node=walker.nextNode();node;node=walker.nextNode()){
+            const text=node.nodeValue.trim(); const element=node.parentElement;
+            if(!text||!element||element.closest('script,style,noscript,template,aside.notes'))continue;
+            range.selectNodeContents(node); const box=range.getBoundingClientRect(); if(!box.width||!box.height)continue;
+            const matrix=element.ownerSVGElement&&typeof element.getScreenCTM==='function'?element.getScreenCTM():null;
+            const size=(parseFloat(getComputedStyle(element).fontSize)||0)*(matrix?Math.hypot(matrix.a,matrix.b):scale);
+            words+=text.split(/\s+/).length; smallest=Math.min(smallest,size);
+            if(size<10.5){smallChars+=text.length; sample||=text.slice(0,48)}
+            if(box.top<safeTop-6*scale||box.bottom>safeBottom+6*scale)covered+=1;
+            inkTop=Math.min(inkTop,box.top); inkBottom=Math.max(inkBottom,box.bottom);
+          }
+          for(const media of current.querySelectorAll('svg,img,canvas,video,table')){const box=media.getBoundingClientRect(); if(box.width&&box.height){inkTop=Math.min(inkTop,box.top); inkBottom=Math.max(inkBottom,box.bottom)}}
+          if(smallChars)note('small_text',smallChars,`${smallChars} characters render below 10.5pt on a phone (smallest ${smallest.toFixed(1)}pt), starting at: ${sample}`);
+          if(portrait&&covered)note('under_reader_controls',covered,`${covered} text runs sit in the top 110px or bottom 120px of the canvas, where the reader draws its controls`);
+          const fill=inkBottom>inkTop?(inkBottom-inkTop)/Math.max(safeBottom-safeTop,1):0;
+          if(portrait&&i>0&&fill<0.5)note('sparse',1-fill,`content covers ${Math.round(fill*100)}% of the usable portrait height; enlarge the main visual or add a worked step`);
+          if(portrait&&words>110)note('dense',words,`${words} words on one portrait slide; split it or move detail into the visual`);
           const spills=current.scrollWidth>current.clientWidth+3||current.scrollHeight>current.clientHeight+3||visible.some(box=>box.left<rect.left-3||box.right>rect.right+3||box.top<rect.top-3||box.bottom>rect.bottom+3);
           if(spills){
-            const slideId=current.id||`slide-${i+1}`; overflow.push(slideId);
+            overflow.push(slideId);
             const bounds=box=>({left:box.left,top:box.top,right:box.right,bottom:box.bottom,width:box.width,height:box.height});
             if(current.scrollWidth>current.clientWidth+3||current.scrollHeight>current.clientHeight+3)overflowDetails.push({slide:slideId,element:'section',canvas:bounds(rect),scroll:{width:current.scrollWidth,height:current.scrollHeight},client:{width:current.clientWidth,height:current.clientHeight},excess_pixels:{horizontal:Math.max(0,current.scrollWidth-current.clientWidth),vertical:Math.max(0,current.scrollHeight-current.clientHeight)}});
             for(const [index,node] of children.entries()){
@@ -428,7 +455,7 @@ const specs = {
         if(count>1){reveal.next();await new Promise(r=>setTimeout(r,80));next=normalizeIndices(reveal.getIndices());reveal.prev();await new Promise(r=>setTimeout(r,80));previous=normalizeIndices(reveal.getIndices());navigation='next_previous_round_trip'}
         else if(reveal.availableFragments?.().next){reveal.nextFragment();await new Promise(r=>setTimeout(r,50));next=normalizeIndices(reveal.getIndices());reveal.prevFragment();await new Promise(r=>setTimeout(r,50));previous=normalizeIndices(reveal.getIndices());navigation='single_slide_fragment_round_trip'}
         const config=reveal.getConfig();
-        return {name,ready:reveal.isReady(),current:Boolean(reveal.getCurrentSlide()),slideCount:count,initial,next,previous,navigation,config:{width:config.width,height:config.height},orientation:{viewport:spec.viewport,canvas:{width:config.width,height:config.height},slides_checked:count,overflow_slides:overflow,overflow_details:overflowDetails.slice(0,40),vertical_occupancy:{minimum:Math.min(...occupancy),maximum:Math.max(...occupancy)}}};
+        return {name,ready:reveal.isReady(),current:Boolean(reveal.getCurrentSlide()),slideCount:count,initial,next,previous,navigation,config:{width:config.width,height:config.height},orientation:{viewport:spec.viewport,canvas:{width:config.width,height:config.height},slides_checked:count,overflow_slides:overflow,overflow_details:overflowDetails.slice(0,40),review:Array.from(findings.values(),found=>({issue:found.issue,slide_count:found.slides.length,slides:found.slides.slice(0,24),worst:found.worst})),vertical_occupancy:{minimum:Math.min(...occupancy),maximum:Math.max(...occupancy)}}};
       },{name,spec});
       if(pageErrors.length||failed.length)throw artifactFailure('deck emitted browser or asset errors during navigation','asset_load',{pageErrors,failed});
       if(measured.config.width!==spec.canvas.width||measured.config.height!==spec.canvas.height)throw artifactFailure(`${name} canvas mismatch`,'canvas',measured);

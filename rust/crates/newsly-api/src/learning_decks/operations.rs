@@ -12,9 +12,10 @@ use newsly_db::{
     SubmissionTaskResolution, apply_content_submission, convert_news_item_to_learning_deck_source,
     create_or_rerun_learning_deck, delete_learning_deck as persist_deck_deletion,
     disable_learning_deck_share, find_visible_news_item_for_learning_deck,
-    list_learning_decks as load_learning_decks, load_submitted_content_learning_deck_source,
-    persist_learning_deck_share, prepare_enable_learning_deck_share,
-    resolve_content_learning_deck_source, retry_learning_deck as persist_deck_retry,
+    learning_deck_source_needing_summary, list_learning_decks as load_learning_decks,
+    load_submitted_content_learning_deck_source, persist_learning_deck_share,
+    prepare_enable_learning_deck_share, resolve_content_learning_deck_source,
+    retry_learning_deck as persist_deck_retry,
 };
 use newsly_queue::{EnqueueRequest, LlmTaskDeliveryKind, QueueKernel, TaskType};
 
@@ -219,6 +220,13 @@ pub(crate) async fn create_deck(
         }
     };
 
+    if let Some(content_id) =
+        learning_deck_source_needing_summary(&mut transaction, source.source_content_id)
+            .await
+            .map_err(|error| repository_error(error, &request_id))?
+    {
+        queue_requests.push(content_task_request(TaskType::Summarize, content_id));
+    }
     let outcome = create_or_rerun_learning_deck(
         &mut transaction,
         current_user.id,

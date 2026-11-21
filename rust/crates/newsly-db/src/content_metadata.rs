@@ -160,6 +160,27 @@ pub fn json_truthy(value: &Value) -> bool {
     }
 }
 
+/// Identifies content saved by the deck flow and still excluded from artwork generation.
+pub fn is_deck_source_only(metadata: &Map<String, Value>) -> bool {
+    runtime_value(metadata, "deck_source_only").and_then(Value::as_bool) == Some(true)
+}
+
+/// Finds legacy text in the same order as the summarization worker.
+pub fn legacy_summarization_text<'a>(content_type: &str, metadata: &'a Value) -> Option<&'a str> {
+    let keys = match content_type {
+        "article" | "news" => ["content", "content_to_summarize"],
+        "podcast" => ["transcript", "content_to_summarize"],
+        _ => return None,
+    };
+    let root = metadata.as_object()?;
+    keys.iter()
+        .filter_map(|key| runtime_value(root, key))
+        .chain(keys.iter().filter_map(|key| root.get(*key)))
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+}
+
 pub fn summary_is_readable(runtime: &Map<String, Value>, content_type: &str) -> bool {
     let Some(summary) = runtime.get("summary") else {
         return false;

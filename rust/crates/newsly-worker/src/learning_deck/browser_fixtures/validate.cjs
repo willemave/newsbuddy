@@ -12,6 +12,7 @@ const html = mode => `<!doctype html><style>
 body{margin:0}section{display:none;position:relative;width:720px;height:1280px}section.current{display:block}section>div{width:100px;height:100px}
 @media(orientation:landscape){section{width:1280px;height:720px}}
 ${mode === 'overflow' ? 'section>div{position:absolute;left:1400px}' : ''}
+${mode === 'tiny' ? 'section>div{font-size:6px}' : ''}
 </style><section id="first" class="current"><div>One</div></section><section id="second"><div>Two</div></section><script>
 let h=0;const slides=Array.from(document.querySelectorAll('section'));
 window.Reveal={isReady:()=>${mode === 'timeout' ? 'false' : 'true'},
@@ -33,6 +34,11 @@ function run(mode, prelude = '') {
 }
 try {
   assert.equal(run('good').status, 0);
+  const tiny=run('tiny');
+  assert.equal(tiny.status,0);
+  const small=tiny.report.portrait.review.find(item=>item.issue==='small_text');
+  assert.deepEqual(small.slides,['first','second']);
+  assert.equal(run('good').report.portrait.review.some(item=>item.issue==='small_text'),false);
   const overflow=run('overflow').report;
   assert.equal(overflow.repairable,true);
   assert.equal(overflow.phase,'layout_overflow');
@@ -52,5 +58,5 @@ try {
   const readiness=run('timeout').report;
   assert.equal(readiness.repairable,true);
   assert.equal(readiness.phase,'readiness');
-  console.log('7 local Chromium fixtures passed: valid, overflow diagnostics, navigation, script, platform, fake timeout, readiness timeout');
+  console.log('8 local Chromium fixtures passed: valid, advisory review, overflow diagnostics, navigation, script, platform, fake timeout, readiness timeout');
 } finally { fs.rmSync(workspace,{recursive:true,force:true}); }

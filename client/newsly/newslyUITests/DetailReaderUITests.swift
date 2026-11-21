@@ -9,7 +9,7 @@ final class DetailReaderUITests: XCTestCase {
         XCTAssertEqual(reader.label, "Read transcript")
         XCTAssertFalse(app.buttons["content.action.open_external"].exists)
         XCTAssertEqual(app.buttons.matching(identifier: "content.action.reader").count, 3)
-        XCTAssertEqual(app.buttons.matching(identifier: "content.action.create_deck").count, 3)
+        XCTAssertEqual(app.buttons.matching(identifier: "content.action.deck").count, 3)
         attachScreenshot(app, named: "detail-action-bars")
 
         reader.tap()
@@ -45,9 +45,9 @@ final class DetailReaderUITests: XCTestCase {
     func testDetailDeckButtonOpensDeckCreation() {
         let app = launchDetailActionBars()
 
-        let deck = app.buttons.matching(identifier: "content.action.create_deck").element(boundBy: 1)
+        let deck = app.buttons.matching(identifier: "content.action.deck").element(boundBy: 1)
         XCTAssertTrue(deck.waitForExistence(timeout: 5))
-        XCTAssertEqual(deck.label, "Create Learning Deck")
+        XCTAssertEqual(deck.label, "Learning Deck")
         deck.tap()
         XCTAssertTrue(app.descendants(matching: .any)["learning_deck.create.sheet"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["A calmer way to follow the news"].exists)
@@ -56,7 +56,7 @@ final class DetailReaderUITests: XCTestCase {
     func testNewsDeckButtonSitsBesideBuddyAndOpensDeckCreation() {
         let app = launchDetailActionBars()
 
-        let deck = app.buttons.matching(identifier: "content.action.create_deck").element(boundBy: 2)
+        let deck = app.buttons.matching(identifier: "content.action.deck").element(boundBy: 2)
         let buddy = app.buttons.matching(identifier: "content.action.knowledge_actions").element(boundBy: 2)
         let play = app.buttons.matching(identifier: "content.action.podcast_audio").element(boundBy: 2)
         XCTAssertTrue(deck.waitForExistence(timeout: 5))

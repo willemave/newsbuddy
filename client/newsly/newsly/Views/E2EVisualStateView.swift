@@ -410,7 +410,8 @@ private struct E2EDetailActionBarVisualState: View {
             onDownloadMore: {},
             onConvertLinkedArticle: {},
             onToggleKnowledgeSave: {},
-            onCreateDeck: { deckSource = content },
+            isLookingUpDeck: false,
+            onDeck: { deckSource = content },
             onPodcastAudio: {},
             onPodcastAudioSpeed: { _ in },
             onOpenKnowledgeActions: {}

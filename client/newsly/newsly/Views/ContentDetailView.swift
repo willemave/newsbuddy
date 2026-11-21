@@ -80,6 +80,9 @@ private struct ContentDetailContentView: View {
     @State private var podcastAudioController: PodcastAudioController
     @State private var activeAlert: ViewAlert?
     @State private var activeReaderContent: ContentDetail?
+    @State private var deckReader: LearningDeckReaderDestination?
+    @State private var deckLookupTask: Task<Void, Never>?
+    @State private var showsDeckLookupError = false
     @State private var activeBrowserDestination: BrowserDestination?
     @State private var discussionCoordinator: DiscussionSummaryCoordinator
     @State private var pendingScrollTarget: ContentDetailScrollTarget?
@@ -276,6 +279,7 @@ private struct ContentDetailContentView: View {
         }
         .onChange(of: currentIndex) { _, _ in
             pendingScrollTarget = nil
+            cancelDeckLookup()
         }
         .onChange(of: viewModel.content?.id) { oldValue, newValue in
             if let oldValue, oldValue != newValue {
@@ -325,6 +329,7 @@ private struct ContentDetailContentView: View {
             )
             podcastAudioController.stopIfSpeaking(forContentId: viewModel.content?.id)
             viewModel.suspendAutomaticReads()
+            cancelDeckLookup()
         }
         .alert(item: $activeAlert) { alert in
             Alert(
@@ -332,6 +337,16 @@ private struct ContentDetailContentView: View {
                 message: Text(alert.message),
                 dismissButton: .cancel(Text("OK"))
             )
+        }
+        .alert("Learning Deck", isPresented: $showsDeckLookupError) {
+            Button("Try Again") {
+                if let content = viewModel.content {
+                    openDeckAction(for: content)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Couldn't look up the Learning Deck.")
         }
         .sheet(item: $activeSheet, onDismiss: {
             chatCoordinator.chatError = nil
@@ -362,6 +377,14 @@ private struct ContentDetailContentView: View {
                 await viewModel.loadReaderBody(for: content)
             }
             .contentZoomNavigationTransition(id: content.id, namespace: readerTransitionNamespace)
+        }
+        .fullScreenCover(item: $deckReader) { destination in
+            LearningDeckReaderView(
+                deck: destination.deck,
+                viewerURL: destination.url,
+                onClose: { deckReader = nil }
+            )
+            .ignoresSafeArea(.container)
         }
         .fullScreenCover(item: $activeBrowserDestination) { destination in
             SafariView(url: destination.url)
@@ -549,7 +572,8 @@ private struct ContentDetailContentView: View {
             onToggleKnowledgeSave: {
                 Task { await viewModel.toggleKnowledgeSave() }
             },
-            onCreateDeck: { activeSheet = .learningDeckCreate },
+            isLookingUpDeck: deckLookupTask != nil,
+            onDeck: { openDeckAction(for: content) },
             onPodcastAudio: {
                 Task { await handlePodcastAudio(for: content) }
             },
@@ -566,6 +590,49 @@ private struct ContentDetailContentView: View {
                 activeSheet = .knowledgeActions
             }
         )
+    }
+
+    private func openDeckAction(for content: ContentDetail) {
+        guard navigationContext.surface == .savedLibrary else {
+            activeSheet = .learningDeckCreate
+            return
+        }
+        guard deckLookupTask == nil,
+              navigationContext.contentId(at: currentIndex) == content.id else { return }
+
+        deckLookupTask = Task {
+            defer {
+                if !Task.isCancelled { deckLookupTask = nil }
+            }
+            do {
+                let decks = try await dependencyFactory.learningDeckService.listDecks().decks
+                guard !Task.isCancelled,
+                      navigationContext.contentId(at: currentIndex) == content.id else { return }
+                let matches = decks.filter { $0.knowledgeSource == .content(content.id) }
+                guard let deck = matches.first(where: \.viewerAvailable) ?? matches.first else {
+                    activeSheet = .learningDeckCreate
+                    return
+                }
+
+                let url = deck.viewerAvailable
+                    ? try? await dependencyFactory.learningDeckService.viewerURL(deckId: deck.id)
+                    : nil
+                guard !Task.isCancelled,
+                      navigationContext.contentId(at: currentIndex) == content.id else { return }
+                deckReader = LearningDeckReaderDestination(deck: deck, url: url)
+            } catch where ClientFailure.classify(error) == .cancelled {
+                return
+            } catch {
+                guard !Task.isCancelled,
+                      navigationContext.contentId(at: currentIndex) == content.id else { return }
+                showsDeckLookupError = true
+            }
+        }
+    }
+
+    private func cancelDeckLookup() {
+        deckLookupTask?.cancel()
+        deckLookupTask = nil
     }
 
     // MARK: - Sheets

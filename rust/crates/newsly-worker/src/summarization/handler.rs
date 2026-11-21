@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use newsly_db::content_metadata::summary_is_readable;
 use newsly_providers::{SummarizationGateway, SummarizationSource};
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
@@ -16,7 +17,9 @@ use super::input::{
 use super::model::{
     PreparedSummarizationAttempt, SummarizationFinalizationPlan, SummarizationMutation,
 };
-use super::repository::load_summarization_snapshot;
+use super::repository::{
+    SOURCE_PREPARATION_RECHECK_SECONDS, load_summarization_snapshot, source_preparation_is_active,
+};
 use super::storage::SummarizationBodyStore;
 
 #[derive(Debug, Clone)]
@@ -96,6 +99,24 @@ async fn execute_summarization(
             Ok(snapshot) => snapshot,
             Err(error) => return plain_failure(error.to_string(), true),
         };
+        if let Some(snapshot) = &snapshot {
+            match source_preparation_is_active(
+                &mut transaction,
+                content_id,
+                &snapshot.status,
+                &snapshot.content_metadata,
+            )
+            .await
+            {
+                Ok(true) => {
+                    return HandlerExecution::from_result(TaskResult::defer(
+                        SOURCE_PREPARATION_RECHECK_SECONDS,
+                    ));
+                }
+                Ok(false) => {}
+                Err(error) => return plain_failure(error.to_string(), true),
+            }
+        }
         if let Err(error) = transaction.commit().await {
             return plain_failure(error.to_string(), true);
         }
@@ -121,8 +142,9 @@ async fn execute_summarization(
         return failed_execution(services, plan, snapshot, fingerprint, error, false, false);
     }
     let metadata_view = runtime_metadata_view(&snapshot.content_metadata);
-    if snapshot.status == "completed" && metadata_view.get("summary").is_some_and(Value::is_object)
-    {
+    let source_ready = matches!(snapshot.status.as_str(), "completed" | "awaiting_image");
+    let ready_summary = source_ready && summary_is_readable(&metadata_view, &snapshot.content_type);
+    if snapshot.status == "completed" && ready_summary {
         return HandlerExecution::from_result(TaskResult::ok());
     }
 
@@ -161,7 +183,8 @@ async fn execute_summarization(
             true,
         );
     }
-    if summary_matches(&snapshot.content_metadata, &fingerprint) {
+    if (!source_ready || ready_summary) && summary_matches(&snapshot.content_metadata, &fingerprint)
+    {
         let attempt = PreparedSummarizationAttempt {
             content: snapshot,
             input_fingerprint: fingerprint,

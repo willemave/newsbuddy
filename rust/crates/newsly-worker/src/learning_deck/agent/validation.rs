@@ -65,7 +65,7 @@ impl DeckValidator {
     pub(super) fn definition() -> ToolDefinition {
         ToolDefinition {
             name: "validate_deck".to_owned(),
-            description: "Validate the current output/index.html, source notes, and local assets using Newsly's exact hosted viewer and portrait/landscape Chromium checks. Fix only reported repairable artifact failures before validating again.".to_owned(),
+            description: "Validate the current output/index.html, source notes, and local assets using Newsly's exact hosted viewer and portrait/landscape Chromium checks. A failure lists what to repair. A pass may still carry `review` notes per orientation (small_text, under_reader_controls, sparse, dense) measured on a phone screen; they do not block publication, so fix the ones that hurt reading and validate again.".to_owned(),
             input_schema: schema_for!(ValidationArguments),
         }
     }

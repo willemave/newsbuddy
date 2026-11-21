@@ -27,6 +27,27 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-07 — `main` — Open saved-source decks and process their summaries
+
+- **Status:** Complete
+- **Scope:** Knowledge detail Deck button and editorial summarization for content-backed Learning Decks.
+- **Decisions:** Match a deck by saved source identity. Prefer a published artifact while regeneration runs. Queue missing summaries through the existing content pipeline and keep source readiness independent of summary retries.
+- **Changes:** Knowledge detail opens a deck, opens its status, or offers creation after a successful lookup. Article and media handoffs, explicit deck creation, and Share Action finalization use the standard summary queue. Deck-only summaries skip artwork.
+- **Validation:** 32 focused iPhone 17 Simulator tests and 27 PostgreSQL tests passed. Verified the published reader, queued status, creation sheet, retry alert, and a rendered editorial summary fixture in Simulator. Concurrent local API requests produced one deck attempt and one summary task. A local worker retried an injected provider failure while the source stayed readable. Rust format, scoped warning-denied Clippy, API and worker builds, and public contract drift checks passed.
+- **Review:** Claude Opus 5.5 identified an artwork readiness regression for older sources. Repair now keeps completed sources readable while eligible artwork runs. An in-flight deck summary whose source changes during ordinary promotion defers without consuming a retry. The final nine-test summarization suite, scoped Clippy, and API and worker builds passed.
+- **Remaining:** A queued deck can still be missed during canonical source rebinding.
+- **Commits:** Uncommitted
+
+### 2026-11-06 — `main` — Learning Deck bottom-up teaching instruction
+
+- **Status:** Complete
+- **Scope:** `rust/assets/prompts/learning_decks/agent.md` system section.
+- **Decisions:** Added one system-prompt bullet asking for hyper-intuitive, bottom-up explanations built step by step with the simplest possible animations; left the model unchanged (default `openrouter:anthropic/claude-sonnet-5.5` with high reasoning effort, overridable via `LEARNING_DECK_MODEL`).
+- **Changes:** Prompt text only.
+- **Validation:** `cargo test -p newsly-worker learning_deck` (31 passed).
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
 ### 2026-10-25 — `main` — Briefing segment headline single-line metadata
 
 - **Status:** Complete

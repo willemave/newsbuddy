@@ -391,11 +391,14 @@ Content bodies are staged by hash and published only through the exact fenced
 transaction. Feed links returned by extraction are candidates; Rust validates
 and persists subscriptions/backfill work.
 
-Deck-only submissions share the canonical content identity but carry a durable
-source-only processing flag. They extract readable source text without editorial
-summarization or content artwork. An ordinary submission clears that flag and
-reenqueues full processing when the source-only row had completed; requesting
-a deck from already processed content does not downgrade it.
+Deck-only submissions share the canonical content identity and carry a durable
+source-only processing flag. The source handoff makes extracted text or a
+transcript available to the deck worker and enqueues the standard, content-deduped
+summary task in the same transaction. Summary processing can finish independently
+of the deck. It preserves source readiness and skips artwork for deck-only
+content. Explicit deck creation also schedules missing summaries for eligible
+sources that already have stored text. An ordinary submission clears the flag
+and resumes full content processing.
 
 Scheduled and backfill dispatchers enqueue one task per configured feed/Reddit
 source or global aggregator. Each leaf prepares only its selected configuration,

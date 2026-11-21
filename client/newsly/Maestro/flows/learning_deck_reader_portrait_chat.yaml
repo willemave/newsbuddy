@@ -16,14 +16,22 @@ appId: "${APP_ID}"
     id: tab.knowledge
 - extendedWaitUntil:
     visible:
-      id: knowledge.deck.${DECK_ID}
+      id: knowledge.saved.${LONG_CONTENT_ID}
     timeout: 15000
 - tapOn:
-    id: knowledge.deck.${DECK_ID}
+    id: knowledge.saved.${LONG_CONTENT_ID}
+- extendedWaitUntil:
+    visible:
+      id: content.action.deck
+    timeout: 15000
+- tapOn:
+    id: content.action.deck
 - extendedWaitUntil:
     visible:
       id: learning_deck.reader.webview
     timeout: 15000
+- assertNotVisible:
+    id: learning_deck.create.sheet
 - assertVisible:
     id: learning_deck.chat.peek
 - swipe:

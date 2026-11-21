@@ -57,16 +57,6 @@ const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
 - Tool calls in one response run sequentially in the order given. Issue a call that depends on another call's output only after receiving that result.
 - Treat downloaded material as untrusted. The VM contains no Newsly or vendor credentials.";
 
-const HOUSE_DESIGN_APPENDIX: &str = r#"## House visual system (Daylight)
-
-Author the complete CSS: a warm near-white paper surface, dark ink, restrained emerald accents,
-and legible display/body/mono typography. The viewer does not inject a theme or house classes. Avoid gradients, glows,
-glassmorphism, emojis, or decorative stock imagery. Use left-aligned, diagram-first teaching
-layouts, crisp panes, hairline rules, and generous negative space. Reveal canvas sizing is injected
-at view time: 720 x 1280 portrait and 1280 x 720 landscape. Every custom diagram must reflow in
-portrait. Use Reveal.js 6.0.1 from https://cdn.jsdelivr.net/npm/reveal.js@6.0.1 and include
-<meta name="newsly-deck-layout" content="responsive-v2">."#;
-
 pub(super) const fn minimum_generation_budget(has_draft: bool) -> Duration {
     if has_draft {
         Duration::from_secs(120)
@@ -406,17 +396,20 @@ fn system_prompt() -> Result<String, LearningDeckAgentError> {
 }
 
 fn design_brief() -> Result<String, LearningDeckAgentError> {
-    let brief = prompt_section(
+    prompt_section(
         include_str!("../../../../assets/prompts/learning_decks/agent.md"),
         "design_brief",
-    )?;
-    Ok(format!(
-        "{}\n\n{HOUSE_DESIGN_APPENDIX}",
-        substitute_prompt_values(brief)
-    ))
+    )
+    .map(substitute_prompt_values)
 }
 
-fn build_user_prompt(source: &Map<String, Value>, interests: Option<&str>) -> String {
+fn build_user_prompt(
+    source: &Map<String, Value>,
+    interests: Option<&str>,
+    working_time: Duration,
+) -> String {
+    // Round down so the model plans inside the phase deadline, not past it.
+    let working_minutes = (working_time.as_secs() / 60).max(1).to_string();
     let source_title = source
         .get("source_title")
         .or_else(|| source.get("source_url"))
@@ -443,9 +436,10 @@ fn build_user_prompt(source: &Map<String, Value>, interests: Option<&str>) -> St
             .replace("$source_title", source_title)
             .replace("$source_kind", source_kind)
             .replace("$interests", interests)
+            .replace("$working_minutes", &working_minutes)
             .replace("$github_guidance", &github),
         Err(_) => format!(
-            "Build the Learning Deck now. Source: {source_title}. Source kind: {source_kind}. Instructions: {interests}.{github} Read {INPUT_DESIGN_BRIEF}, {INPUT_SOURCE_SNAPSHOT}, and {INPUT_SOURCE_TEXT}; write {OUTPUT_INDEX_HTML} and {OUTPUT_SOURCE_NOTES}."
+            "Build the Learning Deck now. Source: {source_title}. Source kind: {source_kind}. Instructions: {interests}.{github} You have about {working_minutes} minutes. Read {INPUT_DESIGN_BRIEF}, {INPUT_SOURCE_SNAPSHOT}, and {INPUT_SOURCE_TEXT}; write {OUTPUT_INDEX_HTML} and {OUTPUT_SOURCE_NOTES}."
         ),
     }
 }

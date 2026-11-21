@@ -1,9 +1,12 @@
 //! Content and News source resolution or conversion for Learning Deck creation.
 
+use crate::content_metadata::{legacy_summarization_text, runtime_metadata, summary_is_readable};
+
 use super::{
     ContentSourceOutcome, ContentSourceRow, ConvertedNewsSource, LearningDeckRepositoryError,
     LearningDeckSourceProjection, Map, NewsItemRow, Postgres, Transaction, Value,
     VisibleNewsItemProjection,
+    canonical::resolve_canonical_content,
     common::{clean_optional, content_display_title, json_object, nested_clean_text},
     save_content_to_knowledge,
 };
@@ -27,7 +30,9 @@ pub async fn resolve_content_learning_deck_source(
     let Some(row) = row else {
         return Ok(ContentSourceOutcome::NotFoundOrNotReady);
     };
-    if !row.body_available {
+    if !row.body_available
+        && legacy_summarization_text(&row.content_type, &row.content_metadata).is_none()
+    {
         return Ok(ContentSourceOutcome::TextUnavailable);
     }
     Ok(ContentSourceOutcome::Ready(content_source_from_row(&row)))
@@ -54,7 +59,7 @@ pub async fn load_submitted_content_learning_deck_source(
             content.content_metadata,
             TRUE AS body_available
         FROM contents AS content
-        WHERE content.id::bigint = $1
+        WHERE content.id = $1::bigint
         FOR SHARE
         "#,
     )
@@ -65,6 +70,63 @@ pub async fn load_submitted_content_learning_deck_source(
         content_id,
     ))?;
     Ok(content_source_from_row(&row))
+}
+
+/// Returns the canonical content ID when a ready Learning Deck source needs a summary task.
+///
+/// The source is share-locked until commit so a concurrent summary finalizer cannot change
+/// eligibility between this check and enqueue. The caller must use standard queue deduplication
+/// to coalesce concurrent creation requests.
+///
+/// # Errors
+///
+/// Returns a repository error when the canonical source cannot be loaded or queried.
+pub async fn learning_deck_source_needing_summary(
+    transaction: &mut Transaction<'_, Postgres>,
+    content_id: Option<i64>,
+) -> Result<Option<i64>, LearningDeckRepositoryError> {
+    let Some(content_id) = content_id else {
+        return Ok(None);
+    };
+    let content = resolve_canonical_content(transaction, content_id).await?;
+    if !matches!(content.status.as_str(), "completed" | "awaiting_image")
+        || !matches!(
+            content.content_type.as_str(),
+            "article" | "news" | "podcast"
+        )
+    {
+        return Ok(None);
+    }
+    if content
+        .content_metadata
+        .as_object()
+        .is_some_and(|metadata| {
+            summary_is_readable(&runtime_metadata(metadata), &content.content_type)
+        })
+    {
+        return Ok(None);
+    }
+    let legacy_text =
+        legacy_summarization_text(&content.content_type, &content.content_metadata).is_some();
+    let needs_summary = sqlx::query_scalar::<_, bool>(
+        r"
+        SELECT (
+            $2 OR EXISTS (
+                SELECT 1 FROM content_bodies
+                WHERE content_id = $1 AND variant = 'source' AND char_count > 0
+            )
+        ) AND NOT EXISTS (
+            SELECT 1 FROM processing_tasks
+            WHERE content_id = $1 AND task_type = 'summarize'
+              AND status IN ('pending', 'processing')
+        )
+        ",
+    )
+    .bind(content.id)
+    .bind(legacy_text)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(needs_summary.then_some(content.id))
 }
 
 /// Finds a visible representative Fast Read source.
@@ -144,7 +206,7 @@ pub async fn convert_news_item_to_learning_deck_source(
             id::bigint AS id, content_type, url, source_url, title, status, content_metadata,
             TRUE AS body_available
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR SHARE
         "#,
     )
@@ -186,33 +248,24 @@ const CONTENT_SOURCE_SQL: &str = r#"
         content.title,
         content.status,
         content.content_metadata,
-        (
-            EXISTS(
-                SELECT 1 FROM content_bodies AS body
-                WHERE body.content_id = content.id
-                  AND body.variant = 'source'
-                  AND body.char_count > 0
-            )
-            OR CASE
-                WHEN content.content_type = 'podcast' THEN
-                    NULLIF(btrim(COALESCE(content.content_metadata->>'transcript', content.content_metadata->>'content_to_summarize', '')), '') IS NOT NULL
-                WHEN content.content_type IN ('article', 'news') THEN
-                    NULLIF(btrim(COALESCE(content.content_metadata->>'content_to_summarize', content.content_metadata->>'content', '')), '') IS NOT NULL
-                ELSE FALSE
-            END
+        EXISTS (
+            SELECT 1 FROM content_bodies AS body
+            WHERE body.content_id = content.id
+              AND body.variant = 'source'
+              AND body.char_count > 0
         ) AS body_available
     FROM contents AS content
-    WHERE content.id::bigint = $2
+    WHERE content.id = $2::bigint
       AND content.status IN ('completed', 'awaiting_image')
       AND (
           EXISTS(
               SELECT 1 FROM content_knowledge_saves AS save
-              WHERE save.user_id::bigint = $1 AND save.content_id = content.id
+              WHERE save.user_id = $1::bigint AND save.content_id = content.id
           )
           OR (
               EXISTS(
                   SELECT 1 FROM content_status AS inbox
-                  WHERE inbox.user_id::bigint = $1
+                  WHERE inbox.user_id = $1::bigint
                     AND inbox.content_id = content.id
                     AND inbox.status = 'inbox'
               )
@@ -229,11 +282,11 @@ const VISIBLE_NEWS_ITEM_SQL: &str = r#"
         item.article_domain,
         item.raw_metadata
     FROM news_items AS item
-    WHERE item.id::bigint = $2
+    WHERE item.id = $2::bigint
       AND item.status = 'ready'
       AND item.representative_news_item_id IS NULL
       AND (
-          (item.visibility_scope = 'user' AND item.owner_user_id::bigint = $1)
+          (item.visibility_scope = 'user' AND item.owner_user_id = $1::bigint)
           OR (
               item.visibility_scope = 'global'
               AND EXISTS(

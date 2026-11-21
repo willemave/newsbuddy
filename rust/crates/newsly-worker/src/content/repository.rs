@@ -4,15 +4,17 @@ use canonical::{
 };
 
 use newsly_db::content_metadata::{
-    RAW_BODY_KEYS, legacy_root_first_value as runtime_value, remove_field, set_field,
+    RAW_BODY_KEYS, is_deck_source_only, legacy_root_first_value as runtime_value, remove_field,
+    set_field,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
 
 use chrono::{NaiveDateTime, Utc};
 use newsly_db::{
-    XSyncRepositoryError, remove_stale_x_bookmark_save, resolve_x_bookmark_destination,
-    save_x_bookmark_destination, x_bookmark_destination_needs_image,
+    XSyncRepositoryError, learning_deck_source_needing_summary, remove_stale_x_bookmark_save,
+    resolve_x_bookmark_destination, save_x_bookmark_destination,
+    x_bookmark_destination_needs_image,
 };
 use newsly_extraction::ExtractionTiming;
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
@@ -58,7 +60,7 @@ pub(super) async fn load_content_snapshot(
         FROM contents AS content
         LEFT JOIN content_bodies AS body
             ON body.content_id = content.id AND body.variant = 'source'
-        WHERE content.id::bigint = $1
+        WHERE content.id = $1::bigint
         ",
     )
     .bind(content_id)
@@ -259,6 +261,13 @@ impl ContentFinalizer {
                         Some("Canonical URL conflicts with existing content".to_owned());
                     content.processed_at = Some(Utc::now().naive_utc());
                     relink_canonical_user_state(transaction, content.id, duplicate_id).await?;
+                    enqueue_canonical_deck_summary(
+                        transaction,
+                        &self.queue,
+                        &metadata,
+                        duplicate_id,
+                    )
+                    .await?;
                     reconcile_x_bookmark_destination_users(
                         transaction,
                         &self.queue,
@@ -327,6 +336,13 @@ impl ContentFinalizer {
                             Value::from(duplicate_id),
                         );
                         relink_canonical_user_state(transaction, content.id, duplicate_id).await?;
+                        enqueue_canonical_deck_summary(
+                            transaction,
+                            &self.queue,
+                            &metadata,
+                            duplicate_id,
+                        )
+                        .await?;
                         reconcile_x_bookmark_destination_users(
                             transaction,
                             &self.queue,
@@ -411,9 +427,13 @@ impl ContentFinalizer {
                 } else {
                     false
                 };
-                let source_only = deck_source_only(&metadata);
-                if !subscribed && !source_only {
-                    let next_task = next_content_task(&metadata, content.platform.as_deref());
+                let source_only = is_deck_source_only(&metadata);
+                if !subscribed {
+                    let next_task = if source_only {
+                        TaskType::Summarize
+                    } else {
+                        next_content_task(&metadata, content.platform.as_deref())
+                    };
                     enqueue_content_task(transaction, &self.queue, next_task, content.id).await?;
                 }
 
@@ -562,7 +582,7 @@ async fn load_locked_content(
             platform,
             search_text
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         ",
     )
@@ -621,7 +641,7 @@ async fn load_content_usage_user_id(
         r"
         SELECT COALESCE(content_metadata, '{}'::json)
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(content_id)
@@ -659,6 +679,7 @@ async fn finalize_analysis(
         content.error_message = Some("Canonical URL conflicts with existing content".to_owned());
         content.processed_at = Some(Utc::now().naive_utc());
         relink_canonical_user_state(transaction, content.id, duplicate_id).await?;
+        enqueue_canonical_deck_summary(transaction, queue, metadata, duplicate_id).await?;
         update_content(transaction, content, metadata.clone()).await?;
         return Ok(());
     }
@@ -669,13 +690,14 @@ async fn finalize_analysis(
         "skipped".clone_into(&mut content.status);
         content.error_message = None;
         content.processed_at = Some(Utc::now().naive_utc());
-    } else if deck_source_only(metadata)
+    } else if is_deck_source_only(metadata)
         && source_body_ready
         && matches!(content_type, "article" | "news")
     {
         "completed".clone_into(&mut content.status);
         content.error_message = None;
         content.processed_at = Some(Utc::now().naive_utc());
+        enqueue_content_task(transaction, queue, TaskType::Summarize, content.id).await?;
     } else {
         enqueue_content_task(transaction, queue, TaskType::ProcessContent, content.id).await?;
     }
@@ -683,8 +705,19 @@ async fn finalize_analysis(
     Ok(())
 }
 
-fn deck_source_only(metadata: &Map<String, Value>) -> bool {
-    runtime_value(metadata, "deck_source_only").and_then(Value::as_bool) == Some(true)
+async fn enqueue_canonical_deck_summary(
+    transaction: &mut Transaction<'static, Postgres>,
+    queue: &QueueKernel,
+    loser_metadata: &Map<String, Value>,
+    winner_id: i64,
+) -> Result<(), ContentRepositoryError> {
+    if is_deck_source_only(loser_metadata)
+        && let Some(content_id) =
+            learning_deck_source_needing_summary(transaction, Some(winner_id)).await?
+    {
+        enqueue_content_task(transaction, queue, TaskType::Summarize, content_id).await?;
+    }
+    Ok(())
 }
 
 async fn apply_instruction_links(
@@ -879,7 +912,7 @@ async fn x_bookmark_destination_bindings(
           ON connection.id = synced_item.connection_id
         JOIN users AS app_user
           ON app_user.id = connection.user_id
-        WHERE synced_item.content_id::bigint = $1
+        WHERE synced_item.content_id = $1::bigint
           AND synced_item.channel = 'bookmarks'
           AND connection.provider = 'x'
           AND app_user.is_active IS TRUE
@@ -916,7 +949,7 @@ async fn reconcile_x_bookmark_destination_users(
             r"
             UPDATE user_integration_synced_items
             SET content_id = $2, updated_at = timezone('UTC', now())
-            WHERE id::bigint = ANY($1::bigint[])
+            WHERE id = ANY($1::bigint[])
             ",
         )
         .bind(&bindings.synced_item_ids)
@@ -966,7 +999,7 @@ async fn update_content(
             platform = $11,
             search_text = $12,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(content.id)
@@ -1086,7 +1119,7 @@ async fn apply_feed_subscription(
         return Ok(());
     };
     let active = sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active IS TRUE FOR SHARE",
+        "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active IS TRUE FOR SHARE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)
@@ -1105,7 +1138,7 @@ async fn apply_feed_subscription(
         r"
         SELECT id::bigint AS id, is_active
         FROM user_scraper_configs
-        WHERE user_id::bigint = $1 AND scraper_type = $2 AND feed_url = $3
+        WHERE user_id = $1::bigint AND scraper_type = $2 AND feed_url = $3
         FOR UPDATE
         ",
     )
@@ -1125,7 +1158,7 @@ async fn apply_feed_subscription(
             }
         } else {
             sqlx::query(
-                "UPDATE user_scraper_configs SET is_active = TRUE, updated_at = timezone('UTC', now()) WHERE id::bigint = $1",
+                "UPDATE user_scraper_configs SET is_active = TRUE, updated_at = timezone('UTC', now()) WHERE id = $1::bigint",
             )
             .bind(existing.id)
             .execute(&mut **transaction)
@@ -1177,7 +1210,7 @@ async fn apply_feed_subscription(
                 r"
                 SELECT id::bigint
                 FROM user_scraper_configs
-                WHERE user_id::bigint = $1 AND scraper_type = $2 AND feed_url = $3
+                WHERE user_id = $1::bigint AND scraper_type = $2 AND feed_url = $3
                 ",
             )
             .bind(user_id)
@@ -1459,7 +1492,7 @@ async fn scrub_task_instruction(
         r"
         UPDATE processing_tasks
         SET payload = (COALESCE(payload, '{}'::json)::jsonb - 'instruction')::json
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         ",
     )
     .bind(task_id)
@@ -1592,7 +1625,7 @@ async fn lock_active_usage_user(
         return Ok(None);
     };
     sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM users WHERE id::bigint = $1 AND is_active IS TRUE FOR SHARE",
+        "SELECT id::bigint FROM users WHERE id = $1::bigint AND is_active IS TRUE FOR SHARE",
     )
     .bind(user_id)
     .fetch_optional(&mut **transaction)
@@ -1601,6 +1634,8 @@ async fn lock_active_usage_user(
 
 #[derive(Debug, Error)]
 pub(super) enum ContentRepositoryError {
+    #[error(transparent)]
+    LearningDeck(#[from] newsly_db::LearningDeckRepositoryError),
     #[error("PostgreSQL content finalization failed")]
     Sqlx(#[from] sqlx::Error),
     #[error("queue handoff failed during content finalization")]

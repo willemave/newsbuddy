@@ -3,12 +3,13 @@ use std::error::Error;
 use newsly_db::{
     CreateLearningDeckOutcome, LearningDeckSourceProjection, ShareActionAgentSnapshot,
     ShareActionFinalizationTask, find_prepared_share_content, finish_share_action_task,
-    get_or_create_share_chat_session, load_submitted_content_learning_deck_source,
-    lock_share_action_for_finalization, mark_share_action_applied, mark_share_action_applying,
-    mark_share_action_failed, persist_share_action_agent_output, request_share_action,
+    get_or_create_share_chat_session, learning_deck_source_needing_summary,
+    load_submitted_content_learning_deck_source, lock_share_action_for_finalization,
+    mark_share_action_applied, mark_share_action_applying, mark_share_action_failed,
+    persist_share_action_agent_output, request_share_action,
 };
 use newsly_domain::sha256_hex;
-use newsly_queue::{EnqueueRequest, LlmTaskDeliveryKind, QueueKernel, TaskResult};
+use newsly_queue::{EnqueueRequest, LlmTaskDeliveryKind, QueueKernel, TaskResult, TaskType};
 use reqwest::Url;
 use serde_json::{Map, Value, json};
 use sqlx::{Postgres, Transaction};
@@ -435,6 +436,14 @@ impl ShareActionApplicator<'_> {
                 "share_action_task_id": task.id,
             }),
         );
+        let mut requests = Vec::new();
+        if let Some(content_id) =
+            learning_deck_source_needing_summary(transaction, source.source_content_id).await?
+        {
+            let mut request = EnqueueRequest::new(TaskType::Summarize);
+            request.content_id = Some(content_id);
+            requests.push(request);
+        }
         let outcome = newsly_db::create_or_rerun_learning_deck(
             transaction,
             task.user_id,
@@ -445,18 +454,20 @@ impl ShareActionApplicator<'_> {
         .await?;
         let deck_id = match outcome {
             CreateLearningDeckOutcome::AttemptCreated { deck_id, task_id } => {
-                let request = EnqueueRequest::run_llm_task(
+                requests.push(EnqueueRequest::run_llm_task(
                     task_id,
                     task.user_id,
                     LlmTaskDeliveryKind::LearningDeck,
-                );
-                self.queue
-                    .enqueue_many_in_transaction(transaction, vec![request])
-                    .await?;
+                ));
                 deck_id
             }
             CreateLearningDeckOutcome::ExistingActiveAttempt { deck_id } => deck_id,
         };
+        if !requests.is_empty() {
+            self.queue
+                .enqueue_many_in_transaction(transaction, requests)
+                .await?;
+        }
         Ok(Map::from_iter([
             ("learning_deck_id".to_owned(), Value::from(deck_id)),
             (
@@ -801,4 +812,73 @@ pub enum ShareActionFinalizationError {
     WrongInput(String),
     #[error("GitHub URL must include an owner and repository")]
     InvalidGithubUrl,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::PgPool;
+
+    #[sqlx::test(migrations = false)]
+    async fn share_action_repairs_a_prepared_deck_source_once(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (apple_id, email, is_admin, is_active)
+             VALUES ('share-deck', 'share-deck@example.test', FALSE, TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let url = "https://example.test/share-deck";
+        let content_id: i64 = sqlx::query_scalar(
+            "INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata)
+             VALUES ('article', $1, FALSE, 'completed', $2) RETURNING id::bigint",
+        )
+        .bind(url)
+        .bind(json!({"deck_source_only": true, "content": "Stored source text"}))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let queue = QueueKernel::new(pool.clone());
+        let applicator = ShareActionApplicator {
+            queue: &queue,
+            sandbox_root: "/tmp/decks",
+        };
+        let task = ShareActionFinalizationTask {
+            id: 1,
+            user_id,
+            mode: "presentation".to_owned(),
+            approval_policy: Map::new(),
+            allowed_actions: vec!["create_learning_deck".to_owned()],
+            input: Map::from_iter([("knowledge_content_id".to_owned(), Value::from(content_id))]),
+            status: "applying".to_owned(),
+        };
+        let input = LearningDeckActionInput {
+            source_url: url.to_owned(),
+            title: None,
+            interests_prompt: None,
+        };
+        for _ in 0..2 {
+            let mut tx = pool.begin().await.unwrap();
+            let result = applicator
+                .apply_learning_deck(&mut tx, &task, &input)
+                .await
+                .unwrap();
+            assert_eq!(result["content_id"], content_id);
+            tx.commit().await.unwrap();
+        }
+        let tasks: Vec<(String, Option<i64>)> = sqlx::query_as(
+            "SELECT task_type, content_id::bigint FROM processing_tasks ORDER BY task_type",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            tasks,
+            [
+                ("run_llm_task".to_owned(), None),
+                ("summarize".to_owned(), Some(content_id))
+            ]
+        );
+    }
 }

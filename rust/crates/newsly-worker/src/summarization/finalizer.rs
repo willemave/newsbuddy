@@ -9,7 +9,7 @@ use super::fanout::enqueue_summary_followups;
 use super::model::{
     SummarizationApplyOutcome, SummarizationFinalizationPlan, SummarizationMutation,
 };
-use super::repository::apply_summarization_state;
+use super::repository::{SOURCE_PREPARATION_RECHECK_SECONDS, apply_summarization_state};
 
 #[derive(Debug, Clone)]
 pub(super) struct SummarizationFinalizer {
@@ -55,7 +55,10 @@ impl SummarizationFinalizer {
                 }
                 Ok(TaskFinalizerResult::Keep)
             }
-            SummarizationApplyOutcome::ContentMissing => Ok(TaskFinalizerResult::Keep),
+            SummarizationApplyOutcome::ContentUnavailable => Ok(TaskFinalizerResult::Keep),
+            SummarizationApplyOutcome::SourceDeferred => Ok(TaskFinalizerResult::Override(
+                TaskResult::defer(SOURCE_PREPARATION_RECHECK_SECONDS),
+            )),
             SummarizationApplyOutcome::SourceChanged => {
                 Ok(TaskFinalizerResult::Override(TaskResult::fail(
                     Some("summarization input changed before finalization".to_owned()),

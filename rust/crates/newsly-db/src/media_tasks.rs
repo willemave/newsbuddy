@@ -1,4 +1,6 @@
-use crate::content_metadata::{RAW_BODY_KEYS, remove_field, runtime_value, set_field};
+use crate::content_metadata::{
+    RAW_BODY_KEYS, is_deck_source_only, remove_field, runtime_value, set_field,
+};
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
 use newsly_domain::truncate_chars;
 use serde_json::{Map, Value, json};
@@ -111,7 +113,7 @@ pub async fn prepare_media_content(
             status,
             COALESCE(content_metadata, '{}'::json) AS content_metadata
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(content_id)
@@ -136,7 +138,7 @@ pub async fn apply_media_mutation(
     }
 
     let mut metadata = metadata_map(&content.content_metadata);
-    let mut next_task = match mutation {
+    let next_task = match mutation {
         MediaMutation::PodcastCompleted {
             body,
             transcript,
@@ -306,10 +308,7 @@ pub async fn apply_media_mutation(
         }
     };
 
-    if matches!(next_task, Some(MediaNextTask::Summarize))
-        && runtime_value(&metadata, "deck_source_only").and_then(Value::as_bool) == Some(true)
-    {
-        next_task = None;
+    if matches!(next_task, Some(MediaNextTask::Summarize)) && is_deck_source_only(&metadata) {
         "completed".clone_into(&mut content.status);
         content.processed_at = Some(Utc::now().naive_utc());
     }
@@ -371,7 +370,7 @@ pub async fn record_media_transcription_chunk_usage(
             (
                 SELECT users.id
                 FROM users
-                WHERE users.id::bigint = $5
+                WHERE users.id = $5::bigint
                   AND users.is_active IS TRUE
             ),
             1,
@@ -450,7 +449,7 @@ async fn load_locked_content(
             processed_at,
             search_text
         FROM contents
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         FOR UPDATE
         "#,
     )
@@ -476,7 +475,7 @@ async fn update_content(
             processed_at = $7,
             search_text = $8,
             updated_at = timezone('UTC', clock_timestamp())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(content.id)

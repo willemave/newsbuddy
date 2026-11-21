@@ -22,7 +22,8 @@ struct DetailActionBar: View {
     let onDownloadMore: () -> Void
     let onConvertLinkedArticle: () -> Void
     let onToggleKnowledgeSave: () -> Void
-    let onCreateDeck: () -> Void
+    let isLookingUpDeck: Bool
+    let onDeck: () -> Void
     let onPodcastAudio: () -> Void
     let onPodcastAudioSpeed: (NarrationPlaybackSpeedOption) -> Void
     let onOpenKnowledgeActions: () -> Void
@@ -91,7 +92,7 @@ struct DetailActionBar: View {
                 }
 
                 if content.contentType == .article || content.contentType == .podcast {
-                    createDeckButton
+                    learningDeckButton
                 }
 
                 if supportsPodcastAudio {
@@ -108,7 +109,7 @@ struct DetailActionBar: View {
                 }
 
                 if content.contentType == .news {
-                    createDeckButton
+                    learningDeckButton
                 }
 
                 Button(action: onOpenKnowledgeActions) {
@@ -128,13 +129,20 @@ struct DetailActionBar: View {
         content.contentType == .podcast ? "Read transcript" : "Read full article"
     }
 
-    private var createDeckButton: some View {
-        Button(action: onCreateDeck) {
-            actionIcon("rectangle.on.rectangle")
+    private var learningDeckButton: some View {
+        Button(action: onDeck) {
+            if isLookingUpDeck {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(width: 44, height: 44)
+            } else {
+                actionIcon("rectangle.on.rectangle")
+            }
         }
+        .disabled(isLookingUpDeck)
         .detailActionBarSegment(overlaid: overlaid)
-        .accessibilityIdentifier("content.action.create_deck")
-        .accessibilityLabel("Create Learning Deck")
+        .accessibilityIdentifier("content.action.deck")
+        .accessibilityLabel(content.contentType == .news ? "Create Learning Deck" : "Learning Deck")
     }
 
     /// The ask-the-buddy action, matching `actionIcon`'s metrics so the left-packed bar

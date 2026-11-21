@@ -258,7 +258,7 @@ pub use learning_decks::{
     VisibleNewsItemProjection, convert_news_item_to_learning_deck_source,
     create_or_rerun_learning_deck, delete_learning_deck, disable_learning_deck_share,
     find_visible_news_item_for_learning_deck, get_hosted_learning_deck, get_learning_deck,
-    is_active_learning_deck_conflict, list_learning_decks,
+    is_active_learning_deck_conflict, learning_deck_source_needing_summary, list_learning_decks,
     load_submitted_content_learning_deck_source, persist_learning_deck_share,
     prepare_enable_learning_deck_share, resolve_content_learning_deck_source, retry_learning_deck,
 };

@@ -33,7 +33,7 @@ pub(super) async fn persisted_source_with_canonical_rebind(
                source_content_id::bigint AS source_content_id,
                source_title, title, source_metadata
         FROM learning_decks
-        WHERE id::bigint = $1 AND user_id::bigint = $2 AND deleted_at IS NULL
+        WHERE id = $1::bigint AND user_id = $2::bigint AND deleted_at IS NULL
         FOR UPDATE
         "#,
     )
@@ -72,10 +72,10 @@ pub(super) async fn persisted_source_with_canonical_rebind(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM learning_decks
-            WHERE user_id::bigint = $1
+            WHERE user_id = $1::bigint
               AND source_identity = $2
               AND deleted_at IS NULL
-              AND id::bigint <> $3
+              AND id <> $3::bigint
         )
         "#,
     )
@@ -102,7 +102,7 @@ pub(super) async fn persisted_source_with_canonical_rebind(
             source_metadata = $6,
             title = $7,
             updated_at = timezone('UTC', now())
-        WHERE id::bigint = $1
+        WHERE id = $1::bigint
         "#,
     )
     .bind(deck_id)
@@ -174,7 +174,7 @@ pub(super) async fn load_canonical_content_optional(
     sqlx::query_as::<_, CanonicalContentRow>(
         r#"
         SELECT id::bigint AS id, content_type, url, source_url, title, status, content_metadata
-        FROM contents WHERE id::bigint = $1 FOR UPDATE
+        FROM contents WHERE id = $1::bigint FOR SHARE
         "#,
     )
     .bind(content_id)
@@ -192,7 +192,7 @@ pub(super) async fn recover_unrecorded_duplicate(
     let latest_analysis_failed = sqlx::query_scalar::<_, String>(
         r#"
         SELECT status FROM processing_tasks
-        WHERE content_id::bigint = $1 AND task_type = 'analyze_url'
+        WHERE content_id = $1::bigint AND task_type = 'analyze_url'
         ORDER BY id DESC LIMIT 1
         "#,
     )
@@ -207,7 +207,7 @@ pub(super) async fn recover_unrecorded_duplicate(
         r#"
         SELECT id::bigint AS id, content_type, url, source_url, title, status, content_metadata
         FROM contents
-        WHERE id::bigint <> $1
+        WHERE id <> $1::bigint
           AND content_type <> 'unknown'
           AND status IN ('completed', 'awaiting_image')
           AND (url = ANY($2) OR source_url = ANY($2))
@@ -239,7 +239,7 @@ pub(super) async fn recover_unrecorded_duplicate(
         r#"
         SELECT id::bigint AS id, content_type, url, source_url, title, status, content_metadata
         FROM contents
-        WHERE id::bigint <> $1
+        WHERE id <> $1::bigint
           AND content_type <> 'unknown'
           AND status IN ('completed', 'awaiting_image')
           AND (url LIKE $2 OR source_url LIKE $2)
@@ -270,24 +270,24 @@ pub(super) async fn relink_canonical_user_state(
     for statement in [
         r#"
         INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
-        SELECT user_id, $2, status, created_at, updated_at FROM content_status WHERE content_id::bigint = $1
+        SELECT user_id, $2, status, created_at, updated_at FROM content_status WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO NOTHING
         "#,
         r#"
         INSERT INTO content_read_status (user_id, content_id, read_at, created_at)
-        SELECT user_id, $2, read_at, created_at FROM content_read_status WHERE content_id::bigint = $1
+        SELECT user_id, $2, read_at, created_at FROM content_read_status WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO UPDATE
         SET read_at = GREATEST(content_read_status.read_at, EXCLUDED.read_at)
         "#,
         r#"
         INSERT INTO content_knowledge_saves (user_id, content_id, saved_at, created_at)
-        SELECT user_id, $2, saved_at, created_at FROM content_knowledge_saves WHERE content_id::bigint = $1
+        SELECT user_id, $2, saved_at, created_at FROM content_knowledge_saves WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO UPDATE
         SET saved_at = GREATEST(content_knowledge_saves.saved_at, EXCLUDED.saved_at)
         "#,
         r#"
         INSERT INTO content_unlikes (user_id, content_id, unliked_at, created_at)
-        SELECT user_id, $2, unliked_at, created_at FROM content_unlikes WHERE content_id::bigint = $1
+        SELECT user_id, $2, unliked_at, created_at FROM content_unlikes WHERE content_id = $1::bigint
         ON CONFLICT (user_id, content_id) DO UPDATE
         SET unliked_at = GREATEST(content_unlikes.unliked_at, EXCLUDED.unliked_at)
         "#,
@@ -299,10 +299,10 @@ pub(super) async fn relink_canonical_user_state(
             .await?;
     }
     for statement in [
-        "DELETE FROM content_status WHERE content_id::bigint = $1",
-        "DELETE FROM content_read_status WHERE content_id::bigint = $1",
-        "DELETE FROM content_knowledge_saves WHERE content_id::bigint = $1",
-        "DELETE FROM content_unlikes WHERE content_id::bigint = $1",
+        "DELETE FROM content_status WHERE content_id = $1::bigint",
+        "DELETE FROM content_read_status WHERE content_id = $1::bigint",
+        "DELETE FROM content_knowledge_saves WHERE content_id = $1::bigint",
+        "DELETE FROM content_unlikes WHERE content_id = $1::bigint",
     ] {
         sqlx::query(statement)
             .bind(loser_content_id)
@@ -310,7 +310,7 @@ pub(super) async fn relink_canonical_user_state(
             .await?;
     }
     sqlx::query(
-        "UPDATE chat_sessions SET content_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE content_id::bigint = $1",
+        "UPDATE chat_sessions SET content_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE content_id = $1::bigint",
     )
     .bind(loser_content_id)
     .bind(winner_content_id)

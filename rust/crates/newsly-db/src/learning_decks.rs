@@ -277,7 +277,8 @@ pub use lifecycle::{
 pub use projection::{get_hosted_learning_deck, get_learning_deck, list_learning_decks};
 pub use sources::{
     convert_news_item_to_learning_deck_source, find_visible_news_item_for_learning_deck,
-    load_submitted_content_learning_deck_source, resolve_content_learning_deck_source,
+    learning_deck_source_needing_summary, load_submitted_content_learning_deck_source,
+    resolve_content_learning_deck_source,
 };
 
 #[cfg(test)]
