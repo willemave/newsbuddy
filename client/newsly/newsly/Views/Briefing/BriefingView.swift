@@ -57,6 +57,10 @@ struct BriefingView: View {
     @State private var playbackService: NarrationPlaybackService
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()
+    /// The lens whose collapse the header shows. Follows the selection inside
+    /// an animation, so switching pages slides the header between the two
+    /// lenses' positions instead of jumping.
+    @State private var chromeLensKey: String?
     @State private var mastheadHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
     @State private var pagerScreenEdgeInsets = EdgeInsets()
@@ -116,8 +120,8 @@ struct BriefingView: View {
     }
 
     /// Only the masthead collapses with the offset; the tier and category
-    /// strips and the player scroll away past it and return on any upward
-    /// scroll (`briefingPinnedChromeHide`).
+    /// strips and the player then ride the text off screen and return on any
+    /// upward scroll (`BriefingChromeCollapseModel.trackPinnedChrome`).
     private var collapsibleChromeHeight: CGFloat {
         mastheadHeight
     }
@@ -148,6 +152,15 @@ struct BriefingView: View {
     /// collapses the masthead.
     private var activeCollapseLensKey: String? {
         viewModel.isStartHereSelected ? nil : viewModel.selectedLensKey
+    }
+
+    /// Slide that takes the pinned chrome fully off screen. Owned here so it
+    /// follows the header's height even when nothing scrolls.
+    private var pinnedHideDistance: CGFloat {
+        briefingPinnedChromeHideDistance(
+            screenTop: pagerScreenEdgeInsets.top,
+            pinnedHeight: readBoundaryY ?? 0
+        )
     }
 
     var body: some View {
@@ -344,10 +357,16 @@ struct BriefingView: View {
         .onChange(of: viewModel.selectedLensKey) { _, key in
             tabBarMinimizer?.expand()
             // A page reached by swipe or tap starts with its pills in view.
-            if let key { chromeCollapse.revealPinnedChrome(forLens: key) }
+            if let key { chromeCollapse.revealPinnedChrome(forLens: key, reduceMotion: reduceMotion) }
         }
         .onChange(of: viewModel.isStartHereSelected) { _, _ in
             tabBarMinimizer?.expand()
+        }
+        .onChange(of: activeCollapseLensKey, initial: true) { _, key in
+            withAnimation(headerAnimation) { chromeLensKey = key }
+        }
+        .onChange(of: pinnedHideDistance, initial: true) { _, distance in
+            chromeCollapse.setPinnedHideDistance(distance)
         }
     }
 
@@ -379,26 +398,50 @@ struct BriefingView: View {
 
     /// Everything above the pager — masthead, tier strip, category strip, and
     /// the playback panel — stays pinned while pages swipe underneath. The
-    /// masthead collapses in lockstep with the scroll offset (via
-    /// `BriefingCollapsibleChromeSlot`), so content is never clipped under
-    /// the chrome before the chrome itself has moved away.
+    /// whole header moves up in lockstep with the scroll offset, masthead then
+    /// pills in one continuous motion (`briefingHeaderScrollOffset`), so
+    /// content is never clipped under the chrome before the chrome itself has
+    /// moved away.
     /// Today's date (not the generation timestamp) keeps the kicker identical
     /// to the Knowledge tab's masthead.
     private var headerChrome: some View {
         VStack(spacing: 0) {
-            BriefingCollapsibleChromeSlot(
+            EditorialMastheadHeader(
+                title: "Briefing",
+                titleAccessibilityIdentifier: "briefing.screen",
+                trailingAccessory: mastheadListenAccessory
+            )
+            .briefingCollapsingMasthead(
                 model: chromeCollapse,
-                lensKey: activeCollapseLensKey,
-                shrink: { [mastheadHeight] in min($0, mastheadHeight) },
+                lensKey: chromeLensKey,
                 naturalHeight: $mastheadHeight
-            ) {
-                EditorialMastheadHeader(
-                    title: "Briefing",
-                    titleAccessibilityIdentifier: "briefing.screen",
-                    trailingAccessory: mastheadListenAccessory
-                )
-            }
+            )
 
+            pinnedChrome
+        }
+        .measureBriefingExpandedChromeHeight(
+            additionalShrink: listenPanelShrink,
+            expandedHeight: $expandedChromeHeight
+        )
+        .onChange(of: viewModel.isMastheadCompact) { _, isCompact in
+            if !isCompact {
+                listenPanelPinnedOpen = false
+            }
+        }
+        .briefingHeaderScrollOffset(
+            model: chromeCollapse,
+            lensKey: chromeLensKey,
+            mastheadHeight: mastheadHeight
+        )
+        // No header-wide animation: an animated update keeps a removed view on
+        // screen until it finishes, so the category strip lingered over text
+        // that had already moved up. Only the pill tints and player animate.
+        .zIndex(1)
+    }
+
+    /// The strips and player that stay pinned once the masthead has collapsed.
+    private var pinnedChrome: some View {
+        VStack(spacing: 0) {
             Group {
                 if viewModel.firstRun != nil {
                     BriefingFirstRunStrip(
@@ -446,30 +489,13 @@ struct BriefingView: View {
             }
             .animation(headerAnimation, value: viewModel.selectedLensKey)
         }
-        .measureBriefingExpandedChromeHeight(
-            model: chromeCollapse,
-            lensKey: activeCollapseLensKey,
-            mastheadHeight: mastheadHeight,
-            additionalShrink: listenPanelShrink,
-            expandedHeight: $expandedChromeHeight
-        )
-        .onChange(of: viewModel.isMastheadCompact) { _, isCompact in
-            if !isCompact {
-                listenPanelPinnedOpen = false
-            }
-        }
         .background(alignment: .top) {
             BriefingPinnedChromeBacking(
                 model: chromeCollapse,
-                lensKey: activeCollapseLensKey,
+                lensKey: chromeLensKey,
                 mastheadHeight: mastheadHeight
             )
         }
-        .briefingPinnedChromeHide(model: chromeCollapse, lensKey: activeCollapseLensKey)
-        // No header-wide animation: an animated update keeps a removed view on
-        // screen until it finishes, so the category strip lingered over text
-        // that had already moved up. Only the pill tints and player animate.
-        .zIndex(1)
     }
 
     private var headerAnimation: Animation {

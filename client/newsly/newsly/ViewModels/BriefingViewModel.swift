@@ -273,6 +273,12 @@ final class BriefingViewModel {
     }
 
     func setHeaderPinned(_ pinned: Bool, forLens key: String) {
+        // Called on every collapse sample; skip the observable write when
+        // nothing changed.
+        guard headerPinnedLensKeys.contains(key) != pinned else {
+            refreshHeaderChrome()
+            return
+        }
         if pinned {
             headerPinnedLensKeys.insert(key)
         } else {

@@ -115,6 +115,7 @@ final class BriefingLensRenderModel {
 
 struct BriefingLensPageView: View, Equatable {
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let lensKey: String
     let lensTitle: String
@@ -350,13 +351,13 @@ struct BriefingLensPageView: View, Equatable {
                             tabBarMinimizer?.record(offset: probe.scrolledDistance, source: lensKey)
                         }
                         // Before the guard below: once the masthead has fully
-                        // collapsed, `collapse` stops changing, but scroll
-                        // direction still drives the pills.
+                        // collapsed, `collapse` stops changing, but the scroll
+                        // still drives the pills.
                         chromeCollapse.trackPinnedChrome(
                             forLens: lensKey,
                             scrolled: probe.scrolledDistance,
                             mastheadHeight: collapsibleChromeHeight,
-                            pinnedHeight: readBoundaryY ?? 0
+                            reduceMotion: reduceMotion
                         )
                         guard oldProbe.collapse != probe.collapse
                                 || oldProbe.step != probe.step
@@ -383,6 +384,10 @@ struct BriefingLensPageView: View, Equatable {
                         // Unconditional so a recreated pager resyncs stale
                         // view-model pinned state on its initial callback.
                         onSetHeaderPinned(pinned)
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        guard phase == .idle else { return }
+                        chromeCollapse.settlePinnedChrome(forLens: lensKey, reduceMotion: reduceMotion)
                     }
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensKey)")

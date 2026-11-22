@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-22 — `main` — One continuous Briefing header scroll motion
+
+- **Status:** Complete. Not yet checked on a physical device.
+- **Scope:** iOS Briefing header chrome: `BriefingChromeCollapse.swift`, `BriefingView.swift`, `BriefingLensContentViews.swift`, `BriefingViewModel.setHeaderPinned`, and `BriefingPinnedChromeTests`.
+- **Decisions:** Pills and player now leave attached to the text (hide = min(prior + downward delta, scrolled − masthead, hide distance)) right after the masthead collapses, replacing the separately timed 0.32s slide that read as a double animation. An upward scroll of 8pt or more still brings them back in one 0.28s slide. When scrolling stops, a part-hidden header finishes in the direction of travel, or comes back if there is no room to hide. Scroll samples cannot overwrite a running slide. The masthead collapse and the pill hide are separate pixel-aligned offsets, so per-frame masthead writes never interrupt a pill slide. `BriefingView` owns the hide distance, so fully hidden chrome stays hidden when it grows without a scroll. The header slides between lenses' positions on page switches.
+- **Changes:** The header collapse is now render-only: offsets plus a top clip on the masthead, replacing per-frame frame-height layout. The backing gradient no longer rebuilds per frame; only its opacity changes. `setHeaderPinned` skips no-op observable writes on every collapse sample.
+- **Validation:** BriefingPinnedChromeTests (18), BriefingReadMarkingTests, and the four BriefingViewModel suites pass. The app builds and launches in the simulator, and the header renders and switches lenses. The local account had no Briefing segments, so the scroll motion itself was not exercised. An Opus 5.5 oracle review found three issues (hide distance going stale without a scroll, reveal snapping during masthead re-expansion, lens-switch jump), all fixed.
+- **Remaining:** Confirm on a ProMotion device: 240fps slow-motion plus Instruments Hitches, on a slow drag and a fast fling. 99bed79c reverted an earlier per-frame pill offset that "trailed the text". This version removes that one's per-frame material blur, its offscreen mask, and its fractional offsets, but still updates the header through the same scroll-geometry → model path the masthead uses. If the pills visibly lag the text, move them into the page scroll content with `visualEffect`, or restore the discrete hide for the pills only. Separately, `RootTabBarMinimizer.scrolledDistance` clamps short of the true end by the content insets (shared code, left unchanged).
+- **Commits:** Uncommitted.
+
 ### 2026-11-21 — `main` — Isolate Deck Kit startup commands
 
 - **Status:** Fixed. Exact-commit release gate rerun pending.
