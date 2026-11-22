@@ -27,6 +27,13 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-21 — `main` — Isolate Deck Kit startup commands
+
+- **Status:** Fixed. Exact-commit release gate rerun pending.
+- **Evidence:** On `a4212bcd`, the deterministic gate passed, including all 828 native tests and AXe. The disposable live stack passed auth, direct chat, Share and Chat, and ownership checks. Deck generation stopped before its first model request with `E2B operation was cancelled`.
+- **Changes:** Workspace creation uses a child cancellation token. Finishing its command stream leaves the subsequent Deck Kit executable check active, and cancellation of the deck attempt still stops both commands.
+- **Release:** The exact `a4212bcd` template publication fixed the stale `newsly-agent` alias. The command-token correction is in the worker runtime. The template and bootstrap inputs are identical.
+
 ### 2026-11-21 — `main` — Review and release local commits
 
 - **Status:** Review fixes complete. Exact-commit validation and deployment pending.

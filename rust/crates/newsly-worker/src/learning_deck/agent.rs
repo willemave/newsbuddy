@@ -301,7 +301,8 @@ impl LearningDeckAgentRuntime {
             ],
             None,
             deadline,
-            cancellation.clone(),
+            // Dropping the command stream cancels its token. Keep the kit check independent.
+            cancellation.child_token(),
             false,
         )
         .await?;
