@@ -1,3 +1,4 @@
+use newsly_db::content_metadata::PODCAST_ARTWORK_SCENE_KEY;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -52,8 +53,21 @@ pub(super) fn build_infographic_prompt(
     title: Option<&str>,
     metadata: &Value,
 ) -> Option<String> {
+    if !matches!(
+        content_type,
+        "article" | "podcast" | "unknown" | "insight_report"
+    ) {
+        return None;
+    }
     let runtime = runtime_metadata_view(metadata);
     let summary = runtime.get("summary")?.as_object()?;
+    if content_type == "podcast" {
+        let scene = podcast_artwork_scene(&runtime)
+            .unwrap_or_else(|| podcast_scene_from_summary(title, summary));
+        return Some(format!(
+            "{INFOGRAPHIC_PROMPT_PREFIX}\n{scene}{INFOGRAPHIC_PROMPT_SUFFIX}"
+        ));
+    }
     let display_title = resolve_display_title(title, summary);
     let (overview, mut key_points) = summary_context(summary);
     if key_points.is_empty() && !overview.is_empty() {
@@ -102,7 +116,27 @@ pub(super) fn build_infographic_prompt(
     Some(format!(
         "{INFOGRAPHIC_PROMPT_PREFIX}\n- Story context: {clues}\n- Primary subject: {subject}\n- Visual metaphor: {metaphor}\n- Scene direction: {scene_direction}\n- Supporting cues: {clues}{INFOGRAPHIC_PROMPT_SUFFIX}"
     ))
-    .filter(|_| matches!(content_type, "article" | "podcast" | "unknown" | "insight_report"))
+}
+
+pub(super) fn podcast_artwork_scene(runtime: &Map<String, Value>) -> Option<String> {
+    runtime
+        .get(PODCAST_ARTWORK_SCENE_KEY)
+        .and_then(value_as_clean_string)
+        .filter(|scene| scene.chars().count() <= 640)
+}
+
+fn podcast_scene_from_summary(title: Option<&str>, summary: &Map<String, Value>) -> String {
+    let title = resolve_display_title(title, summary);
+    let (overview, points) = summary_context(summary);
+    let evidence = std::iter::once(title)
+        .chain(std::iter::once(overview).filter(|value| !value.is_empty()))
+        .chain(points.into_iter().take(3))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let evidence = clamp_text(&evidence, 600);
+    format!(
+        "Illustrate one specific story moment from this episode. Show one action and its visible consequence together in a single scene. Use a source-grounded detail or a clearly symbolic illustration of its central idea. Choose a specific subject, physical object, and setting.\n\nEpisode evidence: {evidence}"
+    )
 }
 
 pub(super) fn image_input_fingerprint(prompt: &str) -> String {
@@ -311,6 +345,62 @@ mod tests {
             image_input_fingerprint(&first),
             image_input_fingerprint(&second)
         );
+    }
+
+    #[test]
+    fn podcast_scene_uses_the_full_layout_and_isolated_source_grounded_brief() {
+        let scene = "A worker checks a clay part while a roller delivers the next piece.";
+        let metadata = json!({
+            "domain": {"summary": {"title": "Retaining human judgment"}},
+            "processing": {"podcast_artwork_scene": scene},
+        });
+        let prompt = build_infographic_prompt("podcast", None, &metadata).unwrap();
+        assert_eq!(
+            prompt,
+            format!("{INFOGRAPHIC_PROMPT_PREFIX}\n{scene}{INFOGRAPHIC_PROMPT_SUFFIX}")
+        );
+        let replacement = json!({
+            "summary": {"title": "Retaining human judgment"},
+            "podcast_artwork_scene": "A person adjusts a mold beside an automatic roller.",
+        });
+        let replacement = build_infographic_prompt("podcast", None, &replacement).unwrap();
+        assert_ne!(
+            image_input_fingerprint(&prompt),
+            image_input_fingerprint(&replacement)
+        );
+    }
+
+    #[test]
+    fn older_podcast_summaries_can_still_direct_a_story_scene() {
+        let metadata = json!({
+            "summary": {
+                "title": "Dockside decisions",
+                "overview": "A builder takes control of the shipping route.",
+                "key_points": ["He bought a tanker and built a wharf."],
+            },
+            "podcast_artwork_scene": "   ",
+        });
+        let prompt = build_infographic_prompt("podcast", None, &metadata).unwrap();
+        assert!(prompt.starts_with(INFOGRAPHIC_PROMPT_PREFIX));
+        assert!(prompt.contains("Show one action and its visible consequence"));
+        assert!(prompt.contains("He bought a tanker and built a wharf."));
+        assert!(!prompt.contains("a tangible system of signals"));
+    }
+
+    #[test]
+    fn older_podcast_story_evidence_is_bounded() {
+        let metadata = json!({
+            "summary": {
+                "title": "A longer story",
+                "overview": "overview ".repeat(100),
+                "key_points": ["First ".repeat(100), "Second ".repeat(100), "Third ".repeat(100), "Fourth item"],
+            }
+        });
+        let prompt = build_infographic_prompt("podcast", None, &metadata).unwrap();
+        let (_, remainder) = prompt.split_once("Episode evidence: ").unwrap();
+        let evidence = remainder.strip_suffix(INFOGRAPHIC_PROMPT_SUFFIX).unwrap();
+        assert!(evidence.chars().count() <= 600);
+        assert!(!evidence.contains("Fourth item"));
     }
 
     #[test]

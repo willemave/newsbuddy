@@ -32,7 +32,7 @@ C15. An agent-initiated feed subscription—Share Add Feed, a feed-valued Add to
 
 C16. Content submission and feed subscription are separate commands. Content submission never mutates a scraper config; legacy requests that set `subscribe_to_feed` are rejected before persistence and callers must use the canonical scraper-subscription or Share Add Feed boundary.
 
-C17. Generated long-form artwork keeps its focal subject and story-bearing detail inside the central upper mobile-safe region, carries visual interest across the full frame, and leaves the lower title-overlay region nonessential so detail-page presentation remains compelling across phone crops.
+C17. Generated long-form artwork keeps its focal subject and story-bearing detail inside the central upper mobile-safe region, carries visual interest across the full frame, and leaves the lower title-overlay region nonessential so detail-page presentation remains compelling across phone crops. Podcast artwork conveys a substantive idea from the episode through a single grounded moment with a visible action and consequence.
 
 C19. Typed article and podcast detail exposes one complete canonical artifact, with its duplicate optional carriers null and duplicate arrays empty while retaining all public top-level keys. Compact list previews remain available, and legacy summary and news representations retain their existing behavior.
 

@@ -113,6 +113,7 @@ async fn repaired_ordinary_summary_preserves_readiness_and_queues_artwork(pool: 
         },
         mutation: SummarizationMutation::Complete {
             summary: json!({"one_line": "The repaired editorial summary."}),
+            podcast_artwork_scene: None,
         },
         finalized_at: chrono::Utc::now(),
     };
@@ -217,6 +218,7 @@ async fn deck_summary_success_and_failure_keep_the_source_readable(pool: PgPool)
                 "reason_to_read": "Understand the repair path."
             },
         }),
+        podcast_artwork_scene: None,
     };
     let SummarizationApplyOutcome::Applied(applied) =
         apply_summarization_state(&mut tx, &plan).await.unwrap()
@@ -278,6 +280,7 @@ async fn queued_deck_summary_yields_to_ordinary_resubmission(pool: PgPool) {
         },
         mutation: SummarizationMutation::Complete {
             summary: json!({"one_line": "Editorial summary"}),
+            podcast_artwork_scene: None,
         },
         finalized_at: chrono::Utc::now(),
     };
@@ -370,6 +373,7 @@ async fn promoted_deck_summary_defers_stale_input_at_the_retry_limit(pool: PgPoo
         },
         mutation: SummarizationMutation::Complete {
             summary: json!({"one_line": "A stale summary"}),
+            podcast_artwork_scene: None,
         },
         finalized_at: chrono::Utc::now(),
     };

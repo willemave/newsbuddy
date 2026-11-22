@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 
 use chrono::Utc;
 use newsly_providers::{
-    ImageGenerationGateway, ImageGenerationUsage, ImageGenerationUsageObserver,
+    ImageGenerationGateway, ImageGenerationUsage, ImageGenerationUsageObserver, InfographicSubject,
 };
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
@@ -14,7 +14,8 @@ use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 use super::finalizer::ImageFinalizer;
 use super::model::{ImageFinalizationPlan, PreparedImageAttempt};
 use super::prompt::{
-    build_infographic_prompt, has_generated_image, image_input_fingerprint, runtime_metadata_view,
+    build_infographic_prompt, has_generated_image, image_input_fingerprint, podcast_artwork_scene,
+    runtime_metadata_view,
 };
 use super::repository::{load_image_snapshot, record_image_generation_usage};
 use super::storage::ImageFileStore;
@@ -83,6 +84,11 @@ async fn execute_image_generation(
     };
     let content_id = prepared.attempt.content.id;
     let task_id = prepared.attempt.task_id;
+    let subject = if prepared.attempt.content.content_type == "podcast" {
+        InfographicSubject::Podcast
+    } else {
+        InfographicSubject::General
+    };
 
     let usage_observer: Arc<dyn ImageGenerationUsageObserver> =
         Arc::new(DurableImageUsageObserver {
@@ -93,6 +99,7 @@ async fn execute_image_generation(
         &prepared.prompt,
         content_id,
         task_id,
+        subject,
         usage_observer,
     );
     tokio::pin!(provider_call);
@@ -266,6 +273,19 @@ async fn prepare_image_generation(
         ));
     };
     let input_fingerprint = image_input_fingerprint(&prompt);
+    if snapshot.content_type == "podcast" {
+        let artwork_scene_source = if podcast_artwork_scene(&runtime).is_some() {
+            "summary"
+        } else {
+            "legacy_evidence"
+        };
+        tracing::info!(
+            content_id,
+            task_id = plan.task_id,
+            artwork_scene_source,
+            "prepared podcast artwork"
+        );
+    }
     Ok(PreparedImageGeneration {
         attempt: PreparedImageAttempt {
             task_id: plan.task_id,

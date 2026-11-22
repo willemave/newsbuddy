@@ -33,11 +33,21 @@ impl TaskHandler for PreparedImageHandler {
     }
 }
 
-async fn finalize_case(pool: PgPool, changed: bool) {
+async fn finalize_case(
+    pool: PgPool,
+    content_type: &str,
+    changed_metadata: Option<serde_json::Value>,
+) {
     newsly_db::run_migrations(&pool).await.unwrap();
     let user: i64 = sqlx::query_scalar("INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('image-finalizer','image-finalizer@example.com',true,false) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
-    let content_id: i64 = sqlx::query_scalar("INSERT INTO contents(content_type,url,title,status,is_aggregate,content_metadata) VALUES('article','https://example.com/image','Test','awaiting_image',false,$1) RETURNING id::bigint")
-        .bind(json!({"summary":{"title":"Test","overview":"An evidence-backed result."}})).fetch_one(&pool).await.unwrap();
+    let mut metadata = json!({"summary":{"title":"Test","overview":"An evidence-backed result."}});
+    if content_type == "podcast" {
+        metadata["processing"] = json!({
+            "podcast_artwork_scene": "A repair worker turns a brass gear under a bench lamp."
+        });
+    }
+    let content_id: i64 = sqlx::query_scalar("INSERT INTO contents(content_type,url,title,status,is_aggregate,content_metadata) VALUES($1,'https://example.com/image','Test','awaiting_image',false,$2) RETURNING id::bigint")
+        .bind(content_type).bind(metadata).fetch_one(&pool).await.unwrap();
     sqlx::query("INSERT INTO content_status(user_id,content_id,status) VALUES($1::bigint::integer,$2::bigint::integer,'inbox')").bind(user).bind(content_id).execute(&pool).await.unwrap();
     let queue = QueueKernel::new(pool.clone());
     let mut enqueue = EnqueueRequest::new(TaskType::GenerateImage);
@@ -51,7 +61,7 @@ async fn finalize_case(pool: PgPool, changed: bool) {
     tx.commit().await.unwrap();
     let fingerprint = image_input_fingerprint(
         &build_infographic_prompt(
-            "article",
+            content_type,
             content.title.as_deref(),
             &content.content_metadata,
         )
@@ -139,9 +149,10 @@ async fn finalize_case(pool: PgPool, changed: bool) {
         0,
         1,
     );
-    if changed {
-        sqlx::query("UPDATE contents SET content_metadata = $1 WHERE id = $2")
-            .bind(json!({"summary":{"title":"Changed","overview":"Different evidence."}}))
+    let changed = changed_metadata.is_some();
+    if let Some(changed_metadata) = changed_metadata {
+        sqlx::query("UPDATE contents SET content_metadata = content_metadata::jsonb || $1::jsonb WHERE id = $2")
+            .bind(changed_metadata)
             .bind(content_id)
             .execute(&pool)
             .await
@@ -195,10 +206,29 @@ async fn finalize_case(pool: PgPool, changed: bool) {
 
 #[sqlx::test]
 async fn artwork_publication_commits_files_readiness_and_briefing_fanout(pool: PgPool) {
-    finalize_case(pool, false).await;
+    finalize_case(pool, "article", None).await;
 }
 
 #[sqlx::test]
 async fn changed_summary_cannot_publish_artwork_or_briefing_fanout(pool: PgPool) {
-    finalize_case(pool, true).await;
+    finalize_case(
+        pool,
+        "article",
+        Some(json!({"summary":{"title":"Changed","overview":"Different evidence."}})),
+    )
+    .await;
+}
+
+#[sqlx::test]
+async fn changed_podcast_scene_cannot_publish_artwork_or_briefing_fanout(pool: PgPool) {
+    finalize_case(
+        pool,
+        "podcast",
+        Some(json!({
+            "processing": {
+                "podcast_artwork_scene": "A volunteer holds a light while the repaired clock starts."
+            }
+        })),
+    )
+    .await;
 }

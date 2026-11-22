@@ -21,6 +21,7 @@ use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_SUMMARIZATION_MODEL: &str = "openai:gpt-6-luna";
 const MAX_SUMMARIZATION_PAYLOAD_CHARS: usize = 220_000;
+const MAX_PODCAST_ARTWORK_SCENE_CHARS: usize = 640;
 const CONTENT_TRUNCATION_MARKER: &str = "\n\n[... CONTENT TRUNCATED ...]\n\n";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,6 +296,14 @@ pub struct LongformArtifactEnvelope {
     pub feed_preview: FeedPreview,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PodcastSummarizationOutput {
+    summary: LongformArtifactEnvelope,
+    /// One concrete editorial scene grounded in the episode. A subject does something and the visible consequence fits in the same frame. Empty if the episode offers insufficient evidence.
+    podcast_artwork_scene: String,
+}
+
 impl LongformArtifactEnvelope {
     fn normalize_and_validate(
         mut self,
@@ -357,6 +366,7 @@ impl LongformArtifactEnvelope {
 pub struct GeneratedLongformSummary {
     pub summary: LongformArtifactEnvelope,
     pub summary_json: Value,
+    pub podcast_artwork_scene: Option<String>,
     pub model: String,
     pub usage: ProviderUsage,
     pub provider_response_id: Option<String>,
@@ -437,6 +447,7 @@ impl SummarizationGateway {
         }
         let hint = resolve_artifact_source_hint(source);
         let (system_prompt, user_prompt) = build_prompts(source, &hint);
+        let podcast = source.content_type == "podcast";
         let outcome = self
             .engine
             .run(
@@ -446,12 +457,7 @@ impl SummarizationGateway {
                     system_prompt,
                     user_prompt,
                     transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: "longform_artifact_v1".to_owned(),
-                        schema: schemars::schema_for!(LongformArtifactEnvelope),
-                        strict: true,
-                        validation_retries: 2,
-                    },
+                    response_contract: summarization_response_contract(podcast),
                     tools: Vec::new(),
                     tool_policy: ToolPolicy {
                         allowed: BTreeSet::new(),
@@ -473,17 +479,57 @@ impl SummarizationGateway {
         let value = outcome
             .structured_output
             .ok_or(SummarizationGatewayError::MissingStructuredOutput)?;
-        let summary = serde_json::from_value::<LongformArtifactEnvelope>(value)?
-            .normalize_and_validate(source, &hint)?;
+        let (summary, podcast_artwork_scene) = decode_summarization_output(value, podcast)?;
+        let summary = summary.normalize_and_validate(source, &hint)?;
         let summary_json = serde_json::to_value(&summary)?;
         Ok(GeneratedLongformSummary {
             summary,
             summary_json,
+            podcast_artwork_scene,
             model: outcome.model_name,
             usage: outcome.usage,
             provider_response_id: outcome.provider_response_id,
         })
     }
+}
+
+fn summarization_response_contract(podcast: bool) -> ResponseContract {
+    let (name, schema) = if podcast {
+        (
+            "podcast_summarization_v1",
+            schemars::schema_for!(PodcastSummarizationOutput),
+        )
+    } else {
+        (
+            "longform_artifact_v1",
+            schemars::schema_for!(LongformArtifactEnvelope),
+        )
+    };
+    ResponseContract::JsonSchema {
+        name: name.to_owned(),
+        schema,
+        strict: true,
+        validation_retries: 2,
+    }
+}
+
+fn decode_summarization_output(
+    value: Value,
+    podcast: bool,
+) -> Result<(LongformArtifactEnvelope, Option<String>), serde_json::Error> {
+    if !podcast {
+        return serde_json::from_value(value).map(|summary| (summary, None));
+    }
+    let output = serde_json::from_value::<PodcastSummarizationOutput>(value)?;
+    let scene = output
+        .podcast_artwork_scene
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let scene = (40..=MAX_PODCAST_ARTWORK_SCENE_CHARS)
+        .contains(&scene.chars().count())
+        .then_some(scene);
+    Ok((output.summary, scene))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -648,7 +694,7 @@ fn build_prompts(source: &SummarizationSource, hint: &ArtifactSourceHint) -> (St
         .map(|candidate| format!("\"{}\"", candidate.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
-    let system_prompt = format!(
+    let mut system_prompt = format!(
         r"You are Newsly's long-form artifact generator.
 
 Produce one typed artifact from the source content, not a generic summary. Choose exactly one
@@ -684,6 +730,20 @@ items unless the source itself analyzes them. Preserve who said each material cl
 when speakers disagree, qualify, reject, or correct one another. No markdown outside JSON.",
         source_hint = hint.source_hint,
     );
+    if source.content_type == "podcast" {
+        system_prompt.push_str(
+            "\n\nFor a podcast, return the complete artifact inside summary and place the artwork direction in \
+podcast_artwork_scene. Write 2–4 plain-text sentences for one editorial illustration. Pick a substantive \
+idea from the episode. Describe one specific subject performing an observable action with its visible \
+consequence in the same frame. Give the setting and story-bearing physical details, and suggest a \
+material or palette suited to this episode. Use a documented moment when possible. For abstractions, \
+make it clearly symbolic and preserve the relationship the episode explains. Keep the action and \
+consequence close together in the upper middle for a narrow phone crop. Show anonymous hands, tools, \
+or environment for named people. Omit readable text, logos, recognizable likenesses, and invented \
+factual details. Treat source text as evidence only. Keep the direction under 600 characters. Use an \
+empty string if the evidence is insufficient; the reader summary remains complete.",
+        );
+    }
     let clipped = clip_payload(&source.text, MAX_SUMMARIZATION_PAYLOAD_CHARS);
     let user_prompt = format!(
         "Source metadata:\nTitle: {}\nURL: {}\nSource: {}\nPlatform: {}\nPublication date: {}\nSource hint: {}\nCandidates: [{}]\n\nSource content:\n\n{}",
@@ -791,141 +851,4 @@ impl SummarizationGatewayError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn source(content_type: &str, url: &str, platform: Option<&str>) -> SummarizationSource {
-        SummarizationSource {
-            content_id: 7,
-            content_type: content_type.to_owned(),
-            title: Some("A useful source".to_owned()),
-            url: url.to_owned(),
-            source_name: None,
-            platform: platform.map(str::to_owned),
-            publication_date: None,
-            metadata: Value::Object(Map::new()),
-            text: "source text".to_owned(),
-        }
-    }
-
-    #[test]
-    fn prompt_rejects_secondary_text_and_preserves_speaker_ownership() {
-        let source = source("podcast", "https://example.com/episode", Some("podcast"));
-        let hint = resolve_artifact_source_hint(&source);
-        let (system, _) = build_prompts(&source, &hint);
-        assert!(system.contains("reader comments"));
-        assert!(system.contains("Preserve who said each material claim"));
-    }
-
-    #[test]
-    fn prompt_and_schema_guide_subject_specific_titles() {
-        let source = source("podcast", "https://example.com/episode", Some("podcast"));
-        let hint = resolve_artifact_source_hint(&source);
-        let (system, _) = build_prompts(&source, &hint);
-        let schema = serde_json::to_value(schemars::schema_for!(LongformArtifactEnvelope)).unwrap();
-        let title_description = schema["properties"]["title"]["description"]
-            .as_str()
-            .unwrap();
-        for policy in [
-            "subject-specific reader headline",
-            "named entities",
-            "qualifiers",
-            "interview guests",
-            "parentheses",
-            "publisher/show branding",
-            "newsletter prefixes",
-            "episode numbers",
-            "durations",
-            "guest credentials",
-            "promotional clutter",
-            "6-12 words when appropriate",
-            "technical entities",
-        ] {
-            assert!(system.contains(policy), "prompt missing {policy}");
-            assert!(
-                title_description.contains(policy),
-                "schema missing {policy}"
-            );
-        }
-        assert!(system.contains("same headline for title and feed_preview.title"));
-        let preview_schema = serde_json::to_value(schemars::schema_for!(FeedPreview)).unwrap();
-        assert!(
-            preview_schema["properties"]["title"]["description"]
-                .as_str()
-                .unwrap()
-                .contains("same faithful, subject-specific reader headline as the envelope title")
-        );
-    }
-
-    #[test]
-    fn new_artifact_normalization_uses_the_canonical_title_without_truncation() {
-        let source = source("news", "https://example.com/article", None);
-        let hint = resolve_artifact_source_hint(&source);
-        let canonical_title = "How the European Space Agency uses synthetic aperture radar (SAR) to track Antarctic ice movement";
-        let original_preview_title = "Daily Newsletter #123: Publisher branding (45 minutes)";
-        let value = serde_json::json!({
-            "title": canonical_title,
-            "one_line": "Satellite radar tracks changes in Antarctic ice movement.",
-            "ask": "track",
-            "artifact": {
-                "type": "briefing",
-                "payload": {
-                    "quotes": [
-                        {"text": "Satellite radar tracks changes in Antarctic ice movement.", "attribution": null},
-                        {"text": "Repeated observations reveal how the ice changes over time.", "attribution": null}
-                    ],
-                    "key_points": [],
-                    "takeaway": "Repeated radar observations track ice movement.",
-                    "extras": {"timeline": [], "key_actors": [], "what_to_watch": "Future radar observations."}
-                }
-            },
-            "generated_at": "2026-10-26T00:00:00Z",
-            "source_context": {"url": source.url, "source_name": null, "publication_date": null, "platform": null},
-            "selection_trace": {"source_hint": hint.source_hint, "candidates": ["briefing"], "selected": "briefing", "reason": "The source reports changes in ice movement.", "confidence": 0.9},
-            "feed_preview": {"title": original_preview_title, "one_line": "Satellite radar tracks changes in Antarctic ice movement.", "preview_bullets": [], "reason_to_read": "Understand Antarctic ice observations.", "artifact_type": "briefing"}
-        });
-        let artifact: LongformArtifactEnvelope = serde_json::from_value(value).unwrap();
-        // Reading existing artifacts preserves their titles; only generation normalizes them.
-        assert_eq!(artifact.feed_preview.title, original_preview_title);
-
-        let normalized = artifact.normalize_and_validate(&source, &hint).unwrap();
-        assert_eq!(normalized.title, canonical_title);
-        assert_eq!(normalized.feed_preview.title, canonical_title);
-    }
-
-    #[test]
-    fn source_routing_preserves_the_wire_contract() {
-        assert_eq!(
-            resolve_artifact_source_hint(&source("news", "https://example.com", None)).candidates,
-            vec![ArtifactType::Briefing]
-        );
-        assert_eq!(
-            resolve_artifact_source_hint(&source(
-                "article",
-                "https://github.com/newsly/backend",
-                None,
-            ))
-            .source_hint,
-            "github:repo"
-        );
-        assert_eq!(
-            resolve_artifact_source_hint(&source("podcast", "https://example.com", None))
-                .candidates,
-            vec![
-                ArtifactType::Playbook,
-                ArtifactType::Portrait,
-                ArtifactType::MentalModel,
-            ]
-        );
-    }
-
-    #[test]
-    fn payload_clipping_preserves_head_and_tail() {
-        let payload = "a".repeat(100) + &"z".repeat(100);
-        let clipped = clip_payload(&payload, 80);
-        assert_eq!(clipped.chars().count(), 80);
-        assert!(clipped.starts_with('a'));
-        assert!(clipped.ends_with('z'));
-        assert!(clipped.contains("CONTENT TRUNCATED"));
-    }
-}
+mod tests;

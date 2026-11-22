@@ -37,6 +37,12 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** Confirm on a ProMotion device: 240fps slow-motion plus Instruments Hitches, on a slow drag and a fast fling. 99bed79c reverted an earlier per-frame pill offset that "trailed the text". This version removes that one's per-frame material blur, its offscreen mask, and its fractional offsets, but still updates the header through the same scroll-geometry → model path the masthead uses. If the pills visibly lag the text, move them into the page scroll content with `visualEffect`, or restore the discrete hide for the pills only. Separately, `RootTabBarMinimizer.scrolledDistance` clamps short of the true end by the content insets (shared code, left unchanged).
 - **Commits:** Uncommitted.
 
+### 2026-11-22 — `codex/podcast-story-artwork` — Ship Muse podcast artwork
+
+- New podcast summaries produce a short, source-grounded action and consequence. The image worker places that scene inside the evaluated full layout and requests 2048×1152 Muse through Runware.
+- The scene stays private in processing metadata and contributes to the image publication fingerprint. Older summaries supply bounded evidence for the same layout. Runware concurrency throttles use the existing queue retry.
+- The hand-written story variant passed four of five held-out episodes. The automatic path has focused coverage for provider settings, prompt construction, metadata redaction and summary settlement. Release validation and live evidence are recorded separately.
+
 ### 2026-11-21 — `main` — Isolate Deck Kit startup commands
 
 - **Status:** Fixed. Exact-commit release gate rerun pending.

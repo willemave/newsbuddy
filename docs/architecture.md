@@ -678,6 +678,13 @@ and usage together. Summary completion keeps articles and podcasts behind the im
 Successful image publication marks the source completed and enqueues it for Briefing, so Briefing
 never publishes long-form content without artwork.
 
+Podcast summarization produces a bounded editorial scene in the same model response
+as the reader summary. The summary finalizer stores the scene in internal processing
+metadata next to the summary. The image worker combines that scene with the full
+mobile layout constraints and sends it to Muse through Runware. Older podcast summaries
+provide the episode evidence for the same scene direction. The finalization fingerprint
+covers the resulting prompt, including the stored scene when present.
+
 Deck bundles, agent logs, and generated image attempts register object keys before
 writing. A bounded hourly reaper uses the same PostgreSQL registry with a one-day
 grace period, retaining active work and published references. Cleanup failure
