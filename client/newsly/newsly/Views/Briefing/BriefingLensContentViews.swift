@@ -20,7 +20,8 @@ final class BriefingSegmentRenderModel: Identifiable {
         )
         self.segment = segment
         self.sourcesByKey = segmentSourcesByKey
-        self.card = BriefingSourceCard(segment: segment, sourcesByKey: segmentSourcesByKey)
+        let card = BriefingSourceCard(segment: segment, sourcesByKey: segmentSourcesByKey)
+        self.card = card
         self.passageBlockIndices = segment.blocks.indices.filter { segment.blocks[$0].type == .passage }
         let discussionChipsByBlockIndex = Self.discussionChipsByBlockIndex(
             for: segment.blocks,
@@ -38,7 +39,8 @@ final class BriefingSegmentRenderModel: Identifiable {
                     textBuilder.build(
                         paragraphs: segment.blocks[index].paragraphs ?? [],
                         discussionChips: discussionChipsByBlockIndex[index] ?? [:],
-                        aggregatorMonograms: aggregatorMonograms
+                        aggregatorMonograms: aggregatorMonograms,
+                        bodyStyle: card == nil ? .passage : BriefingSourceCard.summaryStyle
                     )
                 )
             }

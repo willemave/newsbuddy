@@ -55,6 +55,13 @@ struct BriefingSourceCard: Equatable {
         self.publishedAt = source.publishedAt
     }
 
+    /// Card summaries read smaller than News prose so the card stays led by its image and
+    /// title; reader text-size settings still scale it.
+    static let summaryStyle = BriefingAttributedTextBuilder.BodyStyle(
+        size: 13,
+        color: .appReaderBodyText
+    )
+
     var publicationDate: String? {
         publishedAt.map { Self.shortDate($0) }
     }

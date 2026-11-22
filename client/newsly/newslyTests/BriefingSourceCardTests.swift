@@ -113,6 +113,24 @@ final class BriefingSourceCardTests: XCTestCase {
         XCTAssertFalse(model.allSourcesRead)
     }
 
+    func testCardSummariesUseSmallerTypeThanNewsProse() throws {
+        let card = makeSource(key: "content:1", contentType: .article)
+        let news = makeSource(key: "news:2", kind: "news", contentType: .news)
+        func font(for source: APIBriefingSource) throws -> UIFont {
+            let segment = APIBriefingSegment(
+                id: 1, createdAt: Date(), status: "active", narrationText: "",
+                blocks: [passage("Summary text.")], sourceKeys: [source.sourceKey]
+            )
+            let model = BriefingSegmentRenderModel(segment: segment, sourcesByKey: [source.sourceKey: source])
+            let text = try XCTUnwrap(model.passageContentByBlockIndex[0]?.attributedText)
+            return try XCTUnwrap(text.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        }
+
+        XCTAssertEqual(try font(for: card).pointSize, BriefingSourceCard.summaryStyle.size)
+        XCTAssertEqual(try font(for: news).pointSize, BriefingAttributedTextBuilder.BodyStyle.passage.size)
+        XCTAssertLessThan(BriefingSourceCard.summaryStyle.size, BriefingAttributedTextBuilder.BodyStyle.passage.size)
+    }
+
     func testPublisherDropsFeedTagline() {
         XCTAssertEqual(
             BriefingSourceCard.publisherName("The Green Techpreneur | Climate Marketplace"),

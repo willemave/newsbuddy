@@ -14,9 +14,17 @@ struct BriefingAttributedTextBuilder {
 
     static let passageLineSpacing: CGFloat = 2
 
+    /// Base size and ink for passage body text, before Dynamic Type scaling.
+    struct BodyStyle: Equatable {
+        let size: CGFloat
+        let color: UIColor
+
+        static let passage = BodyStyle(size: 16, color: .appReaderBodyText)
+    }
+
     /// Body font before Dynamic Type scaling; `BriefingPassageView` scales it.
-    static func passageBodyFont(bold: Bool = false) -> UIFont {
-        UIFont.appSans(size: 16, weight: bold ? .semibold : .regular)
+    static func passageBodyFont(bold: Bool = false, size: CGFloat = BodyStyle.passage.size) -> UIFont {
+        UIFont.appSans(size: size, weight: bold ? .semibold : .regular)
     }
 
     struct Result {
@@ -27,10 +35,11 @@ struct BriefingAttributedTextBuilder {
     func build(
         paragraphs: [APIBriefingParagraph],
         discussionChips: [String: BriefingDiscussionChip] = [:],
-        aggregatorMonograms: [String: String] = [:]
+        aggregatorMonograms: [String: String] = [:],
+        bodyStyle: BodyStyle = .passage
     ) -> Result {
         let output = NSMutableAttributedString()
-        let baseFont = Self.passageBodyFont()
+        let baseFont = Self.passageBodyFont(size: bodyStyle.size)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = Self.passageLineSpacing
         paragraphStyle.paragraphSpacing = 10
@@ -43,8 +52,8 @@ struct BriefingAttributedTextBuilder {
             let runs = paragraph.runs
             for (runIndex, run) in runs.enumerated() {
                 var attributes: [NSAttributedString.Key: Any] = [
-                    .font: Self.passageBodyFont(bold: run.bold),
-                    .foregroundColor: UIColor.appReaderBodyText,
+                    .font: Self.passageBodyFont(bold: run.bold, size: bodyStyle.size),
+                    .foregroundColor: bodyStyle.color,
                     .paragraphStyle: paragraphStyle
                 ]
                 if run.kind == .source_link, let sourceKey = run.sourceKey {

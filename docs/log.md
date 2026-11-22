@@ -69,6 +69,14 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** The deferred items above. The module-size guard currently fails only on in-progress Briefing files (`newsly-api/src/briefing.rs`, `briefing_refresh/handler.rs`, `briefing_refresh/tests.rs`, `newsly-admin/src/main.rs`); the files this work grew were split back under their limits (`auth/tests.rs`, `chat/session_state.rs`, `terminal_settlement.rs`). Also about 130 open assessment findings (see ledger), including the larger explicit state-machine refactors (content status, `llm_tasks` status, `TaskResult` flags).
 - **Commits:** Uncommitted
 
+### 2026-11-22 — `main` — Smaller Briefing card summary text
+
+- **Status:** Complete
+- **Scope:** iOS Briefing card summary typography (`BriefingSourceCard.summaryStyle`, `BriefingAttributedTextBuilder.BodyStyle`).
+- **Decisions:** The owner chose option B from five rendered sizes: card summaries use a 13pt base in normal body ink, while News prose stays at 16pt. Reader text-size settings still scale both.
+- **Validation:** 59 Briefing unit tests, including a new card-versus-News font check, and 6 Briefing source-action UI tests passed.
+- **Remaining:** None.
+
 ### 2026-11-21 — `main` — Swipe actions on Briefing cards
 
 - **Status:** Complete (uncommitted)
