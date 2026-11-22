@@ -81,7 +81,7 @@ pub use feed_validation::{
 };
 pub use image_generation::{
     GeneratedImage, GoogleImageAuth, ImageGenerationError, ImageGenerationGateway,
-    ImageGenerationUsage, ImageGenerationUsageObserver, InfographicProvider,
+    ImageGenerationUsage, ImageGenerationUsageObserver, InfographicProvider, InfographicSubject,
 };
 pub use media::{
     ApplePodcastResolution, DownloadedMedia, MediaGateway, MediaGatewayConfig, MediaGatewayError,

@@ -55,52 +55,6 @@ async fn billable_response_is_observed_before_a_later_download_failure() {
 }
 
 #[test]
-fn runware_request_uses_provider_exact_task_uuid_field() {
-    let task_uuid = "a770f077-f413-47de-9dac-be0b26a35da6";
-    let request = RunwareRequest {
-        task_type: "imageInference",
-        task_uuid,
-        include_cost: true,
-        output_type: "URL",
-        output_format: "PNG",
-        positive_prompt: "A bounded fixture prompt",
-        model: DEFAULT_RUNWARE_MODEL,
-        number_results: 1,
-        width: SEEDREAM_INFOGRAPHIC_WIDTH,
-        height: SEEDREAM_INFOGRAPHIC_HEIGHT,
-        negative_prompt: None,
-    };
-
-    let payload = serde_json::to_value([request]).expect("Runware request should serialize");
-    let task = payload
-        .as_array()
-        .and_then(|tasks| tasks.first())
-        .and_then(Value::as_object)
-        .expect("Runware request should be a one-task array");
-
-    assert_eq!(task.get("taskUUID"), Some(&Value::from(task_uuid)));
-    assert!(!task.contains_key("taskUuid"));
-    let parsed = Uuid::parse_str(task_uuid).expect("fixture task UUID should parse");
-    assert_eq!(parsed.get_version_num(), 4);
-}
-
-#[test]
-fn seedream_uses_provider_native_dimensions_without_negative_prompt() {
-    let options = runware_request_options(DEFAULT_RUNWARE_MODEL);
-    assert_eq!(options.width, 2_848);
-    assert_eq!(options.height, 1_600);
-    assert_eq!(options.negative_prompt, None);
-}
-
-#[test]
-fn other_runware_models_use_standard_infographic_request() {
-    let options = runware_request_options("runware:101@1");
-    assert_eq!(options.width, 1_024);
-    assert_eq!(options.height, 576);
-    assert!(options.negative_prompt.is_some());
-}
-
-#[test]
 fn google_response_decodes_camel_case_inline_image() {
     let payload: GoogleGenerateResponse = serde_json::from_value(json!({
         "candidates": [{
@@ -136,10 +90,50 @@ fn runware_task_uuid_validation_error_is_retryable_and_fallback_allowed() {
 }
 
 #[test]
+fn runware_concurrency_limit_defers_to_queue_retry() {
+    let error = runware_status_error(
+        StatusCode::BAD_REQUEST,
+        Some(&RunwareErrorPayload {
+            message: Some("Too many concurrent requests".to_owned()),
+            code: Some(json!("concurrentRequestLimitExceeded")),
+            parameter: None,
+        }),
+    );
+    assert!(error.runware_concurrency_limited());
+    assert!(error.retryable());
+    assert!(!error.fallback_allowed());
+}
+
+#[test]
 fn model_list_deduplicates_primary_and_fallback() {
     assert_eq!(
         resolve_models(" model-a ".to_owned(), Some("model-a".to_owned())).unwrap(),
         vec!["model-a"]
+    );
+}
+
+#[test]
+fn podcast_prioritizes_muse_and_keeps_configured_runware_fallbacks() {
+    let configured = [
+        DEFAULT_RUNWARE_MODEL.to_owned(),
+        PODCAST_RUNWARE_MODEL.to_owned(),
+        "runware:101@1".to_owned(),
+    ];
+    assert_eq!(
+        runware_models_for_subject(InfographicSubject::Podcast, &configured).collect::<Vec<_>>(),
+        [
+            PODCAST_RUNWARE_MODEL,
+            DEFAULT_RUNWARE_MODEL,
+            "runware:101@1"
+        ]
+    );
+    assert_eq!(
+        runware_models_for_subject(InfographicSubject::General, &configured).collect::<Vec<_>>(),
+        [
+            DEFAULT_RUNWARE_MODEL,
+            PODCAST_RUNWARE_MODEL,
+            "runware:101@1"
+        ]
     );
 }
 

@@ -256,6 +256,7 @@ async fn execute_summarization(
                     attempt,
                     mutation: SummarizationMutation::Complete {
                         summary: generated.summary_json,
+                        podcast_artwork_scene: generated.podcast_artwork_scene,
                     },
                     finalized_at: Utc::now(),
                 },

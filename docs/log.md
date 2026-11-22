@@ -27,6 +27,12 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-22 — `codex/podcast-story-artwork` — Ship Muse podcast artwork
+
+- New podcast summaries produce a short, source-grounded action and consequence. The image worker places that scene inside the evaluated full layout and requests 2048×1152 Muse through Runware.
+- The scene stays private in processing metadata and contributes to the image publication fingerprint. Older summaries supply bounded evidence for the same layout. Runware concurrency throttles use the existing queue retry.
+- The hand-written story variant passed four of five held-out episodes. The automatic path has focused coverage for provider settings, prompt construction, metadata redaction and summary settlement. Release validation and live evidence are recorded separately.
+
 ### 2026-11-21 — `main` — Isolate Deck Kit startup commands
 
 - **Status:** Fixed. Exact-commit release gate rerun pending.

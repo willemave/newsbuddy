@@ -1,6 +1,7 @@
 use chrono::NaiveDateTime;
 use newsly_db::content_metadata::{
-    RAW_BODY_KEYS, is_deck_source_only, remove_field, runtime_value, set_field,
+    PODCAST_ARTWORK_SCENE_KEY, RAW_BODY_KEYS, is_deck_source_only, remove_field, runtime_value,
+    set_field,
 };
 use serde_json::{Map, Value, json};
 use sqlx::{FromRow, Postgres, Transaction};
@@ -131,9 +132,15 @@ pub(super) async fn apply_summarization_state(
     }
 
     let pending_chat_requests = match &plan.mutation {
-        SummarizationMutation::Complete { summary } => {
-            apply_completed_summary(&mut content, plan, summary)
-        }
+        SummarizationMutation::Complete {
+            summary,
+            podcast_artwork_scene,
+        } => apply_completed_summary(
+            &mut content,
+            plan,
+            summary,
+            podcast_artwork_scene.as_deref(),
+        ),
         SummarizationMutation::Unchanged => apply_unchanged_summary(&mut content, plan),
         SummarizationMutation::Failed {
             reason,
@@ -204,9 +211,17 @@ fn apply_completed_summary(
     content: &mut LockedContent,
     plan: &SummarizationFinalizationPlan,
     summary: &Value,
+    podcast_artwork_scene: Option<&str>,
 ) -> Vec<PendingChatRequest> {
     let mut metadata = metadata_map(&content.content_metadata);
     set_field(&mut metadata, "summary", summary.clone());
+    if content.content_type == "podcast"
+        && let Some(scene) = podcast_artwork_scene
+    {
+        set_field(&mut metadata, PODCAST_ARTWORK_SCENE_KEY, Value::from(scene));
+    } else {
+        remove_field(&mut metadata, PODCAST_ARTWORK_SCENE_KEY);
+    }
     set_field(
         &mut metadata,
         "summary_kind",
@@ -301,6 +316,7 @@ fn apply_failure(
             ));
     if !retry_scheduled && !source_ready {
         remove_field(&mut metadata, "summary");
+        remove_field(&mut metadata, PODCAST_ARTWORK_SCENE_KEY);
     }
     let mut errors = runtime_metadata_view(&Value::Object(metadata.clone()))
         .get("processing_errors")
@@ -445,6 +461,59 @@ mod readiness_tests {
     use crate::summarization::model::PreparedSummarizationAttempt;
     use newsly_queue::QueueKernel;
     use sqlx::PgPool;
+
+    #[sqlx::test]
+    async fn podcast_scene_is_replaced_and_cleared_with_the_summary(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata)
+             VALUES ('podcast', 'https://example.com/podcast-scene', FALSE, 'processing', $1)
+             RETURNING id::bigint",
+        )
+        .bind(json!({"transcript": "A builder bought a tanker and built a wharf."}))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let scene = "A dockworker pulls the tanker rope tight around the new wharf's bollard.";
+        for expected in [Some(scene), None] {
+            let mut tx = pool.begin().await.unwrap();
+            let content = load_summarization_snapshot(&mut tx, id)
+                .await
+                .unwrap()
+                .unwrap();
+            let payload = build_summarization_payload("podcast", &content.content_metadata, None);
+            let plan = SummarizationFinalizationPlan {
+                attempt: PreparedSummarizationAttempt {
+                    content,
+                    input_fingerprint: input_fingerprint("podcast", &payload),
+                },
+                mutation: SummarizationMutation::Complete {
+                    summary: json!({"one_line": "A builder took control of the shipping route."}),
+                    podcast_artwork_scene: expected.map(str::to_owned),
+                },
+                finalized_at: chrono::Utc::now(),
+            };
+            let SummarizationApplyOutcome::Applied(applied) =
+                apply_summarization_state(&mut tx, &plan).await.unwrap()
+            else {
+                panic!("podcast summary should apply");
+            };
+            assert_eq!(applied.status, "awaiting_image");
+            tx.commit().await.unwrap();
+            let stored: Value =
+                sqlx::query_scalar("SELECT content_metadata FROM contents WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(stored[PODCAST_ARTWORK_SCENE_KEY].as_str(), expected);
+            assert_eq!(
+                stored["processing"][PODCAST_ARTWORK_SCENE_KEY].as_str(),
+                expected
+            );
+            assert!(stored["summary"].get(PODCAST_ARTWORK_SCENE_KEY).is_none());
+        }
+    }
 
     #[sqlx::test]
     async fn reusable_summary_waits_for_artwork_before_enqueuing_briefing(pool: PgPool) {

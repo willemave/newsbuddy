@@ -54,6 +54,7 @@ pub(super) struct PreparedSummarizationAttempt {
 pub(super) enum SummarizationMutation {
     Complete {
         summary: Value,
+        podcast_artwork_scene: Option<String>,
     },
     Unchanged,
     Failed {

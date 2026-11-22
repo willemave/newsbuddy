@@ -4,6 +4,8 @@ pub mod source_presentation;
 
 use serde_json::{Map, Value};
 
+pub const PODCAST_ARTWORK_SCENE_KEY: &str = "podcast_artwork_scene";
+
 const PROCESSING_FIELDS: &[&str] = &[
     "subscribe_to_feed",
     "feed_subscription",
@@ -22,6 +24,7 @@ const PROCESSING_FIELDS: &[&str] = &[
     "tweet_enrichment",
     "tweet_only",
     "deck_source_only",
+    PODCAST_ARTWORK_SCENE_KEY,
 ];
 
 pub const RAW_BODY_KEYS: [&str; 6] = [
@@ -121,6 +124,7 @@ pub fn source_metadata(metadata: &Value) -> Value {
         "submitted_by_user_id",
         "share_and_chat_user_ids",
         "share_and_chat_requests",
+        PODCAST_ARTWORK_SCENE_KEY,
     ] {
         metadata.remove(key);
     }

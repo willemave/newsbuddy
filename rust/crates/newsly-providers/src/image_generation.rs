@@ -18,26 +18,31 @@ use uuid::Uuid;
 
 use crate::public_http::{PublicHttpError, send_public};
 
+mod runware_request;
+
+use runware_request::RunwareRequest;
+
 const DEFAULT_RUNWARE_API_URL: &str = "https://api.runware.ai/v1";
 const DEFAULT_GOOGLE_API_URL: &str = "https://generativelanguage.googleapis.com";
 const DEFAULT_GOOGLE_VERTEX_API_URL: &str = "https://aiplatform.googleapis.com";
 const DEFAULT_RUNWARE_MODEL: &str = "bytedance:seedream@5.0-lite";
+const PODCAST_RUNWARE_MODEL: &str = "meta:muse@image";
 const DEFAULT_GOOGLE_IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
-const SEEDREAM_INFOGRAPHIC_WIDTH: u32 = 2_848;
-const SEEDREAM_INFOGRAPHIC_HEIGHT: u32 = 1_600;
-const DEFAULT_INFOGRAPHIC_WIDTH: u32 = 1_024;
-const DEFAULT_INFOGRAPHIC_HEIGHT: u32 = 576;
 const RUNWARE_INLINE_ATTEMPTS: usize = 2;
 const RUNWARE_IMAGE_MAX_REDIRECTS: usize = 3;
 const DEFAULT_MAX_IMAGE_BYTES: usize = 30_000_000;
 const MAX_PROVIDER_ERROR_CHARS: usize = 1_000;
 
-const INFOGRAPHIC_NEGATIVE_PROMPT: &str = "readable text, words, letters, numbers, captions, labels, headlines, logos, watermarks, screenshots, website UI, app interface, chart axes, poster, document page, printed page, magazine spread, dashboard, phone screen, tablet screen, desktop monitor, laptop, computer, office workstation";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InfographicProvider {
     Runware,
     Google,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InfographicSubject {
+    General,
+    Podcast,
 }
 
 impl InfographicProvider {
@@ -255,6 +260,7 @@ impl ImageGenerationGateway {
         prompt: &str,
         content_id: i64,
         task_id: i64,
+        subject: InfographicSubject,
         usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
         if prompt.trim().is_empty() {
@@ -263,7 +269,13 @@ impl ImageGenerationGateway {
         match self.config.infographic_provider {
             InfographicProvider::Runware => {
                 match self
-                    .generate_runware(prompt, content_id, task_id, Arc::clone(&usage_observer))
+                    .generate_runware(
+                        prompt,
+                        content_id,
+                        task_id,
+                        subject,
+                        Arc::clone(&usage_observer),
+                    )
                     .await
                 {
                     Ok(image) => Ok(image),
@@ -292,29 +304,17 @@ impl ImageGenerationGateway {
         prompt: &str,
         content_id: i64,
         task_id: i64,
+        subject: InfographicSubject,
         usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
         let api_key = self.config.runware_api_key.as_ref().ok_or_else(|| {
             ImageGenerationError::InvalidConfiguration("RUNWARE_API_KEY is missing".to_owned())
         })?;
         let mut last_error = None;
-        for model in &self.config.runware_models {
-            let options = runware_request_options(model);
+        for model in runware_models_for_subject(subject, &self.config.runware_models) {
             for inline_attempt in 1..=RUNWARE_INLINE_ATTEMPTS {
                 let task_uuid = Uuid::new_v4().to_string();
-                let request = RunwareRequest {
-                    task_type: "imageInference",
-                    task_uuid: &task_uuid,
-                    include_cost: true,
-                    output_type: "URL",
-                    output_format: "PNG",
-                    positive_prompt: prompt,
-                    model,
-                    number_results: 1,
-                    width: options.width,
-                    height: options.height,
-                    negative_prompt: options.negative_prompt,
-                };
+                let request = RunwareRequest::new(prompt, model, &task_uuid);
                 let result = self
                     .runware_attempt(
                         api_key,
@@ -325,6 +325,7 @@ impl ImageGenerationGateway {
                     .await;
                 match result {
                     Ok(image) => return Ok(image),
+                    Err(error) if error.runware_concurrency_limited() => return Err(error),
                     Err(error) => {
                         let retry_inline =
                             error.retryable() && inline_attempt < RUNWARE_INLINE_ATTEMPTS;
@@ -592,6 +593,19 @@ impl ImageGenerationGateway {
     }
 }
 
+fn runware_models_for_subject(
+    subject: InfographicSubject,
+    configured: &[String],
+) -> impl Iterator<Item = &str> {
+    let podcast_model = (subject == InfographicSubject::Podcast).then_some(PODCAST_RUNWARE_MODEL);
+    podcast_model.into_iter().chain(
+        configured
+            .iter()
+            .map(String::as_str)
+            .filter(move |model| Some(*model) != podcast_model),
+    )
+}
+
 async fn observe_image_usage(
     observer: Arc<dyn ImageGenerationUsageObserver>,
     usage: ImageGenerationUsage,
@@ -600,46 +614,6 @@ async fn observe_image_usage(
         .observe(usage)
         .await
         .map_err(ImageGenerationError::UsageObservation)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RunwareOptions {
-    width: u32,
-    height: u32,
-    negative_prompt: Option<&'static str>,
-}
-
-fn runware_request_options(model: &str) -> RunwareOptions {
-    if model == DEFAULT_RUNWARE_MODEL {
-        return RunwareOptions {
-            width: SEEDREAM_INFOGRAPHIC_WIDTH,
-            height: SEEDREAM_INFOGRAPHIC_HEIGHT,
-            negative_prompt: None,
-        };
-    }
-    RunwareOptions {
-        width: DEFAULT_INFOGRAPHIC_WIDTH,
-        height: DEFAULT_INFOGRAPHIC_HEIGHT,
-        negative_prompt: Some(INFOGRAPHIC_NEGATIVE_PROMPT),
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RunwareRequest<'a> {
-    task_type: &'static str,
-    #[serde(rename = "taskUUID")]
-    task_uuid: &'a str,
-    include_cost: bool,
-    output_type: &'static str,
-    output_format: &'static str,
-    positive_prompt: &'a str,
-    model: &'a str,
-    number_results: u8,
-    width: u32,
-    height: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    negative_prompt: Option<&'static str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -975,7 +949,8 @@ impl ImageGenerationError {
                 message,
                 ..
             } => {
-                status.is_server_error()
+                self.runware_concurrency_limited()
+                    || status.is_server_error()
                     || *status == StatusCode::TOO_MANY_REQUESTS
                     || parameter.as_deref() == Some("taskUUID")
                     || message.to_ascii_lowercase().contains("taskuuid")
@@ -1008,12 +983,21 @@ impl ImageGenerationError {
             Self::RunwareStatus {
                 status, parameter, ..
             } => {
-                status.is_client_error()
-                    || status.is_server_error()
-                    || parameter.as_deref() == Some("taskUUID")
+                !self.runware_concurrency_limited()
+                    && (status.is_client_error()
+                        || status.is_server_error()
+                        || parameter.as_deref() == Some("taskUUID"))
             }
             _ => false,
         }
+    }
+
+    fn runware_concurrency_limited(&self) -> bool {
+        matches!(
+            self,
+            Self::RunwareStatus { code: Some(code), .. }
+                if code == "concurrentRequestLimitExceeded"
+        )
     }
 
     fn model_unavailable(&self) -> bool {

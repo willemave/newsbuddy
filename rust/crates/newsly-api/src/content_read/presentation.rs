@@ -6,6 +6,7 @@ use newsly_contracts::{
     ContentSummaryQuote, ContentSummaryResponse, ContentType, DetectedFeed, NewsItemDetailResponse,
     NewsItemSummaryResponse, SavedSource, SummaryKind, SummaryVersion,
 };
+use newsly_db::content_metadata::PODCAST_ARTWORK_SCENE_KEY;
 use newsly_db::content_metadata::source_presentation::{clean_title, content_display_title};
 use newsly_db::{ContentDetailProjection, NewsItemProjection};
 use serde_json::{Map, Number, Value};
@@ -25,7 +26,7 @@ const API_METADATA_REDACT_KEYS: &[&str] = &[
     "share_and_chat_user_ids",
     "share_and_chat_requests",
 ];
-const API_METADATA_INTERNAL_KEYS: &[&str] = &["domain", "processing"];
+const API_METADATA_INTERNAL_KEYS: &[&str] = &["domain", "processing", PODCAST_ARTWORK_SCENE_KEY];
 const API_METADATA_LARGE_VALUE_ALLOWLIST: &[&str] = &[
     "summary",
     "article",
@@ -1266,15 +1267,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn public_content_metadata_redacts_shared_submitters_and_initial_prompts() {
+    fn public_content_metadata_redacts_shared_submitters_and_internal_prompts() {
         let metadata = sanitize_metadata_for_api(runtime_metadata(&json!({
             "submitted_by_user_id":1,"share_and_chat_user_ids":[1,2],
-            "processing":{"share_and_chat_requests":[{"user_id":2,"initial_message":"private"}],"detected_feed":{"url":"feed"}}
+            "processing":{
+                "share_and_chat_requests":[{"user_id":2,"initial_message":"private"}],
+                "detected_feed":{"url":"feed"},
+                "podcast_artwork_scene":"An internal editorial scene."
+            }
         })));
         for key in [
             "submitted_by_user_id",
             "share_and_chat_user_ids",
             "share_and_chat_requests",
+            PODCAST_ARTWORK_SCENE_KEY,
         ] {
             assert!(!metadata.contains_key(key));
         }
