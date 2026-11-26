@@ -137,6 +137,10 @@ enum E2ETestLaunch {
     static let openChatSessionIdKey = "newslyE2EOpenChatSessionId"
     static let openContentIdKey = "newslyE2EOpenContentId"
     static let openContentTypeKey = "newslyE2EOpenContentType"
+    static let openChatAttachedKey = "newslyE2EOpenChatAttached"
+    static let briefingLensKey = "newslyE2EBriefingLens"
+    static let newsColumnsKey = "newslyE2ENewsColumns"
+    static let openScreenKey = "newslyE2EOpenScreen"
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
     static let audioFixtureKey = "newslyE2EAudioFixture"
@@ -197,6 +201,38 @@ enum E2ETestLaunch {
     static var openContentType: String? {
         guard isEnabled else { return nil }
         return string(for: openContentTypeKey)
+    }
+
+    /// Opens `openChatSessionId` attached to the opened content (as a
+    /// content-started chat would) instead of as a global Knowledge route.
+    static var openChatAttached: Bool {
+        isEnabled && bool(for: openChatAttachedKey)
+    }
+
+    /// Overrides the open-display News columns preference: `single`/`double`.
+    static var newsColumns: String? {
+        guard isEnabled else { return nil }
+        return string(for: newsColumnsKey)
+    }
+
+    /// A root screen to open at launch.
+    enum OpenScreen: String {
+        case knowledge
+        case settings
+        /// Settings scrolled to Display.
+        case settingsDisplay
+        case chatHistory
+    }
+
+    static var openScreen: OpenScreen? {
+        guard isEnabled else { return nil }
+        return string(for: openScreenKey).flatMap(OpenScreen.init(rawValue:))
+    }
+
+    /// Selects a Briefing tier at launch: `news` or a lens key.
+    static var briefingLens: String? {
+        guard isEnabled else { return nil }
+        return string(for: briefingLensKey)
     }
 
     static var fakeSpeechEnabled: Bool {

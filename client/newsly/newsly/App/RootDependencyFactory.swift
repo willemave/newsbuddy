@@ -104,6 +104,7 @@ final class RootDependencyFactory {
             ),
             activeChatSessionManager: activeChatSessionManager,
             chatNavigation: chatNavigation,
+            attachedChat: AttachedChatController(),
             readStateCache: readStateCache,
             tabCoordinator: makeTabCoordinator(userID: user.id),
             knowledgeViewModel: makeKnowledgeTimelineViewModel(
@@ -147,13 +148,11 @@ final class RootDependencyFactory {
     }
 
     func makeDetailChatCoordinator(
-        chatSessionManager: ActiveChatSessionManager,
-        chatRouter: ChatNavigationCoordinator
+        chatSessionManager: ActiveChatSessionManager
     ) -> DetailChatCoordinator {
         DetailChatCoordinator(
             chatSessionManager: chatSessionManager,
             chatService: dependencies.chatService,
-            chatRouter: chatRouter,
             toastPresenter: dependencies.toastService
         )
     }

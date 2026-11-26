@@ -151,6 +151,15 @@ struct BriefingLensPageView: View, Equatable {
     let onScrolledDown: () -> Void
     let onMarkSegmentSeen: (APIBriefingSegment) -> Void
     let onSetHeaderPinned: (Bool) -> Void
+    /// The open display's arrangement of this page. Nil is the phone pager.
+    var columnLayout: BriefingColumnLayout? = nil
+    /// Keeps a segment in view when News reflows (a story opens or closes).
+    var anchorRequest: BriefingScrollAnchorRequest? = nil
+
+    private var columnSplit: BriefingColumnSplit? { columnLayout?.columnSplit }
+    private var singleColumnMaxWidth: CGFloat? { columnLayout?.singleColumnMaxWidth }
+    private var presentsCardsAsRows: Bool { columnLayout?.presentsCardsAsRows ?? false }
+    private var selectedSourceKey: String? { columnLayout?.selectedSourceKey }
 
     @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
     @State private var isPinned = false
@@ -185,6 +194,8 @@ struct BriefingLensPageView: View, Equatable {
             && lhs.topContentInset == rhs.topContentInset
             && lhs.screenEdgeInsets == rhs.screenEdgeInsets
             && lhs.savedSources === rhs.savedSources
+            && lhs.columnLayout == rhs.columnLayout
+            && lhs.anchorRequest == rhs.anchorRequest
     }
 
     /// One scroll observer owns both chrome movement and read passage. The
@@ -259,33 +270,50 @@ struct BriefingLensPageView: View, Equatable {
                 let firstSegmentID = renderModel.segments.first?.id
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: renderModel.usesCards ? 20 : 24) {
+                        LazyVStack(alignment: .leading, spacing: segmentSpacing(for: renderModel)) {
                             Color.clear
                                 .frame(height: 0)
                                 .id(Self.topAnchor)
 
-                            ForEach(renderModel.segments) { segmentModel in
-                                let segment = segmentModel.segment
-                                VStack(alignment: .leading, spacing: 16) {
-                                    if renderModel.timelineSeparatorSegmentIDs.contains(segment.id) {
-                                        BriefingTimelineSeparator(date: segment.createdAt)
+                            if let columnSplit {
+                                let columns = briefingSpreadColumns(renderModel.segments)
+                                HStack(alignment: .top, spacing: columnSplit.gap) {
+                                    LazyVStack(alignment: .leading, spacing: segmentSpacing(for: renderModel)) {
+                                        ForEach(columns.leading) { segmentModel in
+                                            segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
+                                        }
                                     }
+                                    .padding(.leading, Spacing.appHorizontalMargin)
+                                    .padding(.trailing, Self.spreadInnerMargin)
+                                    .frame(width: columnSplit.leadingWidth, alignment: .leading)
 
-                                    segmentView(segmentModel)
-                                        .onAppear {
-                                            guard segment.id == firstSegmentID,
-                                                  !hasReportedFirstPassage else { return }
-                                            hasReportedFirstPassage = true
-                                            onFirstPassageVisible()
+                                    LazyVStack(alignment: .leading, spacing: segmentSpacing(for: renderModel)) {
+                                        ForEach(columns.trailing) { segmentModel in
+                                            segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
                                         }
-                                        .id(segment.id)
-                                        .onGeometryChange(for: CGRect.self) { proxy in
-                                            proxy.frame(in: .named(contentIdentity))
-                                        } action: { _, frame in
-                                            recordSegmentFrame(frame, segmentID: segment.id)
-                                        }
+                                    }
+                                    .padding(.leading, Self.spreadInnerMargin)
+                                    .padding(.trailing, Spacing.appHorizontalMargin)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .padding(.horizontal, Spacing.appHorizontalMargin)
+                            } else if presentsCardsAsRows {
+                                // Lens order, like the cards: no date dividers (B5).
+                                ForEach(renderModel.segments) { segmentModel in
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        if segmentModel.segment.id != firstSegmentID {
+                                            KnowledgeTimelineRowDivider()
+                                        }
+                                        segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
+                                    }
+                                }
+                            } else {
+                                ForEach(renderModel.segments) { segmentModel in
+                                    segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
+                                        .padding(.horizontal, Spacing.appHorizontalMargin)
+                                        // Leading within the (centred) reading column.
+                                        .frame(maxWidth: singleColumnMaxWidth ?? .infinity, alignment: .leading)
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
 
                             if let firstRunProgress, firstRunProgress.processing > 0 || firstRunProgress.pendingSources > 0 || firstRunProgress.failed > 0 {
@@ -318,6 +346,10 @@ struct BriefingLensPageView: View, Equatable {
                         using: proxy,
                         isEnabled: shouldScrollToTop
                     )
+                    .onChange(of: anchorRequest) { _, request in
+                        guard let request else { return }
+                        proxy.scrollTo(request.segmentID, anchor: .top)
+                    }
                     .id(contentIdentity)
                     .contentMargins(.top, pageInsets.contentMarginTop)
                     .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
@@ -408,9 +440,58 @@ struct BriefingLensPageView: View, Equatable {
         }
     }
 
+    private static let spreadInnerMargin: CGFloat = 12
+
+    private func segmentSpacing(for renderModel: BriefingLensRenderModel) -> CGFloat {
+        guard renderModel.usesCards else { return 24 }
+        return presentsCardsAsRows ? 0 : 20
+    }
+
+    private func segmentRow(
+        _ segmentModel: BriefingSegmentRenderModel,
+        in renderModel: BriefingLensRenderModel,
+        firstSegmentID: Int?
+    ) -> some View {
+        let segment = segmentModel.segment
+        return VStack(alignment: .leading, spacing: 16) {
+            if renderModel.timelineSeparatorSegmentIDs.contains(segment.id) {
+                BriefingTimelineSeparator(date: segment.createdAt)
+            }
+
+            segmentView(segmentModel)
+                .onAppear {
+                    guard segment.id == firstSegmentID,
+                          !hasReportedFirstPassage else { return }
+                    hasReportedFirstPassage = true
+                    onFirstPassageVisible()
+                }
+                .id(segment.id)
+                .onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .named(contentIdentity))
+                } action: { _, frame in
+                    recordSegmentFrame(frame, segmentID: segment.id)
+                }
+        }
+    }
+
+    private func isSelected(_ segmentModel: BriefingSegmentRenderModel) -> Bool {
+        guard let selectedSourceKey else { return false }
+        return segmentModel.segment.sourceKeys.contains(selectedSourceKey)
+    }
+
     @ViewBuilder
     private func segmentView(_ segmentModel: BriefingSegmentRenderModel) -> some View {
-        if let card = segmentModel.card {
+        if let card = segmentModel.card, presentsCardsAsRows {
+            BriefingSourceListRow(
+                model: segmentModel,
+                card: card,
+                isSelected: isSelected(segmentModel),
+                savedSources: savedSources,
+                onOpenSource: onOpenSource,
+                onSourceAction: onSourceAction,
+                onMarkRead: { onMarkSegmentSeen(segmentModel.segment) }
+            )
+        } else if let card = segmentModel.card {
             BriefingSourceCardView(
                 model: segmentModel,
                 card: card,
@@ -421,6 +502,14 @@ struct BriefingLensPageView: View, Equatable {
                 onDig: onDig,
                 onMarkRead: { onMarkSegmentSeen(segmentModel.segment) }
             )
+            .overlay {
+                // The card open beside News on the open display.
+                if isSelected(segmentModel) {
+                    RoundedRectangle(cornerRadius: CornerRadius.card, style: .continuous)
+                        .strokeBorder(Color.appChromeAccent, lineWidth: 2)
+                        .allowsHitTesting(false)
+                }
+            }
             // One centered column on wide screens; phones fill the margins.
             .frame(maxWidth: Self.maximumCardWidth)
             .frame(maxWidth: .infinity)
@@ -666,4 +755,12 @@ struct BriefingTierProgressView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("briefing.tier_progress.\(progress.tier)")
     }
+}
+
+/// Asks a lens page to bring a segment to the top, for example the passage a
+/// reader opened when News reflows beside the story. The generation makes a
+/// repeat request for the same segment fire again.
+struct BriefingScrollAnchorRequest: Equatable {
+    let segmentID: Int
+    let generation: Int
 }

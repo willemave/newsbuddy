@@ -26,14 +26,15 @@ enum DetailSwipePolicy {
         origin: DetailSwipeOrigin,
         translation: CGSize,
         currentIndex: Int,
-        itemCount: Int
+        itemCount: Int,
+        canDismiss: Bool = true
     ) -> CGFloat? {
         guard isHorizontalSwipe(translation, threshold: previewThreshold) else {
             return nil
         }
 
         switch origin {
-        case .leadingEdge where translation.width > previewThreshold:
+        case .leadingEdge where translation.width > previewThreshold && (currentIndex > 0 || canDismiss):
             return translation.width * 0.6
         case .trailingEdge where translation.width < -previewThreshold && currentIndex < itemCount - 1:
             return translation.width * 0.6
@@ -46,7 +47,8 @@ enum DetailSwipePolicy {
         origin: DetailSwipeOrigin,
         translation: CGSize,
         currentIndex: Int,
-        itemCount: Int
+        itemCount: Int,
+        canDismiss: Bool = true
     ) -> DetailSwipeAction {
         guard isHorizontalSwipe(translation, threshold: actionThreshold) else {
             return .ignore
@@ -57,7 +59,7 @@ enum DetailSwipePolicy {
             where translation.width > actionThreshold
                 && currentIndex > 0:
             return .previous
-        case .leadingEdge where translation.width > actionThreshold:
+        case .leadingEdge where translation.width > actionThreshold && canDismiss:
             return .dismiss
         case .trailingEdge where translation.width < -actionThreshold && currentIndex < itemCount - 1:
             return .next
@@ -79,7 +81,9 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     let surfaceName: String
     let edgeWidth: CGFloat
     let topHitExclusionHeight: CGFloat
-    let onDismiss: () -> Void
+    /// Nil where the detail has nothing to return to (the open display's
+    /// pane root), so a leading-edge swipe does nothing there.
+    let onDismiss: (() -> Void)?
     let onNext: () -> Void
     let onPrevious: () -> Void
     let content: Content
@@ -96,7 +100,7 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         surfaceName: String,
         edgeWidth: CGFloat,
         topHitExclusionHeight: CGFloat = 0,
-        onDismiss: @escaping () -> Void,
+        onDismiss: (() -> Void)?,
         onNext: @escaping () -> Void,
         onPrevious: @escaping () -> Void,
         @ViewBuilder content: () -> Content
@@ -164,7 +168,8 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                     origin: origin,
                     translation: value.translation,
                     currentIndex: currentIndex,
-                    itemCount: contentIds.count
+                    itemCount: contentIds.count,
+                    canDismiss: onDismiss != nil
                 ) else {
                     return
                 }
@@ -192,7 +197,8 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                     origin: origin,
                     translation: value.translation,
                     currentIndex: currentIndex,
-                    itemCount: contentIds.count
+                    itemCount: contentIds.count,
+                    canDismiss: onDismiss != nil
                 )
 
                 switch action {
@@ -218,7 +224,7 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
             dragAmount = viewportWidth
         } completion: {
-            onDismiss()
+            onDismiss?()
         }
     }
 

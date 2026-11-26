@@ -106,6 +106,7 @@ struct KnowledgeSearchView: View {
             .scrollContentBackground(.hidden)
         }
         .background(Color.surfacePrimary)
+        .extendsToOpenDisplayEdge()
         .onPaginationThresholdReached {
             await viewModel.loadMoreContent()
         }

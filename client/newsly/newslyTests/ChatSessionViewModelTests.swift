@@ -921,6 +921,47 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.session?.contentId, 7)
     }
 
+    func testOverlappingLoadsSendATopicSessionsTopicOnce() async {
+        let chatService = MockChatSessionService(
+            getSessionHandler: { _ in
+                ChatSessionDetail(
+                    session: Self.session(contentId: 7, hasMessages: false, topic: "Why it matters"),
+                    messages: []
+                )
+            },
+            sendMessageHandler: { sessionId, message in
+                SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(id: 101, role: .user, content: message, status: .processing),
+                    messageId: 501,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(id: 201, role: .assistant, content: "Because", status: .completed)
+                )
+            }
+        )
+        let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        async let first: Void = viewModel.loadSession()
+        async let second: Void = viewModel.loadSession()
+        _ = await (first, second)
+        _ = await waitUntil { !viewModel.isSending }
+
+        XCTAssertEqual(chatService.sentMessages.map(\.message), ["Why it matters"])
+    }
+
     private func makeSuccessfulVoiceSendService() -> MockChatSessionService {
         var latestMessage = ""
         return MockChatSessionService(
@@ -978,7 +1019,8 @@ final class ChatSessionViewModelTests: XCTestCase {
         newsItemId: Int? = nil,
         articleTitle: String? = nil,
         hasPendingMessage: Bool = false,
-        hasMessages: Bool = true
+        hasMessages: Bool = true,
+        topic: String? = nil
     ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: 42,
@@ -986,7 +1028,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             newsItemId: newsItemId,
             title: "Chat",
             sessionType: "knowledge_chat",
-            topic: nil,
+            topic: topic,
             llmProvider: "openai",
             llmModel: "openai:gpt-5.5",
             createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
@@ -1197,5 +1239,139 @@ private actor AsyncGate {
         for continuation in continuations {
             continuation.resume()
         }
+    }
+}
+
+@MainActor
+final class AttachedChatControllerTests: XCTestCase {
+    private func makeViewModel(route: ChatSessionRoute) -> ChatSessionViewModel {
+        ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
+            route: route,
+            dependencies: .test(transcriptionService: MockChatSpeechTranscriber(transcript: "")),
+            initialVoiceDictationAvailable: false
+        )
+    }
+
+    func testPresentAttachesRouteToHost() {
+        let controller = AttachedChatController()
+        let route = ChatSessionRoute(sessionId: 7, contentId: 11)
+
+        controller.present(route, host: .root)
+
+        XCTAssertEqual(controller.presentation?.route, route)
+        XCTAssertEqual(controller.presentation?.host, .root)
+    }
+
+    func testRepresentingSameRouteMovesHostAndKeepsViewModel() {
+        let controller = AttachedChatController()
+        let route = ChatSessionRoute(sessionId: 7, contentId: 11)
+        controller.present(route, host: .reader)
+        let presentation = try! XCTUnwrap(controller.presentation)
+        let viewModel = controller.viewModel(for: presentation) { makeViewModel(route: route) }
+        viewModel.inputText = "draft in progress"
+
+        controller.present(route, host: .root)
+        let moved = try! XCTUnwrap(controller.presentation)
+        let rehosted = controller.viewModel(for: moved) { makeViewModel(route: route) }
+
+        XCTAssertEqual(moved.id, presentation.id)
+        XCTAssertEqual(moved.host, .root)
+        XCTAssertTrue(rehosted === viewModel)
+        XCTAssertEqual(rehosted.inputText, "draft in progress")
+    }
+
+    func testDifferentRouteReplacesPresentationAndViewModel() {
+        let controller = AttachedChatController()
+        let first = ChatSessionRoute(sessionId: 7, contentId: 11)
+        controller.present(first, host: .root)
+        let firstPresentation = try! XCTUnwrap(controller.presentation)
+        let firstViewModel = controller.viewModel(for: firstPresentation) { makeViewModel(route: first) }
+
+        let second = ChatSessionRoute(sessionId: 8, contentId: 12)
+        controller.present(second, host: .root)
+        let secondPresentation = try! XCTUnwrap(controller.presentation)
+        let secondViewModel = controller.viewModel(for: secondPresentation) { makeViewModel(route: second) }
+
+        XCTAssertNotEqual(secondPresentation.id, firstPresentation.id)
+        XCTAssertEqual(secondPresentation.route, second)
+        XCTAssertFalse(secondViewModel === firstViewModel)
+    }
+
+    func testMoveOnlyAppliesToMatchingHost() {
+        let controller = AttachedChatController()
+        let route = ChatSessionRoute(sessionId: 7, contentId: 11)
+        controller.present(route, host: .settings)
+
+        controller.move(from: .reader, to: .root)
+        XCTAssertEqual(controller.presentation?.host, .settings)
+
+        controller.move(from: .settings, to: .root)
+        XCTAssertEqual(controller.presentation?.host, .root)
+    }
+
+    func testCloseEndsPresentationAndReleasesViewModel() {
+        let controller = AttachedChatController()
+        let route = ChatSessionRoute(sessionId: 7, contentId: 11)
+        controller.present(route, host: .root)
+        let presentation = try! XCTUnwrap(controller.presentation)
+        let viewModel = controller.viewModel(for: presentation) { makeViewModel(route: route) }
+
+        controller.close()
+        controller.present(route, host: .root)
+        let reopened = try! XCTUnwrap(controller.presentation)
+        let fresh = controller.viewModel(for: reopened) { makeViewModel(route: route) }
+
+        XCTAssertNotEqual(reopened.id, presentation.id)
+        XCTAssertFalse(fresh === viewModel)
+    }
+}
+
+@MainActor
+final class AttachedChatContinuationTests: XCTestCase {
+    func testSameSessionWithoutNewTurnContinuesTheChat() {
+        let open = ChatSessionRoute(sessionId: 7, contentId: 11, focusComposerOnAppear: true)
+        let banner = ChatSessionRoute(sessionId: 7, contentId: 11)
+
+        XCTAssertTrue(AttachedChatController.continues(open, with: banner))
+        XCTAssertTrue(AttachedChatController.continues(open, with: open))
+    }
+
+    func testNewTurnOrOtherSessionReplacesTheChat() {
+        let open = ChatSessionRoute(sessionId: 7, contentId: 11)
+        let dig = ChatSessionRoute(
+            sessionId: 7,
+            contentId: 11,
+            initialUserMessageText: "Dig deeper",
+            pendingMessageId: 99
+        )
+        let other = ChatSessionRoute(sessionId: 8, contentId: 11)
+
+        XCTAssertFalse(AttachedChatController.continues(open, with: dig))
+        XCTAssertFalse(AttachedChatController.continues(open, with: other))
+    }
+
+    func testStaleHostCannotReplaceTheCurrentViewModel() {
+        let controller = AttachedChatController()
+        let lifecycle = AppLifecycle()
+        let make = { (route: ChatSessionRoute) in
+            ChatSessionViewModel(
+                lifecycle: lifecycle,
+                route: route,
+                dependencies: .test(transcriptionService: MockChatSpeechTranscriber(transcript: "")),
+                initialVoiceDictationAvailable: false
+            )
+        }
+        let first = ChatSessionRoute(sessionId: 1)
+        controller.present(first, host: .root)
+        let stale = try! XCTUnwrap(controller.presentation)
+
+        let second = ChatSessionRoute(sessionId: 2)
+        controller.present(second, host: .root)
+        let current = try! XCTUnwrap(controller.presentation)
+        let currentModel = controller.viewModel(for: current) { make(second) }
+        _ = controller.viewModel(for: stale) { make(first) }
+
+        XCTAssertTrue(controller.viewModel(for: current) { make(second) } === currentModel)
     }
 }

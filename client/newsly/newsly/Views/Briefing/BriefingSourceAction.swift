@@ -27,9 +27,16 @@ enum BriefingSourceAction: String, CaseIterable, Identifiable {
 extension View {
     func briefingSourceMenu(
         sourceKey: String?,
-        onAction: ((String, BriefingSourceAction) -> Void)?
+        onAction: ((String, BriefingSourceAction) -> Void)?,
+        onMarkRead: (() -> Void)? = nil
     ) -> some View {
         contextMenu {
+            if let onMarkRead {
+                Button(action: onMarkRead) {
+                    Label("Mark as Read", systemImage: "checkmark.circle")
+                }
+                .accessibilityIdentifier("briefing.source_action.markRead")
+            }
             if let sourceKey, let onAction {
                 ForEach(BriefingSourceAction.allCases) { action in
                     Button {

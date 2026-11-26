@@ -14,6 +14,7 @@ struct ChatSessionView: View {
     private let route: ChatSessionRoute
     private let onShowHistory: (() -> Void)?
     private let onClose: (() -> Void)?
+    private let attachment: (AttachedChatController.Presentation, AttachedChatController)?
 
     @MainActor
     init(
@@ -24,19 +25,55 @@ struct ChatSessionView: View {
         self.route = route
         self.onShowHistory = onShowHistory
         self.onClose = onClose
+        self.attachment = nil
+    }
+
+    /// A chat attached to its source. The controller owns the view model, so
+    /// this view can be torn down and re-created in another host (a sheet or
+    /// an open-display page) without ending the chat.
+    @MainActor
+    init(
+        attached presentation: AttachedChatController.Presentation,
+        controller: AttachedChatController
+    ) {
+        self.route = presentation.route
+        self.onShowHistory = nil
+        self.onClose = { controller.close() }
+        self.attachment = (presentation, controller)
     }
 
     var body: some View {
-        ChatSessionContent(
-            route: route,
-            lifecycle: lifecycle,
-            dependencies: dependencyFactory.makeChatDependencies(
-                activeSessionManager: activeSessionManager
-            ),
-            feedOptionActionModel: dependencyFactory.makeAssistantFeedOptionActionModel(),
-            onShowHistory: onShowHistory,
-            onClose: onClose
+        let dependencies = dependencyFactory.makeChatDependencies(
+            activeSessionManager: activeSessionManager
         )
+        if let (presentation, controller) = attachment {
+            ChatSessionContent(
+                route: route,
+                lifecycle: lifecycle,
+                dependencies: dependencies,
+                feedOptionActionModel: controller.feedOptionActionModel {
+                    dependencyFactory.makeAssistantFeedOptionActionModel()
+                },
+                attachedViewModel: controller.viewModel(for: presentation) {
+                    ChatSessionViewModel(
+                        lifecycle: lifecycle,
+                        route: route,
+                        dependencies: dependencies
+                    )
+                },
+                onClose: onClose
+            )
+            .id(presentation.id)
+        } else {
+            ChatSessionContent(
+                route: route,
+                lifecycle: lifecycle,
+                dependencies: dependencies,
+                feedOptionActionModel: dependencyFactory.makeAssistantFeedOptionActionModel(),
+                onShowHistory: onShowHistory,
+                onClose: onClose
+            )
+        }
     }
 }
 
@@ -49,6 +86,10 @@ private struct ChatSessionContent: View {
     private let dependencies: ChatDependencies
     private let onShowHistory: (() -> Void)?
     private let onClose: (() -> Void)?
+    /// Attached chats are owned by `AttachedChatController`: this view never
+    /// tears the view model down, and it has no edge-back swipe because it is
+    /// a sheet or pane rather than a pushed route.
+    private let isAttached: Bool
 
     @State private var viewModel: ChatSessionViewModel
     @State private var feedOptionActionModel: AssistantFeedOptionActionModel
@@ -56,6 +97,9 @@ private struct ChatSessionContent: View {
     @State private var scrollToBottomRequest = 0
     @State private var edgeBackDragOffset: CGFloat = 0
     @State private var edgeBackSwipeFeedbackTrigger = 0
+    /// The chat's own width, so the edge-back swipe slides exactly off its
+    /// container (a column or the full screen) rather than the device screen.
+    @State private var containerWidth: CGFloat = 0
 
     @MainActor
     init(
@@ -63,15 +107,17 @@ private struct ChatSessionContent: View {
         lifecycle: AppLifecycle,
         dependencies: ChatDependencies,
         feedOptionActionModel: AssistantFeedOptionActionModel,
+        attachedViewModel: ChatSessionViewModel? = nil,
         onShowHistory: (() -> Void)? = nil,
         onClose: (() -> Void)? = nil
     ) {
         self.route = route
         self.lifecycle = lifecycle
         self.dependencies = dependencies
+        self.isAttached = attachedViewModel != nil
         _feedOptionActionModel = State(initialValue: feedOptionActionModel)
         _viewModel = State(
-            initialValue: ChatSessionViewModel(
+            initialValue: attachedViewModel ?? ChatSessionViewModel(
                 lifecycle: lifecycle,
                 route: route,
                 dependencies: dependencies
@@ -86,7 +132,9 @@ private struct ChatSessionContent: View {
         // scroll beneath both and get the system soft scroll-edge effect.
         messageListView
             .overlay(alignment: .leading) {
-                edgeBackSwipeZone
+                if !isAttached {
+                    edgeBackSwipeZone
+                }
             }
             .safeAreaBar(edge: .top, spacing: 0) {
                 chatHeader
@@ -95,13 +143,23 @@ private struct ChatSessionContent: View {
                 bottomDock
             }
             .offset(x: edgeBackDragOffset)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                containerWidth = width
+            }
             .scrollDismissesKeyboard(.interactively)
+            .extendsToOpenDisplayEdge()
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
             .task(id: route.stableKey) {
                 viewModel.handleAppear()
                 dependencies.activeSessionManager.stopTracking(sessionId: viewModel.sessionId)
+                // A re-hosted attached chat keeps its transcript and any
+                // in-flight turn; reloading would race the live send.
+                if isAttached, viewModel.hasCompletedInitialLoad {
+                    viewModel.resumeAttachedPollingIfNeeded()
+                    return
+                }
                 await viewModel.loadSession()
                 await viewModel.checkAndRefreshVoiceDictation()
                 if route.focusComposerOnAppear {
@@ -115,6 +173,7 @@ private struct ChatSessionContent: View {
                 await viewModel.resumeAfterActivationIfNeeded()
             }
             .onDisappear {
+                guard !isAttached else { return }
                 viewModel.handleDisappear()
             }
             .sensoryFeedback(.impact(weight: .light), trigger: edgeBackSwipeFeedbackTrigger)
@@ -159,8 +218,14 @@ private struct ChatSessionContent: View {
 
     private var chatHeader: some View {
         HStack(spacing: 12) {
-            FloatingBackButton(style: .surface) {
-                closeChat()
+            if isAttached {
+                // Leading, like the back button it replaces: on the open
+                // display the trailing corner sits under the floating clock.
+                attachedCloseButton
+            } else {
+                FloatingBackButton(style: .surface) {
+                    closeChat()
+                }
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -185,6 +250,20 @@ private struct ChatSessionContent: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var attachedCloseButton: some View {
+        Button(action: closeChat) {
+            Image(systemName: "xmark")
+                .font(.appSymbol(size: 15, weight: .semibold))
+                .foregroundStyle(Color.onSurface)
+                .frame(width: DetailDesign.floatingBackButtonSize, height: DetailDesign.floatingBackButtonSize)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close chat")
+        .accessibilityIdentifier("chat.attached.close")
+    }
+
     private var edgeBackSwipeZone: some View {
         Color.clear
             .frame(width: ChatSessionDesign.edgeBackSwipeWidth)
@@ -206,9 +285,8 @@ private struct ChatSessionContent: View {
                 }
 
                 edgeBackSwipeFeedbackTrigger += 1
-                let dismissWidth = activeScreenWidth
                 withAnimation(AppMotion.subtle) {
-                    edgeBackDragOffset = dismissWidth
+                    edgeBackDragOffset = max(containerWidth, value.translation.width)
                 } completion: {
                     closeChat()
                     edgeBackDragOffset = 0
@@ -301,15 +379,5 @@ private extension ChatSessionContent {
         withAnimation(AppMotion.press) {
             edgeBackDragOffset = 0
         }
-    }
-
-    var activeScreenWidth: CGFloat {
-        let windowScene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-            ?? UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first
-        return windowScene?.screen.bounds.width ?? 0
     }
 }

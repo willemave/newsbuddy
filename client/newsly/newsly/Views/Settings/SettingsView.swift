@@ -61,6 +61,8 @@ struct SettingsView: View {
                 onOpenDebugMenu: openDebugMenu
             )
         }
+        // E2E visual checks on devices UI automation cannot scroll.
+        .defaultScrollAnchor(E2ETestLaunch.openScreen == .settingsDisplay ? .center : nil)
         .font(.modalBody)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .appNavigationTitle(

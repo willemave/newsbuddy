@@ -11,31 +11,20 @@ import Observation
 @MainActor
 @Observable
 final class ChatNavigationCoordinator {
-    /// App-level sink for chat entry routes originating outside the current
-    /// navigation stack (notifications, content actions, quick actions, etc.).
+    /// App-level sink for global chat routes originating outside the current
+    /// navigation stack (notifications, Knowledge entry points). Chats started
+    /// from content attach to it instead (`AttachedChatController`).
     private var pendingRoutes: [ChatSessionRoute] = []
-    private var navigationReplacementRoutes: Set<ChatSessionRoute> = []
     private(set) var presentedRoute: ChatSessionRoute?
 
     var queuedRoute: ChatSessionRoute? {
         pendingRoutes.first
     }
 
-    var queuedRouteReplacesCurrentNavigation: Bool {
-        guard let queuedRoute else { return false }
-        return navigationReplacementRoutes.contains(queuedRoute)
-    }
-
     init() {}
 
     func open(_ route: ChatSessionRoute) {
         guard presentedRoute != route, !pendingRoutes.contains(route) else { return }
-        pendingRoutes.append(route)
-    }
-
-    func openReplacingCurrentNavigation(_ route: ChatSessionRoute) {
-        guard presentedRoute != route, !pendingRoutes.contains(route) else { return }
-        navigationReplacementRoutes.insert(route)
         pendingRoutes.append(route)
     }
 
@@ -48,7 +37,6 @@ final class ChatNavigationCoordinator {
             return false
         }
         pendingRoutes.removeFirst()
-        navigationReplacementRoutes.remove(route)
         presentedRoute = route
         return true
     }
@@ -63,13 +51,11 @@ final class ChatNavigationCoordinator {
     func clear(route: ChatSessionRoute? = nil) {
         guard let route else {
             pendingRoutes.removeAll()
-            navigationReplacementRoutes.removeAll()
             presentedRoute = nil
             return
         }
 
         pendingRoutes.removeAll { $0 == route }
-        navigationReplacementRoutes.remove(route)
         if presentedRoute == route {
             presentedRoute = nil
         }

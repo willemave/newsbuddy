@@ -35,12 +35,17 @@ private struct BriefingSourceCommand: Identifiable {
 
 struct BriefingView: View {
     @Environment(RootDependencyFactory.self) private var dependencyFactory
-    @Environment(ChatNavigationCoordinator.self) private var chatNavigation
+    @Environment(AttachedChatController.self) private var attachedChat
+    @Environment(\.attachedChatHost) private var attachedChatHost
     @Environment(BriefingSavedSources.self) private var savedSources
 
     let viewModel: BriefingViewModel
     let scrollToTopRequest: Int
     let contentTextSize: DynamicTypeSize
+    let layout: BriefingLayout
+    /// True while News is hidden under a chat on the open display, so its
+    /// passages are not marked read unseen.
+    let isReadTrackingSuspended: Bool
     private let narrationController: BriefingNarrationController
     /// Sources push onto the tab's navigation stack rather than opening a sheet,
     /// so the reader gets the standard back stack and edge-swipe.
@@ -74,18 +79,37 @@ struct BriefingView: View {
     @State private var activeAlert: BriefingViewAlert?
     @State private var markingCategoryTitle: String?
     @State private var markAllReadFeedbackTrigger = 0
+    /// The column never collapses chrome; it gets its own inert model.
+    @State private var columnCollapse = BriefingChromeCollapseModel()
+    /// Read passage pauses while the column resizes (opening or closing a
+    /// foldable, or a story or chat opening beside News), because reflowed passages
+    /// would otherwise cross the boundary without being read.
+    @State private var isColumnResizing = false
+    @State private var columnResizeGeneration = 0
+    /// The source News last anchored to, so the first-appearance anchor
+    /// does not repeat one already applied.
+    @State private var anchoredSourceKey: String?
+    @State private var anchorRequest: BriefingScrollAnchorRequest?
+    /// Bumped to (re)run the delayed anchor task; a newer request cancels an
+    /// older one that has not fired yet.
+    @State private var anchorNonce = 0
+    @State private var anchorTargetSegmentID: Int?
 
     init(
         viewModel: BriefingViewModel,
         playbackService: NarrationPlaybackService,
         scrollToTopRequest: Int = 0,
         contentTextSize: DynamicTypeSize,
+        layout: BriefingLayout = .pager,
+        isReadTrackingSuspended: Bool = false,
         onOpenContent: @escaping (ContentDetailRoute) -> Void,
         onSourceMutation: @escaping () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.scrollToTopRequest = scrollToTopRequest
         self.contentTextSize = contentTextSize
+        self.layout = layout
+        self.isReadTrackingSuspended = isReadTrackingSuspended
         self.narrationController = viewModel.narrationController
         self.onOpenContent = onOpenContent
         self.onSourceMutation = onSourceMutation
@@ -176,7 +200,12 @@ struct BriefingView: View {
                 }
                 .accessibilityIdentifier("briefing.blocking_error")
             case .loaded:
-                briefingContent
+                switch layout {
+                case .pager:
+                    briefingContent
+                case .column(let columnLayout):
+                    columnContent(columnLayout)
+                }
             }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
@@ -602,6 +631,164 @@ struct BriefingView: View {
         }
     }
 
+    // MARK: Open-display column
+
+    private var columnTitle: String {
+        if viewModel.isStartHereSelected { return "Welcome" }
+        if viewModel.isNewsTierSelected { return "News" }
+        return viewModel.selectedLensSummary?.title ?? "Briefing"
+    }
+
+    private var showsColumnCategoryStrip: Bool {
+        !viewModel.isStartHereSelected && viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
+    }
+
+    private func columnContent(_ columnLayout: BriefingColumnLayout) -> some View {
+        let selectedSourceKey = columnLayout.selectedSourceKey
+        let presentsRows = columnLayout.presentsCardsAsRows
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("BRIEFING")
+                        .font(.appCaption2)
+                        .tracking(1)
+                        .foregroundStyle(Color.onSurfaceTertiary)
+                    Text(columnTitle)
+                        .font(.appTitle2)
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("briefing.screen")
+                }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+
+                if showsColumnCategoryStrip {
+                    BriefingCategoryStrip(
+                        viewModel: viewModel,
+                        onSelectLens: { key in viewModel.selectLens(key: key) },
+                        onRequestMarkAllRead: presentMarkAllReadPrompt
+                    )
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, showsColumnCategoryStrip ? 0 : 10)
+
+            Divider()
+
+            columnLensPage(columnLayout)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { oldWidth, newWidth in
+            guard oldWidth > 0, abs(oldWidth - newWidth) > 0.5 else { return }
+            isColumnResizing = true
+            columnResizeGeneration += 1
+        }
+        .task(id: columnResizeGeneration) {
+            guard isColumnResizing else { return }
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            isColumnResizing = false
+        }
+        .onChange(of: selectedSourceKey) { oldKey, newKey in
+            // News reflows when a story opens or closes; keep the passage
+            // the reader opened (or came back from) in view.
+            guard !presentsRows else { return }
+            // Picking another story while one is open: News does not reflow,
+            // and the tapped passage is already in view.
+            if oldKey != nil, let newKey {
+                anchoredSourceKey = newKey
+                return
+            }
+            guard let key = newKey ?? oldKey else { return }
+            requestAnchor(to: key)
+        }
+        // A story already open when News appears (after unfolding, or once
+        // the lens document loads) is anchored too.
+        .task(id: initialAnchorKey(selectedSourceKey: selectedSourceKey, presentsRows: presentsRows)) {
+            guard !presentsRows, let key = selectedSourceKey, anchoredSourceKey != key else { return }
+            requestAnchor(to: key)
+        }
+        .task(id: anchorNonce) {
+            guard let target = anchorTargetSegmentID else { return }
+            // After the reflow's layout pass.
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            anchorRequest = BriefingScrollAnchorRequest(segmentID: target, generation: anchorNonce)
+        }
+    }
+
+    private func requestAnchor(to sourceKey: String) {
+        guard let segmentID = segmentID(containing: sourceKey) else { return }
+        anchoredSourceKey = sourceKey
+        anchorTargetSegmentID = segmentID
+        anchorNonce += 1
+    }
+
+    private func initialAnchorKey(selectedSourceKey: String?, presentsRows: Bool) -> String {
+        let generation = viewModel.selectedLensKey.map { viewModel.documentGeneration(for: $0) } ?? -1
+        return "\(presentsRows)|\(selectedSourceKey ?? "")|\(viewModel.selectedLensKey ?? "")|\(generation)"
+    }
+
+    private func segmentID(containing sourceKey: String) -> Int? {
+        guard let lensKey = viewModel.selectedLensKey else { return nil }
+        return viewModel.renderModel(for: lensKey)?.segments
+            .first { $0.segment.sourceKeys.contains(sourceKey) }?
+            .segment.id
+    }
+
+    @ViewBuilder
+    private func columnLensPage(_ columnLayout: BriefingColumnLayout) -> some View {
+        if viewModel.isStartHereSelected, let firstRun = viewModel.firstRun {
+            BriefingStartHereView(
+                progress: firstRun,
+                scrollToTopRequest: scrollToTopRequest,
+                onRefresh: viewModel.refreshIndex
+            )
+            .dynamicTypeSize(contentTextSize)
+        } else if let lens = viewModel.pagerLenses.first(where: { $0.key == viewModel.selectedLensKey }) {
+            BriefingLensPageView(
+                lensKey: lens.key,
+                lensTitle: lens.title,
+                renderModel: viewModel.renderModel(for: lens.key),
+                firstRunProgress: viewModel.firstRun?.tiers.first { $0.tier == lens.tier.rawValue },
+                isReadTrackingEnabled: viewModel.isActive && !isColumnResizing && !isReadTrackingSuspended,
+                // The spread has no pinned chrome: a passage is read once it
+                // has scrolled fully above the top of the page.
+                readBoundaryY: 0,
+                documentGeneration: viewModel.documentGeneration(for: lens.key),
+                scrollToTopRequest: scrollToTopRequest,
+                shouldScrollToTop: true,
+                error: viewModel.lensErrors[lens.key],
+                continuationError: viewModel.lensContinuationErrors[lens.key],
+                isLoadingContinuation: viewModel.lensContinuationLoadingKeys.contains(lens.key),
+                chromeCollapse: columnCollapse,
+                collapsibleChromeHeight: 0,
+                topContentInset: 0,
+                onOpenSource: openSource,
+                onSourceAction: handleSourceAction,
+                savedSources: savedSources,
+                onOpenDiscussion: openDiscussion,
+                onDig: startDig,
+                onRefresh: { await viewModel.pullToRefresh() },
+                onLoad: { viewModel.loadLensIfNeeded(key: lens.key) },
+                onRetry: { viewModel.retryLens(key: lens.key) },
+                onFirstPassageVisible: {
+                    viewModel.noteFirstPassageVisible(for: lens.key)
+                },
+                onScrolledDown: {},
+                onMarkSegmentSeen: viewModel.markSegmentSeen,
+                onSetHeaderPinned: { _ in },
+                columnLayout: columnLayout,
+                anchorRequest: anchorRequest
+            )
+            .equatable()
+            .dynamicTypeSize(contentTextSize)
+            .id(lens.key)
+        } else {
+            Color.clear
+        }
+    }
+
     private var emptyState: some View {
         BriefingEmptyStateView(
             refreshPhase: viewModel.refreshPhase,
@@ -644,7 +831,7 @@ struct BriefingView: View {
         case .chat:
             if let route = await sourceActions.startChat(source: command.source), !Task.isCancelled {
                 onSourceMutation()
-                chatNavigation.openReplacingCurrentNavigation(route)
+                attachedChat.present(route, host: attachedChatHost)
             }
         case .createDeck:
             let existing = await sourceActions.existingDeck(

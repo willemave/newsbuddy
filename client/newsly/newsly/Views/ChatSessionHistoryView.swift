@@ -58,28 +58,40 @@ struct ChatSessionHistoryView: View {
                 emptyStateView
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 0) {
                         SearchBar(
                             placeholder: "Search history...",
                             text: $searchText
                         )
                         .padding(.horizontal, Spacing.appHorizontalMargin)
+                        .padding(.bottom, 4)
 
-                        ForEach(filteredSessions) { session in
-                            Button {
-                                onSelectSession(ChatSessionRoute(session: session))
-                            } label: {
-                                ChatSessionCard(session: session)
-                            }
-                            .buttonStyle(.plain)
-                            .matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)
-                            .padding(.horizontal, Spacing.appHorizontalMargin)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.deleteSessions(ids: [session.id]) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                        // The same rows and day groups as the Knowledge list.
+                        ForEach(ChatHistoryDayGroup.group(filteredSessions)) { group in
+                            KnowledgeDayDelimiter(title: group.title)
+                            ForEach(Array(group.sessions.enumerated()), id: \.element.id) { index, session in
+                                if index > 0 {
+                                    KnowledgeTimelineRowDivider()
                                 }
+                                Button {
+                                    onSelectSession(ChatSessionRoute(session: session))
+                                } label: {
+                                    KnowledgeChatRow(
+                                        session: session,
+                                        activityDate: ChatHistoryDayGroup.activityDate(of: session),
+                                        preview: KnowledgeChatPreview.make(for: session)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        Task { await viewModel.deleteSessions(ids: [session.id]) }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                                .accessibilityIdentifier("chat.history.session.\(session.id)")
                             }
                         }
 
@@ -95,6 +107,7 @@ struct ChatSessionHistoryView: View {
             }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
+        .extendsToOpenDisplayEdge()
         .navigationTitle("Chat History")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -138,5 +151,32 @@ struct ChatSessionHistoryView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.sectionTop)
+    }
+}
+
+/// Chat history grouped by day of last activity, with the Knowledge list's
+/// "TODAY" / "YESTERDAY" / weekday titles.
+struct ChatHistoryDayGroup: Identifiable {
+    let day: Date
+    let title: String
+    let sessions: [ChatSessionSummary]
+
+    var id: Date { day }
+
+    /// The same date the Knowledge list files a chat under.
+    static func activityDate(of session: ChatSessionSummary) -> Date {
+        session.lastActivityDate
+    }
+
+    static func group(_ sessions: [ChatSessionSummary], calendar: Calendar = .current) -> [Self] {
+        Dictionary(grouping: sessions) { calendar.startOfDay(for: activityDate(of: $0)) }
+            .map { day, sessions in
+                Self(
+                    day: day,
+                    title: KnowledgeTimelineDayGroup.title(for: day, calendar: calendar),
+                    sessions: sessions.sorted { activityDate(of: $0) > activityDate(of: $1) }
+                )
+            }
+            .sorted { $0.day > $1.day }
     }
 }

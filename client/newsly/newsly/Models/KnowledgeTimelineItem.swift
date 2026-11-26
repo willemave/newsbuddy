@@ -223,14 +223,14 @@ struct KnowledgeTimelineDayGroup: Identifiable {
             .sorted { $0.day > $1.day }
     }
 
-    private static func title(for day: Date, calendar: Calendar) -> String {
+    static func title(for day: Date, calendar: Calendar) -> String {
         if calendar.isDateInToday(day) { return "TODAY" }
         if calendar.isDateInYesterday(day) { return "YESTERDAY" }
         return day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()).uppercased()
     }
 }
 
-private enum KnowledgeChatPreview {
+enum KnowledgeChatPreview {
     private static let markdownPrefixPattern = try! NSRegularExpression(
         pattern: #"(?m)^\s{0,3}(#{1,6}(\s+|$)|>\s+|[-*+]\s+|\d+\.\s+)"#
     )

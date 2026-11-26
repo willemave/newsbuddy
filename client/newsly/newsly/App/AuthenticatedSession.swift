@@ -15,6 +15,8 @@ final class AuthenticatedSession {
     let xConnectionStore: XConnectionStore
     let activeChatSessionManager: ActiveChatSessionManager
     let chatNavigation: ChatNavigationCoordinator
+    /// The chat a reader opened from content, kept attached to that content.
+    let attachedChat: AttachedChatController
     let readStateCache: ReadStateCache
     let tabCoordinator: TabCoordinatorViewModel
     let knowledgeViewModel: KnowledgeTimelineViewModel
@@ -37,6 +39,7 @@ final class AuthenticatedSession {
         xConnectionStore: XConnectionStore,
         activeChatSessionManager: ActiveChatSessionManager,
         chatNavigation: ChatNavigationCoordinator,
+        attachedChat: AttachedChatController,
         readStateCache: ReadStateCache,
         tabCoordinator: TabCoordinatorViewModel,
         knowledgeViewModel: KnowledgeTimelineViewModel,
@@ -50,6 +53,7 @@ final class AuthenticatedSession {
         self.xConnectionStore = xConnectionStore
         self.activeChatSessionManager = activeChatSessionManager
         self.chatNavigation = chatNavigation
+        self.attachedChat = attachedChat
         self.readStateCache = readStateCache
         self.tabCoordinator = tabCoordinator
         self.knowledgeViewModel = knowledgeViewModel
@@ -94,6 +98,7 @@ final class AuthenticatedSession {
         activeChatSessionManager.setPollingSuspended(true)
         activeChatSessionManager.reset()
         chatNavigation.clear()
+        attachedChat.close()
         detachNotificationRouting()
         tabCoordinator.briefingVM.setActive(false)
         briefingSavedSources.detach()

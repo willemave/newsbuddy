@@ -1,0 +1,42 @@
+appId: "${APP_ID}"
+---
+# A chat started from a Briefing card's context menu attaches over Briefing.
+# Closing it returns to the same lens, with Briefing still selected.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- extendedWaitUntil:
+    visible:
+      id: briefing.screen
+    timeout: 15000
+- tapOn:
+    id: briefing.lens.articles
+- extendedWaitUntil:
+    visible:
+      id: briefing.lens_page.articles
+    timeout: 10000
+- longPressOn:
+    id: briefing.segment.${ARTICLE_SEGMENT_ID}
+- tapOn:
+    id: briefing.source_action.chat
+- extendedWaitUntil:
+    visible:
+      id: chat.header
+    timeout: 12000
+- tapOn:
+    id: chat.attached.close
+- extendedWaitUntil:
+    visible:
+      id: briefing.lens_page.articles
+    timeout: 8000
+- assertVisible:
+    id: tab.briefing
