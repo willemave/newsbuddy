@@ -1180,6 +1180,63 @@ and resume observation by durable ID.
 Search cancellation has one coordinator. Views do not maintain competing
 debounce tasks, request registries, and generation counters.
 
+### 11.3a Root layouts and attached chat
+
+`ContentView` chooses one root shell from the size classes. `RootLayout.resolve`
+returns `.openDisplay` only when both horizontal and vertical size classes are
+regular, which is the open iPhone Duo display. Everything else, including Pro Max
+landscape, gets `.compact`: the `TabView` shell with the custom floating bar and
+the Briefing lens pager.
+
+`OpenDisplayShell` shows a tight icon rail (News, Podcasts, Articles,
+Knowledge, player) and the selected tier:
+
+- **News** renders as `BriefingView(layout: .column(BriefingColumnLayout))`:
+  two columns split at the measured fold (`reservedRegions(kind: .division)`, iOS 27.1+) or one centred
+  column, per `AppSettings.openDisplayNewsColumns`.
+- **Opening a story** reflows News to one column ending 40 pt before the hinge,
+  with the story beside it. `OpenBriefingArrangement.resolve` is the single
+  decision point.
+- **Podcasts and Articles** render as the same column layout with
+  `presentsCardsAsRows`: `BriefingSourceListRow` Knowledge-style rows in a 300 pt sidebar, with the
+  item flush beside it and an `OpenDisplayInterstitial` before the first pick.
+- **Knowledge** is `KnowledgeView` in the sidebar, beside the Knowledge
+  `NavigationStack` as the pane.
+
+The open shell ignores the trailing safe area, so the status bar and camera
+float over content. Pane screens opt out of the reserved column themselves
+through `extendsToOpenDisplayEdge()` (`\.isInOpenDisplayPane`), because a
+`NavigationStack`'s UIKit host re-imposes it. The Briefing detail pane has no
+stack; the Briefing list or spread sits in one only for its empty-state and
+first-run links. Both content areas stay mounted, hidden when not selected,
+and an attached chat renders only in the visible one.
+
+Selection lives above both shells, so swapping layouts keeps the item on screen:
+
+- `briefingPath` is a typed `[ContentDetailRoute]`, at most one deep, and serves
+  as the Briefing selection in both layouts. A pushed detail reports paging
+  through `onDetailVisibleContentChange`, and `retargetedBriefingSelection`
+  applies it when the layout changes.
+- `knowledgePath`, `TabCoordinatorViewModel`, and `BriefingViewModel` remain the
+  owners of the Knowledge selection, root destination, and tier/lens.
+- Rail selections write those owners rather than keeping their own state.
+
+`AttachedChatController` is session-owned. It holds the one chat a reader started
+from content (a detail action, a Briefing card, reader selection, or a summary
+topic). The chat attaches to its source instead of navigating away:
+
+- `.settings` and `.reader` always present it as a sheet; `.root` does on
+  compact.
+- The open-display root gives it a page of its own beside its source (chat |
+  story, News | chat, or in place of the list's item), never an overlay. A
+  layout change moves a reader-hosted chat to `.root`, because the reader is
+  torn down with the shell.
+- The controller owns the `ChatSessionViewModel`, so re-hosting keeps the
+  draft, dictation, and in-flight reply. Only `close()` tears the view model
+  down, handing unfinished replies to background tracking.
+- Global chat routes (notifications, Knowledge new chat, history, Knowledge row
+  chat) still go through `ChatNavigationCoordinator`.
+
 ### 11.4 HTTP transport and recovery
 
 ```text

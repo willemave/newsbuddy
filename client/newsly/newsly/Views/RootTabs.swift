@@ -10,7 +10,7 @@ private let rootTabLogger = Logger(subsystem: "com.newsly", category: "ContentVi
 
 private func pushBriefingContentDetail(
     _ route: ContentDetailRoute,
-    path: Binding<NavigationPath>
+    path: Binding<[ContentDetailRoute]>
 ) {
     guard path.wrappedValue.isEmpty else {
         rootTabLogger.info(
@@ -26,7 +26,9 @@ private func pushBriefingContentDetail(
 }
 
 struct BriefingTab: View {
-    @Binding var path: NavigationPath
+    /// Typed and at most one deep: the pushed detail is the Briefing
+    /// selection, shared with the open-display layout's detail pane.
+    @Binding var path: [ContentDetailRoute]
     let scrollToTopRequest: Int
     @Namespace private var contentTransitionNamespace
     let viewModel: BriefingViewModel
@@ -45,12 +47,10 @@ struct BriefingTab: View {
                 onOpenContent: pushDetail,
                 onSourceMutation: onSourceMutation
             )
-                .withContentRoutes(
-                    path: $path,
+                .withContentDetailRoute(
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
-                    contentTransitionNamespace: contentTransitionNamespace,
-                    dependencyFactory: dependencyFactory
+                    contentTransitionNamespace: contentTransitionNamespace
                 )
         }
         .toolbar(.hidden, for: .tabBar)

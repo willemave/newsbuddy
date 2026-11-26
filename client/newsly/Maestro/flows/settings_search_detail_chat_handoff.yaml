@@ -55,5 +55,11 @@ appId: "${APP_ID}"
     visible:
       id: knowledge.chat_input
     timeout: 12000
-- assertNotVisible:
-    id: settings.screen
+# The chat attaches over the detail inside the Settings sheet; closing it
+# returns to that detail.
+- tapOn:
+    id: chat.attached.close
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 8000

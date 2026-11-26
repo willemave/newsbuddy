@@ -14,18 +14,15 @@ final class DetailChatCoordinator {
 
     private let chatSessionManager: ActiveChatSessionManager
     private let chatService: ChatService
-    private let chatRouter: ChatNavigationCoordinator
     private let toastPresenter: any ToastPresenting
 
     init(
         chatSessionManager: ActiveChatSessionManager,
         chatService: ChatService,
-        chatRouter: ChatNavigationCoordinator,
         toastPresenter: any ToastPresenting
     ) {
         self.chatSessionManager = chatSessionManager
         self.chatService = chatService
-        self.chatRouter = chatRouter
         self.toastPresenter = toastPresenter
     }
 
@@ -135,11 +132,6 @@ final class DetailChatCoordinator {
             pendingMessageId: pendingMessageId,
             focusComposerOnAppear: focusComposerOnAppear
         )
-    }
-
-    func open(_ route: ChatSessionRoute) {
-        chatSessionManager.stopTracking(sessionId: route.sessionId)
-        chatRouter.openReplacingCurrentNavigation(route)
     }
 
     private func performChatStart(

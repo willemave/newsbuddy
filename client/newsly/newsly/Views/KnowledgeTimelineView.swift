@@ -156,6 +156,9 @@ struct KnowledgeView: View {
         .onChange(of: isVisible) { _, isVisible in
             if !isVisible {
                 viewModel.suspendAutomaticReads()
+                // The open display keeps this list mounted while hidden; the
+                // keyboard must not stay attached to an invisible composer.
+                isComposerFocused = false
             }
         }
         .onChange(of: viewModel.chats.completedVoiceRoute) { _, route in

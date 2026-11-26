@@ -16,6 +16,21 @@ private let appSettingsLogger = Logger(
 
 typealias ReadingExperience = APIReadingExperience
 
+/// How News reads on the open display of a foldable. Phones always use one
+/// column.
+enum NewsColumnPreference: String, CaseIterable, Identifiable {
+    case single
+    case double
+
+    var id: String { rawValue }
+
+    static let storageKey = "openDisplayNewsColumns"
+
+    static func stored(in defaults: UserDefaults) -> NewsColumnPreference {
+        defaults.string(forKey: storageKey).flatMap(NewsColumnPreference.init(rawValue:)) ?? .double
+    }
+}
+
 @Observable
 final class AppSettings {
     static let shared = AppSettings()
@@ -37,6 +52,15 @@ final class AppSettings {
     }
     var backendTranscriptionAvailable: Bool {
         didSet { userDefaults.set(backendTranscriptionAvailable, forKey: "backendTranscriptionAvailable") }
+    }
+    /// Per-device reader preference for News on the open display.
+    var openDisplayNewsColumns: NewsColumnPreference {
+        didSet { userDefaults.set(openDisplayNewsColumns.rawValue, forKey: NewsColumnPreference.storageKey) }
+    }
+    /// Remembered once this device reports a hinge, so open-display settings
+    /// stay visible while it is closed.
+    var deviceHasHinge: Bool {
+        didSet { userDefaults.set(deviceHasHinge, forKey: "deviceHasHinge") }
     }
 
     @ObservationIgnored
@@ -69,6 +93,16 @@ final class AppSettings {
         contentTextSizeIndex = index
     }
 
+    func setOpenDisplayNewsColumns(_ preference: NewsColumnPreference) {
+        guard openDisplayNewsColumns != preference else { return }
+        openDisplayNewsColumns = preference
+    }
+
+    func noteDeviceHasHinge() {
+        guard !deviceHasHinge else { return }
+        deviceHasHinge = true
+    }
+
     func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
         guard backendTranscriptionAvailable != isAvailable else { return }
         backendTranscriptionAvailable = isAvailable
@@ -89,6 +123,9 @@ final class AppSettings {
         appTextSizeIndex = userDefaults.object(forKey: "appTextSizeIndex") as? Int ?? 1
         contentTextSizeIndex = userDefaults.object(forKey: "contentTextSizeIndex") as? Int ?? 2
         backendTranscriptionAvailable = userDefaults.object(forKey: "backendTranscriptionAvailable") as? Bool ?? false
+        openDisplayNewsColumns = E2ETestLaunch.newsColumns.flatMap(NewsColumnPreference.init(rawValue:))
+            ?? NewsColumnPreference.stored(in: userDefaults)
+        deviceHasHinge = userDefaults.bool(forKey: "deviceHasHinge")
         if E2ETestLaunch.isEnabled {
             appSettingsLogger.notice(
                 "Applied ephemeral E2E server configuration host=\(self.serverHost, privacy: .public) port=\(self.serverPort, privacy: .public)"

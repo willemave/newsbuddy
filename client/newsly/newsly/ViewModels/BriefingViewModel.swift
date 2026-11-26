@@ -169,7 +169,7 @@ final class BriefingViewModel {
         newsLenses + fixedLenses
     }
 
-    private var selectedLensSummary: APIBriefingLensSummary? {
+    var selectedLensSummary: APIBriefingLensSummary? {
         orderedLenses.first { $0.key == selectedLensKey }
     }
 

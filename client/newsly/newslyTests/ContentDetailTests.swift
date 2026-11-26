@@ -50,6 +50,29 @@ final class ContentDetailTests: XCTestCase {
         )
     }
 
+    func testPaneRootDetailIgnoresLeadingEdgeDismiss() {
+        let translation = CGSize(width: 120, height: 6)
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .leadingEdge,
+                translation: translation,
+                currentIndex: 0,
+                itemCount: 1,
+                canDismiss: false
+            ),
+            .ignore
+        )
+        XCTAssertNil(
+            DetailSwipePolicy.dragOffset(
+                origin: .leadingEdge,
+                translation: translation,
+                currentIndex: 0,
+                itemCount: 1,
+                canDismiss: false
+            )
+        )
+    }
+
     func testResolvedNewsFieldsFallbackToTopLevelPayload() throws {
         let detail = try decodeDetail(
             from: """

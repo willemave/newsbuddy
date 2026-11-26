@@ -29,6 +29,13 @@ final class ChatSessionViewModel {
     var session: ChatSessionSummary?
     private(set) var timeline: [ChatTimelineItem] = []
     var isLoading = false
+    /// True once a transcript has been applied. An attached chat that is
+    /// re-hosted after this keeps its state instead of reloading.
+    private(set) var hasCompletedInitialLoad = false
+    /// A topic session sends its topic once, even when two loads overlap
+    /// (an attached chat re-hosted before its first load finished).
+    private var didAutoSendTopic = false
+    @ObservationIgnored private var pollGeneration = 0
     var isSending = false
     private(set) var loadErrorMessage: String?
     var errorMessage: String?
@@ -147,6 +154,7 @@ final class ChatSessionViewModel {
         do {
             let detail = try await chatService.getSession(id: sessionId)
             applyDetail(detail)
+            hasCompletedInitialLoad = true
             let assistantPreview = timeline.last(where: { $0.message.isAssistant })?.message.content.prefix(160) ?? ""
             logger.debug(
                 "[ViewModel] loadSession succeeded | sessionId=\(self.sessionId) messages=\(self.timeline.count) assistantPreview=\(String(assistantPreview), privacy: .public)"
@@ -163,7 +171,8 @@ final class ChatSessionViewModel {
                 await pollForMessageCompletion(messageId: pendingMessageId)
             }
             // If this is a topic-focused session (like "Dig deeper") with no messages, auto-send the topic
-            else if let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
+            else if !didAutoSendTopic, let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
+                didAutoSendTopic = true
                 await sendMessage(text: topic)
             }
         } catch where isCancelledOperation(error) {
@@ -186,6 +195,11 @@ final class ChatSessionViewModel {
 
     /// Poll for a processing message to complete
     private func pollForMessageCompletion(messageId: Int) async {
+        // The newest poll owns the sending state. A re-hosted attached chat
+        // starts a fresh poll while the previous host's cancelled poll is
+        // still unwinding; that one must not clear the indicator.
+        pollGeneration += 1
+        let generation = pollGeneration
         isSending = true
         startThinkingTimer()
 
@@ -200,6 +214,7 @@ final class ChatSessionViewModel {
             errorMessage = error.localizedDescription
         }
 
+        guard generation == pollGeneration else { return }
         isSending = false
         stopThinkingTimer()
     }
@@ -340,6 +355,20 @@ final class ChatSessionViewModel {
 
         let prompt = "Dig deeper into this: \"\(trimmed)\""
         await sendMessage(text: prompt)
+    }
+
+    /// Re-hosting an attached chat cancels the previous host's view task,
+    /// which may have been polling a reply started before this view model
+    /// was re-hosted. Resume that poll under the view model's own task bag.
+    func resumeAttachedPollingIfNeeded() {
+        guard !tasks.isRunning(.send) else { return }
+        guard let messageId = timeline.lazy.compactMap({ item -> Int? in
+            guard item.message.isProcessing else { return nil }
+            return item.message.sourceMessageId ?? item.pendingMessageId
+        }).first else { return }
+        tasks.runReplacing(.send) { [weak self] in
+            await self?.pollForMessageCompletion(messageId: messageId)
+        }
     }
 
     func handleDisappear() {

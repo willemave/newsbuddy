@@ -7,6 +7,7 @@ import SwiftUI
 
 struct SettingsDisplaySection: View {
     let settings: AppSettings
+    @Environment(\.supportsOpenDisplay) private var supportsOpenDisplay
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,6 +15,11 @@ struct SettingsDisplaySection: View {
 
             VStack(spacing: 0) {
                 textSizeRow
+
+                if supportsOpenDisplay {
+                    RowDivider(leadingInset: Spacing.rowHorizontal)
+                    newsColumnsRow
+                }
             }
             .settingsCard()
         }
@@ -45,6 +51,41 @@ struct SettingsDisplaySection: View {
                 range: 0...4
             )
         }
+    }
+
+    /// Only on devices that open: one or two columns of News on the open
+    /// display. Phones always read in one column.
+    private var newsColumnsRow: some View {
+        HStack(spacing: 12) {
+            SettingsIcon(systemName: "rectangle.split.2x1")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("News columns")
+                    .font(.modalBody)
+                    .foregroundStyle(Color.onSurface)
+                Text("On the open display")
+                    .font(.modalSupporting)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Picker(
+                "News columns",
+                selection: Binding(
+                    get: { settings.openDisplayNewsColumns },
+                    set: { settings.setOpenDisplayNewsColumns($0) }
+                )
+            ) {
+                Text("One").tag(NewsColumnPreference.single)
+                Text("Two").tag(NewsColumnPreference.double)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .accessibilityIdentifier("settings.news_columns")
+        }
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, Spacing.rowVertical)
     }
 
     /// The slider spans the full row width rather than starting at the text inset:

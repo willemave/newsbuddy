@@ -53,5 +53,13 @@ appId: "${APP_ID}"
     visible:
       id: chat.header
     timeout: 10000
+# Content chat stays attached to the article: closing it returns to the same
+# detail instead of leaving the user on the Knowledge tab.
 - assertNotVisible:
     id: tab.knowledge
+- tapOn:
+    id: chat.attached.close
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 8000

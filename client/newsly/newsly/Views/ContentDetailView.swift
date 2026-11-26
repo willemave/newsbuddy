@@ -12,7 +12,6 @@ private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDet
 
 struct ContentDetailView: View {
     @Environment(ActiveChatSessionManager.self) private var activeChatSessionManager
-    @Environment(ChatNavigationCoordinator.self) private var chatNavigation
     @Environment(RootDependencyFactory.self) private var dependencyFactory
 
     private let contentId: Int
@@ -47,7 +46,6 @@ struct ContentDetailView: View {
             initialScrollTarget: initialScrollTarget,
             readStateCache: readStateCache,
             activeChatSessionManager: activeChatSessionManager,
-            chatNavigation: chatNavigation,
             dependencyFactory: dependencyFactory
         )
     }
@@ -63,6 +61,14 @@ private struct ContentDetailContentView: View {
     private var initialContentType: APIContentType? { navigationContext.initialContentType }
     private var allContentIds: [Int] { navigationContext.contentIds }
     private let dependencyFactory: RootDependencyFactory
+    @Environment(AttachedChatController.self) private var attachedChat
+    @Environment(\.attachedChatHost) private var attachedChatHost
+    @Environment(\.isDetailPaneRoot) private var isDetailPaneRoot
+    @Environment(\.isInOpenDisplayPane) private var isInOpenDisplayPane
+    @Environment(\.onDetailVisibleContentChange) private var onDetailVisibleContentChange
+    /// A chat requested from inside a sheet waits for that sheet to finish
+    /// dismissing, because only one sheet can present from a host at a time.
+    @State private var pendingChatRoute: ChatSessionRoute?
     @State private var viewModel: ContentDetailViewModel
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(\.dismiss) private var dismiss
@@ -99,7 +105,6 @@ private struct ContentDetailContentView: View {
         initialScrollTarget: ContentDetailScrollTarget? = nil,
         readStateCache: ReadStateCache,
         activeChatSessionManager: ActiveChatSessionManager,
-        chatNavigation: ChatNavigationCoordinator,
         dependencyFactory: RootDependencyFactory
     ) {
         let context = ContentDetailNavigationContext(
@@ -121,8 +126,7 @@ private struct ContentDetailContentView: View {
         )
         self._chatCoordinator = State(
             initialValue: dependencyFactory.makeDetailChatCoordinator(
-                chatSessionManager: activeChatSessionManager,
-                chatRouter: chatNavigation
+                chatSessionManager: activeChatSessionManager
             )
         )
         self._podcastAudioController = State(
@@ -141,7 +145,7 @@ private struct ContentDetailContentView: View {
             surfaceName: navigationSurfaceName,
             edgeWidth: DetailDesign.edgeNavigationSwipeWidth,
             topHitExclusionHeight: DetailDesign.edgeNavigationTopExclusionHeight,
-            onDismiss: { dismiss() },
+            onDismiss: isDetailPaneRoot ? nil : { dismiss() },
             onNext: navigateToNext,
             onPrevious: navigateToPrevious
         ) {
@@ -247,17 +251,19 @@ private struct ContentDetailContentView: View {
                 .overlay(alignment: .topLeading) {
                     GeometryReader { proxy in
                         VStack(alignment: .leading, spacing: 0) {
-                            floatingBackButton
-                                .scaleEffect(floatingBackScale)
-                                .padding(.leading, 16)
-                                .padding(.top, floatingBackTopPadding(for: proxy))
+                            if !isDetailPaneRoot {
+                                floatingBackButton
+                                    .scaleEffect(floatingBackScale)
+                                    .padding(.leading, 16)
+                                    .padding(.top, floatingBackTopPadding(for: proxy))
+                            }
                             Spacer(minLength: 0)
                         }
                     }
                 }
             }
         }
-        .ignoresSafeArea(edges: hasHeroImage ? .top : [])
+        .ignoresSafeArea(edges: ignoredSafeAreaEdges)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -277,9 +283,12 @@ private struct ContentDetailContentView: View {
         .onChange(of: lifecycle.phase, initial: true) { _, newPhase in
             handleLifecyclePhase(newPhase)
         }
-        .onChange(of: currentIndex) { _, _ in
+        .onChange(of: currentIndex) { _, newIndex in
             pendingScrollTarget = nil
             cancelDeckLookup()
+            if let contentId = contentId(at: newIndex, context: "visible") {
+                onDetailVisibleContentChange?(contentId)
+            }
         }
         .onChange(of: viewModel.content?.id) { oldValue, newValue in
             if let oldValue, oldValue != newValue {
@@ -350,12 +359,20 @@ private struct ContentDetailContentView: View {
         }
         .sheet(item: $activeSheet, onDismiss: {
             chatCoordinator.chatError = nil
+            if let route = pendingChatRoute {
+                pendingChatRoute = nil
+                attachedChat.present(route, host: attachedChatHost)
+                return
+            }
             guard !presentPendingSheetIfNeeded() else { return }
             presentPendingShareIfNeeded()
         }) {
             sheetContent(for: $0)
         }
-        .fullScreenCover(item: $activeReaderContent) { content in
+        .fullScreenCover(item: $activeReaderContent, onDismiss: {
+            // A chat dug from the reader stays open over the detail.
+            attachedChat.move(from: .reader, to: attachedChatHost)
+        }) { content in
             ArticleReaderView(
                 content: content,
                 articleBody: viewModel.readerBody,
@@ -366,13 +383,14 @@ private struct ContentDetailContentView: View {
                     Task { await viewModel.loadReaderBody(for: content, force: true) }
                 },
                 onDigDeeper: { selectedText in
-                    activeReaderContent = nil
                     startReaderDigDeeper(
                         selectedText: selectedText,
-                        content: content
+                        content: content,
+                        host: .reader
                     )
                 }
             )
+            .attachedChatHost(.reader, controller: attachedChat)
             .task(id: content.id) {
                 await viewModel.loadReaderBody(for: content)
             }
@@ -699,6 +717,15 @@ private struct ContentDetailContentView: View {
         activeSheet = nil
     }
 
+    /// Hero art bleeds under the status bar. In an open-display pane the
+    /// detail also runs to the trailing screen edge, under the floating
+    /// status bar and camera, instead of stopping at a reserved column.
+    private var ignoredSafeAreaEdges: Edge.Set {
+        var edges: Edge.Set = hasHeroImage ? .top : []
+        if isInOpenDisplayPane { edges.insert(.trailing) }
+        return edges
+    }
+
     private func presentPendingSheetIfNeeded() -> Bool {
         guard let destination = pendingSheetDestination else { return false }
         pendingSheetDestination = nil
@@ -746,7 +773,7 @@ private struct ContentDetailContentView: View {
         _ session: ActiveChatSession,
         content: ContentDetail
     ) {
-        openGlobalChat(
+        openAttachedChat(
             chatCoordinator.chatRoute(sessionId: session.id, content: content)
         )
     }
@@ -754,13 +781,14 @@ private struct ContentDetailContentView: View {
     private func startChat(for content: ContentDetail) {
         Task {
             let route = await chatCoordinator.startChat(content: content)
-            openGlobalChat(route)
+            openAttachedChat(route)
         }
     }
 
     private func startReaderDigDeeper(
         selectedText: String,
-        content: ContentDetail
+        content: ContentDetail,
+        host: AttachedChatHost? = nil
     ) {
         Task {
             let route = await chatCoordinator.startReaderDigDeeper(
@@ -768,14 +796,23 @@ private struct ContentDetailContentView: View {
                 content: content,
                 visibleContentIds: allContentIds
             )
-            openGlobalChat(route)
+            openAttachedChat(route, host: host)
         }
     }
 
-    private func openGlobalChat(_ route: ChatSessionRoute?) {
+    /// Opens the chat attached to this content. From inside a sheet it waits
+    /// for that sheet to dismiss; the sheet's `onDismiss` then presents it.
+    private func openAttachedChat(_ route: ChatSessionRoute?, host requestedHost: AttachedChatHost? = nil) {
         guard let route else { return }
-        activeSheet = nil
-        chatCoordinator.open(route)
+        // Dig Deeper is async: if the reader closed while the chat was being
+        // created, attach to this detail instead of an absent reader.
+        let host = requestedHost == .reader && activeReaderContent == nil ? nil : requestedHost
+        if activeSheet != nil, host != .reader {
+            pendingChatRoute = route
+            activeSheet = nil
+            return
+        }
+        attachedChat.present(route, host: host ?? attachedChatHost)
     }
 
     @MainActor

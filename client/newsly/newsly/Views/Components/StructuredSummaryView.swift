@@ -24,7 +24,8 @@ struct StructuredSummaryView: View {
     @State private var isKeyPointsExpanded = true
     @State private var isQuestionsExpanded = false
     @State private var isCounterArgsExpanded = false
-    @State private var topicSession: ChatSessionSummary?
+    @Environment(AttachedChatController.self) private var attachedChat: AttachedChatController?
+    @Environment(\.attachedChatHost) private var attachedChatHost
     @State private var topicChatError: String?
 
     var body: some View {
@@ -102,11 +103,6 @@ struct StructuredSummaryView: View {
                         }
                     }
                 }
-            }
-        }
-        .sheet(item: $topicSession) { session in
-            NavigationStack {
-                ChatSessionView(route: ChatSessionRoute(session: session))
             }
         }
         .alert(
@@ -248,7 +244,7 @@ struct StructuredSummaryView: View {
     private func startTopicChat(topic: String) {
         Task {
             if let session = await startChatSession(topic: topic) {
-                topicSession = session
+                openTopicChat(session)
             }
         }
     }
@@ -256,9 +252,14 @@ struct StructuredSummaryView: View {
     private func startKeyPointChat(keyPoint: String) {
         Task {
             if let session = await startChatSession(topic: "Dig deeper: \(keyPoint)") {
-                topicSession = session
+                openTopicChat(session)
             }
         }
+    }
+
+    /// Topic chats attach to the content like every other content chat.
+    private func openTopicChat(_ session: ChatSessionSummary) {
+        attachedChat?.present(ChatSessionRoute(session: session), host: attachedChatHost)
     }
 
     private func startChatSession(topic: String) async -> ChatSessionSummary? {

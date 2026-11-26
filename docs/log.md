@@ -27,6 +27,134 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-26 — `feature/iphone-duo` — Duo review fixes and cleanup
+
+- **Status:** Complete. Uncommitted.
+- **Scope:** Two independent reviews of the uncommitted Duo diff (cleanup, strict correctness), with fixes applied in the main thread; phone-flow testing on the iPhone 17 Pro simulator.
+- **Fixes:**
+  - On the open display an attached chat was mounted in both content areas (two loads and two polls for one session; topic chats could send their topic twice; the hidden area reflowed). It now renders only in the visible area. `ChatSessionViewModel` also sends a topic session's topic once, even when two loads overlap.
+  - A leading-edge swipe in the open-display detail pane called a no-op `dismiss()` and left the page blank. `ContentDetailSwipeContainer` now takes an optional dismiss; pane roots pass nil.
+  - Re-picking the same chat in the Knowledge sidebar after viewing something else did nothing (`presentedRoute` was never acknowledged). Open-display global routes are acknowledged as soon as the pane shows them.
+  - Picking a second News story while one was open re-anchored News and made it jump.
+  - The keyboard stayed attached to the hidden Knowledge composer after a rail switch.
+  - Short News segments were centred on phones (a new `.frame(maxWidth: .infinity)`); they are leading-aligned again, including inside the spread columns.
+  - A reader-hosted chat moves to the root on a layout change (B22).
+  - The `chat.attached` identifier no longer propagates onto the composer and other children.
+  - Rail, player, and close targets are 44 pt; rows announce "Saved to Knowledge"; text on accent fills uses `surfacePrimary`; the interstitial's duration counts unread sources only.
+- **Cleanup:**
+  - `BriefingLayout` is `.pager` or `.column(BriefingColumnLayout)`, replacing four parameters threaded through three layers.
+  - Removed: the `DetailChatCoordinator.open` passthrough, both one-value path helpers (`NavigationPath([x])`), the read-tracking environment key (now a `BriefingView` parameter), `lastOpenedSourceKey`, `AttachedChatController.isPresented(in:)`, and unused `Equatable` conformances.
+  - Added `OpenDisplayMetrics.verticalFold`; `BriefingViewModel.selectedLensSummary` is now internal; the E2E open screen is a typed enum; chat history files chats by `lastActivityDate`, as Knowledge does.
+  - Stale "column/overlay/Library" comments fixed.
+- **Docs:** CH27 scoped to the main layout (reader and Settings chats stay sheets); architecture 11.3a host and stack wording; plan and revision-plan superseded markers.
+- **Validation:**
+  - Full unit suite on the iPhone 17 Pro simulator (iOS 26.5): 851 passed, 0 failed.
+  - New tests: overlapping topic loads send once; the pane root ignores a leading-edge dismiss.
+  - Phone flows driven with axe: detail Start Chat → attached sheet → close returns to detail; card swipe chat → attached sheet over Briefing → close; Settings hides News columns on a non-folding phone; chat history rows open pushed chats.
+  - The 12-shot open-display set was re-captured on the Duo simulator (`outputs/iphone-duo-built/`).
+- **Remaining:**
+  - The Briefing column's link stack has no path, so a pushed Settings (first-run "Manage sources", empty-state links) survives a rail switch.
+  - The context-menu Chat item could not be automated (synthetic taps don't reach system menus); the swipe path shares its action.
+  - Unchanged from the earlier entry: the hinge rule for detail action buttons (awaiting the user's call), the interstitial after the selected item leaves the list, closed-display shots, and real taps on the Duo.
+- **Commits:** Uncommitted.
+
+### 2026-11-26 — `feature/iphone-duo` — Open-display revision implemented
+
+- **Status:** Implemented. Uncommitted.
+- **Scope:**
+  - Open-display shell rewrite (`OpenDisplayShell`, `OpenDisplayLayout` with `OpenBriefingArrangement`, `OpenDisplayInterstitial`, `BriefingSourceListRow`), with `BriefingView` `.spread`/`.list` layouts and the reflow anchor.
+  - `AppSettings.openDisplayNewsColumns` with the Settings → Display row (devices that open only, via `supportsOpenDisplay` and remembered hinge detection).
+  - Chat history in Knowledge rows grouped by day; `ChatSessionCard` deleted.
+  - Edge-to-edge panes (`extendsToOpenDisplayEdge`, no Briefing pane stack).
+  - Attached chat close button moved to the leading side.
+  - E2E-only launch hooks: `newslyE2ENewsColumns`, `newslyE2EOpenScreen`, `newslyE2EBriefingLens`, `newslyE2EOpenChatAttached`.
+- **Decisions (user):**
+  - News spread with a One/Two setting; stories always side by side (News ends hinge − 40 pt; ✕ right of the hinge).
+  - Podcasts/Articles/Knowledge: 300 pt sidebar plus a flush pane; no overlays anywhere.
+  - Knowledge is one rail item (no Chats).
+  - No right gutter, and no clock-avoiding padding.
+- **Review:** an Opus 5.5 implementation review found six bugs, all fixed:
+  - an attached chat swallowing picks and global routes (it now closes on a pick, rail change, or global route)
+  - a stale story after switching tier from Knowledge
+  - destination links needing a stack (Briefing is wrapped in one, with an edge opt-out)
+  - News staying live under a chat (hidden, inert, read tracking suspended)
+  - News losing its place (both areas stay mounted; the anchor also applies on first appearance and is cancellable)
+  - row day headers contradicting B5 (removed)
+- **Validation:**
+  - Full unit suite: only the pre-existing `AuthenticationViewModelTests` fail.
+  - `OpenDisplayLayoutTests`: 21 pass.
+  - Full open-display screenshot set on the Xcode 27.2 Duo simulator (`outputs/iphone-duo-built/`), including the reflow anchor on a real in-lens story.
+- **Remaining:**
+  - Hinge rule for detail action buttons not implemented; awaiting the user's call, since they asked for no avoidance tweaks.
+  - Closed-display shots skipped at the user's request.
+  - Real-tap interaction on the Duo is unverified (automation cannot tap it).
+  - The interstitial after the selected item leaves the list is not implemented.
+  - The phone masthead single-line change should be checked at AX sizes.
+- **Commits:** Uncommitted.
+
+### 2026-11-24 — `feature/iphone-duo` — Duo simulator, Phase 0, Briefing spread
+
+- **Status:** In progress. Uncommitted.
+- **Scope:**
+  - Xcode 27.2 (App Store update by the user) and the iOS 27.2 iPhone Duo simulator.
+  - Production state synced locally at the user's request (`scripts/sync_production_state.sh --env-file /tmp/newsly-debug.env`).
+  - DEBUG `FoldDiagnosticsOverlay`.
+  - E2E launch args `newslyE2EOpenChatAttached` and `newslyE2EBriefingLens`.
+  - Open-display Briefing spread with slide-over detail and chat panels.
+- **Decisions:**
+  - On the user's direction, Briefing now fills both pages: two columns split at the measured fold, with detail sliding over the trailing page. The compact row view was deleted and cards are restored in the spread.
+  - Library keeps the split, now aligned to the fold.
+  - B1 and B5 were updated for the spread.
+- **Phase 0:**
+  - Closed: 466×678 pt. Open, held wide: 951×669 pt.
+  - Fold: a 40 pt band at x 455–495. Status/camera column: 84 pt on the right.
+  - Open/close is DeviceHub-only (not scriptable).
+  - axe input doesn't reach either Duo display, so state is driven by E2E launch args.
+  - The earlier chat 500 and card decode failures were a local DB 13 migrations behind; fixed by the sync.
+- **Validation:**
+  - The app builds on the 27.2 SDK.
+  - Layout and attached-chat tests: 23 pass.
+  - Captured on the Duo simulator: closed Briefing, detail and attached chat; open News/Podcasts spreads, slide-overs, and chat | article.
+- **Remaining:**
+  - Close/open continuity on the Duo (needs a DeviceHub click).
+  - Upright hold (needs a DeviceHub rotate).
+  - Whether Library should also adopt the spread.
+  - Detail action row on the fold (now moot in the spread; still applies in Library).
+  - Maestro.
+- **Commits:** Uncommitted.
+
+### 2026-11-22 — `feature/iphone-duo` — iPhone Duo support (plan + Phases 1–3)
+
+- **Status:** Phases 1, 2a–2c and 3 implemented. Phase 0 and Phase 5 are blocked on Xcode 27.1 (Duo simulator/SDK). Phase 4 waits on Phase 0.
+- **Scope:** iOS client.
+  - Phase 1, attached chat: `AttachedChatController`, `AttachedChatHost`, `ChatSessionView` attached mode, `DetailChatCoordinator`, `ContentDetailView`, `BriefingView`, `StructuredSummaryView`. Removed `ChatNavigationCoordinator.openReplacingCurrentNavigation`.
+  - Phases 2–3, open display: `RootLayout` switch in `ContentView`, typed `briefingPath`, `OpenDisplayShell`/`OpenDisplayRail`/`OpenDisplayLayout`, `BriefingView(layout: .column)` with `BriefingSourceRowView` rows, a Library pane built on the Knowledge stack, and `LearningDeckReaderView` landscape chosen by keyboard-independent size.
+  - Shared: `EditorialMastheadHeader` moves its accessory below the title when the title won't fit beside it.
+  - Docs: plan and mockups in `docs/initiatives/iphone-duo-2026-11/`, laws CH27, B1 open-display paragraph, B5 rows, B22, and architecture 11.3a.
+- **Decisions:**
+  - The closed display keeps the compact UI. The open display (regular × regular only) gets a tight icon rail, a list column and a detail pane, with no auto-selection.
+  - Content chats attach to their source instead of jumping to Knowledge: a sheet on compact; a detail | chat column or an overlay (width hysteresis) on the open display.
+  - Selection stays with the existing owners (typed 0/1-deep `briefingPath`, `knowledgePath`, `TabCoordinatorViewModel`, `BriefingViewModel`).
+  - Plan-review and implementation-review findings were verified and folded in. Deviations and the D8 dismiss-on-transition gaps are in the plan's implementation notes.
+- **Validation:**
+  - Clean build.
+  - New tests pass: `AttachedChatControllerTests`, `AttachedChatContinuationTests`, `OpenDisplayLayoutTests`.
+  - Full unit suite: 838 tests, 42 failures, all in `AuthenticationViewModelTests`. Those fail identically on the unchanged tree (stash check), so they are pre-existing.
+  - Open layout checked on iPad mini and iPad Pro 13 simulators built with `TARGETED_DEVICE_FAMILY=1,2` (local override only): rail, News column, detail pane, Library and Chats panes, masthead fit. Phone mastheads are unchanged.
+  - Two Opus 5.5 reviews (plan, implementation).
+- **Not exercised:**
+  - Chat creation (local API returns 500), so the attached sheet hasn't been seen at runtime.
+  - Article/podcast rows (local seed lenses fail to decode on compact too).
+  - Rotation and fold transitions (DeviceHub can't be scripted here).
+  - Maestro flows (Maestro not installed). Updated `briefing_article_podcast` and `settings_search_detail_chat_handoff`; added `briefing_source_card_chat`.
+- **Remaining:**
+  - Install Xcode 27.1 and run Phase 0 on the Duo simulator: fold transitions, sheets on the fold, real geometry.
+  - Run the Maestro flows.
+  - Verify attached chat against a server that can create chats.
+  - Decide D9 (release SDK) before moving the release toolchain to 27.1.
+  - Mockup PNGs need `git add -f` (`*.png` is gitignored).
+- **Commits:** Uncommitted.
+
 ### 2026-11-22 — `main` — One continuous Briefing header scroll motion
 
 - **Status:** Complete. Not yet checked on a physical device.

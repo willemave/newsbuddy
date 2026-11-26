@@ -46,6 +46,10 @@ private struct LearningDeckReaderContent: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// The reader's size with the keyboard ignored, so focusing deck chat on
+    /// the open iPhone Duo display never flips the layout.
+    @State private var keyboardIndependentSize: CGSize = .zero
 
     private let lifecycle: AppLifecycle
     private let deck: LearningDeck
@@ -87,8 +91,11 @@ private struct LearningDeckReaderContent: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // The keyboard shrinks geometry without changing the phone's orientation.
-            let isLandscape = verticalSizeClass == .compact
+            let isLandscape = learningDeckUsesLandscapeLayout(
+                horizontal: horizontalSizeClass,
+                vertical: verticalSizeClass,
+                keyboardIndependentSize: keyboardIndependentSize
+            )
 
             Group {
                 if let url = viewModel.resolvedViewerURL {
@@ -99,6 +106,13 @@ private struct LearningDeckReaderContent: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.surfacePrimary.ignoresSafeArea())
+        }
+        .background {
+            Color.clear
+                .ignoresSafeArea(.keyboard)
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    keyboardIndependentSize = size
+                }
         }
         .task {
             viewModel.handleAppear()
@@ -480,4 +494,19 @@ private struct LearningDeckReaderContent: View {
             .compactMap { ($0 as? UIWindowScene)?.keyWindow }
             .first?.safeAreaInsets.bottom ?? 0
     }
+}
+
+/// Phones decide by size class: compact height is landscape, and the keyboard
+/// never changes that. The open iPhone Duo display is regular in both
+/// directions whichever way it is held, so there the reader's own shape
+/// decides, measured with the keyboard ignored.
+func learningDeckUsesLandscapeLayout(
+    horizontal: UserInterfaceSizeClass?,
+    vertical: UserInterfaceSizeClass?,
+    keyboardIndependentSize: CGSize
+) -> Bool {
+    if vertical == .compact { return true }
+    guard horizontal == .regular, vertical == .regular,
+          keyboardIndependentSize.width > 0, keyboardIndependentSize.height > 0 else { return false }
+    return keyboardIndependentSize.width > keyboardIndependentSize.height
 }

@@ -6,14 +6,12 @@
 import SwiftUI
 
 extension View {
-    func withContentRoutes(
-        path: Binding<NavigationPath>,
+    /// The content detail destination alone, for stacks whose path holds only
+    /// `ContentDetailRoute` (the typed Briefing path).
+    func withContentDetailRoute(
         readStateCache: ReadStateCache,
         contentTextSize: DynamicTypeSize,
-        contentTransitionNamespace: Namespace.ID? = nil,
-        chatTransitionNamespace: Namespace.ID? = nil,
-        allowsChatHistory: Bool = false,
-        dependencyFactory: RootDependencyFactory
+        contentTransitionNamespace: Namespace.ID? = nil
     ) -> some View {
         navigationDestination(for: ContentDetailRoute.self) { route in
             ContentDetailView(
@@ -28,6 +26,22 @@ extension View {
             .environment(readStateCache)
             .contentZoomNavigationTransition(id: route.contentId, namespace: contentTransitionNamespace)
         }
+    }
+
+    func withContentRoutes(
+        path: Binding<NavigationPath>,
+        readStateCache: ReadStateCache,
+        contentTextSize: DynamicTypeSize,
+        contentTransitionNamespace: Namespace.ID? = nil,
+        chatTransitionNamespace: Namespace.ID? = nil,
+        allowsChatHistory: Bool = false,
+        dependencyFactory: RootDependencyFactory
+    ) -> some View {
+        withContentDetailRoute(
+            readStateCache: readStateCache,
+            contentTextSize: contentTextSize,
+            contentTransitionNamespace: contentTransitionNamespace
+        )
         .navigationDestination(for: ChatSessionRoute.self) { route in
             ChatSessionView(
                 route: route,
