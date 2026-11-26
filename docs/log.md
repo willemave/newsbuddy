@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-26 — `main` — iOS 27 submenu UI test lookup
+
+- **Status:** Complete.
+- **Scope:** `KnowledgeSourceActivityUITests` only.
+- **Decisions:** On the iOS 27.2 simulator, SwiftUI drops accessibility identifiers from buttons inside a context submenu, so `testRelatedMenusOpenAndDeleteArtifactsWithoutRemovingSources` failed on `origin/main` too (it passes on iOS 26.5). The test now falls back to the submenu item's label among unidentified buttons; app code is unchanged.
+- **Validation:** `KnowledgeSourceActivityUITests` passes on iPhone 17 (iOS 27.2) and iOS 26.5.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-11-26 — `feature/iphone-duo` — Duo review fixes and cleanup
 
 - **Status:** Complete. Uncommitted.

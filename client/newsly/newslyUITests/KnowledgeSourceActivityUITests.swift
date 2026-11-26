@@ -59,12 +59,12 @@ final class KnowledgeSourceActivityUITests: XCTestCase {
 
         chatRow.press(forDuration: 1)
         app.buttons["knowledge.chat.904.menu"].tap()
-        app.buttons["knowledge.chat.904.open"].tap()
+        submenuButton(in: app, identifier: "knowledge.chat.904.open", label: "Open chat").tap()
         XCTAssertEqual(app.staticTexts["knowledge.source_activity.opened"].label, "Chat opened")
 
         chatRow.press(forDuration: 1)
         app.buttons["knowledge.chat.904.menu"].tap()
-        app.buttons["knowledge.chat.904.delete"].tap()
+        submenuButton(in: app, identifier: "knowledge.chat.904.delete", label: "Delete chat").tap()
         XCTAssertTrue(chatRow.exists)
         XCTAssertFalse(chatRow.label.contains("Processing"))
         XCTAssertFalse(chatRow.value as? String == "Has chat")
@@ -104,6 +104,16 @@ final class KnowledgeSourceActivityUITests: XCTestCase {
         deckRow.press(forDuration: 1)
         app.buttons["knowledge.deck.903.delete"].tap()
         XCTAssertFalse(app.buttons["knowledge.saved.901.open_deck"].exists)
+    }
+
+    /// iOS 27 drops accessibility identifiers from buttons inside a context
+    /// submenu, so fall back to the item's label among unidentified buttons.
+    private func submenuButton(in app: XCUIApplication, identifier: String, label: String) -> XCUIElement {
+        let identified = app.buttons[identifier]
+        if identified.waitForExistence(timeout: 1) { return identified }
+        return app.buttons
+            .matching(NSPredicate(format: "label == %@ AND identifier == ''", label))
+            .firstMatch
     }
 
     private func assertOnlySourceRows(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
