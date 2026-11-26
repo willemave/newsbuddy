@@ -16,6 +16,15 @@ private func newslyFlock(_ descriptor: Int32, _ operation: Int32) -> Int32 {
 }
 
 enum E2ETestLaunch {
+    /// A root screen to open at launch.
+    enum OpenScreen: String {
+        case knowledge
+        case settings
+        /// Settings scrolled to Display.
+        case settingsDisplay
+        case chatHistory
+    }
+
 #if DEBUG
     private static let arguments = ProcessInfo.processInfo.arguments
     private static let defaults = UserDefaults.standard
@@ -215,15 +224,6 @@ enum E2ETestLaunch {
         return string(for: newsColumnsKey)
     }
 
-    /// A root screen to open at launch.
-    enum OpenScreen: String {
-        case knowledge
-        case settings
-        /// Settings scrolled to Display.
-        case settingsDisplay
-        case chatHistory
-    }
-
     static var openScreen: OpenScreen? {
         guard isEnabled else { return nil }
         return string(for: openScreenKey).flatMap(OpenScreen.init(rawValue:))
@@ -272,6 +272,10 @@ enum E2ETestLaunch {
     static let openChatSessionId: Int? = nil
     static let openContentId: Int? = nil
     static let openContentType: String? = nil
+    static let openChatAttached = false
+    static let newsColumns: String? = nil
+    static let openScreen: OpenScreen? = nil
+    static let briefingLens: String? = nil
     static let fakeSpeechEnabled = false
     static let fakeSpeechTranscript: String? = nil
     static let visualNow: Date? = nil

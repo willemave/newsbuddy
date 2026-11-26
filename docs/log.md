@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-26 — `main` — Release build stubs for Duo E2E hooks
+
+- **Status:** Complete.
+- **Scope:** `E2ETestLaunch` in `Shared/SharedContainer.swift`.
+- **Decisions:** The Duo E2E hooks (`openChatAttached`, `newsColumns`, `openScreen`, `briefingLens`) and the `OpenScreen` enum existed only in the `#if DEBUG` block, so Release builds failed to compile and the Xcode Cloud archive of `86ddba00` failed. Each hook now has an inert Release stub, and the enum sits outside the conditional.
+- **Validation:** Release builds of the `newsly` and `ShareExtension` schemes for a generic iOS device succeed (`CODE_SIGNING_ALLOWED=NO`). The earlier release gate built Debug only; add a Release device build when changing `#if DEBUG` hooks.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-11-26 — `main` — iOS 27 submenu UI test lookup
 
 - **Status:** Complete.
