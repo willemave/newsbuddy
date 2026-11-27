@@ -57,6 +57,28 @@ final class OpenDisplayLayoutTests: XCTestCase {
         )
     }
 
+    func testSideStatusGutterIsTheTopTrailingStatusColumn() {
+        // Closed Duo (466 pt wide): camera inside a status column at the top
+        // of the trailing edge.
+        let closedDuo = [
+            CGRect(x: 399.7, y: 29.3, width: 37, height: 37),
+            CGRect(x: 382, y: 0, width: 84, height: 174),
+        ]
+        XCTAssertEqual(
+            SideStatusGutter.resolve(occlusions: closedDuo, containerWidth: 466),
+            SideStatusGutter(width: 84, statusBottom: 174)
+        )
+        // A phone's island: top centre in portrait, a side away from the top
+        // in landscape. Neither is a status column.
+        XCTAssertNil(SideStatusGutter.resolve(
+            occlusions: [CGRect(x: 141, y: 11, width: 120, height: 37)], containerWidth: 402
+        ))
+        XCTAssertNil(SideStatusGutter.resolve(
+            occlusions: [CGRect(x: 837, y: 141, width: 37, height: 120)], containerWidth: 874
+        ))
+        XCTAssertNil(SideStatusGutter.resolve(occlusions: [], containerWidth: 402))
+    }
+
     func testNewsBesideAStoryEndsFortyPointsBeforeTheHinge() {
         let hinge = OpenDisplayMetrics.hingeX(
             foldFrame: CGRect(x: 402, y: 0, width: 40, height: 669),

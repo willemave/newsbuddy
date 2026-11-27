@@ -27,6 +27,23 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-27 — `main` — Closed Duo: detail back button in the status column
+
+- **Status:** Complete. Uncommitted.
+- **Scope:** `ContentDetailView` floating back button; `SideStatusGutter` in `OpenDisplayLayout.swift`.
+- **Decisions:**
+  - The user asked for the back arrow to sit in the closed Duo's right-side gutter.
+  - That column reports zero safe-area insets. It is an occlusion region (`reservedRegions(kind: .occlusion)`, iOS 27.1+), measured at x 382–466, y 0–174 on the 466 pt outer display.
+  - The detection takes a region that starts at the top, touches the trailing edge, and is at least 44×60 pt. A phone's island never qualifies.
+  - `onAppear`/size-change reads returned no regions, so detection runs in `onGeometryChange` and keeps the first column it finds.
+  - In the column the button uses surface glass, since it sits on the page background rather than hero art.
+- **Validation:**
+  - Closed Duo screenshot: the button sits in the column below the clock and Wi-Fi.
+  - iPhone 17 screenshot: unchanged, top-left over the hero.
+  - Unit test for the gutter detection.
+- **Remaining:** The pushed chat's back button (in its header row) is unchanged.
+- **Commits:** Uncommitted.
+
 ### 2026-11-27 — `main` — Duo feedback: full-view News, cleaner rows, rail actions, resume fixes
 
 - **Status:** Complete. Uncommitted.

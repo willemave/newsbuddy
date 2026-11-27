@@ -148,6 +148,32 @@ func retargetedBriefingSelection(
     )
 }
 
+/// The closed iPhone Duo puts the status bar and camera in a column at the
+/// top of the trailing edge. The system reports it as an occlusion region
+/// (iOS 27.1+), not a safe-area inset. Floating chrome such as the detail
+/// back button sits in that column, below the status items.
+struct SideStatusGutter: Equatable {
+    let width: CGFloat
+    /// The bottom of the status column.
+    let statusBottom: CGFloat
+
+    /// A region that starts at the top, reaches the trailing edge, and is at
+    /// least a button wide and tall. A phone's island (top centre, or a side
+    /// in landscape, away from the top) never qualifies.
+    static func resolve(occlusions: [CGRect], containerWidth: CGFloat) -> SideStatusGutter? {
+        let column = occlusions.first { frame in
+            frame.minY < 1 && frame.maxX >= containerWidth - 1
+                && frame.width >= 44 && frame.height >= 60
+        }
+        return column.map { SideStatusGutter(width: $0.width, statusBottom: $0.maxY) }
+    }
+
+    static func occlusions(in proxy: GeometryProxy) -> [CGRect] {
+        guard #available(iOS 27.1, *) else { return [] }
+        return proxy.reservedRegions(kind: .occlusion, options: .includeInactive).map(\.frame)
+    }
+}
+
 private struct DetailPaneRootKey: EnvironmentKey {
     static let defaultValue = false
 }

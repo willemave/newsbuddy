@@ -69,6 +69,8 @@ private struct ContentDetailContentView: View {
     /// A chat requested from inside a sheet waits for that sheet to finish
     /// dismissing, because only one sheet can present from a host at a time.
     @State private var pendingChatRoute: ChatSessionRoute?
+    /// The closed Duo's status column, when the device has one.
+    @State private var statusGutter: SideStatusGutter?
     @State private var viewModel: ContentDetailViewModel
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(\.dismiss) private var dismiss
@@ -250,16 +252,39 @@ private struct ContentDetailContentView: View {
                 .topScreenSoftEdge(opacity: topEdgeFadeOpacity)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { proxy in
-                        VStack(alignment: .leading, spacing: 0) {
-                            if !isDetailPaneRoot {
-                                floatingBackButton
+                        if !isDetailPaneRoot {
+                            if let gutter = statusGutter {
+                                // Closed Duo: centred in the status column,
+                                // below the clock, off the reading area.
+                                floatingBackButton(style: .surface)
+                                    .scaleEffect(floatingBackScale)
+                                    .frame(width: gutter.width)
+                                    .padding(.top, gutter.statusBottom + 8)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            } else {
+                                floatingBackButton(style: hasHeroImage && topEdgeFadeOpacity < 0.5 ? .imageOverlay : .surface)
                                     .scaleEffect(floatingBackScale)
                                     .padding(.leading, 16)
                                     .padding(.top, floatingBackTopPadding(for: proxy))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             }
-                            Spacer(minLength: 0)
                         }
                     }
+                    .onGeometryChange(for: SideStatusGutter?.self) { proxy in
+                        SideStatusGutter.resolve(
+                            occlusions: SideStatusGutter.occlusions(in: proxy),
+                            containerWidth: proxy.size.width
+                        )
+                    } action: { gutter in
+                        // Some layout passes report no regions; keep a found
+                        // column for this view's lifetime (opening or closing
+                        // the device rebuilds the detail).
+                        guard !isInOpenDisplayPane, let gutter else { return }
+                        statusGutter = gutter
+                    }
+                    // Reaches the trailing screen edge, where the closed
+                    // Duo's status column sits.
+                    .ignoresSafeArea(.container, edges: .trailing)
                 }
             }
         }
@@ -510,11 +535,11 @@ private struct ContentDetailContentView: View {
         }
     }
 
-    private var floatingBackButton: some View {
-        // Darkened glass while it sits on hero art; surface glass once the art
-        // has scrolled out from under it. Glass carries its own contrast, so
-        // the button no longer fades as the reader scrolls.
-        FloatingBackButton(style: hasHeroImage && topEdgeFadeOpacity < 0.5 ? .imageOverlay : .surface) {
+    /// Darkened glass while it sits on hero art; surface glass once the art
+    /// has scrolled out from under it, or in the closed Duo's status column.
+    /// Glass carries its own contrast, so the button never fades.
+    private func floatingBackButton(style: FloatingBackButton.Style) -> some View {
+        FloatingBackButton(style: style) {
             detailLogger.info(
                 "[DetailNavigation] backButtonTapped surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public)"
             )

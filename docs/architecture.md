@@ -1200,6 +1200,11 @@ Knowledge, player) and the selected tier:
   decision point.
 - The rail carries Search and Settings above the player; the Knowledge
   sidebar hides its masthead buttons (`showsHeaderActions: false`).
+- On the closed Duo the status bar and camera form a column at the top of
+  the trailing edge, reported as an occlusion region (not a safe-area inset).
+  `SideStatusGutter` finds it through `onGeometryChange` and keeps the first
+  reading, because some passes report no regions. The detail's floating
+  back button then sits centred in that column, below the status items.
 - `ContentView` holds `rootLayout` while the app is not active, because the
   system reports compact size classes while snapshotting a backgrounded
   open display; following them would swap shells and rebuild the detail.
