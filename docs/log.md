@@ -27,6 +27,27 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-26 — `main` — Open-display News in the first column; rail clears the corner
+
+- **Status:** Complete. Uncommitted.
+- **Scope:** Open-display News layout, rail, Settings, laws B1, architecture 11.3a.
+- **Decisions (user feedback):**
+  - The two-column spread read as two unrelated strips. A paged two-page spread would need a pagination engine and new read-tracking rules. A centred single column was tried next; the user then chose "just default to the first column".
+  - News now always sits in the first column (hinge − 40 pt), with a News interstitial ("Hot off the press.") beside it until a story is picked. News never moves when a story opens or closes, so the open/close anchoring was removed; only the first-appearance anchor (after unfolding) remains.
+  - The rail's first icon sat in the display's rounded corner; the rail now starts one item lower (56 pt).
+- **Removed:**
+  - The "News columns" setting (`NewsColumnPreference`, `AppSettings.openDisplayNewsColumns`).
+  - Hinge memory (`deviceHasHinge`, `HingeDetection`) and the `supportsOpenDisplay` environment key, which existed only to show that setting.
+  - `BriefingColumnSplit` and the spread balancing helpers.
+  - The `newslyE2ENewsColumns` hook and the two-column tests.
+  - `OpenBriefingArrangement.spread` is gone: News with nothing open is `.newsBeside(.interstitial)`.
+- **Validation:**
+  - Unit tests: 845 passed, 0 failed (iPhone 17, iOS 27.2).
+  - `ShareExtension` Release device build succeeds.
+  - Duo simulator shots of News with the interstitial and News beside a story.
+- **Remaining:** A paged spread is possible later if wanted.
+- **Commits:** Uncommitted.
+
 ### 2026-11-26 — `main` — Release build stubs for Duo E2E hooks
 
 - **Status:** Complete.

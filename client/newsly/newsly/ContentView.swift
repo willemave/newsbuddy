@@ -66,7 +66,6 @@ struct ContentView: View {
         #if DEBUG
         .overlay { FoldDiagnosticsOverlay() }
         #endif
-        .modifier(HingeDetection(settings: settings))
         .sheet(isPresented: $showSettingsSheet, onDismiss: {
             isSettingsSheetActive = false
             // A chat attached inside Settings stays open over the root.
@@ -101,8 +100,6 @@ struct ContentView: View {
         .font(.appBody)
         .dynamicTypeSize(appTextSize)
         .environment(readStateCache)
-        // Outside the Settings sheet modifier so the sheet inherits it.
-        .environment(\.supportsOpenDisplay, rootLayout == .openDisplay || settings.deviceHasHinge)
         .environment(session.badgeStatsStore)
         .environment(session.xConnectionStore)
         .environment(submissionStatusViewModel)
@@ -371,23 +368,5 @@ struct ContentView: View {
             openChatSession: openChatSession,
             openAttachedChat: { route in session.attachedChat.present(route, host: .root) }
         )
-    }
-}
-
-/// Remembers that this device folds the first time the system reports a
-/// hinge (iOS 27.1+), so open-display settings stay visible while closed.
-private struct HingeDetection: ViewModifier {
-    let settings: AppSettings
-
-    func body(content: Content) -> some View {
-        if #available(iOS 27.1, *) {
-            content.onHingeChange { _, context in
-                if context.hinge != nil {
-                    settings.noteDeviceHasHinge()
-                }
-            }
-        } else {
-            content
-        }
     }
 }

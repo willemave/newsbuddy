@@ -53,7 +53,9 @@ struct OpenDisplayRail: View {
                 playerButton(player)
             }
         }
-        .padding(.top, 12)
+        // The display's rounded corner curves through the top of the rail;
+        // the first item starts one item lower, clear of it.
+        .padding(.top, 56)
         .padding(.bottom, 14)
         .frame(width: OpenDisplayMetrics.railWidth)
         .frame(maxHeight: .infinity)

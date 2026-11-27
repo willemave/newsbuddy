@@ -148,7 +148,6 @@ enum E2ETestLaunch {
     static let openContentTypeKey = "newslyE2EOpenContentType"
     static let openChatAttachedKey = "newslyE2EOpenChatAttached"
     static let briefingLensKey = "newslyE2EBriefingLens"
-    static let newsColumnsKey = "newslyE2ENewsColumns"
     static let openScreenKey = "newslyE2EOpenScreen"
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
@@ -218,12 +217,6 @@ enum E2ETestLaunch {
         isEnabled && bool(for: openChatAttachedKey)
     }
 
-    /// Overrides the open-display News columns preference: `single`/`double`.
-    static var newsColumns: String? {
-        guard isEnabled else { return nil }
-        return string(for: newsColumnsKey)
-    }
-
     static var openScreen: OpenScreen? {
         guard isEnabled else { return nil }
         return string(for: openScreenKey).flatMap(OpenScreen.init(rawValue:))
@@ -273,7 +266,6 @@ enum E2ETestLaunch {
     static let openContentId: Int? = nil
     static let openContentType: String? = nil
     static let openChatAttached = false
-    static let newsColumns: String? = nil
     static let openScreen: OpenScreen? = nil
     static let briefingLens: String? = nil
     static let fakeSpeechEnabled = false

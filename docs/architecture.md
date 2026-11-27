@@ -1191,12 +1191,11 @@ the Briefing lens pager.
 `OpenDisplayShell` shows a tight icon rail (News, Podcasts, Articles,
 Knowledge, player) and the selected tier:
 
-- **News** renders as `BriefingView(layout: .column(BriefingColumnLayout))`:
-  two columns split at the measured fold (`reservedRegions(kind: .division)`, iOS 27.1+) or one centred
-  column, per `AppSettings.openDisplayNewsColumns`.
-- **Opening a story** reflows News to one column ending 40 pt before the hinge,
-  with the story beside it. `OpenBriefingArrangement.resolve` is the single
-  decision point.
+- **News** renders as `BriefingView(layout: .column(BriefingColumnLayout))`
+  in the first column, ending 40 pt before the hinge (measured from
+  `reservedRegions(kind: .division)`, iOS 27.1+). The story, a chat, or an
+  `OpenDisplayInterstitial` fills the page beside it, and News never moves.
+  `OpenBriefingArrangement.resolve` is the single decision point.
 - **Podcasts and Articles** render as the same column layout with
   `presentsCardsAsRows`: `BriefingSourceListRow` Knowledge-style rows in a 300 pt sidebar, with the
   item flush beside it and an `OpenDisplayInterstitial` before the first pick.
@@ -1207,7 +1206,7 @@ The open shell ignores the trailing safe area, so the status bar and camera
 float over content. Pane screens opt out of the reserved column themselves
 through `extendsToOpenDisplayEdge()` (`\.isInOpenDisplayPane`), because a
 `NavigationStack`'s UIKit host re-imposes it. The Briefing detail pane has no
-stack; the Briefing list or spread sits in one only for its empty-state and
+stack; the Briefing list or News column sits in one only for its empty-state and
 first-run links. Both content areas stay mounted, hidden when not selected,
 and an attached chat renders only in the visible one.
 

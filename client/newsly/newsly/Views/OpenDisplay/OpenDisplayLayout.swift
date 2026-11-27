@@ -30,24 +30,18 @@ enum OpenDisplayMetrics {
     /// Podcasts, Articles, and Knowledge lists: a narrow sidebar, so the
     /// item beside it gets most of the display.
     static let sidebarWidth: CGFloat = 300
-    /// News reflowed beside a story ends this far before the hinge line.
+    /// News always reads in the first column, ending this far before the
+    /// hinge line.
     static let newsHingeClearance: CGFloat = 40
-    /// One-column News reads at this width, centred.
-    static let singleColumnReadingWidth: CGFloat = 640
-
-    /// The fold when it runs top to bottom (the wide hold). Nil for a
-    /// horizontal fold (upright hold) or no fold at all.
-    static func verticalFold(_ foldFrame: CGRect?, contentHeight: CGFloat) -> CGRect? {
-        guard let foldFrame, foldFrame.height >= contentHeight * 0.5 else { return nil }
-        return foldFrame
-    }
 
     /// The hinge line in content coordinates: the centre of a vertical fold.
+    /// Nil for a horizontal fold (upright hold) or no fold at all.
     static func hingeX(foldFrame: CGRect?, contentHeight: CGFloat) -> CGFloat? {
-        verticalFold(foldFrame, contentHeight: contentHeight)?.midX
+        guard let foldFrame, foldFrame.height >= contentHeight * 0.5 else { return nil }
+        return foldFrame.midX
     }
 
-    /// News beside a story or chat: ends 40 pt before the hinge, or uses a
+    /// News in the first column: ends 40 pt before the hinge, or uses a
     /// readable share of the width when there is no vertical hinge.
     static func newsLeadingWidth(hingeX: CGFloat?, contentWidth: CGFloat) -> CGFloat {
         if let hingeX { return max(hingeX - newsHingeClearance, sidebarWidth) }
@@ -63,14 +57,9 @@ enum BriefingLayout: Equatable {
     case column(BriefingColumnLayout)
 }
 
-/// One lens on the open display. News (and Start Here) reads as two columns
-/// split at the fold, one centred column, or one column filling the leading
-/// page beside an open story; Podcasts and Articles are Knowledge-style rows
-/// in the sidebar.
+/// One lens on the open display. News (and Start Here) fills the first
+/// column; Podcasts and Articles are Knowledge-style rows in the sidebar.
 struct BriefingColumnLayout: Equatable {
-    var columnSplit: BriefingColumnSplit?
-    /// One-column News with nothing open reads at this width, centred.
-    var singleColumnMaxWidth: CGFloat?
     var presentsCardsAsRows = false
     /// The source open beside the column.
     var selectedSourceKey: String?
@@ -78,10 +67,8 @@ struct BriefingColumnLayout: Equatable {
 
 /// How the open display arranges a Briefing tier.
 enum OpenBriefingArrangement: Equatable {
-    /// News with nothing open: the full spread, in two columns split at the
-    /// fold, or one centred column.
-    case spread(BriefingColumnSplit?)
-    /// News reflowed to one leading column beside a story or a chat.
+    /// News in the first column beside a story, a chat, or (before a pick)
+    /// the interstitial. News never moves when a story opens or closes.
     case newsBeside(OpenTrailingPane)
     /// A chat on the leading page beside the open story.
     case chatBesideStory
@@ -91,9 +78,7 @@ enum OpenBriefingArrangement: Equatable {
     static func resolve(
         isNewsLike: Bool,
         hasStory: Bool,
-        hasChat: Bool,
-        preference: NewsColumnPreference,
-        split: BriefingColumnSplit?
+        hasChat: Bool
     ) -> OpenBriefingArrangement {
         guard isNewsLike else {
             return .listBeside(hasChat ? .chat : (hasStory ? .detail : .interstitial))
@@ -102,12 +87,12 @@ enum OpenBriefingArrangement: Equatable {
         case (true, true): return .chatBesideStory
         case (true, false): return .newsBeside(.detail)
         case (false, true): return .newsBeside(.chat)
-        case (false, false): return .spread(preference == .double ? split : nil)
+        case (false, false): return .newsBeside(.interstitial)
         }
     }
 }
 
-/// What fills the trailing page beside a list or reflowed News.
+/// What fills the trailing page beside a list or News.
 enum OpenTrailingPane: Equatable {
     case detail
     case chat
@@ -164,10 +149,6 @@ private struct DetailVisibleContentChangeKey: EnvironmentKey {
     static let defaultValue: (@MainActor (Int) -> Void)? = nil
 }
 
-private struct SupportsOpenDisplayKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
 private struct InOpenDisplayPaneKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -178,13 +159,6 @@ extension EnvironmentValues {
     var isDetailPaneRoot: Bool {
         get { self[DetailPaneRootKey.self] }
         set { self[DetailPaneRootKey.self] = newValue }
-    }
-
-    /// True on a device that can open (it is open now, or a hinge has been
-    /// seen). Settings shows open-display preferences only then.
-    var supportsOpenDisplay: Bool {
-        get { self[SupportsOpenDisplayKey.self] }
-        set { self[SupportsOpenDisplayKey.self] = newValue }
     }
 
     /// True for screens shown in an open-display pane. They run to the
@@ -200,69 +174,6 @@ extension EnvironmentValues {
         get { self[DetailVisibleContentChangeKey.self] }
         set { self[DetailVisibleContentChangeKey.self] = newValue }
     }
-}
-
-/// Two columns that meet at the fold: the gutter between them is the fold
-/// band, centred on the hinge; text runs in both columns.
-struct BriefingColumnSplit: Equatable {
-    let leadingWidth: CGFloat
-    let gap: CGFloat
-
-    static let minimumSpreadWidth: CGFloat = 760
-    static let fallbackGap: CGFloat = 32
-
-    /// Splits at a vertical fold when the system reports one; otherwise into
-    /// equal halves once the area is wide enough for two columns. A
-    /// horizontal fold (the upright hold) or a narrow area keeps one column.
-    static func resolve(width: CGFloat, height: CGFloat, foldFrame: CGRect?) -> BriefingColumnSplit? {
-        if let foldFrame = OpenDisplayMetrics.verticalFold(foldFrame, contentHeight: height),
-           foldFrame.minX > width * 0.25, foldFrame.maxX < width * 0.75 {
-            return BriefingColumnSplit(leadingWidth: foldFrame.minX, gap: foldFrame.width)
-        }
-        guard width >= minimumSpreadWidth else { return nil }
-        return BriefingColumnSplit(
-            leadingWidth: ((width - fallbackGap) / 2).rounded(),
-            gap: fallbackGap
-        )
-    }
-}
-
-/// Distributes segments into two columns, each next segment going to the
-/// shorter column by estimated height, so the columns stay balanced as the
-/// lens pages in. Reading order is preserved within each column.
-func briefingSpreadColumns(
-    _ segments: [BriefingSegmentRenderModel]
-) -> (leading: [BriefingSegmentRenderModel], trailing: [BriefingSegmentRenderModel]) {
-    let weights = segments.map {
-        briefingSegmentWeight(textLength: $0.segment.narrationText.count, isCard: $0.card != nil)
-    }
-    let columns = briefingSpreadColumnIndices(weights: weights)
-    return (columns.leading.map { segments[$0] }, columns.trailing.map { segments[$0] })
-}
-
-/// Greedy balance: each next item goes to the column that is shorter so far
-/// (ties to the leading column), preserving order within each column.
-func briefingSpreadColumnIndices(weights: [Int]) -> (leading: [Int], trailing: [Int]) {
-    var leading: [Int] = []
-    var trailing: [Int] = []
-    var leadingHeight = 0
-    var trailingHeight = 0
-    for (index, weight) in weights.enumerated() {
-        if leadingHeight <= trailingHeight {
-            leading.append(index)
-            leadingHeight += weight
-        } else {
-            trailing.append(index)
-            trailingHeight += weight
-        }
-    }
-    return (leading, trailing)
-}
-
-/// Cards carry a hero image that is roughly as tall as 900 characters of
-/// summary; every segment pays a fixed share for its spacing.
-func briefingSegmentWeight(textLength: Int, isCard: Bool) -> Int {
-    textLength + (isCard ? 900 : 0) + 120
 }
 
 extension View {

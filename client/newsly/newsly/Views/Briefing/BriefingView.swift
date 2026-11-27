@@ -82,12 +82,12 @@ struct BriefingView: View {
     /// The column never collapses chrome; it gets its own inert model.
     @State private var columnCollapse = BriefingChromeCollapseModel()
     /// Read passage pauses while the column resizes (opening or closing a
-    /// foldable, or a story or chat opening beside News), because reflowed passages
-    /// would otherwise cross the boundary without being read.
+    /// foldable), because reflowed passages would otherwise cross the
+    /// boundary without being read.
     @State private var isColumnResizing = false
     @State private var columnResizeGeneration = 0
-    /// The source News last anchored to, so the first-appearance anchor
-    /// does not repeat one already applied.
+    /// The source whose passage is known to be in view (tapped here, or
+    /// already anchored), so News only scrolls to stories opened elsewhere.
     @State private var anchoredSourceKey: String?
     @State private var anchorRequest: BriefingScrollAnchorRequest?
     /// Bumped to (re)run the delayed anchor task; a newer request cancels an
@@ -689,28 +689,16 @@ struct BriefingView: View {
             guard !Task.isCancelled else { return }
             isColumnResizing = false
         }
-        .onChange(of: selectedSourceKey) { oldKey, newKey in
-            // News reflows when a story opens or closes; keep the passage
-            // the reader opened (or came back from) in view.
-            guard !presentsRows else { return }
-            // Picking another story while one is open: News does not reflow,
-            // and the tapped passage is already in view.
-            if oldKey != nil, let newKey {
-                anchoredSourceKey = newKey
-                return
-            }
-            guard let key = newKey ?? oldKey else { return }
-            requestAnchor(to: key)
-        }
-        // A story already open when News appears (after unfolding, or once
-        // the lens document loads) is anchored too.
+        // A story opened without a tap in this column (after unfolding, from a
+        // link, or once the lens document loads) scrolls its passage into
+        // view. Taps mark their passage as anchored, so News stays put.
         .task(id: initialAnchorKey(selectedSourceKey: selectedSourceKey, presentsRows: presentsRows)) {
             guard !presentsRows, let key = selectedSourceKey, anchoredSourceKey != key else { return }
             requestAnchor(to: key)
         }
         .task(id: anchorNonce) {
             guard let target = anchorTargetSegmentID else { return }
-            // After the reflow's layout pass.
+            // After the first layout pass.
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled else { return }
             anchorRequest = BriefingScrollAnchorRequest(segmentID: target, generation: anchorNonce)
@@ -752,7 +740,7 @@ struct BriefingView: View {
                 renderModel: viewModel.renderModel(for: lens.key),
                 firstRunProgress: viewModel.firstRun?.tiers.first { $0.tier == lens.tier.rawValue },
                 isReadTrackingEnabled: viewModel.isActive && !isColumnResizing && !isReadTrackingSuspended,
-                // The spread has no pinned chrome: a passage is read once it
+                // The column has no pinned chrome: a passage is read once it
                 // has scrolled fully above the top of the page.
                 readBoundaryY: 0,
                 documentGeneration: viewModel.documentGeneration(for: lens.key),
@@ -876,10 +864,13 @@ struct BriefingView: View {
 
     private func openSource(_ sourceKey: String) {
         guard let source = viewModel.source(for: sourceKey) else { return }
+        // A tapped passage is already in view; News must not scroll to it.
+        anchoredSourceKey = sourceKey
         onOpenContent(contentRoute(for: source))
     }
 
     private func openDiscussion(_ source: APIBriefingSource) {
+        anchoredSourceKey = source.sourceKey
         onOpenContent(contentRoute(for: source, initialScrollTarget: .comments))
     }
 

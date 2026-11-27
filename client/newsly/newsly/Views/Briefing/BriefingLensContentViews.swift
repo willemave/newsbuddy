@@ -153,11 +153,9 @@ struct BriefingLensPageView: View, Equatable {
     let onSetHeaderPinned: (Bool) -> Void
     /// The open display's arrangement of this page. Nil is the phone pager.
     var columnLayout: BriefingColumnLayout? = nil
-    /// Keeps a segment in view when News reflows (a story opens or closes).
+    /// Brings the open story's passage into view when News first appears.
     var anchorRequest: BriefingScrollAnchorRequest? = nil
 
-    private var columnSplit: BriefingColumnSplit? { columnLayout?.columnSplit }
-    private var singleColumnMaxWidth: CGFloat? { columnLayout?.singleColumnMaxWidth }
     private var presentsCardsAsRows: Bool { columnLayout?.presentsCardsAsRows ?? false }
     private var selectedSourceKey: String? { columnLayout?.selectedSourceKey }
 
@@ -275,28 +273,7 @@ struct BriefingLensPageView: View, Equatable {
                                 .frame(height: 0)
                                 .id(Self.topAnchor)
 
-                            if let columnSplit {
-                                let columns = briefingSpreadColumns(renderModel.segments)
-                                HStack(alignment: .top, spacing: columnSplit.gap) {
-                                    LazyVStack(alignment: .leading, spacing: segmentSpacing(for: renderModel)) {
-                                        ForEach(columns.leading) { segmentModel in
-                                            segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
-                                        }
-                                    }
-                                    .padding(.leading, Spacing.appHorizontalMargin)
-                                    .padding(.trailing, Self.spreadInnerMargin)
-                                    .frame(width: columnSplit.leadingWidth, alignment: .leading)
-
-                                    LazyVStack(alignment: .leading, spacing: segmentSpacing(for: renderModel)) {
-                                        ForEach(columns.trailing) { segmentModel in
-                                            segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
-                                        }
-                                    }
-                                    .padding(.leading, Self.spreadInnerMargin)
-                                    .padding(.trailing, Spacing.appHorizontalMargin)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            } else if presentsCardsAsRows {
+                            if presentsCardsAsRows {
                                 // Lens order, like the cards: no date dividers (B5).
                                 ForEach(renderModel.segments) { segmentModel in
                                     VStack(alignment: .leading, spacing: 0) {
@@ -310,9 +287,6 @@ struct BriefingLensPageView: View, Equatable {
                                 ForEach(renderModel.segments) { segmentModel in
                                     segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
                                         .padding(.horizontal, Spacing.appHorizontalMargin)
-                                        // Leading within the (centred) reading column.
-                                        .frame(maxWidth: singleColumnMaxWidth ?? .infinity, alignment: .leading)
-                                        .frame(maxWidth: .infinity)
                                 }
                             }
 
@@ -439,8 +413,6 @@ struct BriefingLensPageView: View, Equatable {
             updateReadConfiguration(configuration)
         }
     }
-
-    private static let spreadInnerMargin: CGFloat = 12
 
     private func segmentSpacing(for renderModel: BriefingLensRenderModel) -> CGFloat {
         guard renderModel.usesCards else { return 24 }
@@ -757,8 +729,8 @@ struct BriefingTierProgressView: View {
     }
 }
 
-/// Asks a lens page to bring a segment to the top, for example the passage a
-/// reader opened when News reflows beside the story. The generation makes a
+/// Asks a lens page to bring a segment to the top, for example the open
+/// story's passage when News appears after unfolding. The generation makes a
 /// repeat request for the same segment fire again.
 struct BriefingScrollAnchorRequest: Equatable {
     let segmentID: Int

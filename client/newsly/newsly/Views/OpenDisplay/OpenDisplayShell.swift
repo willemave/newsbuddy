@@ -7,12 +7,11 @@ import SwiftUI
 
 /// The open iPhone Duo layout: a tight icon rail, then the selected tier.
 ///
-/// - News reads as a spread (two columns split at the fold, or one centred
-///   column, per the reader's setting). Opening a story reflows News to one
-///   column ending 40 pt before the hinge, with the story beside it.
+/// - News reads in the first column, ending 40 pt before the hinge; the
+///   story opens beside it.
 /// - Podcasts, Articles, and Knowledge are a 300 pt sidebar list with the
-///   selected item flush beside it, and a friendly interstitial before the
-///   first pick.
+///   selected item flush beside it.
+/// - Every tier shows a friendly interstitial before the first pick.
 /// - Nothing overlays content: attached chats take a page of their own.
 /// - The status bar and camera float over content; no column is reserved.
 ///
@@ -37,7 +36,6 @@ struct OpenDisplayShell: View {
     private var tabCoordinator: TabCoordinatorViewModel { session.tabCoordinator }
     private var briefing: BriefingViewModel { session.tabCoordinator.briefingVM }
     private var attachedChat: AttachedChatController { session.attachedChat }
-    private var settings: AppSettings { session.dependencyFactory.appSettings }
 
     private var inlineChat: AttachedChatController.Presentation? {
         guard let presentation = attachedChat.presentation, presentation.host == .root else { return nil }
@@ -46,7 +44,7 @@ struct OpenDisplayShell: View {
 
     /// The chat renders only in the visible area. Both areas stay mounted, so
     /// rendering it in each would give one session two live views (two loads,
-    /// two polls) and reflow the hidden one.
+    /// two polls).
     private func inlineChat(in tab: RootTab) -> AttachedChatController.Presentation? {
         tabCoordinator.selectedTab == tab ? inlineChat : nil
     }
@@ -99,10 +97,6 @@ struct OpenDisplayShell: View {
         OpenDisplayMetrics.hingeX(foldFrame: foldFrame, contentHeight: contentHeight)
     }
 
-    private var columnSplit: BriefingColumnSplit? {
-        BriefingColumnSplit.resolve(width: contentWidth, height: contentHeight, foldFrame: foldFrame)
-    }
-
     private var newsLeadingWidth: CGFloat {
         OpenDisplayMetrics.newsLeadingWidth(hingeX: hingeX, contentWidth: contentWidth)
     }
@@ -124,9 +118,7 @@ struct OpenDisplayShell: View {
         OpenBriefingArrangement.resolve(
             isNewsLike: isNewsLike,
             hasStory: briefingPath.last != nil,
-            hasChat: inlineChat(in: .briefing) != nil,
-            preference: settings.openDisplayNewsColumns,
-            split: columnSplit
+            hasChat: inlineChat(in: .briefing) != nil
         )
     }
 
@@ -185,11 +177,6 @@ struct OpenDisplayShell: View {
 
     private func briefingLayout(for arrangement: OpenBriefingArrangement) -> BriefingLayout {
         switch arrangement {
-        case .spread(let split):
-            .column(BriefingColumnLayout(
-                columnSplit: split,
-                singleColumnMaxWidth: split == nil ? OpenDisplayMetrics.singleColumnReadingWidth : nil
-            ))
         case .newsBeside, .chatBesideStory:
             .column(BriefingColumnLayout(selectedSourceKey: selectedBriefingSourceKey))
         case .listBeside:
@@ -199,7 +186,6 @@ struct OpenDisplayShell: View {
 
     private func leadingWidth(for arrangement: OpenBriefingArrangement) -> CGFloat? {
         switch arrangement {
-        case .spread: nil
         case .newsBeside, .chatBesideStory: newsLeadingWidth
         case .listBeside: OpenDisplayMetrics.sidebarWidth
         }
@@ -207,7 +193,6 @@ struct OpenDisplayShell: View {
 
     private func trailingPane(for arrangement: OpenBriefingArrangement) -> OpenTrailingPane? {
         switch arrangement {
-        case .spread: nil
         case .newsBeside(let pane), .listBeside(let pane): pane
         case .chatBesideStory: .detail
         }
@@ -233,7 +218,7 @@ struct OpenDisplayShell: View {
     }
 
     /// News keeps a close control on the story so the reader can return to
-    /// the full spread. It sits right of the hinge line.
+    /// the interstitial. It sits right of the hinge line.
     private var closeButton: some View {
         let paneMinX = newsLeadingWidth + 1
         let leading = hingeX.map { max($0 - paneMinX + 12, 14) } ?? 14
@@ -299,9 +284,9 @@ struct OpenDisplayShell: View {
         let totalSeconds = unreadSources.reduce(0) { total, source in
             total + (isPodcasts ? (source.durationSeconds ?? 0) : (source.readingMinutes ?? 0) * 60)
         }
-        let lensTitle = summary?.title ?? (isPodcasts ? "Podcasts" : "Articles")
+        let lensTitle = summary?.title ?? (isPodcasts ? "Podcasts" : (isNewsLike ? "News" : "Articles"))
         return OpenDisplayInterstitial(
-            kind: isPodcasts ? .podcasts : .articles,
+            kind: isPodcasts ? .podcasts : (isNewsLike ? .news : .articles),
             meta: openDisplayInterstitialMeta(
                 isPodcasts: isPodcasts,
                 unreadCount: summary?.unreadSourceCount ?? 0,
@@ -501,7 +486,7 @@ struct OpenDisplayShell: View {
             tab = .knowledge
         }
         // The open item belongs to the tier it came from; another Briefing
-        // tier starts at its list or spread.
+        // tier starts at its list and interstitial.
         if tab == .briefing, destination != previousBriefingDestination {
             briefingPath = []
         }
