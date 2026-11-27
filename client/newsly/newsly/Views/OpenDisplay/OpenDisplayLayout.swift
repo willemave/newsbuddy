@@ -30,9 +30,11 @@ enum OpenDisplayMetrics {
     /// Podcasts, Articles, and Knowledge lists: a narrow sidebar, so the
     /// item beside it gets most of the display.
     static let sidebarWidth: CGFloat = 300
-    /// News always reads in the first column, ending this far before the
-    /// hinge line.
+    /// News beside a story ends this far before the hinge line.
     static let newsHingeClearance: CGFloat = 40
+    /// News with nothing open reads in one column centred in the full view,
+    /// this wide with its margins.
+    static let newsReadingWidth: CGFloat = 640
 
     /// The hinge line in content coordinates: the centre of a vertical fold.
     /// Nil for a horizontal fold (upright hold) or no fold at all.
@@ -41,7 +43,7 @@ enum OpenDisplayMetrics {
         return foldFrame.midX
     }
 
-    /// News in the first column: ends 40 pt before the hinge, or uses a
+    /// News beside a story or chat: ends 40 pt before the hinge, or uses a
     /// readable share of the width when there is no vertical hinge.
     static func newsLeadingWidth(hingeX: CGFloat?, contentWidth: CGFloat) -> CGFloat {
         if let hingeX { return max(hingeX - newsHingeClearance, sidebarWidth) }
@@ -57,9 +59,13 @@ enum BriefingLayout: Equatable {
     case column(BriefingColumnLayout)
 }
 
-/// One lens on the open display. News (and Start Here) fills the first
-/// column; Podcasts and Articles are Knowledge-style rows in the sidebar.
+/// One lens on the open display. News (and Start Here) reads in one centred
+/// column, or fills the leading column beside an open story; Podcasts and
+/// Articles are Knowledge-style rows in the sidebar.
 struct BriefingColumnLayout: Equatable {
+    /// News with nothing open: the header and passages share this centred
+    /// width. Nil fills the slot.
+    var readingWidth: CGFloat?
     var presentsCardsAsRows = false
     /// The source open beside the column.
     var selectedSourceKey: String?
@@ -67,8 +73,9 @@ struct BriefingColumnLayout: Equatable {
 
 /// How the open display arranges a Briefing tier.
 enum OpenBriefingArrangement: Equatable {
-    /// News in the first column beside a story, a chat, or (before a pick)
-    /// the interstitial. News never moves when a story opens or closes.
+    /// News with nothing open: one column centred in the full view.
+    case newsAlone
+    /// News in a leading column beside a story or a chat.
     case newsBeside(OpenTrailingPane)
     /// A chat on the leading page beside the open story.
     case chatBesideStory
@@ -87,7 +94,7 @@ enum OpenBriefingArrangement: Equatable {
         case (true, true): return .chatBesideStory
         case (true, false): return .newsBeside(.detail)
         case (false, true): return .newsBeside(.chat)
-        case (false, false): return .newsBeside(.interstitial)
+        case (false, false): return .newsAlone
         }
     }
 }

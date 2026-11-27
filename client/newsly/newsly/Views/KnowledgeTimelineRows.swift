@@ -161,6 +161,9 @@ struct KnowledgeTimelineRow<Accessory: View>: View {
     let title: String
     let subtitle: String?
     let kicker: String
+    /// Long titles wrap instead of truncating (open-display Briefing rows).
+    /// Knowledge rows stay single-line for density.
+    var wrapsLongTitle = false
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
@@ -174,11 +177,7 @@ struct KnowledgeTimelineRow<Accessory: View>: View {
             )
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.terracottaHeadlineSmall)
-                    .foregroundStyle(Color.onSurface)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                titleText
 
                 if let subtitle, !subtitle.isEmpty, subtitle != title {
                     Text(subtitle)
@@ -200,6 +199,37 @@ struct KnowledgeTimelineRow<Accessory: View>: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
+
+    @ViewBuilder
+    private var titleText: some View {
+        if wrapsLongTitle {
+            // A title that fits keeps the full size on one line. A longer one
+            // steps down a size and wraps to two lines, shrinking a little
+            // more only before it would truncate.
+            ViewThatFits(in: .horizontal) {
+                Text(title)
+                    .font(.terracottaHeadlineSmall)
+                    .lineLimit(1)
+                Text(title)
+                    .font(.knowledgeRowWrappedTitle)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+                    .allowsTightening(true)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(Color.onSurface)
+        } else {
+            Text(title)
+                .font(.terracottaHeadlineSmall)
+                .foregroundStyle(Color.onSurface)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+}
+
+private extension Font {
+    static let knowledgeRowWrappedTitle = Font.appSerif(size: 16, relativeTo: .headline, weight: .semibold)
 }
 
 /// Hairline between rows of the same day group, aligned with the text column.

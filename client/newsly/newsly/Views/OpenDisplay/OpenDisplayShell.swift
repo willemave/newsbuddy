@@ -7,11 +7,11 @@ import SwiftUI
 
 /// The open iPhone Duo layout: a tight icon rail, then the selected tier.
 ///
-/// - News reads in the first column, ending 40 pt before the hinge; the
-///   story opens beside it.
+/// - News reads in one column centred in the full view. Opening a story
+///   moves News to a leading column ending 40 pt before the hinge, with the
+///   story beside it.
 /// - Podcasts, Articles, and Knowledge are a 300 pt sidebar list with the
-///   selected item flush beside it.
-/// - Every tier shows a friendly interstitial before the first pick.
+///   selected item flush beside it and an interstitial before the first pick.
 /// - Nothing overlays content: attached chats take a page of their own.
 /// - The status bar and camera float over content; no column is reserved.
 ///
@@ -56,7 +56,10 @@ struct OpenDisplayShell: View {
                 knowledgeItem: knowledgeRailItem,
                 selection: railSelection,
                 player: playerState,
-                onSelect: selectRail
+                onSelect: selectRail,
+                onSearch: openKnowledgeSearch,
+                onOpenSettings: onOpenSettings,
+                settingsNeedsAttention: session.xConnectionStore.needsAttention
             )
 
             divider()
@@ -177,6 +180,8 @@ struct OpenDisplayShell: View {
 
     private func briefingLayout(for arrangement: OpenBriefingArrangement) -> BriefingLayout {
         switch arrangement {
+        case .newsAlone:
+            .column(BriefingColumnLayout(readingWidth: OpenDisplayMetrics.newsReadingWidth))
         case .newsBeside, .chatBesideStory:
             .column(BriefingColumnLayout(selectedSourceKey: selectedBriefingSourceKey))
         case .listBeside:
@@ -186,6 +191,7 @@ struct OpenDisplayShell: View {
 
     private func leadingWidth(for arrangement: OpenBriefingArrangement) -> CGFloat? {
         switch arrangement {
+        case .newsAlone: nil
         case .newsBeside, .chatBesideStory: newsLeadingWidth
         case .listBeside: OpenDisplayMetrics.sidebarWidth
         }
@@ -193,6 +199,7 @@ struct OpenDisplayShell: View {
 
     private func trailingPane(for arrangement: OpenBriefingArrangement) -> OpenTrailingPane? {
         switch arrangement {
+        case .newsAlone: nil
         case .newsBeside(let pane), .listBeside(let pane): pane
         case .chatBesideStory: .detail
         }
@@ -218,7 +225,7 @@ struct OpenDisplayShell: View {
     }
 
     /// News keeps a close control on the story so the reader can return to
-    /// the interstitial. It sits right of the hinge line.
+    /// News on its own. It sits right of the hinge line.
     private var closeButton: some View {
         let paneMinX = newsLeadingWidth + 1
         let leading = hingeX.map { max($0 - paneMinX + 12, 14) } ?? 14
@@ -284,9 +291,9 @@ struct OpenDisplayShell: View {
         let totalSeconds = unreadSources.reduce(0) { total, source in
             total + (isPodcasts ? (source.durationSeconds ?? 0) : (source.readingMinutes ?? 0) * 60)
         }
-        let lensTitle = summary?.title ?? (isPodcasts ? "Podcasts" : (isNewsLike ? "News" : "Articles"))
+        let lensTitle = summary?.title ?? (isPodcasts ? "Podcasts" : "Articles")
         return OpenDisplayInterstitial(
-            kind: isPodcasts ? .podcasts : (isNewsLike ? .news : .articles),
+            kind: isPodcasts ? .podcasts : .articles,
             meta: openDisplayInterstitialMeta(
                 isPodcasts: isPodcasts,
                 unreadCount: summary?.unreadSourceCount ?? 0,
@@ -329,14 +336,12 @@ struct OpenDisplayShell: View {
                     knowledgePath = NavigationPath([route])
                 },
                 onSelectSession: onSelectSession,
-                onSearch: {
-                    closeInlineChat()
-                    knowledgePath = NavigationPath([KnowledgeSearchRoute()])
-                },
+                onSearch: openKnowledgeSearch,
                 onOpenSettings: onOpenSettings,
                 viewModel: session.knowledgeViewModel,
                 contentTextSize: contentTextSize,
-                chatTransitionNamespace: chatTransitionNamespace
+                chatTransitionNamespace: chatTransitionNamespace,
+                showsHeaderActions: false
             )
             .dynamicTypeSize(contentTextSize)
             .frame(width: OpenDisplayMetrics.sidebarWidth)
@@ -381,6 +386,15 @@ struct OpenDisplayShell: View {
         .environment(\.isDetailPaneRoot, knowledgePath.count <= 1)
         .environment(\.isInOpenDisplayPane, true)
         .ignoresSafeArea(.container, edges: .trailing)
+    }
+
+    /// Search opens in the Knowledge pane, from any tier.
+    private func openKnowledgeSearch() {
+        closeInlineChat()
+        knowledgePath = NavigationPath([KnowledgeSearchRoute()])
+        if tabCoordinator.selectedTab != .knowledge {
+            tabCoordinator.select(.knowledge)
+        }
     }
 
     /// A chat attached to content gives way when the reader picks something
@@ -486,7 +500,7 @@ struct OpenDisplayShell: View {
             tab = .knowledge
         }
         // The open item belongs to the tier it came from; another Briefing
-        // tier starts at its list and interstitial.
+        // tier starts at its list or News on its own.
         if tab == .briefing, destination != previousBriefingDestination {
             briefingPath = []
         }

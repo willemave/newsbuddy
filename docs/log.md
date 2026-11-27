@@ -27,6 +27,31 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-27 — `main` — Duo feedback: full-view News, cleaner rows, rail actions, resume fixes
+
+- **Status:** Complete. Uncommitted.
+- **Scope:**
+  - Open-display News, Briefing rows, rail, Knowledge sidebar.
+  - App-resume layout stability; detail first-load recovery.
+- **Decisions (user feedback):**
+  - News with nothing open fills the view as one centred column (640 pt with margins) with its header aligned; no empty page beside it. Opening a story still puts News in a leading column (hinge − 40 pt) beside the story, with the reflow anchor restored.
+  - Podcasts/Articles rows lose the save button and unread dot. Add to Knowledge stays in the menu and as an accessibility action, and read rows dim.
+  - Row titles keep 18 pt on one line when they fit; otherwise they step to 16 pt and wrap over two lines, shrinking up to 10% before truncating (`ViewThatFits`). Knowledge rows stay single-line.
+  - Search and Settings move from the Knowledge masthead to the rail, above the player. The Settings attention dot moves with it, and Knowledge's composer moves up.
+- **Bugs found:**
+  - **Reopen loading state:** backgrounding the open display made the system report compact size classes during its snapshot. `ContentView` swapped to the phone shell and back, rebuilding the detail and its list (logs: rootLayout openDisplay → compact → openDisplay, detail disappear/appear and reload). `rootLayout` is now held while the app is not active.
+  - **Stuck skeleton:** separately, a detail whose first load was cancelled by backgrounding stayed on its skeleton forever. `ContentDetailViewModel.needsInitialLoad` now triggers a load on return to active.
+- **Validation:**
+  - Unit tests: 846 passed after one test fix, including the new first-load test.
+  - `ShareExtension` Release device build succeeds.
+  - On the Duo simulator: News centred, Podcasts rows, and Knowledge with the rail buttons.
+  - Background → foreground on the Duo: no layout swap and no detail rebuild in the logs.
+- **Crash reports (user-supplied .ips):**
+  - **Build 259, 2026-11-27 07:46, `iPhone19,4` (the Duo, TestFlight):** `EXC_BREAKPOINT` in a SwiftUICore assertion reached through `swift_getAtKeyPath` during an AttributeGraph update. It happened inside `-[UIScene _performSystemSnapshotWithActions:]` with a window rotation, while a `UINavigationController` hid its bar during a hosting-view insertion. Every view's environment objects are injected above both shells, so the likely cause is the snapshot's size-class flip: the shell swapped to the compact `TabView` mid-snapshot and evaluated a view before its environment was in place. Holding `rootLayout` while not active prevents that swap. The simulator never reproduces the device's snapshot rotation: a temporary XCUITest probe (background, rotate, return, on six screens, iPhone 17 and Duo, with and without the hold) passed every time.
+  - **Build 258, 2026-11-26 16:03:** RunningBoard `SIGKILL` with `0xdead10cc` (resource lock held during suspension). A cooperative thread was in `SecItemCopyMatching` via `KeychainManager` (shared access group). This is unrelated to the Duo work and is left for a separate investigation.
+- **Remaining:** Confirm on the device that the 259 crash is gone. Investigate the `0xdead10cc` keychain-during-suspension kill.
+- **Commits:** Uncommitted.
+
 ### 2026-11-26 — `main` — Open-display News in the first column; rail clears the corner
 
 - **Status:** Complete. Uncommitted.

@@ -34,6 +34,26 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertEqual(service.fetchCount, 2)
     }
 
+    func testFirstLoadCancelledByBackgroundingNeedsALoadOnReturn() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let gate = ContentDetailAsyncGate()
+        let service = BlockingContentDetailService(detail: detail, gate: gate)
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+
+        let first = Task { await viewModel.loadContent() }
+        await waitUntil { service.fetchCount == 1 }
+        XCTAssertFalse(viewModel.needsInitialLoad)
+
+        viewModel.suspendAutomaticReads()
+        await gate.open()
+        await first.value
+
+        XCTAssertNil(viewModel.content)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertTrue(viewModel.needsInitialLoad)
+    }
+
     func testConcurrentLoadsCoalesceAndCommitDependentWorkOnce() async throws {
         let detail = try Self.articleDetail(id: 42)
         let gate = ContentDetailAsyncGate()

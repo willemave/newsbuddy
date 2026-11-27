@@ -73,6 +73,11 @@ final class ContentDetailViewModel {
     var isLoading: Bool {
         content == nil && initialLoadPhase == .loading
     }
+    /// True when the first load never finished (backgrounding cancels it)
+    /// and nothing is on screen yet, so returning to the app must load.
+    var needsInitialLoad: Bool {
+        content == nil && initialLoadPhase == .idle
+    }
     var errorMessage: String? {
         guard content == nil,
               case .failure(let message) = initialLoadPhase else { return nil }

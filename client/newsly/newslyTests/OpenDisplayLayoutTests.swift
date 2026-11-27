@@ -17,10 +17,10 @@ final class OpenDisplayLayoutTests: XCTestCase {
 
     // MARK: Briefing arrangement
 
-    func testNewsWithNothingOpenKeepsTheFirstColumnBesideTheInterstitial() {
+    func testNewsWithNothingOpenFillsTheViewInOneColumn() {
         XCTAssertEqual(
             OpenBriefingArrangement.resolve(isNewsLike: true, hasStory: false, hasChat: false),
-            .newsBeside(.interstitial)
+            .newsAlone
         )
     }
 

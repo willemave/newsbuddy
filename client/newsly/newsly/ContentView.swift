@@ -48,8 +48,14 @@ struct ContentView: View {
         _settings = State(initialValue: session.dependencyFactory.appSettings)
     }
 
+    /// While the app is not active the system snapshots it at other sizes,
+    /// briefly reporting compact size classes on the open display. The layout
+    /// holds still then, so leaving and returning never swaps shells (which
+    /// would rebuild the detail and reload it).
+    @State private var heldLayout: RootLayout?
+
     private var rootLayout: RootLayout {
-        RootLayout.resolve(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
+        heldLayout ?? RootLayout.resolve(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
     }
 
     var body: some View {
@@ -139,6 +145,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: lifecycle.phase) { _, newPhase in
+            heldLayout = newPhase == .active ? nil : rootLayout
             updateBriefingActivity()
             if newPhase == .active {
                 applyE2ERoutesIfNeeded()

@@ -417,6 +417,11 @@ private struct ContentDetailContentView: View {
         case .background:
             viewModel.suspendAutomaticReads()
         case .active:
+            // A first load cancelled by backgrounding never resumes on its
+            // own; without this the skeleton stays up after returning.
+            if viewModel.needsInitialLoad {
+                Task { await viewModel.loadContent() }
+            }
             guard let generation = lifecycle.activation?.generation else { return }
             guard let previousGeneration = handledActivationGeneration else {
                 handledActivationGeneration = generation

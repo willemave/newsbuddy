@@ -10,7 +10,6 @@ import SwiftUI
 /// pick and, for Briefing tiers, offers the lens's own audio.
 struct OpenDisplayInterstitial: View {
     enum Kind {
-        case news
         case podcasts
         case articles
         case caughtUp
@@ -18,7 +17,6 @@ struct OpenDisplayInterstitial: View {
 
         var title: String {
             switch self {
-            case .news: "Hot off the press."
             case .podcasts: "Tune in."
             case .articles: "Pull up a chair."
             case .caughtUp: "All caught up."
@@ -28,7 +26,6 @@ struct OpenDisplayInterstitial: View {
 
         var message: String {
             switch self {
-            case .news: "Tap a story and it opens here, beside the news."
             case .podcasts: "Choose an episode and it opens here, ready to play."
             case .articles: "Pick an article and it opens right here."
             case .caughtUp: "New pieces land here as your briefing updates."

@@ -2,7 +2,7 @@
 
 **Status:** Implemented 2026-11-26 on `feature/iphone-duo` (uncommitted); see `docs/log.md`. Open items: hinge rule for detail action buttons (awaiting user), interstitial after the selected item leaves the list. It builds on the uncommitted `feature/iphone-duo` work (see `plan.md`, including its "Spread revision" and "Phase 0 findings" sections).
 
-**Revision (2026-11-26, later):** the two-column News spread and its One/Two setting were removed after review (the columns read as unrelated strips). News always sits in the first column (hinge − 40 pt) with an interstitial beside it until a story is picked; it never moves when a story opens or closes. The rail starts below the display's rounded corner.
+**Revision (2026-11-26, later):** the two-column News spread and its One/Two setting were removed after review (the columns read as unrelated strips). News with nothing open fills the view as one centred column with its header aligned (2026-11-27, after a brief first-column trial); stories open side by side with News in a leading column. Search and Settings live in the rail; rows drop the save button and unread dot and wrap long titles. The rail starts below the display's rounded corner.
 **Scope:** iOS open-display layout (regular × regular) only, except where noted. Compact phones and the closed Duo keep today's layout, with one exception: chat history adopts the shared row style everywhere (decision R5).
 
 ## What the user asked for

@@ -21,6 +21,9 @@ struct KnowledgeView: View {
     let chatTransitionNamespace: Namespace.ID?
     let contentTextSize: DynamicTypeSize
     let onOpenSettings: () -> Void
+    /// Search and Settings sit in the masthead on phones; the open display
+    /// moves them to its rail.
+    let showsHeaderActions: Bool
 
     @State private var viewModel: KnowledgeTimelineViewModel
     @State private var composerText = ""
@@ -40,7 +43,8 @@ struct KnowledgeView: View {
         onOpenSettings: @escaping () -> Void,
         viewModel: KnowledgeTimelineViewModel,
         contentTextSize: DynamicTypeSize,
-        chatTransitionNamespace: Namespace.ID? = nil
+        chatTransitionNamespace: Namespace.ID? = nil,
+        showsHeaderActions: Bool = true
     ) {
         self.scrollToTopRequest = scrollToTopRequest
         self.isVisible = isVisible
@@ -51,6 +55,7 @@ struct KnowledgeView: View {
         self.viewModel = viewModel
         self.contentTextSize = contentTextSize
         self.chatTransitionNamespace = chatTransitionNamespace
+        self.showsHeaderActions = showsHeaderActions
     }
 
     private var trimmedComposerText: String {
@@ -72,7 +77,7 @@ struct KnowledgeView: View {
                 EditorialMastheadHeader(
                     title: "Knowledge",
                     titleAccessibilityIdentifier: "knowledge.screen",
-                    trailingAccessory: AnyView(headerActions)
+                    trailingAccessory: showsHeaderActions ? AnyView(headerActions) : nil
                 )
                 .appListRow()
                 .id(Self.topAnchor)

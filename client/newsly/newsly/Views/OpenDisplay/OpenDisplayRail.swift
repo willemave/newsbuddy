@@ -6,8 +6,8 @@
 import SwiftUI
 
 /// The open display's tight, icon-only navigation rail: Briefing tiers with
-/// unread badges, Knowledge, and the Briefing player pinned at the
-/// bottom. It sits at the leading edge, away from the fold. Names are spoken
+/// unread badges and Knowledge at the top; Search, Settings, and the
+/// Briefing player pinned at the bottom. It sits at the leading edge, away from the fold. Names are spoken
 /// by VoiceOver and shown on long press, never as visible labels.
 struct OpenDisplayRail: View {
     struct Item: Identifiable {
@@ -25,6 +25,9 @@ struct OpenDisplayRail: View {
     let selection: OpenRailDestination?
     let player: PlayerState?
     let onSelect: (OpenRailDestination) -> Void
+    let onSearch: () -> Void
+    let onOpenSettings: () -> Void
+    let settingsNeedsAttention: Bool
 
     struct PlayerState {
         let isPreparing: Bool
@@ -48,6 +51,21 @@ struct OpenDisplayRail: View {
             railButton(knowledgeItem)
 
             Spacer(minLength: 12)
+
+            utilityButton(
+                systemImage: "magnifyingglass",
+                label: "Search saved knowledge",
+                identifier: "open.rail.search",
+                action: onSearch
+            )
+            utilityButton(
+                systemImage: "gearshape",
+                label: "Settings",
+                identifier: "open.rail.settings",
+                showsAttention: settingsNeedsAttention,
+                action: onOpenSettings
+            )
+            .padding(.bottom, 8)
 
             if let player {
                 playerButton(player)
@@ -127,6 +145,37 @@ struct OpenDisplayRail: View {
         .accessibilityLabel(item.badge > 0 ? "\(item.title), \(item.badge) unread" : item.title)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier(item.accessibilityIdentifier)
+    }
+
+    /// Search and Settings: actions, not destinations, so they never show
+    /// as selected.
+    private func utilityButton(
+        systemImage: String,
+        label: String,
+        identifier: String,
+        showsAttention: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.appSymbol(size: 17))
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .overlay(alignment: .topTrailing) {
+                    if showsAttention {
+                        Circle()
+                            .fill(Color.statusDestructive)
+                            .frame(width: 8, height: 8)
+                            .overlay(Circle().stroke(Color.surfaceTertiary, lineWidth: 1.5))
+                            .offset(x: 3, y: -2)
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(showsAttention ? "Needs attention" : "")
+        .accessibilityIdentifier(identifier)
     }
 
     private func playerButton(_ player: PlayerState) -> some View {

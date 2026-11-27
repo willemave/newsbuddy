@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// An Articles or Podcasts source as a Knowledge-style row, for the
-/// open-display sidebar beside the detail pane. It keeps every card action:
-/// tap to open, the same swipe (mark read, chat, deck), the source menu plus
-/// Mark as Read, and Save.
+/// open-display sidebar beside the detail pane. It keeps the card actions:
+/// tap to open, the same swipe (mark read, chat, deck), and the source menu
+/// (Add to Knowledge, Chat, Create Deck) plus Mark as Read. Read rows dim;
+/// there is no separate unread dot or save button.
 struct BriefingSourceListRow: View {
     let model: BriefingSegmentRenderModel
     let card: BriefingSourceCard
@@ -52,11 +53,11 @@ struct BriefingSourceListRow: View {
                     imageURL: card.thumbnailURL ?? card.imageURL,
                     title: card.title,
                     subtitle: Self.summaryLine(model.segment.narrationText),
-                    kicker: kicker
+                    kicker: kicker,
+                    wrapsLongTitle: true
                 ) {
                     EmptyView()
                 }
-                .padding(.trailing, -Spacing.appHorizontalMargin)
                 .saturation(isRead && !isSelected ? 0.2 : 1)
                 .opacity(isRead && !isSelected ? 0.72 : 1)
             }
@@ -81,50 +82,13 @@ struct BriefingSourceListRow: View {
                 Button(BriefingSourceAction.chat.title) { onSourceAction?(card.sourceKey, .chat) }
                 Button(BriefingSourceAction.createDeck.title) { onSourceAction?(card.sourceKey, .createDeck) }
             }
-
-            saveButton
         }
-        .padding(.trailing, 8)
         .background {
             RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
                 .fill(isSelected ? Color.surfaceContainer : Color.surfacePrimary.opacity(0.001))
                 .padding(.horizontal, 6)
         }
-        .overlay(alignment: .leading) {
-            if !isRead {
-                Circle()
-                    .fill(Color.appChromeAccent)
-                    .frame(width: 6, height: 6)
-                    .padding(.leading, 8)
-                    .accessibilityHidden(true)
-            }
-        }
         .animation(.easeInOut(duration: 0.25), value: isRead)
-    }
-
-    private var saveButton: some View {
-        Button(action: save) {
-            Group {
-                if isSaving {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(Color.onSurfaceSecondary)
-                } else {
-                    KnowledgeSaveIcon(
-                        isSaved: isSaved,
-                        size: 16,
-                        unsavedColor: .onSurfaceSecondary,
-                        badgeForegroundColor: .surfacePrimary
-                    )
-                }
-            }
-            .frame(width: 40, height: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isSaving)
-        .accessibilityLabel(isSaved ? "Saved to Knowledge" : "Save to Knowledge")
-        .accessibilityIdentifier("briefing.row.save.\(model.segment.id)")
     }
 
     /// Publisher (the work's attribution), length, and publication date;

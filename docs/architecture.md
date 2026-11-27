@@ -1191,11 +1191,18 @@ the Briefing lens pager.
 `OpenDisplayShell` shows a tight icon rail (News, Podcasts, Articles,
 Knowledge, player) and the selected tier:
 
-- **News** renders as `BriefingView(layout: .column(BriefingColumnLayout))`
-  in the first column, ending 40 pt before the hinge (measured from
-  `reservedRegions(kind: .division)`, iOS 27.1+). The story, a chat, or an
-  `OpenDisplayInterstitial` fills the page beside it, and News never moves.
-  `OpenBriefingArrangement.resolve` is the single decision point.
+- **News** renders as `BriefingView(layout: .column(BriefingColumnLayout))`:
+  with nothing open, one column centred in the full view
+  (`OpenDisplayMetrics.newsReadingWidth`) with the header aligned to it.
+  Opening a story moves News to a leading column ending 40 pt before the
+  hinge (measured from `reservedRegions(kind: .division)`, iOS 27.1+), with
+  the story beside it. `OpenBriefingArrangement.resolve` is the single
+  decision point.
+- The rail carries Search and Settings above the player; the Knowledge
+  sidebar hides its masthead buttons (`showsHeaderActions: false`).
+- `ContentView` holds `rootLayout` while the app is not active, because the
+  system reports compact size classes while snapshotting a backgrounded
+  open display; following them would swap shells and rebuild the detail.
 - **Podcasts and Articles** render as the same column layout with
   `presentsCardsAsRows`: `BriefingSourceListRow` Knowledge-style rows in a 300 pt sidebar, with the
   item flush beside it and an `OpenDisplayInterstitial` before the first pick.

@@ -153,9 +153,10 @@ struct BriefingLensPageView: View, Equatable {
     let onSetHeaderPinned: (Bool) -> Void
     /// The open display's arrangement of this page. Nil is the phone pager.
     var columnLayout: BriefingColumnLayout? = nil
-    /// Brings the open story's passage into view when News first appears.
+    /// Keeps a segment in view when News reflows (a story opens or closes).
     var anchorRequest: BriefingScrollAnchorRequest? = nil
 
+    private var readingWidth: CGFloat? { columnLayout?.readingWidth }
     private var presentsCardsAsRows: Bool { columnLayout?.presentsCardsAsRows ?? false }
     private var selectedSourceKey: String? { columnLayout?.selectedSourceKey }
 
@@ -287,6 +288,9 @@ struct BriefingLensPageView: View, Equatable {
                                 ForEach(renderModel.segments) { segmentModel in
                                     segmentRow(segmentModel, in: renderModel, firstSegmentID: firstSegmentID)
                                         .padding(.horizontal, Spacing.appHorizontalMargin)
+                                        // Leading within the (centred) reading column.
+                                        .frame(maxWidth: readingWidth ?? .infinity, alignment: .leading)
+                                        .frame(maxWidth: .infinity)
                                 }
                             }
 
@@ -729,8 +733,8 @@ struct BriefingTierProgressView: View {
     }
 }
 
-/// Asks a lens page to bring a segment to the top, for example the open
-/// story's passage when News appears after unfolding. The generation makes a
+/// Asks a lens page to bring a segment to the top, for example the passage a
+/// reader opened when News reflows beside the story. The generation makes a
 /// repeat request for the same segment fire again.
 struct BriefingScrollAnchorRequest: Equatable {
     let segmentID: Int

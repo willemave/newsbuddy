@@ -82,12 +82,13 @@ struct BriefingView: View {
     /// The column never collapses chrome; it gets its own inert model.
     @State private var columnCollapse = BriefingChromeCollapseModel()
     /// Read passage pauses while the column resizes (opening or closing a
-    /// foldable), because reflowed passages would otherwise cross the
-    /// boundary without being read.
+    /// foldable, or a story or chat opening beside News), because reflowed
+    /// passages would otherwise cross the boundary without being read.
     @State private var isColumnResizing = false
+    @State private var columnWidth: CGFloat = 0
     @State private var columnResizeGeneration = 0
-    /// The source whose passage is known to be in view (tapped here, or
-    /// already anchored), so News only scrolls to stories opened elsewhere.
+    /// The source News last anchored to, so the first-appearance anchor
+    /// does not repeat one already applied.
     @State private var anchoredSourceKey: String?
     @State private var anchorRequest: BriefingScrollAnchorRequest?
     /// Bumped to (re)run the delayed anchor task; a newer request cancels an
@@ -646,6 +647,9 @@ struct BriefingView: View {
     private func columnContent(_ columnLayout: BriefingColumnLayout) -> some View {
         let selectedSourceKey = columnLayout.selectedSourceKey
         let presentsRows = columnLayout.presentsCardsAsRows
+        // The header lines up with the centred reading column; the category
+        // strip starts there too but still scrolls the full width.
+        let readingInset = columnLayout.readingWidth.map { max((columnWidth - $0) / 2, 0) } ?? 0
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -660,7 +664,7 @@ struct BriefingView: View {
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("briefing.screen")
                 }
-                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.horizontal, Spacing.appHorizontalMargin + readingInset)
 
                 if showsColumnCategoryStrip {
                     BriefingCategoryStrip(
@@ -668,6 +672,7 @@ struct BriefingView: View {
                         onSelectLens: { key in viewModel.selectLens(key: key) },
                         onRequestMarkAllRead: presentMarkAllReadPrompt
                     )
+                    .safeAreaPadding(.leading, readingInset)
                 }
             }
             .padding(.top, 8)
@@ -679,6 +684,7 @@ struct BriefingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { oldWidth, newWidth in
+            columnWidth = newWidth
             guard oldWidth > 0, abs(oldWidth - newWidth) > 0.5 else { return }
             isColumnResizing = true
             columnResizeGeneration += 1
@@ -689,16 +695,28 @@ struct BriefingView: View {
             guard !Task.isCancelled else { return }
             isColumnResizing = false
         }
-        // A story opened without a tap in this column (after unfolding, from a
-        // link, or once the lens document loads) scrolls its passage into
-        // view. Taps mark their passage as anchored, so News stays put.
+        .onChange(of: selectedSourceKey) { oldKey, newKey in
+            // News reflows when a story opens or closes; keep the passage
+            // the reader opened (or came back from) in view.
+            guard !presentsRows else { return }
+            // Picking another story while one is open: News does not reflow,
+            // and the tapped passage is already in view.
+            if oldKey != nil, let newKey {
+                anchoredSourceKey = newKey
+                return
+            }
+            guard let key = newKey ?? oldKey else { return }
+            requestAnchor(to: key)
+        }
+        // A story already open when News appears (after unfolding, or once
+        // the lens document loads) is anchored too.
         .task(id: initialAnchorKey(selectedSourceKey: selectedSourceKey, presentsRows: presentsRows)) {
             guard !presentsRows, let key = selectedSourceKey, anchoredSourceKey != key else { return }
             requestAnchor(to: key)
         }
         .task(id: anchorNonce) {
             guard let target = anchorTargetSegmentID else { return }
-            // After the first layout pass.
+            // After the reflow's layout pass.
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled else { return }
             anchorRequest = BriefingScrollAnchorRequest(segmentID: target, generation: anchorNonce)
@@ -864,13 +882,10 @@ struct BriefingView: View {
 
     private func openSource(_ sourceKey: String) {
         guard let source = viewModel.source(for: sourceKey) else { return }
-        // A tapped passage is already in view; News must not scroll to it.
-        anchoredSourceKey = sourceKey
         onOpenContent(contentRoute(for: source))
     }
 
     private func openDiscussion(_ source: APIBriefingSource) {
-        anchoredSourceKey = source.sourceKey
         onOpenContent(contentRoute(for: source, initialScrollTarget: .comments))
     }
 
