@@ -325,11 +325,11 @@ final class KnowledgeTimelineViewModel {
         }
         let visibleChats = boundedTimelineChats()
         let savedOldest = savedContent.hasMoreContent
-            ? savedContent.contents.last?.knowledgeActivityDate
+            ? (savedContent.contents.last?.knowledgeActivityDate ?? .distantFuture)
             : nil
         let hasOlderUnshownChats = visibleChats.count < chats.sessions.count
         let chatOldest: Date? = if chats.hasMoreSessions && !hasOlderUnshownChats {
-            chats.sessions.last.map(\.lastActivityDate)
+            chats.sessions.last?.lastActivityDate ?? .distantFuture
         } else {
             nil
         }

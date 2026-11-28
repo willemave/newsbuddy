@@ -655,6 +655,44 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
         XCTAssertEqual(store.timeline.map(\.id), ["chat-301", "saved-201", "chat-302", "saved-202"])
     }
 
+    func testDeletingLastLoadedChatStillPagesNextChatInKnowledgeTimeline() async {
+        let firstChat = makeSession(id: 401, activityDate: now.addingTimeInterval(-60))
+        let secondChat = makeSession(id: 402, activityDate: now.addingTimeInterval(-120))
+        let chatService = PagedKnowledgeTimelineChatService(pages: [[firstChat], [secondChat]])
+        let store = KnowledgeTimelineViewModel(
+            savedContent: ContentListViewModel(
+                contentService: KnowledgeTimelineContentService(contents: []),
+                readStateCache: makeTestReadStateCache()
+            ),
+            chats: KnowledgeChatViewModel(
+                chatService: chatService,
+                transcriptionService: TestUnavailableSpeechTranscriber()
+            ),
+            decks: LearningDecksViewModel(
+                service: KnowledgeTimelineDeckService(decks: [])
+            ),
+            narrations: CustomNarrationLibraryViewModel(
+                playbackService: NarrationPlaybackService(),
+                audioService: KnowledgeTimelineNarrationService(episodes: []),
+                badgeStatsStore: makeTestBadgeStatsStore(),
+                readStateCache: makeTestReadStateCache()
+            ),
+            now: { self.now }
+        )
+
+        await store.forceReload()
+        XCTAssertEqual(store.timeline.map(\.id), ["chat-401"])
+        XCTAssertTrue(store.chats.hasMoreSessions)
+
+        await store.chats.deleteSession(firstChat)
+        await Task.yield()
+        XCTAssertTrue(store.chats.sessions.isEmpty)
+        XCTAssertTrue(store.chats.hasMoreSessions)
+
+        await store.loadNextPage()
+        XCTAssertEqual(store.timeline.map(\.id), ["chat-402"])
+    }
+
     private func makeStore(
         saved: [ContentSummary] = [],
         chatLoadFails: Bool = false,
@@ -1076,4 +1114,51 @@ private final class PagedKnowledgeTimelineContentService: ContentSummaryListServ
         count: Int
     ) async throws -> DownloadMoreResponse { throw Failure.unused }
     func markContentAsUnread(id: Int) async throws { throw Failure.unused }
+}
+
+@MainActor
+private final class PagedKnowledgeTimelineChatService: KnowledgeChatServicing {
+    private enum Failure: Error { case unavailable }
+    private let pages: [[ChatSessionSummary]]
+
+    init(pages: [[ChatSessionSummary]]) {
+        self.pages = pages
+    }
+
+    func listSessionsPage(
+        contentId: Int?,
+        newsItemId: Int?,
+        limit: Int,
+        cursor: String?
+    ) async throws -> ChatSessionListResponse {
+        let index = cursor.flatMap(Int.init) ?? 0
+        let page = pages.indices.contains(index) ? pages[index] : []
+        let nextIndex = index + 1
+        let hasMore = pages.indices.contains(nextIndex)
+        return ChatSessionListResponse(
+            sessions: page,
+            meta: PaginationMetadata(
+                nextCursor: hasMore ? String(nextIndex) : nil,
+                hasMore: hasMore,
+                pageSize: page.count,
+                total: nil
+            )
+        )
+    }
+
+    func createAssistantTurn(
+        message: String,
+        sessionId: Int?,
+        screenContext: AssistantScreenContext
+    ) async throws -> AssistantTurnResponse { throw Failure.unavailable }
+
+    func deleteSession(sessionId: Int) async throws {}
+
+    func existingSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary? {
+        throw Failure.unavailable
+    }
+
+    func startSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary {
+        throw Failure.unavailable
+    }
 }

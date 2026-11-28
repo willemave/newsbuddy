@@ -97,9 +97,19 @@ pub(super) async fn save(
         .first()
         .filter(|id| !batch.inserted_task_ids.contains(id))
     {
-        newsly_db::expedite_pending_briefing_refresh(&mut transaction, *task_id, available_at)
+        let expedited =
+            newsly_db::expedite_pending_briefing_refresh(&mut transaction, *task_id, available_at)
+                .await
+                .map_err(|error| internal_error(error, &request_id))?;
+        if expedited {
+            newsly_queue::notify_queue_in_transaction(
+                &mut transaction,
+                TaskType::BriefingRefresh.spec().queue,
+                "briefing_refresh_expedited",
+            )
             .await
             .map_err(|error| internal_error(error, &request_id))?;
+        }
     }
     crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(present(saved)))

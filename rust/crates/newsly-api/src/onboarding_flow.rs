@@ -391,9 +391,19 @@ async fn complete_onboarding(
         completion_unavailable("briefing refresh queue result missing", request_id)
     })?;
     if !batch.inserted_task_ids.contains(&briefing_task_id) {
-        expedite_pending_briefing_refresh(&mut transaction, briefing_task_id, Utc::now())
+        let expedited =
+            expedite_pending_briefing_refresh(&mut transaction, briefing_task_id, Utc::now())
+                .await
+                .map_err(|error| completion_unavailable(error, request_id))?;
+        if expedited {
+            newsly_queue::notify_queue_in_transaction(
+                &mut transaction,
+                TaskType::BriefingRefresh.spec().queue,
+                "briefing_refresh_expedited",
+            )
             .await
             .map_err(|error| completion_unavailable(error, request_id))?;
+        }
     }
     let task_id = primary_index.and_then(|index| batch.task_ids.get(index).copied());
     transaction
