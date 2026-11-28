@@ -1,5 +1,3 @@
-use std::env;
-
 use axum::Json;
 use axum::extract::Path;
 use axum::extract::rejection::{JsonRejection, PathRejection};
@@ -8,6 +6,7 @@ use axum::http::{HeaderMap, StatusCode};
 use newsly_db::{RouteWriteFenceError, verify_route_write_fence};
 use reqwest::Url;
 
+use crate::AppState;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 
@@ -130,32 +129,15 @@ pub(super) fn positive_path_id(
 }
 
 pub(super) fn external_url(
+    state: &AppState,
     headers: &HeaderMap,
     path: &str,
     request_id: &str,
 ) -> Result<String, ApiError> {
-    let configured = env::var("PUBLIC_BASE_URL")
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty());
-    let is_production =
-        env::var("ENVIRONMENT").is_ok_and(|value| value.eq_ignore_ascii_case("production"));
-    let mut base = if let Some(configured) = configured {
-        let parsed = Url::parse(&configured).map_err(|error| internal_error(error, request_id))?;
-        if parsed.host().is_none()
-            || !matches!(parsed.scheme(), "http" | "https")
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-            || !matches!(parsed.path(), "" | "/")
-            || (is_production && parsed.scheme() != "https")
-        {
-            return Err(internal_error("PUBLIC_BASE_URL is invalid", request_id));
-        }
-        parsed
+    let mut base = if let Some(configured) = &state.public_base_url {
+        configured.clone()
     } else {
-        if is_production {
+        if state.is_production {
             return Err(internal_error(
                 "PUBLIC_BASE_URL is required in production",
                 request_id,

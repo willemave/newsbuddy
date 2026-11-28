@@ -63,6 +63,7 @@ pub(super) async fn private_deck_url(
     };
     Ok(Json(LearningDeckUrlResponse {
         url: external_url(
+            state,
             headers,
             &format!("/learning/signed/{}{suffix}", signed.token),
             &request_id,

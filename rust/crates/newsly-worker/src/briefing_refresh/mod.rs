@@ -62,7 +62,7 @@ pub(crate) async fn enqueue_and_pull_forward_briefing_refreshes(
             SELECT EXISTS(
                 SELECT 1
                 FROM updated
-                WHERE available_at <= timezone('UTC', now())
+                WHERE available_at <= timezone('UTC', clock_timestamp())
             )
             ",
         )
@@ -92,4 +92,119 @@ fn nonempty(value: &str) -> Option<&str> {
 
 fn centroid_model(model: &str) -> String {
     format!("{EMBEDDING_PROVIDER}:{model}")
+}
+
+#[cfg(test)]
+mod pull_forward_tests {
+    use chrono::{DateTime, Duration, Utc};
+    use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
+    use serde_json::{Map, Value};
+    use sqlx::PgPool;
+    use sqlx::postgres::PgListener;
+
+    use super::enqueue_and_pull_forward_briefing_refreshes;
+
+    fn briefing_request(
+        user_id: i64,
+        dedupe_key: String,
+        available_at: DateTime<Utc>,
+    ) -> EnqueueRequest {
+        let mut request = EnqueueRequest::new(TaskType::BriefingRefresh);
+        request.owner_user_id = Some(user_id);
+        request.payload = Some(Map::from_iter([(
+            "user_id".to_owned(),
+            Value::from(user_id),
+        )]));
+        request.dedupe = Some(true);
+        request.dedupe_key = Some(dedupe_key);
+        request.available_at = Some(available_at);
+        request
+    }
+
+    #[sqlx::test(migrations = "../newsly-db/migrations")]
+    async fn pull_forward_notifies_ready_queue_and_preserves_backing_off_retries(pool: PgPool) {
+        let user_id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('pull-fwd','pull-fwd@example.com',FALSE,TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let backing_off_user_id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('pull-backoff','pull-backoff@example.com',FALSE,TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let queue = QueueKernel::new(pool.clone());
+        let future_at = Utc::now() + Duration::minutes(10);
+        let ready_key = format!("briefing_refresh:{user_id}");
+        let backoff_key = format!("briefing_refresh:{backing_off_user_id}");
+
+        let mut setup_tx = pool.begin().await.unwrap();
+        queue
+            .enqueue_many_in_transaction(
+                &mut setup_tx,
+                vec![
+                    briefing_request(user_id, ready_key.clone(), future_at),
+                    briefing_request(backing_off_user_id, backoff_key.clone(), future_at),
+                ],
+            )
+            .await
+            .unwrap();
+        sqlx::query("UPDATE processing_tasks SET retry_count = 1 WHERE dedupe_key = $1")
+            .bind(&backoff_key)
+            .execute(&mut *setup_tx)
+            .await
+            .unwrap();
+        setup_tx.commit().await.unwrap();
+
+        let mut listener = PgListener::connect_with(&pool).await.unwrap();
+        listener
+            .listen(&TaskType::BriefingRefresh.spec().queue.notify_channel())
+            .await
+            .unwrap();
+
+        // Begin the transaction BEFORE taking Utc::now() so transaction start `now()` precedes
+        // the bound deadline — verifying `clock_timestamp()` still detects readiness and notifies.
+        let mut pull_tx = pool.begin().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+        let now = Utc::now();
+        enqueue_and_pull_forward_briefing_refreshes(
+            &mut pull_tx,
+            &queue,
+            vec![
+                briefing_request(user_id, ready_key.clone(), now),
+                briefing_request(backing_off_user_id, backoff_key.clone(), now),
+            ],
+        )
+        .await
+        .unwrap();
+        pull_tx.commit().await.unwrap();
+
+        let notification = tokio::time::timeout(std::time::Duration::from_secs(2), listener.recv())
+            .await
+            .expect("pull-forward notification arrived")
+            .unwrap();
+        assert_eq!(
+            notification.channel(),
+            TaskType::BriefingRefresh.spec().queue.notify_channel()
+        );
+        assert_eq!(notification.payload(), "briefing_refresh_pulled_forward");
+
+        let ready_available: chrono::NaiveDateTime =
+            sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE dedupe_key = $1")
+                .bind(&ready_key)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let backoff_available: chrono::NaiveDateTime =
+            sqlx::query_scalar("SELECT available_at FROM processing_tasks WHERE dedupe_key = $1")
+                .bind(&backoff_key)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(ready_available <= now.naive_utc() + Duration::seconds(1));
+        assert!(backoff_available > now.naive_utc() + Duration::minutes(5));
+    }
 }

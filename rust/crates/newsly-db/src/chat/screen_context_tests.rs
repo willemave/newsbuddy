@@ -363,3 +363,152 @@ async fn learning_deck_ownership_grants_content_visibility_until_soft_deleted(po
     assert!(!deleted_rendered.contains("Deleted Deck Source"));
     assert!(!deleted_rendered.contains("Visible Content:"));
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn c3_visibility_excludes_archived_sessions_and_supports_revocation_and_saved_access(
+    pool: PgPool,
+) {
+    use super::{
+        CreateChatSessionInput, CreateChatSessionOutcome, StageAssistantTurnInput,
+        StageChatTurnOutcome, create_chat_session, stage_assistant_turn,
+    };
+    let owner_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('c3-ext-owner','c3-ext-owner@example.com',FALSE,TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let other_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('c3-ext-other','c3-ext-other@example.com',FALSE,TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // 1. Archived chat session alone does NOT grant visibility; saving to knowledge DOES.
+    let archived_content_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO contents (content_type,url,status,is_aggregate,content_metadata) VALUES ('article','https://example.com/archived-only','completed',FALSE,$1) RETURNING id::bigint",
+    )
+    .bind(json!({"title":"Archived Link Title","summary":{"title":"Archived Link Title","one_line":"Archived Link Summary"}}))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO chat_sessions (user_id,content_id,title,session_type,llm_model,llm_provider,is_archived) VALUES ($1,$2,'Old','knowledge_chat','openai:gpt-6.1-sol','openai',TRUE)",
+    )
+    .bind(owner_id)
+    .bind(archived_content_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut transaction = pool.begin().await.unwrap();
+    let archived_create = create_chat_session(
+        &mut transaction,
+        &CreateChatSessionInput {
+            user_id: owner_id,
+            content_id: Some(archived_content_id),
+            news_item_id: None,
+            topic: None,
+            initial_message: None,
+            session_type: "knowledge_chat",
+            llm_provider: "openai",
+            llm_model: "openai:gpt-6.1-sol",
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(archived_create, CreateChatSessionOutcome::ContentNotFound);
+
+    // Saving the same content to Knowledge restores access even when the historical session is archived.
+    sqlx::query("INSERT INTO content_knowledge_saves (user_id,content_id) VALUES ($1,$2)")
+        .bind(owner_id)
+        .bind(archived_content_id)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    let saved_create = create_chat_session(
+        &mut transaction,
+        &CreateChatSessionInput {
+            user_id: owner_id,
+            content_id: Some(archived_content_id),
+            news_item_id: None,
+            topic: None,
+            initial_message: None,
+            session_type: "knowledge_chat",
+            llm_provider: "openai",
+            llm_model: "openai:gpt-6.1-sol",
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        saved_create,
+        CreateChatSessionOutcome::Created { .. }
+    ));
+
+    // 2. Staging on an existing session with a foreign content_id is rejected.
+    let existing_other_session_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO chat_sessions (user_id,title,session_type,llm_model,llm_provider) VALUES ($1,'General','knowledge_chat','openai:gpt-6.1-sol','openai') RETURNING id::bigint",
+    )
+    .bind(other_id)
+    .fetch_one(&mut *transaction)
+    .await
+    .unwrap();
+    let foreign_context: AssistantScreenContext = serde_json::from_value(json!({
+        "screen_type": "knowledge_chat",
+        "content_id": archived_content_id
+    }))
+    .unwrap();
+    let foreign_stage = stage_assistant_turn(
+        &mut transaction,
+        &StageAssistantTurnInput {
+            user_id: other_id,
+            session_id: Some(existing_other_session_id),
+            user_prompt: "Read this foreign article",
+            screen_context: &foreign_context,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(foreign_stage, StageChatTurnOutcome::ContentNotFound);
+
+    // 3. Soft-deleting an owned learning deck revokes visibility on the SAME content_id when no active chat exists.
+    let revocable_content_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO contents (content_type,url,status,is_aggregate,content_metadata) VALUES ('article','https://example.com/revocable-deck','completed',FALSE,$1) RETURNING id::bigint",
+    )
+    .bind(json!({"title":"Revocable Deck Title","summary":{"title":"Revocable Deck Title","one_line":"Summary"}}))
+    .fetch_one(&mut *transaction)
+    .await
+    .unwrap();
+    let revocable_deck_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO learning_decks (user_id,source_kind,source_identity,source_content_id,source_metadata,title,artifact_object_keys,share_enabled) VALUES ($1,'article','revocable-1',$2,'{}'::jsonb,'Revocable','{}'::jsonb,FALSE) RETURNING id::bigint",
+    )
+    .bind(owner_id)
+    .bind(revocable_content_id)
+    .fetch_one(&mut *transaction)
+    .await
+    .unwrap();
+    let revocable_ctx: AssistantScreenContext = serde_json::from_value(json!({
+        "screen_type": "learning_deck",
+        "content_id": revocable_content_id
+    }))
+    .unwrap();
+    assert!(
+        build_screen_context_snapshot(&mut transaction, owner_id, &revocable_ctx)
+            .await
+            .unwrap()
+            .contains("Revocable Deck Title")
+    );
+    sqlx::query("UPDATE learning_decks SET deleted_at = timezone('UTC', now()) WHERE id = $1")
+        .bind(revocable_deck_id)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    assert!(
+        !build_screen_context_snapshot(&mut transaction, owner_id, &revocable_ctx)
+            .await
+            .unwrap()
+            .contains("Revocable Deck Title")
+    );
+}

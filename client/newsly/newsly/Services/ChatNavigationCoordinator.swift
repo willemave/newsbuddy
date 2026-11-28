@@ -24,7 +24,10 @@ final class ChatNavigationCoordinator {
     init() {}
 
     func open(_ route: ChatSessionRoute) {
-        guard presentedRoute != route, !pendingRoutes.contains(route) else { return }
+        guard !matchesIntent(presentedRoute, route),
+              !pendingRoutes.contains(where: { $0.stableKey == route.stableKey }) else {
+            return
+        }
         pendingRoutes.append(route)
     }
 
@@ -33,7 +36,7 @@ final class ChatNavigationCoordinator {
         _ route: ChatSessionRoute,
         replacingPresented: Bool = false
     ) -> Bool {
-        guard (presentedRoute == nil || replacingPresented), queuedRoute == route else {
+        guard (presentedRoute == nil || replacingPresented), matchesIntent(queuedRoute, route) else {
             return false
         }
         pendingRoutes.removeFirst()
@@ -43,7 +46,7 @@ final class ChatNavigationCoordinator {
 
     @discardableResult
     func acknowledgePresented(_ route: ChatSessionRoute) -> Bool {
-        guard presentedRoute == route else { return false }
+        guard matchesIntent(presentedRoute, route) else { return false }
         presentedRoute = nil
         return true
     }
@@ -55,9 +58,13 @@ final class ChatNavigationCoordinator {
             return
         }
 
-        pendingRoutes.removeAll { $0 == route }
-        if presentedRoute == route {
+        pendingRoutes.removeAll { $0.stableKey == route.stableKey }
+        if matchesIntent(presentedRoute, route) {
             presentedRoute = nil
         }
+    }
+
+    private func matchesIntent(_ existing: ChatSessionRoute?, _ candidate: ChatSessionRoute) -> Bool {
+        existing?.stableKey == candidate.stableKey
     }
 }

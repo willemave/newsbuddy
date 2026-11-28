@@ -631,6 +631,30 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
         XCTAssertNotEqual(first.token, token)
     }
 
+    func testDeepChatPagingDoesNotLeakOlderChatsPastSavedFloor() async {
+        let savedPage1 = [makeSaved(id: 201, activityDate: now.addingTimeInterval(-60))]
+        let savedPage2 = [makeSaved(id: 202, activityDate: now.addingTimeInterval(-300))]
+        let contentService = PagedKnowledgeTimelineContentService(pages: [savedPage1, savedPage2])
+        let store = makeStore(contentService: contentService, now: { self.now })
+
+        await store.forceReload()
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-201"])
+        XCTAssertTrue(store.savedContent.hasMoreContent)
+
+        // Simulate Chat History loading a newer chat plus an older chat past savedPage1's floor.
+        let newerChat = makeSession(id: 301, activityDate: now.addingTimeInterval(-30))
+        let olderChat = makeSession(id: 302, activityDate: now.addingTimeInterval(-200))
+        store.chats.sessions = [newerChat, olderChat]
+        await Task.yield()
+
+        // Only the chat at or above the saved floor is visible while older saved items remain unloaded.
+        XCTAssertEqual(store.timeline.map(\.id), ["chat-301", "saved-201"])
+
+        // Paging Knowledge advances saved items next, revealing the older chat in chronological order.
+        await store.loadNextPage()
+        XCTAssertEqual(store.timeline.map(\.id), ["chat-301", "saved-201", "chat-302", "saved-202"])
+    }
+
     private func makeStore(
         saved: [ContentSummary] = [],
         chatLoadFails: Bool = false,
@@ -998,4 +1022,58 @@ private final class KnowledgeTimelineNarrationService: CustomNarrationLibrarySer
         for episode: AudioEpisode
     ) async throws -> AuthorizedMediaResource { throw Failure.unused }
 
+}
+
+@MainActor
+private final class PagedKnowledgeTimelineContentService: ContentSummaryListServicing {
+    private enum Failure: Error { case unused }
+    private let pages: [[ContentSummary]]
+
+    init(pages: [[ContentSummary]]) {
+        self.pages = pages
+    }
+
+    func fetchKnowledgeLibrary(
+        query: String?,
+        cursor: String?,
+        limit: Int
+    ) async throws -> ContentListResponse {
+        let index = cursor.flatMap(Int.init) ?? 0
+        let page = pages.indices.contains(index) ? pages[index] : []
+        let nextIndex = index + 1
+        let hasMore = pages.indices.contains(nextIndex)
+        return ContentListResponse(
+            contents: page,
+            availableDates: [],
+            contentTypes: [],
+            meta: PaginationMetadata(
+                nextCursor: hasMore ? String(nextIndex) : nil,
+                hasMore: hasMore,
+                pageSize: page.count,
+                total: nil
+            )
+        )
+    }
+
+    func fetchContentList(
+        contentType: String?,
+        date: String?,
+        readFilter: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> ContentListResponse { throw Failure.unused }
+    func fetchRecentlyReadList(
+        contentType: String?,
+        date: String?,
+        cursor: String?,
+        limit: Int
+    ) async throws -> ContentListResponse { throw Failure.unused }
+    func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse { throw Failure.unused }
+    func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse { throw Failure.unused }
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse { throw Failure.unused }
+    func downloadMoreFromSeries(
+        contentId: Int,
+        count: Int
+    ) async throws -> DownloadMoreResponse { throw Failure.unused }
+    func markContentAsUnread(id: Int) async throws { throw Failure.unused }
 }

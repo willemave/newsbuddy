@@ -97,6 +97,7 @@ pub struct ServerConfig {
     pub bind_address: SocketAddr,
     pub service_name: String,
     pub environment: DeploymentEnvironment,
+    pub public_base_url: Option<Url>,
     pub debug: bool,
     pub log_filter: String,
     pub log_format: LogFormat,
@@ -125,6 +126,7 @@ impl Debug for ServerConfig {
             .field("bind_address", &self.bind_address)
             .field("service_name", &self.service_name)
             .field("environment", &self.environment)
+            .field("public_base_url", &self.public_base_url)
             .field("debug", &self.debug)
             .field("log_filter", &self.log_filter)
             .field("log_format", &self.log_format)
@@ -180,6 +182,8 @@ impl ServerConfig {
         let service_name = value_or_default("NEWSLY_RUST_SERVICE_NAME", DEFAULT_SERVICE_NAME);
         let environment =
             DeploymentEnvironment::parse(&value_or_default("ENVIRONMENT", DEFAULT_ENVIRONMENT))?;
+        let public_base_url =
+            parse_public_base_url(environment, optional_string("PUBLIC_BASE_URL"))?;
         let debug = parse_bool("DEBUG", false)?;
         validate_debug_auth(environment, debug)?;
         let log_filter = env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_owned());
@@ -305,6 +309,7 @@ impl ServerConfig {
             bind_address,
             service_name,
             environment,
+            public_base_url,
             debug,
             log_filter,
             log_format,
@@ -401,6 +406,43 @@ fn validate_debug_auth(environment: DeploymentEnvironment, debug: bool) -> Resul
         });
     }
     Ok(())
+}
+
+fn parse_public_base_url(
+    environment: DeploymentEnvironment,
+    configured: Option<String>,
+) -> Result<Option<Url>, ConfigError> {
+    let Some(raw) = configured else {
+        if environment.is_production() {
+            return Err(ConfigError::Missing("PUBLIC_BASE_URL"));
+        }
+        return Ok(None);
+    };
+    let parsed = Url::parse(&raw).map_err(|_| ConfigError::InvalidValue {
+        name: "PUBLIC_BASE_URL",
+        value: raw.clone(),
+        expected: "an absolute origin URL without path, query, or credentials",
+    })?;
+    if parsed.host().is_none()
+        || !matches!(parsed.scheme(), "http" | "https")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || !matches!(parsed.path(), "" | "/")
+        || (environment.is_production() && parsed.scheme() != "https")
+    {
+        return Err(ConfigError::InvalidValue {
+            name: "PUBLIC_BASE_URL",
+            value: raw,
+            expected: if environment.is_production() {
+                "an HTTPS origin URL without path, query, or credentials"
+            } else {
+                "an HTTP or HTTPS origin URL without path, query, or credentials"
+            },
+        });
+    }
+    Ok(Some(parsed))
 }
 
 fn parse_u64(name: &'static str, default: u64) -> Result<u64, ConfigError> {
@@ -516,5 +558,39 @@ mod tests {
         assert!(validate_debug_auth(DeploymentEnvironment::Production, true).is_err());
         assert!(validate_debug_auth(DeploymentEnvironment::Production, false).is_ok());
         assert!(validate_debug_auth(DeploymentEnvironment::Development, true).is_ok());
+    }
+
+    #[test]
+    fn public_base_url_is_validated_at_startup() {
+        assert!(super::parse_public_base_url(DeploymentEnvironment::Production, None).is_err());
+        assert!(
+            super::parse_public_base_url(
+                DeploymentEnvironment::Production,
+                Some("http://news.example.com".to_owned())
+            )
+            .is_err()
+        );
+        assert!(
+            super::parse_public_base_url(
+                DeploymentEnvironment::Production,
+                Some("https://news.example.com/extra".to_owned())
+            )
+            .is_err()
+        );
+        assert_eq!(
+            super::parse_public_base_url(
+                DeploymentEnvironment::Production,
+                Some("https://news.example.com".to_owned())
+            )
+            .unwrap()
+            .unwrap()
+            .as_str(),
+            "https://news.example.com/"
+        );
+        assert!(
+            super::parse_public_base_url(DeploymentEnvironment::Development, None)
+                .unwrap()
+                .is_none()
+        );
     }
 }

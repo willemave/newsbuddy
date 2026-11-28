@@ -340,6 +340,15 @@ pub(super) async fn refresh(
             .await
             .map_err(|error| internal_error(error, &request_id))?
     };
+    if expedited {
+        newsly_queue::notify_queue_in_transaction(
+            &mut transaction,
+            TaskType::BriefingRefresh.spec().queue,
+            "briefing_refresh_expedited",
+        )
+        .await
+        .map_err(|error| internal_error(error, &request_id))?;
+    }
     crate::write_support::commit(transaction, &request_id).await?;
     Ok(Json(BriefingRefreshResponse {
         enqueued: inserted || expedited,

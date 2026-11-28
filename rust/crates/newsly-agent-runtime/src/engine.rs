@@ -251,8 +251,10 @@ impl AgentRuntimeError {
             | Self::RequestLimitExceeded
             | Self::ChatBudgetExhausted(_)
             | Self::ToolCallLimitExceeded
-            | Self::Validation(_) => false,
-            Self::DeadlineExceeded | Self::Tool(_) | Self::EventSink(_) => true,
+            | Self::Validation(_)
+            | Self::Tool(_)
+            | Self::EventSink(_) => false,
+            Self::DeadlineExceeded => true,
             Self::Provider(message) => !is_non_retryable_provider_message(message),
         }
     }
@@ -268,8 +270,10 @@ fn is_non_retryable_provider_message(message: &str) -> bool {
         || lower.contains("status: 403")
         || lower.contains("401 unauthorized")
         || lower.contains("403 forbidden")
-        || lower.contains("unauthorized")
-        || lower.contains("forbidden")
+        || lower.contains("\"code\":401")
+        || lower.contains("\"code\": 401")
+        || lower.contains("\"code\":403")
+        || lower.contains("\"code\": 403")
         || lower.contains("invalid api key")
         || lower.contains("invalid_api_key")
         || lower.contains("authentication_error")
@@ -324,5 +328,35 @@ mod tests {
         limits(None)
             .validate()
             .expect("a deadline may be the sole model-request bound");
+    }
+
+    #[test]
+    fn retryability_blocks_auth_errors_without_prose_false_positives() {
+        assert!(AgentRuntimeError::DeadlineExceeded.is_retryable());
+        assert!(
+            AgentRuntimeError::Provider("HTTP 429 Too Many Requests".to_owned()).is_retryable()
+        );
+        assert!(
+            AgentRuntimeError::Provider("HTTP 503 Service Unavailable".to_owned()).is_retryable()
+        );
+        assert!(
+            AgentRuntimeError::Provider(
+                "model mentioned an unauthorized biography in summary".to_owned()
+            )
+            .is_retryable()
+        );
+
+        assert!(!AgentRuntimeError::Provider("HTTP 401 Unauthorized".to_owned()).is_retryable());
+        assert!(!AgentRuntimeError::Provider("status: 403 Forbidden".to_owned()).is_retryable());
+        assert!(
+            !AgentRuntimeError::Provider(
+                r#"{"error":{"code":401,"message":"No auth"}}"#.to_owned()
+            )
+            .is_retryable()
+        );
+        assert!(!AgentRuntimeError::Provider("invalid_api_key provided".to_owned()).is_retryable());
+        assert!(!AgentRuntimeError::Tool("sandbox failed".to_owned()).is_retryable());
+        assert!(!AgentRuntimeError::EventSink("sink closed".to_owned()).is_retryable());
+        assert!(!AgentRuntimeError::Validation("bad schema".to_owned()).is_retryable());
     }
 }

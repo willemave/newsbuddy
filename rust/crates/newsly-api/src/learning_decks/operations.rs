@@ -553,6 +553,7 @@ pub(crate) async fn enable_share(
     Ok(Json(LearningDeckShareResponse {
         share_enabled: true,
         share_url: Some(external_url(
+            &state,
             &headers,
             &format!("/learning/share/{token}/"),
             &request_id,

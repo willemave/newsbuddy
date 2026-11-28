@@ -209,7 +209,7 @@ impl EnvdProcessClient {
         sandbox: &SandboxHandle,
         max_message_size: usize,
     ) -> Result<process::ProcessClient<HttpClient>, E2bError> {
-        static SHARED_ENVD_HTTP_CLIENT: LazyLock<Result<HttpClient, String>> =
+        static SHARED_TLS_CONFIG: LazyLock<Arc<connectrpc::rustls::ClientConfig>> =
             LazyLock::new(|| {
                 let roots = webpki_roots::TLS_SERVER_ROOTS
                     .iter()
@@ -219,10 +219,10 @@ impl EnvdProcessClient {
                     connectrpc::rustls::crypto::aws_lc_rs::default_provider(),
                 ))
                 .with_safe_default_protocol_versions()
-                .map_err(|error| error.to_string())?
+                .expect("default rustls protocol versions are valid")
                 .with_root_certificates(roots)
                 .with_no_client_auth();
-                Ok(HttpClient::with_tls(Arc::new(tls)))
+                Arc::new(tls)
             });
 
         let base = self.control.envd_base_url(sandbox)?;
@@ -230,10 +230,7 @@ impl EnvdProcessClient {
             .as_str()
             .parse::<http::Uri>()
             .map_err(|error| E2bError::Configuration(error.to_string()))?;
-        let http = SHARED_ENVD_HTTP_CLIENT
-            .as_ref()
-            .map_err(|error| E2bError::Configuration(error.clone()))?
-            .clone();
+        let http = HttpClient::with_tls(Arc::clone(&SHARED_TLS_CONFIG));
         let wire_message_size = max_message_size
             .saturating_mul(4)
             .div_ceil(3)

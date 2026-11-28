@@ -222,6 +222,7 @@ async fn execute_podcast(
         Ok(path) => path,
         Err(error) => return podcast_failed(services, content_id, error.to_string(), true, true),
     };
+    let mut scratch_guard = AttemptScratchDirGuard::new(scratch.clone());
     let downloaded = if is_youtube_url(&audio_url) {
         lease_aware(
             &lease,
@@ -328,6 +329,7 @@ async fn execute_podcast(
         }
     };
     services.file_store.cleanup_podcast_attempt(&scratch).await;
+    scratch_guard.disarm();
     if lease.ownership_lost() {
         return lease_lost_failure();
     }
@@ -387,6 +389,7 @@ async fn execute_tweet_download(
             return tweet_fallback(services, content_id, "download_tweet_video_audio", error);
         }
     };
+    let mut attempt_dir_guard = AttemptScratchDirGuard::new(attempt_dir.clone());
     let downloaded = match lease_aware(
         &lease,
         services.media_gateway.download_with_ytdlp(
@@ -433,6 +436,7 @@ async fn execute_tweet_download(
             MediaFileStoreError::UnsafeMediaPath,
         );
     };
+    attempt_dir_guard.disarm();
     completed_media(
         services,
         content_id,
@@ -828,12 +832,66 @@ where
 #[derive(Debug)]
 struct LeaseLost;
 
+/// Removes an isolated per-attempt media scratch directory if the worker kernel drops this
+/// handler future on lease loss or attempt timeout (`HandlerInterruptionPolicy::Cancel`).
+struct AttemptScratchDirGuard {
+    path: Option<PathBuf>,
+}
+
+impl AttemptScratchDirGuard {
+    const fn new(path: PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    fn disarm(&mut self) {
+        self.path = None;
+    }
+}
+
+impl Drop for AttemptScratchDirGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take()
+            && let Err(error) = std::fs::remove_dir_all(&path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "could not remove media attempt scratch directory on drop"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::{direct_audio_url, runtime_metadata, tweet_video_metadata};
+    use super::{AttemptScratchDirGuard, direct_audio_url, runtime_metadata, tweet_video_metadata};
     use newsly_db::MediaContentSnapshot;
+
+    #[test]
+    fn scratch_dir_guard_cleans_up_on_drop_unless_disarmed() {
+        let base =
+            std::env::temp_dir().join(format!("newsly-media-guard-{}", uuid::Uuid::new_v4()));
+        let dropped_dir = base.join("dropped");
+        let kept_dir = base.join("kept");
+        std::fs::create_dir_all(&dropped_dir).unwrap();
+        std::fs::create_dir_all(&kept_dir).unwrap();
+        std::fs::write(dropped_dir.join("part.bin"), b"partial").unwrap();
+
+        {
+            let _guard = AttemptScratchDirGuard::new(dropped_dir.clone());
+        }
+        assert!(!dropped_dir.exists());
+
+        {
+            let mut guard = AttemptScratchDirGuard::new(kept_dir.clone());
+            guard.disarm();
+        }
+        assert!(kept_dir.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn resolves_snapshot_video_metadata() {

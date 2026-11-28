@@ -5,7 +5,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectPath;
 use object_store::{
     Attribute, AttributeValue, Attributes, ClientOptions, Error as ObjectStoreError, ObjectStore,
-    ObjectStoreExt as _, PutOptions,
+    ObjectStoreExt as _, PutMode, PutOptions,
 };
 use reqwest::Url;
 use secrecy::{ExposeSecret, SecretString};
@@ -419,18 +419,32 @@ impl ObjectStorageBackend {
             Self::Local { root } => publish_local_immutable(root, key, bytes).await,
             Self::S3 { store, .. } => {
                 let path = parse_object_path(key)?;
-                let mut options = PutOptions::default();
+                let mut options = PutOptions {
+                    mode: PutMode::Create,
+                    ..PutOptions::default()
+                };
                 if let Some(content_type) = content_type {
                     options.attributes = Attributes::from_iter([(
                         Attribute::ContentType,
                         AttributeValue::from(content_type.to_owned()),
                     )]);
                 }
-                store
-                    .put_opts(&path, bytes.to_vec().into(), options)
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| ObjectStorageOpError::ObjectStore(error.to_string()))
+                match store.put_opts(&path, bytes.to_vec().into(), options).await {
+                    Ok(_) => Ok(()),
+                    Err(ObjectStoreError::AlreadyExists { .. }) => {
+                        let existing = self
+                            .read_bounded(key, bytes.len().saturating_add(1))
+                            .await?;
+                        if existing.as_deref() == Some(bytes) {
+                            Ok(())
+                        } else {
+                            Err(ObjectStorageOpError::UnsafeExistingObject(PathBuf::from(
+                                key,
+                            )))
+                        }
+                    }
+                    Err(error) => Err(ObjectStorageOpError::ObjectStore(error.to_string())),
+                }
             }
         }
     }
@@ -825,6 +839,26 @@ mod tests {
             )
             .await
             .unwrap();
+        // Identical bytes at the same key are idempotent.
+        backend
+            .put_immutable(
+                "content/42/source.txt",
+                b"hello s3",
+                Some("text/plain; charset=utf-8"),
+            )
+            .await
+            .unwrap();
+        // Different bytes at the same immutable key must be rejected without overwriting.
+        assert!(matches!(
+            backend
+                .put_immutable(
+                    "content/42/source.txt",
+                    b"conflicting bytes",
+                    Some("text/plain; charset=utf-8"),
+                )
+                .await,
+            Err(ObjectStorageOpError::UnsafeExistingObject(_))
+        ));
         assert!(backend.exists("content/42/source.txt").await.unwrap());
         assert_eq!(
             backend

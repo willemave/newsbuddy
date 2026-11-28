@@ -664,12 +664,7 @@ impl AudioEpisodeGatewayError {
             Self::ElevenLabsStatus { status, .. } => {
                 *status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
             }
-            Self::Script(error) => !matches!(
-                error,
-                AgentRuntimeError::InvalidRequest(_)
-                    | AgentRuntimeError::Validation(_)
-                    | AgentRuntimeError::Tool(_)
-            ),
+            Self::Script(error) => error.is_retryable(),
             Self::EmptyAudio
             | Self::FfmpegTimeout
             | Self::FfmpegFailed(_)

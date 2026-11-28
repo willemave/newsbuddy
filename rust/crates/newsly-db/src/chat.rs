@@ -1341,6 +1341,7 @@ const VISIBLE_CONTENT_CLAUSE: &str = r"
             FROM chat_sessions AS owned_session
             WHERE owned_session.user_id = $2::bigint
               AND owned_session.content_id = contents.id
+              AND owned_session.is_archived = FALSE
         )
         OR EXISTS (
             SELECT 1

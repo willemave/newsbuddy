@@ -9,6 +9,10 @@ fn default_local_provider() -> String {
     "local".to_owned()
 }
 
+fn is_local_provider(value: &str) -> bool {
+    value == "local"
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparedArticle {
@@ -17,7 +21,10 @@ struct PreparedArticle {
     title: Option<String>,
     article_domain: Option<String>,
     extraction_method: String,
-    #[serde(default = "default_local_provider")]
+    #[serde(
+        default = "default_local_provider",
+        skip_serializing_if = "is_local_provider"
+    )]
     storage_provider: String,
     storage_key: String,
     storage_bucket: Option<String>,
@@ -112,4 +119,40 @@ pub(super) async fn save(
         .bind(snapshot.id).execute(&mut *tx).await.map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PreparedArticle;
+
+    #[test]
+    fn local_checkpoint_omits_storage_provider_for_rollback_compatibility() {
+        let local = PreparedArticle {
+            article_url: "https://example.com/a".to_owned(),
+            final_url: "https://example.com/a".to_owned(),
+            title: Some("Title".to_owned()),
+            article_domain: Some("example.com".to_owned()),
+            extraction_method: "http".to_owned(),
+            storage_provider: "local".to_owned(),
+            storage_key: "news/1/body.txt".to_owned(),
+            storage_bucket: None,
+            sha256: "abc".to_owned(),
+            byte_size: 3,
+            char_count: 3,
+        };
+        let encoded = serde_json::to_value(&local).unwrap();
+        assert!(encoded.get("storage_provider").is_none());
+        let decoded: PreparedArticle = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.storage_provider, "local");
+
+        let s3 = PreparedArticle {
+            storage_provider: "s3_compatible".to_owned(),
+            storage_bucket: Some("newsly-bucket".to_owned()),
+            ..local
+        };
+        let encoded_s3 = serde_json::to_value(&s3).unwrap();
+        assert_eq!(encoded_s3["storage_provider"], "s3_compatible");
+        let decoded_s3: PreparedArticle = serde_json::from_value(encoded_s3).unwrap();
+        assert_eq!(decoded_s3.storage_provider, "s3_compatible");
+    }
 }

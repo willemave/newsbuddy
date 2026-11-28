@@ -106,4 +106,43 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.presentedRoute, requestedRoute)
         XCTAssertNil(coordinator.queuedRoute)
     }
+
+    func testDuplicateRouteCoalescesAcrossPreviewUpdates() {
+        let coordinator = ChatNavigationCoordinator()
+        let createdAt = Date(timeIntervalSince1970: 1_780_000_000)
+        let firstSummary: ChatSessionSummary = .fixture(
+            id: 42,
+            contentId: 7,
+            title: "Session",
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            lastMessageAt: createdAt,
+            lastMessagePreview: "Old preview"
+        )
+        let updatedSummary: ChatSessionSummary = .fixture(
+            id: 42,
+            contentId: 7,
+            title: "Session",
+            createdAt: createdAt,
+            updatedAt: createdAt.addingTimeInterval(30),
+            lastMessageAt: createdAt.addingTimeInterval(30),
+            lastMessagePreview: "Updated preview"
+        )
+        let firstRoute = ChatSessionRoute(session: firstSummary)
+        let updatedRoute = ChatSessionRoute(session: updatedSummary)
+
+        XCTAssertNotEqual(firstSummary, updatedSummary)
+
+        coordinator.open(firstRoute)
+        coordinator.open(updatedRoute)
+
+        XCTAssertTrue(coordinator.beginPresentation(updatedRoute))
+        XCTAssertNil(coordinator.queuedRoute)
+
+        coordinator.open(updatedRoute)
+        XCTAssertNil(coordinator.queuedRoute)
+
+        XCTAssertTrue(coordinator.acknowledgePresented(firstRoute))
+        XCTAssertNil(coordinator.presentedRoute)
+    }
 }

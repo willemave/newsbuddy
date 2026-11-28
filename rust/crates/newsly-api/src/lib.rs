@@ -92,6 +92,8 @@ pub struct AppState {
     checkout_timeout: Duration,
     debug_auth_enabled: bool,
     secure_admin_cookie: bool,
+    is_production: bool,
+    public_base_url: Option<reqwest::Url>,
     auth: AuthConfig,
     audio_storage: Arc<audio_storage::AudioStorage>,
     content_body_store: Arc<content_body_storage::ContentBodyStore>,
@@ -269,6 +271,8 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         checkout_timeout: config.checkout_timeout,
         debug_auth_enabled: config.debug,
         secure_admin_cookie: config.environment.requires_secure_cookies(),
+        is_production: config.environment.is_production(),
+        public_base_url: config.public_base_url,
         auth: config.auth,
         audio_storage,
         learning_deck_artifact_store: Arc::new(LearningDeckArtifactStore::from_content_store(

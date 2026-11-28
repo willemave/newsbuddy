@@ -58,7 +58,7 @@ struct ChatSessionHistoryView: View {
                 ErrorView(message: error) {
                     Task { await viewModel.loadChats() }
                 }
-            } else if knowledgeSessions.isEmpty {
+            } else if knowledgeSessions.isEmpty && !viewModel.hasMoreSessions {
                 emptyStateView
             } else {
                 ScrollView {
@@ -131,7 +131,7 @@ struct ChatSessionHistoryView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                             .accessibilityIdentifier("chat.history.pagination.retry")
-                        } else if shouldShowNoResults && viewModel.hasMoreSessions {
+                        } else if viewModel.hasMoreSessions {
                             Button("Load older chats") {
                                 Task { await viewModel.loadMoreSessions() }
                             }

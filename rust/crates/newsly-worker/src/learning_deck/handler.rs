@@ -641,11 +641,10 @@ fn retryable_agent_error(error: &LearningDeckAgentError) -> bool {
             | LearningDeckArtifactError::ObjectStore(_)
             | LearningDeckArtifactError::File { .. },
         )
-        | LearningDeckAgentError::Lifecycle(crate::task_sandbox::TaskSandboxError::Deadline)
-        | LearningDeckAgentError::Agent(
-            newsly_agent_runtime::AgentRuntimeError::DeadlineExceeded
-            | newsly_agent_runtime::AgentRuntimeError::Provider(_),
-        ) => true,
+        | LearningDeckAgentError::Lifecycle(crate::task_sandbox::TaskSandboxError::Deadline) => {
+            true
+        }
+        LearningDeckAgentError::Agent(error) => error.is_retryable(),
         _ => false,
     }
 }

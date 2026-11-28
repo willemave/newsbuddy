@@ -42,8 +42,9 @@ pub struct RigAgentEngine {
 
 static DEFAULT_AGENT_HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
+        // Per-request execution deadlines (300s-3540s) are enforced by AgentLimits.deadline,
+        // so do not impose a shorter client-wide total request timeout here.
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(180))
         .build()
         .expect("default RigAgentEngine HTTP client builds")
 });

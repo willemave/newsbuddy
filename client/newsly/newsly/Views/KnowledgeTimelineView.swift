@@ -491,7 +491,11 @@ struct KnowledgeView: View {
                 }
             }
         case .deck:
-            if let deck = viewModel.decks.decks.first(where: { $0.knowledgeSource == source }) {
+            if let deck = BriefingSourceDeckLookup.find(
+                source: source,
+                sourceURL: content.url,
+                decks: viewModel.decks.decks
+            ) {
                 Task { await openDeck(deck) }
             } else {
                 deckSource = content

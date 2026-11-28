@@ -173,14 +173,22 @@ pub(crate) enum ContentCommand {
     Submissions(ContentSubmissionsArgs),
 }
 
-fn parse_page_limit(raw: &str) -> Result<usize, String> {
+fn parse_bounded_limit(raw: &str, max: usize) -> Result<usize, String> {
     let limit = raw
         .parse::<usize>()
-        .map_err(|_| "limit must be an integer from 1 through 100".to_owned())?;
-    if !(1..=100).contains(&limit) {
-        return Err("limit must be from 1 through 100".to_owned());
+        .map_err(|_| format!("limit must be an integer from 1 through {max}"))?;
+    if !(1..=max).contains(&limit) {
+        return Err(format!("limit must be from 1 through {max}"));
     }
     Ok(limit)
+}
+
+fn parse_page_limit(raw: &str) -> Result<usize, String> {
+    parse_bounded_limit(raw, 100)
+}
+
+fn parse_search_limit(raw: &str) -> Result<usize, String> {
+    parse_bounded_limit(raw, 25)
 }
 
 #[derive(Debug, Args)]
@@ -248,8 +256,8 @@ pub(crate) enum LibraryCommand {
 #[derive(Debug, Args)]
 pub(crate) struct SearchArgs {
     pub(crate) query: String,
-    /// Maximum number of results to return (1-100).
-    #[arg(long, value_parser = parse_page_limit, default_value_t = 10)]
+    /// Maximum number of results to return (1-25).
+    #[arg(long, value_parser = parse_search_limit, default_value_t = 10)]
     pub(crate) limit: usize,
     #[arg(
         long,
@@ -581,6 +589,28 @@ mod tests {
             let error =
                 Cli::try_parse_from(["newsbuddy", "content", "favorites", "--limit", limit])
                     .unwrap_err();
+            assert!(error.to_string().contains("limit must"));
+        }
+    }
+
+    #[test]
+    fn search_limit_enforces_one_through_twenty_five() {
+        for limit in [1, 25] {
+            let parsed =
+                Cli::try_parse_from(["newsbuddy", "search", "rust", "--limit", &limit.to_string()])
+                    .unwrap();
+            assert!(matches!(
+                parsed.command,
+                Command::Search(SearchArgs {
+                    limit: parsed_limit,
+                    ..
+                }) if parsed_limit == limit
+            ));
+        }
+
+        for limit in ["0", "26", "100", "not-a-number"] {
+            let error =
+                Cli::try_parse_from(["newsbuddy", "search", "rust", "--limit", limit]).unwrap_err();
             assert!(error.to_string().contains("limit must"));
         }
     }

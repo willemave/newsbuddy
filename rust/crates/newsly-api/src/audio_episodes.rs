@@ -684,8 +684,8 @@ pub(super) async fn enable_audio_episode_public_share(
     let audio_path = format!("/audio/share/{token}/audio");
     Ok(Json(AudioEpisodeShareResponse {
         share_enabled: true,
-        share_page_url: Some(external_url(&headers, &page_path, &request_id)?),
-        share_audio_url: Some(external_url(&headers, &audio_path, &request_id)?),
+        share_page_url: Some(external_url(&state, &headers, &page_path, &request_id)?),
+        share_audio_url: Some(external_url(&state, &headers, &audio_path, &request_id)?),
     }))
 }
 
@@ -869,6 +869,7 @@ pub(super) async fn serve_shared_audio_episode(
     let episode = shared_episode(&state, &token, &request_id).await?;
     let title = escape_html(&episode.title);
     let audio_url = external_url(
+        &state,
         &headers,
         &format!("/audio/share/{token}/audio"),
         &request_id,

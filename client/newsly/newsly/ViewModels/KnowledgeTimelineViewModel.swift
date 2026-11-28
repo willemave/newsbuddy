@@ -323,12 +323,16 @@ final class KnowledgeTimelineViewModel {
         if isSavedObservationReadInFlight, aggregateReadTask == nil {
             savedContent.cancelAutomaticRead()
         }
+        let visibleChats = boundedTimelineChats()
         let savedOldest = savedContent.hasMoreContent
             ? savedContent.contents.last?.knowledgeActivityDate
             : nil
-        let chatOldest = chats.hasMoreSessions
-            ? chats.sessions.last.map(\.lastActivityDate)
-            : nil
+        let hasOlderUnshownChats = visibleChats.count < chats.sessions.count
+        let chatOldest: Date? = if chats.hasMoreSessions && !hasOlderUnshownChats {
+            chats.sessions.last.map(\.lastActivityDate)
+        } else {
+            nil
+        }
         switch KnowledgePaginationSource.next(
             savedOldest: savedOldest,
             chatOldest: chatOldest
@@ -522,17 +526,32 @@ final class KnowledgeTimelineViewModel {
             && narrations.loadErrorMessage == nil
     }
 
+    private func boundedTimelineChats() -> [ChatSessionSummary] {
+        guard savedContent.hasMoreContent,
+              let savedFloor = savedContent.contents.last?.knowledgeActivityDate else {
+            return chats.sessions
+        }
+        let savedSources = Set(savedContent.contents.map(KnowledgeSource.init))
+        return chats.sessions.filter { session in
+            if let source = session.knowledgeSource, savedSources.contains(source) {
+                return true
+            }
+            return session.lastActivityDate >= savedFloor
+        }
+    }
+
     private func refreshTimelineProjection() {
+        let visibleChats = boundedTimelineChats()
         timeline = KnowledgeTimelineItem.merged(
             saved: savedContent.contents,
-            chats: chats.sessions,
+            chats: visibleChats,
             decks: decks.decks,
             narrations: narrations.episodes,
             chatPreview: chats.preview(for:)
         )
         groupedTimeline = KnowledgeTimelineDayGroup.group(timeline)
         sourceDerivatives = KnowledgeSourceDerivatives.index(
-            chats: chats.sessions,
+            chats: visibleChats,
             decks: decks.decks,
             narrations: narrations.episodes
         )

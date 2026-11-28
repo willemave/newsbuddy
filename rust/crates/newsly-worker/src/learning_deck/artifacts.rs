@@ -710,8 +710,6 @@ pub(super) enum LearningDeckArtifactError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("Learning Deck artifact JSON is invalid")]
     Json(#[from] serde_json::Error),
-    #[error("Learning Deck artifact validator could not compile")]
-    Regex(#[from] regex::Error),
 }
 
 impl LearningDeckArtifactError {

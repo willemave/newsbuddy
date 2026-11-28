@@ -249,17 +249,24 @@ impl ChatAgentRuntime {
             provider_parameters: Map::new(),
         };
 
+        let execution = engine.run_chat(
+            request,
+            tools.clone(),
+            events.clone(),
+            ChatBudget {
+                cumulative_token_limit: self.config.cumulative_token_limit,
+                final_answer_reserve: self.config.final_answer_reserve,
+            },
+        );
+        tokio::pin!(execution);
         let result = tokio::select! {
-            result = engine.run_chat(
-                request,
-                tools.clone(),
-                events.clone(),
-                ChatBudget {
-                    cumulative_token_limit: self.config.cumulative_token_limit,
-                    final_answer_reserve: self.config.final_answer_reserve,
-                },
-            ) => result.map_err(ChatAgentError::Agent),
-            () = cancellation.cancelled() => Err(ChatAgentError::Cancelled),
+            result = &mut execution => result.map_err(ChatAgentError::Agent),
+            () = cancellation.cancelled() => {
+                // Let the cancelled tool future unwind through its sandbox cleanup guards
+                // and allow non-cancellable host write tools to finish cleanly.
+                let _ = execution.await;
+                Err(ChatAgentError::Cancelled)
+            }
         };
         finish_run(
             ChatRunCompletion {
