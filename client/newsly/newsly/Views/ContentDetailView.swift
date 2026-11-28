@@ -275,20 +275,23 @@ private struct ContentDetailContentView: View {
                     await Task.yield()
                     await requestInitialCommentsScrollIfNeeded(scrollProxy: scrollProxy)
                 }
-                .topScreenSoftEdge(opacity: topEdgeFadeOpacity)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { proxy in
                         if !isDetailPaneRoot {
                             if let gutter = statusGutter {
-                                // Closed Duo: centred in the status column,
-                                // below the clock, off the reading area.
-                                floatingBackButton(style: .surface)
-                                    .scaleEffect(floatingBackScale)
-                                    .frame(width: gutter.width)
-                                    .padding(.top, gutter.statusBottom + 8)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                // Closed Duo: back and the content actions
+                                // stack in the status column, below the
+                                // clock, off the reading area.
+                                VStack(spacing: 12) {
+                                    floatingBackButton(style: .surface)
+                                        .scaleEffect(floatingBackScale)
+                                    if let content = viewModel.content {
+                                        actionBar(content: content, axis: .vertical, scrollProxy: scrollProxy)
+                                    }
+                                }
+                                .placedInSideStatusGutter(gutter)
                             } else {
-                                floatingBackButton(style: hasHeroImage && topEdgeFadeOpacity < 0.5 ? .imageOverlay : .surface)
+                                floatingBackButton(style: hasHeroImage && heroScrolledClearProgress < 0.5 ? .imageOverlay : .surface)
                                     .scaleEffect(floatingBackScale)
                                     .padding(.leading, 16)
                                     .padding(.top, floatingBackTopPadding(for: proxy))
@@ -296,21 +299,7 @@ private struct ContentDetailContentView: View {
                             }
                         }
                     }
-                    .onGeometryChange(for: SideStatusGutter?.self) { proxy in
-                        SideStatusGutter.resolve(
-                            occlusions: SideStatusGutter.occlusions(in: proxy),
-                            containerWidth: proxy.size.width
-                        )
-                    } action: { gutter in
-                        // Some layout passes report no regions; keep a found
-                        // column for this view's lifetime (opening or closing
-                        // the device rebuilds the detail).
-                        guard !isInOpenDisplayPane, let gutter else { return }
-                        statusGutter = gutter
-                    }
-                    // Reaches the trailing screen edge, where the closed
-                    // Duo's status column sits.
-                    .ignoresSafeArea(.container, edges: .trailing)
+                    .readsSideStatusGutter($statusGutter)
                 }
             }
         }
@@ -555,7 +544,10 @@ private struct ContentDetailContentView: View {
             reduceMotion: reduceMotion,
             showsPodcastPlaybackControls: podcastAudioController.shouldShowControls(for: content)
         ) { overlaid in
-            actionBar(content: content, overlaid: overlaid, scrollProxy: scrollProxy)
+            // The closed Duo's status column holds the actions instead.
+            if statusGutter == nil {
+                actionBar(content: content, overlaid: overlaid, scrollProxy: scrollProxy)
+            }
         } podcastPlaybackControls: {
             podcastPlaybackControls(for: content)
         }
@@ -573,13 +565,13 @@ private struct ContentDetailContentView: View {
         }
     }
 
-    /// Hero artwork is meant to bleed under the status bar, so the fade waits until
-    /// the hero has scrolled clear. Text-only detail views get it immediately.
-    private var topEdgeFadeOpacity: Double {
+    /// How far the hero has scrolled clear of the top, 0 to 1. The back button
+    /// leaves its darkened image glass past halfway. Text-only views start at 1.
+    private var heroScrolledClearProgress: Double {
         guard hasHeroImage else { return 1 }
-        let distance = DetailDesign.topEdgeFadeEndOffset - DetailDesign.topEdgeFadeStartOffset
+        let distance = DetailDesign.heroScrolledClearEndOffset - DetailDesign.heroScrolledClearStartOffset
         guard distance > 0 else { return 1 }
-        let raw = (detailScrollOffsetY - DetailDesign.topEdgeFadeStartOffset) / distance
+        let raw = (detailScrollOffsetY - DetailDesign.heroScrolledClearStartOffset) / distance
         return Double(min(max(raw, 0), 1))
     }
 
@@ -598,7 +590,7 @@ private struct ContentDetailContentView: View {
 
     private static func scrollChromeOffset(for rawOffset: CGFloat) -> CGFloat {
         let maximumRelevantOffset = max(
-            DetailDesign.topEdgeFadeEndOffset,
+            DetailDesign.heroScrolledClearEndOffset,
             DetailDesign.floatingBackFadeEndOffset
         )
         let boundedOffset = min(max(rawOffset, 0), maximumRelevantOffset)
@@ -619,6 +611,7 @@ private struct ContentDetailContentView: View {
     private func actionBar(
         content: ContentDetail,
         overlaid: Bool = false,
+        axis: Axis = .horizontal,
         scrollProxy: ScrollViewProxy
     ) -> some View {
         DetailActionBar(
@@ -662,7 +655,8 @@ private struct ContentDetailContentView: View {
             onOpenKnowledgeActions: {
                 chatCoordinator.chatError = nil
                 activeSheet = .knowledgeActions
-            }
+            },
+            axis: axis
         )
     }
 

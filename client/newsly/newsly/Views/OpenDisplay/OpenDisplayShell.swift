@@ -52,10 +52,10 @@ struct OpenDisplayShell: View {
     var body: some View {
         HStack(spacing: 0) {
             OpenDisplayRail(
-                briefingItems: briefingRailItems,
+                briefingItems: briefing.railItems,
                 knowledgeItem: knowledgeRailItem,
                 selection: railSelection,
-                player: playerState,
+                player: briefing.railPlayerState,
                 onSelect: selectRail,
                 onSearch: openKnowledgeSearch,
                 onOpenSettings: onOpenSettings,
@@ -405,42 +405,6 @@ struct OpenDisplayShell: View {
 
     // MARK: Rail
 
-    private var briefingRailItems: [OpenDisplayRail.Item] {
-        var items: [OpenDisplayRail.Item] = []
-        if briefing.firstRun != nil {
-            items.append(
-                OpenDisplayRail.Item(
-                    destination: .startHere,
-                    title: "Welcome",
-                    systemImage: "sparkles",
-                    badge: 0,
-                    accessibilityIdentifier: "open.rail.start_here"
-                )
-            )
-        }
-        items.append(
-            OpenDisplayRail.Item(
-                destination: .news,
-                title: "News",
-                systemImage: "newspaper",
-                badge: briefing.newsUnreadSourceCount,
-                accessibilityIdentifier: "open.rail.news"
-            )
-        )
-        for lens in briefing.fixedLenses {
-            items.append(
-                OpenDisplayRail.Item(
-                    destination: .lens(lens.key),
-                    title: lens.title,
-                    systemImage: lens.tier == .audio ? "waveform" : "text.book.closed",
-                    badge: lens.unreadSourceCount,
-                    accessibilityIdentifier: "open.rail.lens.\(lens.key)"
-                )
-            )
-        }
-        return items
-    }
-
     private let knowledgeRailItem = OpenDisplayRail.Item(
         destination: .knowledge,
         title: "Knowledge",
@@ -458,28 +422,13 @@ struct OpenDisplayShell: View {
         )
     }
 
-    private var playerState: OpenDisplayRail.PlayerState? {
-        guard let lensKey = briefing.selectedLensKey else { return nil }
-        let narration = briefing.narrationController
-        return OpenDisplayRail.PlayerState(
-            isPreparing: narration.session(for: lensKey).isPreparing,
-            isPlaying: narration.isPlaying(lensKey: lensKey),
-            onToggle: { Task { await narration.togglePlayback(for: lensKey) } }
-        )
-    }
-
     /// Writes the root and Briefing owners, so activity, read tracking, and
     /// chat routing behave exactly as on compact. Reselecting the current item
     /// scrolls its list to the top.
     private func selectRail(_ destination: OpenRailDestination) {
         let isReselection = destination == railSelection
         // The Briefing tier as it was, even if Knowledge is showing now.
-        let previousBriefingDestination = OpenRailDestination.current(
-            selectedTab: .briefing,
-            isStartHereSelected: briefing.isStartHereSelected,
-            isNewsTierSelected: briefing.isNewsTierSelected,
-            selectedLensKey: briefing.selectedLensKey
-        )
+        let previousBriefingDestination = briefing.railSelection
         // An attached chat belongs beside its source; another destination
         // hands it to background tracking.
         if !isReselection {

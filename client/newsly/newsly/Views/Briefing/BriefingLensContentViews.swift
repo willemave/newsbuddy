@@ -115,7 +115,6 @@ final class BriefingLensRenderModel {
 
 struct BriefingLensPageView: View, Equatable {
     @Environment(\.displayScale) private var displayScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let lensKey: String
     let lensTitle: String
@@ -256,7 +255,7 @@ struct BriefingLensPageView: View, Equatable {
                 }
                 .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
                 // The bar supplies the status-bar part of the top inset.
-                .systemTopScrollEdge(height: screenEdgeInsets.top)
+                .topScrollInsetBar(height: screenEdgeInsets.top)
                 .refreshable { await onRefresh() }
             } else if let renderModel, renderModel.segments.isEmpty, !renderModel.hasMore {
                 BriefingLensEmptyView(
@@ -333,10 +332,10 @@ struct BriefingLensPageView: View, Equatable {
                     .id(contentIdentity)
                     .contentMargins(.top, pageInsets.contentMarginTop)
                     .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
-                    // The edge effect spans the status bar. The content margin
+                    // The bar spans the status bar. The content margin
                     // gives that height back, so the total top inset is
                     // exactly `pageInsets.layoutTop`.
-                    .systemTopScrollEdge(height: pageInsets.scrollEdgeBar)
+                    .topScrollInsetBar(height: pageInsets.scrollEdgeBar)
                     .refreshable {
                         await onRefresh()
                     }
@@ -368,8 +367,7 @@ struct BriefingLensPageView: View, Equatable {
                         chromeCollapse.trackPinnedChrome(
                             forLens: lensKey,
                             scrolled: probe.scrolledDistance,
-                            mastheadHeight: collapsibleChromeHeight,
-                            reduceMotion: reduceMotion
+                            mastheadHeight: collapsibleChromeHeight
                         )
                         guard oldProbe.collapse != probe.collapse
                                 || oldProbe.step != probe.step
@@ -396,10 +394,6 @@ struct BriefingLensPageView: View, Equatable {
                         // Unconditional so a recreated pager resyncs stale
                         // view-model pinned state on its initial callback.
                         onSetHeaderPinned(pinned)
-                    }
-                    .onScrollPhaseChange { _, phase in
-                        guard phase == .idle else { return }
-                        chromeCollapse.settlePinnedChrome(forLens: lensKey, reduceMotion: reduceMotion)
                     }
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensKey)")

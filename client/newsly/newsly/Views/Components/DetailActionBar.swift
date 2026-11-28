@@ -27,12 +27,17 @@ struct DetailActionBar: View {
     let onPodcastAudio: () -> Void
     let onPodcastAudioSpeed: (NarrationPlaybackSpeedOption) -> Void
     let onOpenKnowledgeActions: () -> Void
+    /// A row under the title, or a column in the closed Duo's status column.
+    var axis: Axis = .horizontal
 
     var body: some View {
+        let layout = axis == .vertical
+            ? AnyLayout(VStackLayout(spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 6))
         // Container spacing below the row spacing: circles stay separate at
         // rest and only flow together while pressed.
         GlassEffectContainer(spacing: 4) {
-            HStack(spacing: 6) {
+            layout {
                 // One reading entry; the reader opens on the original page when no text exists.
                 if canShowReader || externalURL != nil {
                     Button(action: onOpenReader) {
@@ -120,8 +125,8 @@ struct DetailActionBar: View {
                 .accessibilityLabel("Knowledge actions")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 44)
+        .frame(maxWidth: axis == .horizontal ? .infinity : nil, alignment: .leading)
+        .frame(height: axis == .horizontal ? 44 : nil)
         .textSelection(.disabled)
     }
 

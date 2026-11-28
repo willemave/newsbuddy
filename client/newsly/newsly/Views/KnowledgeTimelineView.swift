@@ -21,14 +21,16 @@ struct KnowledgeView: View {
     let chatTransitionNamespace: Namespace.ID?
     let contentTextSize: DynamicTypeSize
     let onOpenSettings: () -> Void
-    /// Search and Settings sit in the masthead on phones; the open display
-    /// moves them to its rail.
+    /// Search and Settings sit in the masthead on phones, in the status
+    /// column on the closed Duo; the open display moves them to its rail.
     let showsHeaderActions: Bool
 
     @State private var viewModel: KnowledgeTimelineViewModel
     @State private var deckReaderDestination: LearningDeckReaderDestination?
     @State private var deckSource: ContentSummary?
     @State private var showsInitialLoadingIndicator = false
+    /// The closed Duo's status column, when the device has one.
+    @State private var statusGutter: SideStatusGutter?
 
     private static let topAnchor = "knowledge.top"
 
@@ -66,7 +68,9 @@ struct KnowledgeView: View {
                 EditorialMastheadHeader(
                     title: "Knowledge",
                     titleAccessibilityIdentifier: "knowledge.screen",
-                    trailingAccessory: showsHeaderActions ? AnyView(headerActions) : nil
+                    trailingAccessory: showsHeaderActions && statusGutter == nil
+                        ? AnyView(headerActions(axis: .horizontal))
+                        : nil
                 )
                 .appListRow()
                 .id(Self.topAnchor)
@@ -91,7 +95,6 @@ struct KnowledgeView: View {
                 await viewModel.loadNextPage()
             }
             .refreshable { await viewModel.forceReload() }
-            .systemTopScrollEdge()
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 RootTabBarMinimizer.scrolledDistance(in: geometry)
             } action: { _, offset in
@@ -103,6 +106,11 @@ struct KnowledgeView: View {
                 anchor: Self.topAnchor,
                 using: proxy
             )
+        }
+        .overlay(alignment: .topTrailing) {
+            if showsHeaderActions {
+                statusColumnActions
+            }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -423,9 +431,24 @@ struct KnowledgeView: View {
         }
     }
 
-    private var headerActions: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 10) {
+    /// Closed Duo: Search and Settings stack in the status column, below the
+    /// clock, off the list. Elsewhere this finds no column and draws nothing.
+    private var statusColumnActions: some View {
+        GeometryReader { _ in
+            if let gutter = statusGutter {
+                headerActions(axis: .vertical)
+                    .placedInSideStatusGutter(gutter)
+            }
+        }
+        .readsSideStatusGutter($statusGutter)
+    }
+
+    private func headerActions(axis: Axis) -> some View {
+        let layout = axis == .vertical
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return GlassEffectContainer(spacing: 6) {
+            layout {
                 Button(action: onSearch) {
                     Image(systemName: "magnifyingglass")
                         .font(.appSymbol(size: 17, weight: .semibold))

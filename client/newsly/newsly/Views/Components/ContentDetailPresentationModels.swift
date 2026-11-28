@@ -37,8 +37,8 @@ enum DetailDesign {
     static let floatingBackMinimumScale: CGFloat = 0.9
     // Bracket the point where a 320pt hero clears the status bar, so the fade
     // arrives exactly as body text would start colliding with the clock.
-    static let topEdgeFadeStartOffset: CGFloat = 260
-    static let topEdgeFadeEndOffset: CGFloat = 320
+    static let heroScrolledClearStartOffset: CGFloat = 260
+    static let heroScrolledClearEndOffset: CGFloat = 320
     static let edgeNavigationSwipeWidth: CGFloat = 44
     static let edgeNavigationTopExclusionHeight: CGFloat = 120
 }

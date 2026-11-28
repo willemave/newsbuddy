@@ -34,16 +34,14 @@ final class BriefingChromeCollapseModel {
 
     /// How far the pills and player have slid up past the collapsed masthead.
     /// Scrolling down carries them off with the text, so masthead and pills
-    /// leave as one continuous motion; an upward scroll brings them back.
+    /// leave as one continuous motion. They come back only with the text, as
+    /// the reader returns to the top.
     private var pinnedHideByLens: [String: CGFloat] = [:]
     /// Slide that takes the pinned chrome fully off the top of the screen.
     private(set) var pinnedHideDistance: CGFloat = 0
     @ObservationIgnored private let now: () -> TimeInterval
     @ObservationIgnored private var lastScrolledByLens: [String: CGFloat] = [:]
-    @ObservationIgnored private var upwardTravelByLens: [String: CGFloat] = [:]
-    @ObservationIgnored private var movingDownByLens: [String: Bool] = [:]
-    @ObservationIgnored private var ceilingByLens: [String: CGFloat] = [:]
-    /// While a reveal or settle slide runs, scroll samples must not overwrite
+    /// While a reveal slide runs, scroll samples must not overwrite
     /// its target: an unanimated write would snap the chrome mid-slide.
     @ObservationIgnored private var slideEndsAtByLens: [String: TimeInterval] = [:]
 
@@ -56,73 +54,40 @@ final class BriefingChromeCollapseModel {
     }
 
     /// Feeds one scroll sample. Past the masthead the pills ride the text off
-    /// screen; any deliberate upward scroll slides them straight back. The
-    /// masthead is separate: it tracks the offset, so it returns only at the
-    /// top.
+    /// screen, and they return only with it, near the top.
     func trackPinnedChrome(
         forLens key: String,
         scrolled: CGFloat,
-        mastheadHeight: CGFloat,
-        reduceMotion: Bool
+        mastheadHeight: CGFloat
     ) {
-        let lastScrolled = lastScrolledByLens[key]
-        let step = briefingPinnedChromeStep(
+        let hide = briefingPinnedChromeHide(
             hide: pinnedHide(forLens: key),
-            upwardTravel: upwardTravelByLens[key] ?? 0,
-            lastScrolled: lastScrolled,
+            lastScrolled: lastScrolledByLens[key],
             scrolled: scrolled,
             mastheadHeight: mastheadHeight,
             hideDistance: pinnedHideDistance
         )
         lastScrolledByLens[key] = scrolled
-        upwardTravelByLens[key] = step.upwardTravel
-        ceilingByLens[key] = briefingPinnedChromeHideCeiling(
-            scrolled: scrolled,
-            mastheadHeight: mastheadHeight,
-            hideDistance: pinnedHideDistance
-        )
-        if let lastScrolled, scrolled != lastScrolled {
-            movingDownByLens[key] = scrolled > lastScrolled
-        }
-        if step.revealed {
-            slidePinnedChrome(to: 0, forLens: key, reduceMotion: reduceMotion)
-        } else if !isSliding(key) {
-            setPinnedHide(step.hide, forLens: key)
-        }
+        guard !isSliding(key) else { return }
+        setPinnedHide(hide, forLens: key)
     }
 
-    /// Called when scrolling comes to rest, so the pills never park half off
-    /// screen: they finish leaving if the reader was heading down with room
-    /// to hide them, and come back otherwise.
-    func settlePinnedChrome(forLens key: String, reduceMotion: Bool) {
-        guard let target = briefingPinnedChromeSettleTarget(
-            hide: pinnedHide(forLens: key),
-            ceiling: ceilingByLens[key] ?? 0,
-            hideDistance: pinnedHideDistance,
-            movingDown: movingDownByLens[key] ?? false
-        ) else { return }
-        slidePinnedChrome(to: target, forLens: key, reduceMotion: reduceMotion)
-    }
-
+    /// Shows the pills at once, or with a slide when `reduceMotion` is given
+    /// (a page reached by swipe or tap).
     func revealPinnedChrome(forLens key: String, reduceMotion: Bool? = nil) {
-        upwardTravelByLens[key] = 0
         guard let reduceMotion else {
             slideEndsAtByLens.removeValue(forKey: key)
             setPinnedHide(0, forLens: key)
             return
         }
-        slidePinnedChrome(to: 0, forLens: key, reduceMotion: reduceMotion)
-    }
-
-    private func slidePinnedChrome(to value: CGFloat, forLens key: String, reduceMotion: Bool) {
-        guard pinnedHide(forLens: key) != value else { return }
+        guard pinnedHide(forLens: key) != 0 else { return }
         let animation = AppMotion.respectingReduceMotion(
             reduceMotion,
             .smooth(duration: Self.slideDuration)
         )
         slideEndsAtByLens[key] = now() + (reduceMotion ? 0 : Self.slideDuration)
         withAnimation(animation) {
-            setPinnedHide(value, forLens: key)
+            setPinnedHide(0, forLens: key)
         }
     }
 
@@ -157,18 +122,6 @@ final class BriefingChromeCollapseModel {
     static let slideDuration: TimeInterval = 0.28
 }
 
-struct BriefingPinnedChromeStep: Equatable {
-    var hide: CGFloat
-    /// Distance scrolled up since the reader last moved down.
-    var upwardTravel: CGFloat
-    /// True when this sample slides the chrome back into view.
-    var revealed: Bool
-}
-
-/// Upward travel that counts as scrolling back, so finger jitter at rest does
-/// not bring the chrome back in.
-let briefingPinnedChromeRevealDistance: CGFloat = 8
-
 /// Most the pills can be hidden: only as far as the reader has scrolled past
 /// the masthead, so near the top they always sit on the text they inset.
 func briefingPinnedChromeHideCeiling(
@@ -179,55 +132,31 @@ func briefingPinnedChromeHideCeiling(
     min(max(scrolled - mastheadHeight, 0), max(hideDistance, 0))
 }
 
-/// Quick-return step for the pinned pills and player. `scrolled` is distance
-/// from the top of content, clamped to the scrollable range, so a bounce at
-/// the end does not read as reversing. Downward scrolling hides by exactly the
-/// distance scrolled, so the pills leave attached to the text; upward
-/// scrolling past the reveal distance brings them back in one slide.
-func briefingPinnedChromeStep(
+/// Hide for the pinned pills and player after one scroll sample. `scrolled`
+/// is distance from the top of content, clamped to the scrollable range.
+/// Downward scrolling hides by exactly the distance scrolled, so the pills
+/// leave attached to the text; scrolling up only clamps to the ceiling, so
+/// they come back with the text as the reader reaches the top.
+func briefingPinnedChromeHide(
     hide: CGFloat,
-    upwardTravel: CGFloat,
     lastScrolled: CGFloat?,
     scrolled: CGFloat,
     mastheadHeight: CGFloat,
     hideDistance: CGFloat
-) -> BriefingPinnedChromeStep {
+) -> CGFloat {
     let ceiling = briefingPinnedChromeHideCeiling(
         scrolled: scrolled,
         mastheadHeight: mastheadHeight,
         hideDistance: hideDistance
     )
-    guard let lastScrolled else {
-        return BriefingPinnedChromeStep(hide: min(hide, ceiling), upwardTravel: 0, revealed: false)
-    }
-    let delta = scrolled - lastScrolled
-    if delta > 0 {
-        return BriefingPinnedChromeStep(hide: min(hide + delta, ceiling), upwardTravel: 0, revealed: false)
-    }
-    let travel = upwardTravel - delta
-    let held = min(hide, ceiling)
-    if held > 0, travel >= briefingPinnedChromeRevealDistance {
-        return BriefingPinnedChromeStep(hide: 0, upwardTravel: travel, revealed: true)
-    }
-    return BriefingPinnedChromeStep(hide: held, upwardTravel: travel, revealed: false)
-}
-
-/// Where part-hidden chrome finishes when scrolling stops, or nil when it is
-/// already fully in or out.
-func briefingPinnedChromeSettleTarget(
-    hide: CGFloat,
-    ceiling: CGFloat,
-    hideDistance: CGFloat,
-    movingDown: Bool
-) -> CGFloat? {
-    guard hideDistance > 0, hide > 0, hide < hideDistance else { return nil }
-    return movingDown && ceiling >= hideDistance ? hideDistance : 0
+    guard let lastScrolled, scrolled > lastScrolled else { return min(hide, ceiling) }
+    return min(hide + scrolled - lastScrolled, ceiling)
 }
 
 /// Slide that carries the pinned chrome from its resting place (below the
-/// status bar) fully off the top of the screen, past its fade.
+/// status bar) fully off the top of the screen.
 func briefingPinnedChromeHideDistance(screenTop: CGFloat, pinnedHeight: CGFloat) -> CGFloat {
-    max(screenTop, 0) + max(pinnedHeight, 0) + BriefingPinnedChromeBacking.fadeHeight + 4
+    max(screenTop, 0) + max(pinnedHeight, 0) + 4
 }
 
 /// Moves the whole header with the scroll: up by the collapsed masthead, then
@@ -294,74 +223,6 @@ private struct BriefingTopInsetClip: Shape {
 
     func path(in rect: CGRect) -> Path {
         Path(CGRect(x: rect.minX, y: rect.minY + inset, width: rect.width, height: max(rect.height - inset, 0)))
-    }
-}
-
-/// Light fade behind the pinned chrome: text passing under the pills dims a
-/// little, then clears just below them. Translucent, never a solid band. It
-/// belongs to the header, so it slides away with the pills. Text only passes
-/// under the chrome once the masthead has fully collapsed (before that it
-/// rides the chrome's bottom edge), so it fades in over the end of that.
-struct BriefingPinnedChromeBacking: View {
-    var model: BriefingChromeCollapseModel
-    var lensKey: String?
-    var mastheadHeight: CGFloat
-
-    private var visibility: CGFloat {
-        guard lensKey != nil, mastheadHeight > 0 else { return 0 }
-        let remaining = mastheadHeight - model.collapse(forLens: lensKey)
-        return min(max(1 - remaining / Self.fadeInDistance, 0), 1)
-    }
-
-    var body: some View {
-        // The gradient has no inputs, so per-frame collapse changes only
-        // update this opacity and never rebuild the gradient.
-        BriefingPinnedChromeFade()
-            .opacity(visibility)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-
-    /// How far the fade extends below the header.
-    static let fadeHeight: CGFloat = 20
-    private static let fadeInDistance: CGFloat = 24
-}
-
-private struct BriefingPinnedChromeFade: View {
-    var body: some View {
-        GeometryReader { proxy in
-            let fadeHeight = BriefingPinnedChromeBacking.fadeHeight
-            let height = proxy.size.height + fadeHeight
-            LinearGradient(
-                stops: [
-                    .init(color: Color.surfacePrimary.opacity(0.6), location: 0),
-                    .init(color: Color.surfacePrimary.opacity(0.45), location: max(1 - fadeHeight * 2 / max(height, 1), 0)),
-                    .init(color: Color.surfacePrimary.opacity(0), location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: height)
-        }
-    }
-}
-
-/// The same light fade under the status bar, so text scrolling up there no
-/// longer runs straight into the clock.
-struct BriefingStatusBarFade: View {
-    var height: CGFloat
-
-    var body: some View {
-        LinearGradient(
-            colors: [Color.surfacePrimary.opacity(0.6), Color.surfacePrimary.opacity(0)],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .frame(height: height + 12)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .ignoresSafeArea(edges: .top)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 

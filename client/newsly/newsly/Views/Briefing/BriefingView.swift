@@ -70,6 +70,9 @@ struct BriefingView: View {
     @State private var mastheadHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
     @State private var pagerScreenEdgeInsets = EdgeInsets()
+    /// The closed Duo's status column, when the device has one. It holds the
+    /// tiers and the play button there.
+    @State private var statusGutter: SideStatusGutter?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(RootTabBarMinimizer.self) private var tabBarMinimizer: RootTabBarMinimizer?
     @State private var listenPanelFullHeight: CGFloat = 0
@@ -141,15 +144,17 @@ struct BriefingView: View {
         )
     }
 
-    /// First-run navigation already includes every category. The separate
-    /// category strip belongs only beneath the normal tier strip.
+    /// First-run navigation already includes every category, so the separate
+    /// category strip belongs beneath the normal tier strip, or on its own when
+    /// the closed Duo's status column holds the tiers.
     private var showsCategoryStrip: Bool {
-        viewModel.firstRun == nil && viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
+        guard viewModel.isNewsTierSelected, !viewModel.newsLenses.isEmpty else { return false }
+        return viewModel.firstRun == nil || statusGutter != nil
     }
 
     /// Only the masthead collapses with the offset; the tier and category
-    /// strips and the player then ride the text off screen and return on any
-    /// upward scroll (`BriefingChromeCollapseModel.trackPinnedChrome`).
+    /// strips and the player then ride the text off screen and return with it
+    /// at the top (`BriefingChromeCollapseModel.trackPinnedChrome`).
     private var collapsibleChromeHeight: CGFloat {
         mastheadHeight
     }
@@ -376,12 +381,9 @@ struct BriefingView: View {
                 .accessibilityIdentifier("briefing.lens_pager")
             }
 
-            if !viewModel.isStartHereSelected {
-                BriefingStatusBarFade(height: pagerScreenEdgeInsets.top)
-            }
-
             headerChrome
         }
+        .overlay { statusColumn }
         .onGeometryChange(for: EdgeInsets.self) { proxy in
             proxy.safeAreaInsets
         } action: { _, insets in
@@ -477,15 +479,16 @@ struct BriefingView: View {
     /// The strips and player that stay pinned once the masthead has collapsed.
     private var pinnedChrome: some View {
         VStack(spacing: 0) {
+            // The closed Duo's status column holds the tiers instead.
             Group {
-                if viewModel.firstRun != nil {
+                if statusGutter == nil, viewModel.firstRun != nil {
                     BriefingFirstRunStrip(
                         viewModel: viewModel,
                         onSelectStartHere: viewModel.selectStartHere,
                         onSelectLens: viewModel.selectLens,
                         onRequestMarkAllRead: presentMarkAllReadPrompt
                     )
-                } else {
+                } else if statusGutter == nil {
                     BriefingTierStrip(
                         viewModel: viewModel,
                         onSelectNews: { viewModel.selectNewsTier() },
@@ -536,13 +539,6 @@ struct BriefingView: View {
             }
             .animation(headerAnimation, value: viewModel.selectedLensKey)
         }
-        .background(alignment: .top) {
-            BriefingPinnedChromeBacking(
-                model: chromeCollapse,
-                lensKey: chromeLensKey,
-                mastheadHeight: mastheadHeight
-            )
-        }
     }
 
     private var headerAnimation: Animation {
@@ -550,19 +546,57 @@ struct BriefingView: View {
     }
 
     private var mastheadListenAccessory: AnyView? {
-        viewModel.isStartHereSelected ? nil : viewModel.selectedLensKey.map { lensKey in
-            AnyView(listenAccessory(lensKey: lensKey))
-        }
+        guard statusGutter == nil, !viewModel.isStartHereSelected,
+              let player = viewModel.railPlayerState else { return nil }
+        return AnyView(
+            BriefingListenButton(
+                isPreparing: player.isPreparing,
+                isPlaying: player.isPlaying,
+                onToggle: player.onToggle
+            )
+        )
     }
 
-    private func listenAccessory(lensKey: String) -> some View {
-        return BriefingListenButton(
-            isPreparing: narrationController.session(for: lensKey).isPreparing,
-            isPlaying: narrationController.isPlaying(lensKey: lensKey),
-            onToggle: {
-                Task { await narrationController.togglePlayback(for: lensKey) }
+    // MARK: Closed Duo status column
+
+    /// Closed Duo: the tiers, as rail icons with unread badges, and the play
+    /// button stack in the status column below the clock. Elsewhere this finds
+    /// no column and draws nothing.
+    private var statusColumn: some View {
+        GeometryReader { _ in
+            if let gutter = statusGutter {
+                VStack(spacing: 4) {
+                    ForEach(viewModel.railItems) { item in
+                        let isSelected = item.destination == viewModel.railSelection
+                        Button {
+                            selectTier(item.destination)
+                        } label: {
+                            RailIconTile(item: item, isSelected: isSelected, backing: .surfacePrimary)
+                        }
+                        .buttonStyle(.plain)
+                        .railItemAccessibility(item, isSelected: isSelected)
+                    }
+
+                    if !viewModel.isStartHereSelected, let player = viewModel.railPlayerState {
+                        RailPlayerButton(player: player)
+                            .padding(.top, 8)
+                            .accessibilityIdentifier("briefing.status_column.player")
+                    }
+                }
+                .animation(headerAnimation, value: viewModel.selectedLensKey)
+                .placedInSideStatusGutter(gutter)
             }
-        )
+        }
+        .readsSideStatusGutter($statusGutter)
+    }
+
+    private func selectTier(_ destination: OpenRailDestination) {
+        switch destination {
+        case .startHere: viewModel.selectStartHere()
+        case .news: viewModel.selectNewsTier()
+        case .lens(let key): viewModel.selectLens(key: key)
+        case .knowledge: break
+        }
     }
 
     // MARK: Open-display column
