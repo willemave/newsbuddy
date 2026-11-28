@@ -10,6 +10,13 @@ import os.log
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
 
+private struct ContentDetailOwnedModels {
+    let viewModel: ContentDetailViewModel
+    let chatCoordinator: DetailChatCoordinator
+    let podcastAudioController: PodcastAudioController
+    let discussionCoordinator: DiscussionSummaryCoordinator
+}
+
 struct ContentDetailView: View {
     @Environment(ActiveChatSessionManager.self) private var activeChatSessionManager
     @Environment(RootDependencyFactory.self) private var dependencyFactory
@@ -20,6 +27,8 @@ struct ContentDetailView: View {
     private let navigationSurface: ContentDetailNavigationSurface
     private let initialScrollTarget: ContentDetailScrollTarget?
     private let readStateCache: ReadStateCache
+
+    @State private var ownedModels: ContentDetailOwnedModels?
 
     init(
         contentId: Int,
@@ -38,16 +47,45 @@ struct ContentDetailView: View {
     }
 
     var body: some View {
-        ContentDetailContentView(
-            contentId: contentId,
-            contentType: contentType,
-            allContentIds: allContentIds,
-            navigationSurface: navigationSurface,
-            initialScrollTarget: initialScrollTarget,
-            readStateCache: readStateCache,
-            activeChatSessionManager: activeChatSessionManager,
-            dependencyFactory: dependencyFactory
-        )
+        Group {
+            if let ownedModels {
+                ContentDetailContentView(
+                    contentId: contentId,
+                    contentType: contentType,
+                    allContentIds: allContentIds,
+                    navigationSurface: navigationSurface,
+                    initialScrollTarget: initialScrollTarget,
+                    viewModel: ownedModels.viewModel,
+                    chatCoordinator: ownedModels.chatCoordinator,
+                    podcastAudioController: ownedModels.podcastAudioController,
+                    discussionCoordinator: ownedModels.discussionCoordinator,
+                    dependencyFactory: dependencyFactory
+                )
+            } else {
+                ContentDetailSkeletonView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(Color.surfacePrimary.ignoresSafeArea())
+                    .navigationBarTitleDisplayMode(.inline)
+                    .navigationBarBackButtonHidden(true)
+                    .toolbar(.hidden, for: .navigationBar)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+        }
+        .onAppear {
+            guard ownedModels == nil else { return }
+            ownedModels = ContentDetailOwnedModels(
+                viewModel: dependencyFactory.makeContentDetailViewModel(
+                    contentId: contentId,
+                    contentType: contentType,
+                    readStateCache: readStateCache
+                ),
+                chatCoordinator: dependencyFactory.makeDetailChatCoordinator(
+                    chatSessionManager: activeChatSessionManager
+                ),
+                podcastAudioController: dependencyFactory.makePodcastAudioController(),
+                discussionCoordinator: dependencyFactory.makeDiscussionSummaryCoordinator()
+            )
+        }
     }
 }
 
@@ -60,6 +98,10 @@ private struct ContentDetailContentView: View {
     private var initialContentId: Int { navigationContext.initialContentId }
     private var initialContentType: APIContentType? { navigationContext.initialContentType }
     private var allContentIds: [Int] { navigationContext.contentIds }
+    private let viewModel: ContentDetailViewModel
+    private let chatCoordinator: DetailChatCoordinator
+    private let podcastAudioController: PodcastAudioController
+    private let discussionCoordinator: DiscussionSummaryCoordinator
     private let dependencyFactory: RootDependencyFactory
     @Environment(AttachedChatController.self) private var attachedChat
     @Environment(\.attachedChatHost) private var attachedChatHost
@@ -71,10 +113,8 @@ private struct ContentDetailContentView: View {
     @State private var pendingChatRoute: ChatSessionRoute?
     /// The closed Duo's status column, when the device has one.
     @State private var statusGutter: SideStatusGutter?
-    @State private var viewModel: ContentDetailViewModel
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(\.dismiss) private var dismiss
-    @State private var chatCoordinator: DetailChatCoordinator
     @State private var currentIndex: Int
     // Navigation skipping state
     @State private var didTriggerNavigation: Bool = false
@@ -85,14 +125,12 @@ private struct ContentDetailContentView: View {
     @State private var activeSheet: DetailSheetDestination?
     @State private var pendingSheetDestination: DetailSheetDestination?
     @State private var pendingShareOption: ShareContentOption?
-    @State private var podcastAudioController: PodcastAudioController
     @State private var activeAlert: ViewAlert?
     @State private var activeReaderContent: ContentDetail?
     @State private var deckReader: LearningDeckReaderDestination?
     @State private var deckLookupTask: Task<Void, Never>?
     @State private var showsDeckLookupError = false
     @State private var activeBrowserDestination: BrowserDestination?
-    @State private var discussionCoordinator: DiscussionSummaryCoordinator
     @State private var pendingScrollTarget: ContentDetailScrollTarget?
     @State private var detailScrollOffsetY: CGFloat = 0
     @State private var handledActivationGeneration: UInt64?
@@ -105,8 +143,10 @@ private struct ContentDetailContentView: View {
         allContentIds: [Int] = [],
         navigationSurface: ContentDetailNavigationSurface = .direct,
         initialScrollTarget: ContentDetailScrollTarget? = nil,
-        readStateCache: ReadStateCache,
-        activeChatSessionManager: ActiveChatSessionManager,
+        viewModel: ContentDetailViewModel,
+        chatCoordinator: DetailChatCoordinator,
+        podcastAudioController: PodcastAudioController,
+        discussionCoordinator: DiscussionSummaryCoordinator,
         dependencyFactory: RootDependencyFactory
     ) {
         let context = ContentDetailNavigationContext(
@@ -117,26 +157,12 @@ private struct ContentDetailContentView: View {
             initialScrollTarget: initialScrollTarget
         )
         self.navigationContext = context
+        self.viewModel = viewModel
+        self.chatCoordinator = chatCoordinator
+        self.podcastAudioController = podcastAudioController
+        self.discussionCoordinator = discussionCoordinator
         self.dependencyFactory = dependencyFactory
         self._currentIndex = State(initialValue: context.initialIndex)
-        self._viewModel = State(
-            initialValue: dependencyFactory.makeContentDetailViewModel(
-                contentId: contentId,
-                contentType: contentType,
-                readStateCache: readStateCache
-            )
-        )
-        self._chatCoordinator = State(
-            initialValue: dependencyFactory.makeDetailChatCoordinator(
-                chatSessionManager: activeChatSessionManager
-            )
-        )
-        self._podcastAudioController = State(
-            initialValue: dependencyFactory.makePodcastAudioController()
-        )
-        self._discussionCoordinator = State(
-            initialValue: dependencyFactory.makeDiscussionSummaryCoordinator()
-        )
         self._pendingScrollTarget = State(initialValue: context.initialScrollTarget)
     }
     
@@ -656,8 +682,11 @@ private struct ContentDetailContentView: View {
                 let decks = try await dependencyFactory.learningDeckService.listDecks().decks
                 guard !Task.isCancelled,
                       navigationContext.contentId(at: currentIndex) == content.id else { return }
-                let matches = decks.filter { $0.knowledgeSource == .content(content.id) }
-                guard let deck = matches.first(where: \.viewerAvailable) ?? matches.first else {
+                guard let deck = BriefingSourceDeckLookup.find(
+                    source: .content(content.id),
+                    sourceURL: content.url,
+                    decks: decks
+                ) else {
                     activeSheet = .learningDeckCreate
                     return
                 }

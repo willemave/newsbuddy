@@ -16,7 +16,23 @@ use crate::{
     TaskTransition, TaskType, UnknownQueueValue, compatibility_canonical_json,
 };
 
-const QUEUE_NOTIFY_CHANNEL: &str = "processing_tasks";
+/// Emits a queue-scoped `PostgreSQL` notification inside the caller's transaction.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] when `pg_notify` fails.
+pub async fn notify_queue_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    queue: TaskQueue,
+    payload: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_notify($1, $2)")
+        .bind(queue.notify_channel())
+        .bind(payload)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct ClaimRequest {
@@ -143,6 +159,9 @@ impl QueueKernel {
         lock_active_users(transaction, &prepared).await?;
         let mut task_ids = Vec::with_capacity(prepared.len());
         let mut inserted_task_ids = Vec::new();
+        let mut ready_by_queue: std::collections::BTreeMap<TaskQueue, Vec<i64>> =
+            std::collections::BTreeMap::new();
+        let notify_cutoff = Utc::now();
         for request in &prepared {
             let (task_id, inserted, durable_owner_user_id) =
                 insert_or_resolve_task(transaction, request).await?;
@@ -159,19 +178,21 @@ impl QueueKernel {
             task_ids.push(task_id);
             if inserted {
                 inserted_task_ids.push(task_id);
+                if request.available_at <= notify_cutoff {
+                    ready_by_queue
+                        .entry(request.queue_name)
+                        .or_default()
+                        .push(task_id);
+                }
             }
         }
 
-        if !inserted_task_ids.is_empty() {
+        for (queue, queue_task_ids) in ready_by_queue {
             let payload = json!({
-                "task_ids": inserted_task_ids.iter().take(100).collect::<Vec<_>>(),
-                "count": inserted_task_ids.len(),
+                "task_ids": queue_task_ids.iter().take(100).collect::<Vec<_>>(),
+                "count": queue_task_ids.len(),
             });
-            sqlx::query("SELECT pg_notify($1, $2)")
-                .bind(QUEUE_NOTIFY_CHANNEL)
-                .bind(payload.to_string())
-                .execute(&mut **transaction)
-                .await?;
+            notify_queue_in_transaction(transaction, queue, &payload.to_string()).await?;
         }
         Ok(EnqueueBatchResult {
             task_ids,

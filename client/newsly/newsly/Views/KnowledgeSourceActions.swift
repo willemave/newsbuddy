@@ -223,7 +223,7 @@ private struct KnowledgeSwipeHintModifier: ViewModifier {
         guard isActive else { return }
         do {
             try await Task.sleep(for: .milliseconds(700))
-            withAnimation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.82)) {
+            withAnimation(reduceMotion ? nil : AppMotion.emphasized) {
                 offset = KnowledgeSwipeHintActions.width
             }
             try await Task.sleep(for: .milliseconds(1_600))
@@ -231,7 +231,7 @@ private struct KnowledgeSwipeHintModifier: ViewModifier {
             offset = 0
             return
         }
-        withAnimation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.9)) {
+        withAnimation(reduceMotion ? nil : AppMotion.panel) {
             offset = 0
         } completion: {
             onFinished()

@@ -73,8 +73,8 @@ pub(crate) async fn run(mode: NewsItemWorkerMode) -> Result<()> {
     .context("Firecrawl client initialization failed")?;
     let gateway =
         NewsItemGateway::from_env().context("news-item provider initialization failed")?;
-    let body_store = NewsArticleBodyStore::new(
-        config.content_body_local_root.clone(),
+    let body_store = NewsArticleBodyStore::from_backend(
+        config.content_body_storage.clone(),
         config.content_body_storage_prefix.clone(),
     )
     .context("news article-body storage initialization failed")?;

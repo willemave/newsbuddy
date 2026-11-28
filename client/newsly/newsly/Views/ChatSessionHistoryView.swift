@@ -7,23 +7,27 @@ import SwiftUI
 
 struct ChatSessionHistoryView: View {
     let onSelectSession: (ChatSessionRoute) -> Void
+    let viewModel: KnowledgeChatViewModel
     let chatTransitionNamespace: Namespace.ID?
 
-    @State private var viewModel: ChatSessionsViewModel
     @State private var searchText = ""
 
     init(
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
-        viewModel: ChatSessionsViewModel,
+        viewModel: KnowledgeChatViewModel,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
         self.onSelectSession = onSelectSession
+        self.viewModel = viewModel
         self.chatTransitionNamespace = chatTransitionNamespace
-        self._viewModel = State(initialValue: viewModel)
     }
 
     private var knowledgeSessions: [ChatSessionSummary] {
         viewModel.sessions
+    }
+
+    private var displayedErrorMessage: String? {
+        viewModel.errorMessage ?? viewModel.loadErrorMessage
     }
 
     private var filteredSessions: [ChatSessionSummary] {
@@ -50,9 +54,9 @@ struct ChatSessionHistoryView: View {
         Group {
             if viewModel.isLoading && knowledgeSessions.isEmpty {
                 BuddyLoadingView()
-            } else if let error = viewModel.errorMessage, knowledgeSessions.isEmpty {
+            } else if let error = displayedErrorMessage, knowledgeSessions.isEmpty {
                 ErrorView(message: error) {
-                    Task { await viewModel.loadSessions() }
+                    Task { await viewModel.loadChats() }
                 }
             } else if knowledgeSessions.isEmpty {
                 emptyStateView
@@ -65,6 +69,22 @@ struct ChatSessionHistoryView: View {
                         )
                         .padding(.horizontal, Spacing.appHorizontalMargin)
                         .padding(.bottom, 4)
+
+                        if let error = displayedErrorMessage {
+                            KnowledgeTimelineInlineError(
+                                message: error,
+                                actionTitle: viewModel.errorMessage != nil ? "Dismiss" : "Retry",
+                                accessibilityIdentifier: "chat.history.error",
+                                action: {
+                                    if viewModel.errorMessage != nil {
+                                        viewModel.clearError()
+                                    } else {
+                                        Task { await viewModel.loadChats() }
+                                    }
+                                }
+                            )
+                            .padding(.bottom, 4)
+                        }
 
                         // The same rows and day groups as the Knowledge list.
                         ForEach(ChatHistoryDayGroup.group(filteredSessions)) { group in
@@ -79,14 +99,14 @@ struct ChatSessionHistoryView: View {
                                     KnowledgeChatRow(
                                         session: session,
                                         activityDate: ChatHistoryDayGroup.activityDate(of: session),
-                                        preview: KnowledgeChatPreview.make(for: session)
+                                        preview: viewModel.preview(for: session)
                                     )
                                 }
                                 .buttonStyle(.plain)
                                 .matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)
                                 .contextMenu {
                                     Button(role: .destructive) {
-                                        Task { await viewModel.deleteSessions(ids: [session.id]) }
+                                        Task { await viewModel.deleteSession(session) }
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -98,11 +118,35 @@ struct ChatSessionHistoryView: View {
                         if shouldShowNoResults {
                             noResultsRow
                         }
+
+                        if viewModel.isLoadingMore {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .accessibilityIdentifier("chat.history.pagination.loading")
+                        } else if viewModel.hasLoadMoreError {
+                            Button("Try loading more again") {
+                                Task { await viewModel.loadMoreSessions() }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .accessibilityIdentifier("chat.history.pagination.retry")
+                        } else if shouldShowNoResults && viewModel.hasMoreSessions {
+                            Button("Load older chats") {
+                                Task { await viewModel.loadMoreSessions() }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .accessibilityIdentifier("chat.history.pagination.load_more")
+                        }
                     }
                     .padding(.vertical, 8)
                 }
+                .onPaginationThresholdReached {
+                    await viewModel.loadMoreSessions()
+                }
                 .refreshable {
-                    await viewModel.loadSessions()
+                    await viewModel.loadChats()
                 }
             }
         }
@@ -111,7 +155,7 @@ struct ChatSessionHistoryView: View {
         .navigationTitle("Chat History")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await viewModel.loadSessions()
+            await viewModel.loadChats()
         }
     }
 

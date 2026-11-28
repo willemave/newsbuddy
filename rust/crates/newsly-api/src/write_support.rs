@@ -1,7 +1,12 @@
+use std::env;
+
 use axum::Json;
-use axum::extract::rejection::JsonRejection;
-use axum::http::StatusCode;
+use axum::extract::Path;
+use axum::extract::rejection::{JsonRejection, PathRejection};
+use axum::http::header::HOST;
+use axum::http::{HeaderMap, StatusCode};
 use newsly_db::{RouteWriteFenceError, verify_route_write_fence};
+use reqwest::Url;
 
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
@@ -106,6 +111,74 @@ pub(super) fn stale_owner(request_id: &str) -> ApiError {
         request_id.to_owned(),
     )
     .with_retryable(true)
+}
+
+pub(super) fn positive_path_id(
+    path: Result<Path<i64>, PathRejection>,
+    field: &str,
+    request_id: &str,
+) -> Result<i64, ApiError> {
+    let Path(id) =
+        path.map_err(|rejection| ApiError::validation(rejection.body_text(), request_id))?;
+    if id <= 0 {
+        return Err(ApiError::validation(
+            format!("{field} must be greater than zero"),
+            request_id,
+        ));
+    }
+    Ok(id)
+}
+
+pub(super) fn external_url(
+    headers: &HeaderMap,
+    path: &str,
+    request_id: &str,
+) -> Result<String, ApiError> {
+    let configured = env::var("PUBLIC_BASE_URL")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let is_production =
+        env::var("ENVIRONMENT").is_ok_and(|value| value.eq_ignore_ascii_case("production"));
+    let mut base = if let Some(configured) = configured {
+        let parsed = Url::parse(&configured).map_err(|error| internal_error(error, request_id))?;
+        if parsed.host().is_none()
+            || !matches!(parsed.scheme(), "http" | "https")
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || !matches!(parsed.path(), "" | "/")
+            || (is_production && parsed.scheme() != "https")
+        {
+            return Err(internal_error("PUBLIC_BASE_URL is invalid", request_id));
+        }
+        parsed
+    } else {
+        if is_production {
+            return Err(internal_error(
+                "PUBLIC_BASE_URL is required in production",
+                request_id,
+            ));
+        }
+        let host = headers
+            .get(HOST)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| internal_error("request Host header is missing", request_id))?;
+        let scheme = headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .filter(|value| matches!(*value, "http" | "https"))
+            .unwrap_or("http");
+        Url::parse(&format!("{scheme}://{host}"))
+            .map_err(|error| internal_error(error, request_id))?
+    };
+    base.set_path(path);
+    base.set_query(None);
+    base.set_fragment(None);
+    Ok(base.to_string())
 }
 
 pub(super) fn internal_error(error: impl std::fmt::Display, request_id: &str) -> ApiError {

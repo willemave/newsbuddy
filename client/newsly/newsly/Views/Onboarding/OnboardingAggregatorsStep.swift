@@ -46,17 +46,13 @@ struct OnboardingAggregatorsStep: View {
                 .foregroundColor(.onSurfaceSecondary)
 
             onboardingPrimaryButton("Continue") {
-                withAnimation(AppMotion.panel) {
-                    viewModel.advanceToReddit()
-                }
+                viewModel.advanceToReddit()
             }
             .disabled(viewModel.isLoading)
             .accessibilityIdentifier("onboarding.aggregators.continue")
 
             Button("Back") {
-                withAnimation(AppMotion.panel) {
-                    viewModel.returnToSuggestions()
-                }
+                viewModel.returnToSuggestions()
             }
             .font(.appCallout.weight(.medium))
             .foregroundColor(.onSurfaceSecondary)

@@ -240,6 +240,41 @@ pub enum AgentRuntimeError {
     EventSink(String),
 }
 
+impl AgentRuntimeError {
+    /// Returns whether retrying the failed agent execution is likely to succeed.
+    ///
+    /// Authentication/authorization errors (HTTP 401/403) and malformed requests are terminal.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::InvalidRequest(_)
+            | Self::RequestLimitExceeded
+            | Self::ChatBudgetExhausted(_)
+            | Self::ToolCallLimitExceeded
+            | Self::Validation(_) => false,
+            Self::DeadlineExceeded | Self::Tool(_) | Self::EventSink(_) => true,
+            Self::Provider(message) => !is_non_retryable_provider_message(message),
+        }
+    }
+}
+
+fn is_non_retryable_provider_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("http 401")
+        || lower.contains("http 403")
+        || lower.contains("status 401")
+        || lower.contains("status 403")
+        || lower.contains("status: 401")
+        || lower.contains("status: 403")
+        || lower.contains("401 unauthorized")
+        || lower.contains("403 forbidden")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("invalid api key")
+        || lower.contains("invalid_api_key")
+        || lower.contains("authentication_error")
+}
+
 mod duration_millis {
     use std::time::Duration;
 

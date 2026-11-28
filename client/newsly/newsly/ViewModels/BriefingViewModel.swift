@@ -53,31 +53,31 @@ final class BriefingViewModel {
     private var destination: BriefingDestination?
     private(set) var isActive = false
     /// Direct loads may prefetch; lifecycle deactivation pauses speculative neighbors.
-    private var allowsNeighborPrefetch = true
+    @ObservationIgnored private var allowsNeighborPrefetch = true
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
     private(set) var isMastheadCompact = false
-
-    let service: BriefingServicing
-    let narrationController: BriefingNarrationController
-    private let snapshotStore: BriefingSnapshotStoring?
-    private let indexSynchronizer: BriefingIndexSynchronizer
-    private let firstRunCoordinator: BriefingFirstRunCoordinator
-    private let indexFreshnessInterval: TimeInterval
-    private let now: () -> Date
-    let lensRetention: BriefingLensRetentionPolicy
-    let tasks = TaskBag<TaskKey>()
-    private var pendingReadKeys: Set<String> = []
-    var optimisticallyReadSourceKeys: Set<String> = []
-    private var sourceByKey: [String: APIBriefingSource] = [:]
-    private var lensKeysBySourceKey: [String: Set<String>] = [:]
-    var readVersionCompatibility: ReadVersionCompatibility?
-    private var staleReadReconciliationVersions: Range<Int>?
-    private var headerPinnedLensKeys: Set<String> = []
-    /// The news category to return to when the reader re-enters the news tier.
-    private var lastNewsLensKey: String?
     private var dismissedFirstRunID: Int?
-    private var lastValidatedAt: Date?
+
+    @ObservationIgnored let service: BriefingServicing
+    @ObservationIgnored let narrationController: BriefingNarrationController
+    @ObservationIgnored private let snapshotStore: BriefingSnapshotStoring?
+    @ObservationIgnored private let indexSynchronizer: BriefingIndexSynchronizer
+    @ObservationIgnored private let firstRunCoordinator: BriefingFirstRunCoordinator
+    @ObservationIgnored private let indexFreshnessInterval: TimeInterval
+    @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored let lensRetention: BriefingLensRetentionPolicy
+    @ObservationIgnored let tasks = TaskBag<TaskKey>()
+    @ObservationIgnored private var pendingReadKeys: Set<String> = []
+    @ObservationIgnored var optimisticallyReadSourceKeys: Set<String> = []
+    @ObservationIgnored private var sourceByKey: [String: APIBriefingSource] = [:]
+    @ObservationIgnored private var lensKeysBySourceKey: [String: Set<String>] = [:]
+    @ObservationIgnored var readVersionCompatibility: ReadVersionCompatibility?
+    @ObservationIgnored private var staleReadReconciliationVersions: Range<Int>?
+    @ObservationIgnored private var headerPinnedLensKeys: Set<String> = []
+    /// The news category to return to when the reader re-enters the news tier.
+    @ObservationIgnored private var lastNewsLensKey: String?
+    @ObservationIgnored private var lastValidatedAt: Date?
 
     init(
         service: BriefingServicing,
@@ -122,7 +122,7 @@ final class BriefingViewModel {
 
     var selectedLens: APIBriefingLensResponse? {
         guard let selectedLensKey else { return nil }
-        return lenses[selectedLensKey]
+        return lensStates[selectedLensKey]?.document
     }
 
     func noteFirstPassageVisible(for lensKey: String) {
@@ -451,7 +451,7 @@ final class BriefingViewModel {
         }
         guard let selectedKey = workingSetKeys.first else { return }
         loadLensIfNeeded(key: selectedKey)
-        if let selected = lenses[selectedKey],
+        if let selected = lensStates[selectedKey]?.document,
            lensStates[selectedKey]?.isStale != true,
            !selected.hasMore,
            selected.version == index?.version {
@@ -462,7 +462,7 @@ final class BriefingViewModel {
     func prefetchNeighborsIfSelected(_ loadedKey: String) {
         guard allowsNeighborPrefetch,
               loadedKey == selectedLensKey,
-              let selected = lenses[loadedKey],
+              let selected = lensStates[loadedKey]?.document,
               !selected.hasMore,
               lensStates[loadedKey]?.isStale != true else {
             return

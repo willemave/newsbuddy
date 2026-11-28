@@ -378,7 +378,7 @@ struct OpenDisplayShell: View {
                     contentTextSize: contentTextSize,
                     chatTransitionNamespace: chatTransitionNamespace,
                     allowsChatHistory: true,
-                    dependencyFactory: session.dependencyFactory
+                    chatHistoryViewModel: session.knowledgeViewModel.chats
                 )
         }
         // Only the pane's first screen drops its back button; anything pushed

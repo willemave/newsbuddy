@@ -2138,7 +2138,6 @@ dependencies = [
  "newsly-providers",
  "newsly-queue",
  "newsly-worker",
- "object_store",
  "reqwest",
  "secrecy",
  "serde_json",
@@ -2206,7 +2205,6 @@ dependencies = [
  "newsly-providers",
  "newsly-queue",
  "newsly-worker",
- "object_store",
  "percent-encoding",
  "reqwest",
  "secrecy",
@@ -2452,13 +2450,10 @@ dependencies = [
 name = "newsly-vm-bootstrap"
 version = "0.1.0"
 dependencies = [
- "base64",
  "clap",
- "serde",
  "serde_json",
  "tempfile",
  "thiserror",
- "url",
 ]
 
 [[package]]

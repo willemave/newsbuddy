@@ -50,6 +50,8 @@ struct OnboardingFlowView: View {
 
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .id(viewModel.step)
+                    .transition(screenTransition)
             }
 
             if viewModel.isLoading {
@@ -77,39 +79,43 @@ struct OnboardingFlowView: View {
         switch viewModel.step {
         case .intro:
             OnboardingIntroStep(viewModel: viewModel, logoNamespace: logoNamespace)
-                .transition(screenTransition)
         case .choice:
             OnboardingChoiceStep(viewModel: viewModel)
-                .transition(screenTransition)
         case .audio:
             OnboardingAudioStep(viewModel: viewModel)
-                .transition(screenTransition)
         case .loading:
             OnboardingLoadingStep(
                 viewModel: viewModel,
                 reduceMotion: reduceMotion
             )
-            .transition(screenTransition)
         case .suggestions:
             OnboardingSuggestionsStep(viewModel: viewModel)
-                .transition(screenTransition)
         case .aggregators:
             OnboardingAggregatorsStep(
                 viewModel: viewModel,
                 reduceMotion: reduceMotion
             )
-            .transition(screenTransition)
         case .reddit:
             OnboardingRedditStep(viewModel: viewModel)
-                .transition(screenTransition)
         }
     }
 
     private var screenTransition: AnyTransition {
-        .asymmetric(
-            insertion: .opacity.combined(with: .move(edge: .bottom)),
-            removal: .opacity.combined(with: .offset(y: -10))
-        )
+        if reduceMotion {
+            return .opacity
+        }
+        switch viewModel.stepDirection {
+        case .forward:
+            return .asymmetric(
+                insertion: .opacity.combined(with: .move(edge: .bottom)),
+                removal: .opacity.combined(with: .offset(y: -10))
+            )
+        case .backward:
+            return .asymmetric(
+                insertion: .opacity.combined(with: .offset(y: -10)),
+                removal: .opacity.combined(with: .move(edge: .bottom))
+            )
+        }
     }
 }
 

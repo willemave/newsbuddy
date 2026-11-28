@@ -15,6 +15,7 @@ final class BriefingSourceCardTests: XCTestCase {
 
         let card = try XCTUnwrap(makeCard(sourceKeys: ["content:1"], sources: [source]))
 
+        XCTAssertEqual(card.contentId, source.id)
         XCTAssertEqual(card.sourceKey, "content:1")
         XCTAssertEqual(card.kind, .article)
         XCTAssertEqual(card.title, "Runway’s WorldPrompt")

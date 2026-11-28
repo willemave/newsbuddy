@@ -508,10 +508,13 @@ impl Client {
             request = request.json(body);
         }
 
-        let mut response = request
-            .send()
-            .await
-            .map_err(|error| ApiError::local(format!("{method} {path} request failed: {error}")))?;
+        let mut response = request.send().await.map_err(|error| {
+            if error.is_timeout() {
+                ApiError::local(format!("{method} {path} request timed out: {error}"))
+            } else {
+                ApiError::local(format!("{method} {path} request failed: {error}"))
+            }
+        })?;
         let status = response.status();
         if !status.is_success() {
             let payload = read_limited_error_body(&mut response)

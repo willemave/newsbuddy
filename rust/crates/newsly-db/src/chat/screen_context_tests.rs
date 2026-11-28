@@ -53,11 +53,20 @@ async fn screen_context_snapshot_preserves_order_trimming_and_excerpt_limits(poo
         ("Primary", "a".repeat(1_900)),
         ("Secondary", "b".repeat(500)),
     ] {
-        ids.push(sqlx::query_scalar::<_, i64>(
+        let content_id = sqlx::query_scalar::<_, i64>(
             "INSERT INTO contents (content_type,url,status,is_aggregate,content_metadata) VALUES ('article',$1,'completed',FALSE,$2) RETURNING id::bigint",
         ).bind(format!("https://example.com/{title}"))
         .bind(json!({"title":title,"excerpt":excerpt,"summary":{"title":title,"one_line":"Summary"}}))
-        .fetch_one(&pool).await.unwrap());
+        .fetch_one(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO content_status (user_id,content_id,status) VALUES ($1,$2,'inbox')",
+        )
+        .bind(user_id)
+        .bind(content_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        ids.push(content_id);
     }
     let context: AssistantScreenContext = serde_json::from_value(json!({
         "screen_type":" learning_deck ","screen_title":" Reader ","content_id":ids[0],
@@ -148,4 +157,209 @@ async fn staged_followup_bounds_title_before_encoding_and_rejects_invalid_contex
         .await
         .unwrap();
     assert_eq!(count, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn chat_enforces_c3_content_visibility_across_create_stage_and_screen_context(pool: PgPool) {
+    use super::{
+        CreateChatSessionInput, CreateChatSessionOutcome, StageAssistantTurnInput,
+        StageChatTurnOutcome, create_chat_session, stage_assistant_turn,
+    };
+    let owner_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('c3-owner','c3-owner@example.com',FALSE,TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let other_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('c3-other','c3-other@example.com',FALSE,TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let private_content_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO contents (content_type,url,status,is_aggregate,content_metadata) VALUES ('article','https://example.com/private','completed',FALSE,$1) RETURNING id::bigint",
+    )
+    .bind(json!({"title":"Secret Title","excerpt":"Secret Excerpt","summary":{"title":"Secret Title","one_line":"Secret Summary"}}))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO content_status (user_id,content_id,status) VALUES ($1,$2,'inbox')")
+        .bind(owner_id)
+        .bind(private_content_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut transaction = pool.begin().await.unwrap();
+    let create_outcome = create_chat_session(
+        &mut transaction,
+        &CreateChatSessionInput {
+            user_id: other_id,
+            content_id: Some(private_content_id),
+            news_item_id: None,
+            topic: None,
+            initial_message: None,
+            session_type: "knowledge_chat",
+            llm_provider: "openai",
+            llm_model: "openai:gpt-6.1-sol",
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(create_outcome, CreateChatSessionOutcome::ContentNotFound);
+
+    let stage_context: AssistantScreenContext = serde_json::from_value(json!({
+        "screen_type": "knowledge_chat",
+        "content_id": private_content_id
+    }))
+    .unwrap();
+    let stage_outcome = stage_assistant_turn(
+        &mut transaction,
+        &StageAssistantTurnInput {
+            user_id: other_id,
+            session_id: None,
+            user_prompt: "Summarize this",
+            screen_context: &stage_context,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(stage_outcome, StageChatTurnOutcome::ContentNotFound);
+
+    let visible_ids_context: AssistantScreenContext = serde_json::from_value(json!({
+        "screen_type": "knowledge_chat",
+        "visible_content_ids": [private_content_id]
+    }))
+    .unwrap();
+    let rendered = build_screen_context_snapshot(&mut transaction, other_id, &visible_ids_context)
+        .await
+        .unwrap();
+    assert!(!rendered.contains("Secret Title"));
+    assert!(!rendered.contains("Secret Summary"));
+    assert!(!rendered.contains("Secret Excerpt"));
+    assert!(!rendered.contains("Visible Content:"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn learning_deck_ownership_grants_content_visibility_until_soft_deleted(pool: PgPool) {
+    use super::{
+        CreateChatSessionInput, CreateChatSessionOutcome, StageAssistantTurnInput,
+        StageChatTurnOutcome, create_chat_session, stage_assistant_turn,
+    };
+    let owner_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('deck-owner','deck-owner@example.com',FALSE,TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let other_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('deck-other','deck-other@example.com',FALSE,TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let deck_content_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO contents (content_type,url,status,is_aggregate,content_metadata) VALUES ('article','https://example.com/deck-source','completed',FALSE,$1) RETURNING id::bigint",
+    )
+    .bind(json!({"title":"Deck Source Title","summary":{"title":"Deck Source Title","one_line":"Deck Source Summary"}}))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO learning_decks (user_id,source_kind,source_identity,source_content_id,source_metadata,title,artifact_object_keys,share_enabled) VALUES ($1,'article','deck-source-1',$2,'{}'::jsonb,'My Deck','{}'::jsonb,FALSE)",
+    )
+    .bind(owner_id)
+    .bind(deck_content_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let deleted_deck_content_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO contents (content_type,url,status,is_aggregate,content_metadata) VALUES ('article','https://example.com/deleted-deck-source','completed',FALSE,$1) RETURNING id::bigint",
+    )
+    .bind(json!({"title":"Deleted Deck Source","summary":{"title":"Deleted Deck Source","one_line":"Deleted Deck Summary"}}))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO learning_decks (user_id,source_kind,source_identity,source_content_id,source_metadata,title,artifact_object_keys,share_enabled,deleted_at) VALUES ($1,'article','deck-source-2',$2,'{}'::jsonb,'Deleted Deck','{}'::jsonb,FALSE,timezone('UTC', now()))",
+    )
+    .bind(owner_id)
+    .bind(deleted_deck_content_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut transaction = pool.begin().await.unwrap();
+    let owner_create = create_chat_session(
+        &mut transaction,
+        &CreateChatSessionInput {
+            user_id: owner_id,
+            content_id: Some(deck_content_id),
+            news_item_id: None,
+            topic: None,
+            initial_message: None,
+            session_type: "knowledge_chat",
+            llm_provider: "openai",
+            llm_model: "openai:gpt-6.1-sol",
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        owner_create,
+        CreateChatSessionOutcome::Created { .. }
+    ));
+
+    let other_create = create_chat_session(
+        &mut transaction,
+        &CreateChatSessionInput {
+            user_id: other_id,
+            content_id: Some(deck_content_id),
+            news_item_id: None,
+            topic: None,
+            initial_message: None,
+            session_type: "knowledge_chat",
+            llm_provider: "openai",
+            llm_model: "openai:gpt-6.1-sol",
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(other_create, CreateChatSessionOutcome::ContentNotFound);
+
+    let deck_context: AssistantScreenContext = serde_json::from_value(json!({
+        "screen_type": "learning_deck",
+        "content_id": deck_content_id
+    }))
+    .unwrap();
+    let owner_rendered = build_screen_context_snapshot(&mut transaction, owner_id, &deck_context)
+        .await
+        .unwrap();
+    assert!(owner_rendered.contains("Deck Source Title"));
+
+    let deleted_deck_context: AssistantScreenContext = serde_json::from_value(json!({
+        "screen_type": "learning_deck",
+        "content_id": deleted_deck_content_id
+    }))
+    .unwrap();
+    let deleted_stage = stage_assistant_turn(
+        &mut transaction,
+        &StageAssistantTurnInput {
+            user_id: owner_id,
+            session_id: None,
+            user_prompt: "Explain this deck",
+            screen_context: &deleted_deck_context,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(deleted_stage, StageChatTurnOutcome::ContentNotFound);
+
+    let deleted_rendered =
+        build_screen_context_snapshot(&mut transaction, owner_id, &deleted_deck_context)
+            .await
+            .unwrap();
+    assert!(!deleted_rendered.contains("Deleted Deck Source"));
+    assert!(!deleted_rendered.contains("Visible Content:"));
 }

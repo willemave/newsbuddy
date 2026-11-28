@@ -1,8 +1,4 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use object_store::path::Path as ObjectPath;
-use object_store::{Error as ObjectStoreError, ObjectStore, ObjectStoreExt};
+use newsly_providers::{ObjectStorageBackend, ObjectStorageOpError};
 use thiserror::Error;
 
 const MAX_CHAT_CONTEXT_BYTES: usize = 2_000_000;
@@ -17,49 +13,16 @@ pub(crate) struct ContentBodySlice {
 ///
 /// The key is immutable input. Reads happen only after that transaction commits, including for
 /// S3-compatible production storage, so slow object storage can never pin a `PostgreSQL` snapshot.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContentBodyStore {
-    backend: ContentBodyBackend,
-}
-
-impl std::fmt::Debug for ContentBodyStore {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ContentBodyStore")
-            .field("backend", &self.backend)
-            .finish()
-    }
-}
-
-#[derive(Clone)]
-enum ContentBodyBackend {
-    Local { root: PathBuf },
-    S3 { store: Arc<dyn ObjectStore> },
-}
-
-impl std::fmt::Debug for ContentBodyBackend {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Local { root } => formatter
-                .debug_struct("LocalChatBodyBackend")
-                .field("root", root)
-                .finish(),
-            Self::S3 { .. } => formatter.debug_struct("S3ChatBodyBackend").finish(),
-        }
-    }
+    backend: ObjectStorageBackend,
 }
 
 impl ContentBodyStore {
     pub(crate) fn from_env() -> Result<Self, ContentBodyStoreError> {
-        let backend = match newsly_providers::ObjectStorageBackend::from_environment()? {
-            newsly_providers::ObjectStorageBackend::Local { root } => {
-                ContentBodyBackend::Local { root }
-            }
-            newsly_providers::ObjectStorageBackend::S3 { store } => {
-                ContentBodyBackend::S3 { store }
-            }
-        };
-        Ok(Self { backend })
+        Ok(Self {
+            backend: ObjectStorageBackend::from_environment()?,
+        })
     }
 
     pub(crate) async fn get_text(
@@ -96,77 +59,48 @@ impl ContentBodyStore {
         storage_key: &str,
         maximum: usize,
     ) -> Result<Option<ContentBodySlice>, ContentBodyStoreError> {
-        validate_key(storage_key)?;
         if maximum == 0 || maximum > MAX_CHAT_CONTEXT_BYTES {
             return Err(ContentBodyStoreError::InvalidReadLimit(maximum));
         }
-        match &self.backend {
-            ContentBodyBackend::Local { root } => {
-                newsly_providers::read_local_object(root, storage_key, maximum)
-                    .await
-                    .map(|slice| {
-                        slice.map(|slice| ContentBodySlice {
-                            bytes: slice.bytes,
-                            truncated: slice.truncated,
-                        })
-                    })
-                    .map_err(|error| match error {
-                        newsly_providers::LocalStorageError::UnsafePath(_) => {
-                            ContentBodyStoreError::UnsafeKey(storage_key.to_owned())
-                        }
-                        newsly_providers::LocalStorageError::File { source, .. } => {
-                            ContentBodyStoreError::Io(source)
-                        }
-                    })
-            }
-            ContentBodyBackend::S3 { store } => {
-                let path = ObjectPath::parse(storage_key)
-                    .map_err(|error| ContentBodyStoreError::UnsafeKey(error.to_string()))?;
-                let metadata = match store.head(&path).await {
-                    Ok(metadata) => metadata,
-                    Err(ObjectStoreError::NotFound { .. }) => return Ok(None),
-                    Err(error) => {
-                        return Err(ContentBodyStoreError::ObjectStore(error.to_string()));
-                    }
-                };
-                let maximum = u64::try_from(maximum).unwrap_or(u64::MAX);
-                let end = metadata.size.min(maximum);
-                let bytes = if end == 0 {
-                    Vec::new()
-                } else {
-                    store
-                        .get_range(&path, 0..end)
-                        .await
-                        .map_err(|error| ContentBodyStoreError::ObjectStore(error.to_string()))?
-                        .to_vec()
-                };
-                Ok(Some(ContentBodySlice {
-                    bytes,
-                    truncated: metadata.size > maximum,
-                }))
-            }
-        }
+        let slice = self
+            .backend
+            .read_prefix(storage_key, maximum)
+            .await
+            .map_err(|error| map_storage_error(storage_key, error))?;
+        Ok(slice.map(|slice| ContentBodySlice {
+            bytes: slice.bytes,
+            truncated: slice.truncated,
+        }))
     }
 }
 
-fn validate_key(key: &str) -> Result<(), ContentBodyStoreError> {
-    if !newsly_providers::is_safe_object_key(key) {
-        return Err(ContentBodyStoreError::UnsafeKey(key.to_owned()));
+fn map_storage_error(storage_key: &str, error: ObjectStorageOpError) -> ContentBodyStoreError {
+    match error {
+        ObjectStorageOpError::UnsafeKey(key) => ContentBodyStoreError::UnsafeKey(key),
+        ObjectStorageOpError::UnsafeLocalPath(_)
+        | ObjectStorageOpError::UnsafeExistingObject(_) => {
+            ContentBodyStoreError::UnsafeKey(storage_key.to_owned())
+        }
+        ObjectStorageOpError::TooLarge { maximum_bytes, .. } => {
+            ContentBodyStoreError::TooLarge(maximum_bytes.saturating_add(1))
+        }
+        ObjectStorageOpError::File { source, .. } => ContentBodyStoreError::Io(source),
+        ObjectStorageOpError::ObjectStore(message) => ContentBodyStoreError::ObjectStore(message),
     }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use newsly_providers::{ObjectStorageBackend, is_safe_object_key};
 
-    use super::{ContentBodyBackend, ContentBodyStore, validate_key};
+    use super::ContentBodyStore;
 
     #[test]
     fn canonical_body_keys_cannot_escape_storage() {
-        assert!(validate_key("content/42/source.txt").is_ok());
-        assert!(validate_key("../secret").is_err());
-        assert!(validate_key("/absolute").is_err());
-        assert!(validate_key("a/../b").is_err());
+        assert!(is_safe_object_key("content/42/source.txt"));
+        assert!(!is_safe_object_key("../secret"));
+        assert!(!is_safe_object_key("/absolute"));
+        assert!(!is_safe_object_key("a/../b"));
     }
 
     #[tokio::test]
@@ -179,9 +113,7 @@ mod tests {
         )
         .unwrap();
         let store = ContentBodyStore {
-            backend: ContentBodyBackend::Local {
-                root: directory.path().to_path_buf(),
-            },
+            backend: ObjectStorageBackend::local(directory.path().to_path_buf()).unwrap(),
         };
 
         let slice = store
@@ -199,6 +131,7 @@ mod tests {
                 .is_none()
         );
     }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn local_reads_reject_symlink_escape_and_non_files() {
@@ -209,7 +142,7 @@ mod tests {
         tokio::fs::write(&outside, b"secret").await.unwrap();
         std::os::unix::fs::symlink(&outside, root.join("escape.txt")).unwrap();
         let store = ContentBodyStore {
-            backend: ContentBodyBackend::Local { root },
+            backend: ObjectStorageBackend::local(root).unwrap(),
         };
         assert!(store.get_bytes("escape.txt").await.is_err());
         assert!(store.get_bytes(".").await.is_err());

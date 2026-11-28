@@ -527,7 +527,8 @@ final class KnowledgeTimelineViewModel {
             saved: savedContent.contents,
             chats: chats.sessions,
             decks: decks.decks,
-            narrations: narrations.episodes
+            narrations: narrations.episodes,
+            chatPreview: chats.preview(for:)
         )
         groupedTimeline = KnowledgeTimelineDayGroup.group(timeline)
         sourceDerivatives = KnowledgeSourceDerivatives.index(

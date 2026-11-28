@@ -783,21 +783,7 @@ fn parse_external_query(
     Ok(Query(query))
 }
 
-fn positive_path_id(
-    path: Result<Path<i64>, PathRejection>,
-    field: &str,
-    request_id: &str,
-) -> Result<i64, ApiError> {
-    let Path(value) =
-        path.map_err(|rejection| validation_error(rejection.body_text(), request_id))?;
-    if value <= 0 {
-        return Err(validation_error(
-            format!("{field} must be greater than zero"),
-            request_id,
-        ));
-    }
-    Ok(value)
-}
+use crate::write_support::positive_path_id;
 
 fn normalize_http_url(value: &str, request_id: &str) -> Result<String, ApiError> {
     let parsed = reqwest::Url::parse(value.trim())

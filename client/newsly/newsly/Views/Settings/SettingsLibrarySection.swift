@@ -63,12 +63,14 @@ struct SettingsLibrarySection: View {
                 divider
 
                 NavigationLink {
-                    ProcessingStatsView(
-                        sourcesViewModel: dependencyFactory.makeScraperSettingsViewModel(
-                            filterTypes: APIScraperType.libraryRawValues
-                        ),
-                        feedHistoryService: dependencyFactory.scraperConfigService
-                    )
+                    LazyView {
+                        ProcessingStatsView(
+                            sourcesViewModel: dependencyFactory.makeScraperSettingsViewModel(
+                                filterTypes: APIScraperType.libraryRawValues
+                            ),
+                            feedHistoryService: dependencyFactory.scraperConfigService
+                        )
+                    }
                 } label: {
                     SettingsRow(icon: "clock.arrow.circlepath", title: "Feed Status") {
                         HStack(spacing: 8) {
@@ -101,9 +103,11 @@ struct SettingsLibrarySection: View {
         icon: String,
         title: String,
         accessibilityIdentifier: String,
-        @ViewBuilder destination: () -> Destination
+        @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        NavigationLink(destination: destination) {
+        NavigationLink {
+            LazyView(destination)
+        } label: {
             SettingsRow(icon: icon, title: title)
         }
         .buttonStyle(.plain)

@@ -1039,7 +1039,7 @@ async fn upsert_source_body(
             created_at,
             updated_at
         )
-        VALUES ($1, 'source', $2, NULL, $3, $4, $5, $6, $7, timezone('UTC', now()), timezone('UTC', now()))
+        VALUES ($1, 'source', $2, $3, $4, $5, $6, $7, $8, timezone('UTC', now()), timezone('UTC', now()))
         ON CONFLICT (content_id, variant) DO UPDATE
         SET
             storage_provider = EXCLUDED.storage_provider,
@@ -1054,6 +1054,7 @@ async fn upsert_source_body(
     )
     .bind(content_id)
     .bind(body.storage_provider)
+    .bind(&body.storage_bucket)
     .bind(&body.storage_key)
     .bind(body.content_format)
     .bind(&body.sha256)

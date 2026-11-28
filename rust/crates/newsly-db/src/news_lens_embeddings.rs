@@ -122,6 +122,87 @@ where
     Ok(())
 }
 
+pub async fn load_many(
+    connection: &mut PgConnection,
+    items: &[(i64, String)],
+    model: &str,
+) -> Result<std::collections::HashMap<i64, Vec<f64>>, sqlx::Error> {
+    if items.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let ids = items.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let hashes = items
+        .iter()
+        .map(|(_, hash)| hash.as_str())
+        .collect::<Vec<_>>();
+    let rows = sqlx::query_as::<_, (i64, Value)>(
+        r"
+        SELECT emb.news_item_id::bigint, emb.vector
+        FROM unnest($1::bigint[], $2::text[]) AS wanted(news_item_id, input_hash)
+        JOIN news_lens_embeddings AS emb
+          ON emb.news_item_id = wanted.news_item_id
+         AND emb.input_hash = wanted.input_hash
+         AND emb.model = $3
+         AND emb.encoder_version = $4
+         AND emb.dimensions = jsonb_array_length(emb.vector)
+        ",
+    )
+    .bind(&ids)
+    .bind(&hashes)
+    .bind(model)
+    .bind(ENCODER_VERSION)
+    .fetch_all(connection)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, value)| {
+            let vector = serde_json::from_value::<Vec<f64>>(value).ok()?;
+            (!vector.is_empty()
+                && vector.iter().all(|n| n.is_finite())
+                && vector.iter().any(|n| *n != 0.0))
+            .then_some((id, vector))
+        })
+        .collect())
+}
+
+pub async fn preparation_failed_many(
+    connection: &mut PgConnection,
+    items: &[(i64, String)],
+    model: &str,
+) -> Result<std::collections::HashSet<i64>, sqlx::Error> {
+    if items.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let ids = items.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let hashes = items
+        .iter()
+        .map(|(_, hash)| hash.as_str())
+        .collect::<Vec<_>>();
+    let rows = sqlx::query_scalar::<_, i64>(
+        r"
+        SELECT DISTINCT wanted.news_item_id
+        FROM unnest($1::bigint[], $2::text[]) AS wanted(news_item_id, input_hash)
+        WHERE EXISTS (
+            SELECT 1 FROM processing_tasks t
+            WHERE t.task_type = 'prepare_news_lens'
+              AND t.payload->>'news_item_id' = wanted.news_item_id::text
+              AND t.status = 'failed'
+              AND t.completed_at >= timezone('UTC', now()) - interval '6 hours'
+              AND t.payload->>'embedding_model' = $3
+              AND t.payload->>'input_hash' = wanted.input_hash
+              AND (t.payload->>'encoder_version')::integer = $4
+        )
+        ",
+    )
+    .bind(&ids)
+    .bind(&hashes)
+    .bind(model)
+    .bind(ENCODER_VERSION)
+    .fetch_all(connection)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
 /// A terminal preparation failure for unchanged source state is not automatically replayed.
 pub async fn preparation_failed(
     connection: &mut PgConnection,

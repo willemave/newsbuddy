@@ -141,20 +141,26 @@ pub(crate) struct ContentArgs {
 pub(crate) enum ContentCommand {
     /// List content cards.
     List {
-        #[arg(long, default_value_t = 25)]
+        /// Maximum number of items to return (1-100).
+        #[arg(long, value_parser = parse_page_limit, default_value_t = 25)]
         limit: usize,
+        /// Pagination cursor from a previous list response.
         #[arg(long)]
         cursor: Option<String>,
+        /// Filter by content type (comma-separated or repeated).
         #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
         content_type: Vec<String>,
+        /// Filter by date (YYYY-MM-DD).
         #[arg(long)]
         date: Option<String>,
+        /// Filter by read state (all, read, unread).
         #[arg(long, default_value = "all")]
         read_filter: String,
     },
     /// List the most recently saved Knowledge articles.
     Favorites {
-        #[arg(long, value_parser = parse_favorites_limit, default_value_t = 10)]
+        /// Maximum number of saved articles to return (1-100).
+        #[arg(long, value_parser = parse_page_limit, default_value_t = 10)]
         limit: usize,
     },
     /// Fetch one content item.
@@ -167,7 +173,7 @@ pub(crate) enum ContentCommand {
     Submissions(ContentSubmissionsArgs),
 }
 
-fn parse_favorites_limit(raw: &str) -> Result<usize, String> {
+fn parse_page_limit(raw: &str) -> Result<usize, String> {
     let limit = raw
         .parse::<usize>()
         .map_err(|_| "limit must be an integer from 1 through 100".to_owned())?;
@@ -202,8 +208,10 @@ pub(crate) struct ContentSubmissionsArgs {
 pub(crate) enum ContentSubmissionsCommand {
     /// List active or failed user submissions.
     List {
-        #[arg(long, default_value_t = 25)]
+        /// Maximum number of submissions to return (1-100).
+        #[arg(long, value_parser = parse_page_limit, default_value_t = 25)]
         limit: usize,
+        /// Pagination cursor from a previous list response.
         #[arg(long)]
         cursor: Option<String>,
     },
@@ -219,8 +227,10 @@ pub(crate) struct LibraryArgs {
 pub(crate) enum LibraryCommand {
     /// Download the current markdown library diff to local disk.
     Sync {
+        /// Destination directory for synced library markdown files.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Include full source markdown files alongside summaries.
         #[arg(
             long,
             default_value_t = true,
@@ -229,6 +239,7 @@ pub(crate) enum LibraryCommand {
             default_missing_value = "true"
         )]
         include_source: bool,
+        /// Allow deleting all previously synced local files if the remote manifest is empty.
         #[arg(long)]
         allow_prune_all: bool,
     },
@@ -237,7 +248,8 @@ pub(crate) enum LibraryCommand {
 #[derive(Debug, Args)]
 pub(crate) struct SearchArgs {
     pub(crate) query: String,
-    #[arg(long, default_value_t = 10)]
+    /// Maximum number of results to return (1-100).
+    #[arg(long, value_parser = parse_page_limit, default_value_t = 10)]
     pub(crate) limit: usize,
     #[arg(
         long,
@@ -334,10 +346,13 @@ pub(crate) struct NewsArgs {
 pub(crate) enum NewsCommand {
     /// List visible news items.
     List {
-        #[arg(long, default_value_t = 25)]
+        /// Maximum number of news items to return (1-100).
+        #[arg(long, value_parser = parse_page_limit, default_value_t = 25)]
         limit: usize,
+        /// Pagination cursor from a previous list response.
         #[arg(long)]
         cursor: Option<String>,
+        /// Filter by read state (all, read, unread).
         #[arg(long, default_value = "unread")]
         read_filter: String,
     },

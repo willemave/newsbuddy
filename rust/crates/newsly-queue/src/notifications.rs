@@ -6,7 +6,8 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, warn};
 
-const QUEUE_NOTIFY_CHANNEL: &str = "processing_tasks";
+use crate::TaskQueue;
+
 const RECONNECT_BACKOFF_START: Duration = Duration::from_secs(1);
 const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
@@ -28,15 +29,23 @@ pub struct QueueNotificationHub {
 }
 
 impl QueueNotificationHub {
-    pub fn spawn(database_url: impl Into<String>) -> Self {
+    pub fn spawn_for_queue(database_url: impl Into<String>, queue: TaskQueue) -> Self {
         let database_url = database_url.into();
+        let channel = queue.notify_channel();
         let (generation_tx, _) = watch::channel(0_u64);
         let (connected_tx, _) = watch::channel(false);
         let (stop_tx, stop_rx) = watch::channel(false);
         let task_generation_tx = generation_tx.clone();
         let task_connected_tx = connected_tx.clone();
         let task = tokio::spawn(async move {
-            notification_loop(database_url, task_generation_tx, task_connected_tx, stop_rx).await;
+            notification_loop(
+                database_url,
+                channel,
+                task_generation_tx,
+                task_connected_tx,
+                stop_rx,
+            )
+            .await;
         });
         Self {
             generation_tx,
@@ -145,6 +154,7 @@ impl QueueNotificationWaiter {
 
 async fn notification_loop(
     database_url: String,
+    channel: String,
     generation_tx: watch::Sender<u64>,
     connected_tx: watch::Sender<bool>,
     mut stop_rx: watch::Receiver<bool>,
@@ -156,7 +166,7 @@ async fn notification_loop(
         }
         match PgListener::connect(&database_url).await {
             Ok(mut listener) => {
-                if let Err(error) = listener.listen(QUEUE_NOTIFY_CHANNEL).await {
+                if let Err(error) = listener.listen(&channel).await {
                     warn!(error = %error, "unable to LISTEN for queue notifications; polling only");
                     set_connected(&connected_tx, &generation_tx, false);
                 } else {

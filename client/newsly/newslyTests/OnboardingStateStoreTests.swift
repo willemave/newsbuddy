@@ -565,6 +565,49 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testStepDirectionTracksForwardAndBackwardNavigation() {
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 52),
+            service: DeferredOnboardingService(),
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+
+        XCTAssertEqual(viewModel.stepDirection, .forward)
+
+        viewModel.advanceToChoice()
+        XCTAssertEqual(viewModel.step, .choice)
+        XCTAssertEqual(viewModel.stepDirection, .forward)
+
+        viewModel.chooseDefaults()
+        XCTAssertEqual(viewModel.step, .suggestions)
+        XCTAssertEqual(viewModel.stepDirection, .forward)
+
+        viewModel.advanceToAggregators()
+        XCTAssertEqual(viewModel.step, .aggregators)
+        XCTAssertEqual(viewModel.stepDirection, .forward)
+
+        viewModel.advanceToReddit()
+        XCTAssertEqual(viewModel.step, .reddit)
+        XCTAssertEqual(viewModel.stepDirection, .forward)
+
+        viewModel.returnToAggregators()
+        XCTAssertEqual(viewModel.step, .aggregators)
+        XCTAssertEqual(viewModel.stepDirection, .backward)
+
+        viewModel.returnToSuggestions()
+        XCTAssertEqual(viewModel.step, .suggestions)
+        XCTAssertEqual(viewModel.stepDirection, .backward)
+
+        viewModel.retryPersonalization()
+        XCTAssertEqual(viewModel.step, .audio)
+        XCTAssertEqual(viewModel.stepDirection, .backward)
+
+        viewModel.advanceToAggregators()
+        XCTAssertEqual(viewModel.step, .aggregators)
+        XCTAssertEqual(viewModel.stepDirection, .forward)
+    }
+
     private func makeSuggestion(
         id: Int,
         suggestionType: String,

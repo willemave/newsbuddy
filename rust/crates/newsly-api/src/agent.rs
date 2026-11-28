@@ -264,36 +264,48 @@ async fn render_library_documents(
     include_source: bool,
     request_id: &str,
 ) -> Result<Vec<RenderedDocument>, ApiError> {
+    use futures_util::stream::{self, StreamExt as _, TryStreamExt as _};
+
+    const MANIFEST_RENDER_CONCURRENCY: usize = 16;
+
     let rows = list_agent_library_content(state.database.pool(), user_id)
         .await
         .map_err(|error| internal_error(error, request_id))?;
-    let mut documents = Vec::with_capacity(rows.len() * usize::from(include_source) + rows.len());
-    for row in rows {
-        if include_source
-            && let Some(document) = render_library_variant(
-                state,
+    let rendered_pairs: Vec<Vec<RenderedDocument>> = stream::iter(rows.into_iter().map(|row| {
+        let state = state.clone();
+        let request_id = request_id.to_owned();
+        async move {
+            let mut row_docs = Vec::with_capacity(usize::from(include_source) + 1);
+            if include_source
+                && let Some(document) = render_library_variant(
+                    &state,
+                    user_id,
+                    &row,
+                    AgentLibraryDocumentVariant::Source,
+                    &request_id,
+                )
+                .await?
+            {
+                row_docs.push(document);
+            }
+            if let Some(document) = render_library_variant(
+                &state,
                 user_id,
                 &row,
-                AgentLibraryDocumentVariant::Source,
-                request_id,
+                AgentLibraryDocumentVariant::Summary,
+                &request_id,
             )
             .await?
-        {
-            documents.push(document);
+            {
+                row_docs.push(document);
+            }
+            Ok::<_, ApiError>(row_docs)
         }
-        if let Some(document) = render_library_variant(
-            state,
-            user_id,
-            &row,
-            AgentLibraryDocumentVariant::Summary,
-            request_id,
-        )
-        .await?
-        {
-            documents.push(document);
-        }
-    }
-    Ok(documents)
+    }))
+    .buffered(MANIFEST_RENDER_CONCURRENCY)
+    .try_collect()
+    .await?;
+    Ok(rendered_pairs.into_iter().flatten().collect())
 }
 
 async fn render_library_variant(

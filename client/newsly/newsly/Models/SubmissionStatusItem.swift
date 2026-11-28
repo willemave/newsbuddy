@@ -318,15 +318,18 @@ struct SubmissionStatusItem: Identifiable {
         return candidate
     }
 
-    var statusDateDisplay: String? {
-        let dateString = processedAt ?? createdAt
-        guard let date = parseDate(from: dateString) else { return nil }
-
+    private static let statusDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        formatter.timeZone = TimeZone.current
-        return formatter.string(from: date)
+        formatter.timeZone = .autoupdatingCurrent
+        return formatter
+    }()
+
+    var statusDateDisplay: String? {
+        let dateString = processedAt ?? createdAt
+        guard let date = parseDate(from: dateString) else { return nil }
+        return Self.statusDateFormatter.string(from: date)
     }
 
     var createdDate: Date? {

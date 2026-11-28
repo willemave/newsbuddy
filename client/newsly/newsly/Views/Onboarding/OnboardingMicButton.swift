@@ -12,7 +12,6 @@ struct OnboardingMicButton: View {
     let onStop: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isPressed = false
     @State private var pulseScale: CGFloat = 1.0
 
     var body: some View {
@@ -68,15 +67,8 @@ struct OnboardingMicButton: View {
                 iconStack
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
         .disabled(audioState == .starting || audioState == .transcribing)
-        .scaleEffect(isPressed ? 0.96 : 1.0)
-        .animation(AppMotion.press, value: isPressed)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in isPressed = true }
-                .onEnded { _ in isPressed = false }
-        )
         .accessibilityIdentifier("onboarding.audio.mic")
         .accessibilityLabel(accessibilityText)
     }

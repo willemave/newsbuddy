@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+use newsly_providers::{ObjectStorageBackend, ObjectStorageConfigError};
 use secrecy::SecretString;
 use thiserror::Error;
 use url::Url;
@@ -34,7 +35,7 @@ pub struct MediaWorkerProcessConfig {
     pub itunes_country: Option<String>,
     pub podcast_scratch_root: PathBuf,
     pub tweet_media_root: PathBuf,
-    pub content_body_local_root: PathBuf,
+    pub content_body_storage: ObjectStorageBackend,
     pub content_body_storage_prefix: PathBuf,
     pub tweet_video_enabled: bool,
 }
@@ -61,7 +62,7 @@ impl Debug for MediaWorkerProcessConfig {
             .field("itunes_country", &self.itunes_country)
             .field("podcast_scratch_root", &self.podcast_scratch_root)
             .field("tweet_media_root", &self.tweet_media_root)
-            .field("content_body_local_root", &self.content_body_local_root)
+            .field("content_body_storage", &self.content_body_storage)
             .field(
                 "content_body_storage_prefix",
                 &self.content_body_storage_prefix,
@@ -177,13 +178,7 @@ impl MediaWorkerProcessConfig {
             });
         }
 
-        let storage_provider =
-            env::var("CONTENT_BODY_STORAGE_PROVIDER").unwrap_or_else(|_| "local".to_owned());
-        if storage_provider != "local" {
-            return Err(MediaWorkerConfigError::UnsupportedStorageProvider(
-                storage_provider,
-            ));
-        }
+        let content_body_storage = ObjectStorageBackend::from_environment()?;
         let media_root = env_path("MEDIA_BASE_DIR", "./data/media")?;
         let content_body_storage_prefix = PathBuf::from(
             env::var("CONTENT_BODY_STORAGE_PREFIX").unwrap_or_else(|_| "content".to_owned()),
@@ -218,7 +213,7 @@ impl MediaWorkerProcessConfig {
             itunes_country,
             podcast_scratch_root: env_path("PODCAST_SCRATCH_DIR", "./data/scratch")?,
             tweet_media_root: media_root.join("tweet_videos"),
-            content_body_local_root: env_path("CONTENT_BODY_LOCAL_ROOT", "./data/content_bodies")?,
+            content_body_storage,
             content_body_storage_prefix,
             tweet_video_enabled: parse_bool("TWEET_VIDEO_ENABLED", true)?,
         })
@@ -369,8 +364,8 @@ pub enum MediaWorkerConfigError {
     InvalidRange(&'static str),
     #[error("{0} must be a safe relative path")]
     InvalidPath(&'static str),
-    #[error("Rust media workers require local content-body storage, got {0:?}")]
-    UnsupportedStorageProvider(String),
+    #[error("invalid content-body storage configuration: {0}")]
+    StorageConfig(#[from] ObjectStorageConfigError),
 }
 
 impl From<QueueWorkerProcessConfigError> for MediaWorkerConfigError {

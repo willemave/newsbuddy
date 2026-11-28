@@ -40,9 +40,7 @@ struct OnboardingIntroStep: View {
                     }
                     Spacer(minLength: 0)
                     onboardingPrimaryButton("Continue") {
-                        withAnimation(reduceMotion ? nil : AppMotion.panel) {
-                            viewModel.advanceToChoice()
-                        }
+                        viewModel.advanceToChoice()
                     }
                     .accessibilityIdentifier("onboarding.intro.continue")
                     .padding(.horizontal, Spacing.appHorizontalMargin)

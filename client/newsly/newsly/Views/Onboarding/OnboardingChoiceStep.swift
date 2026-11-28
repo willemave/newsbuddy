@@ -42,9 +42,7 @@ struct OnboardingChoiceStep: View {
 
             VStack(spacing: 12) {
                 onboardingPrimaryButton("Personalize") {
-                    withAnimation(AppMotion.panel) {
-                        viewModel.startPersonalized()
-                    }
+                    viewModel.startPersonalized()
                 }
                 .accessibilityIdentifier("onboarding.choice.personalized")
 

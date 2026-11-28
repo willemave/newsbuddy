@@ -4,10 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use newsly_agent_runtime::{
-    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError, ProviderUsage};
 use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,7 +14,6 @@ use thiserror::Error;
 use crate::openrouter_embeddings::{OpenRouterEmbeddingClient, OpenRouterEmbeddingError};
 use crate::{ProviderCredentials, RigAgentEngine};
 
-use crate::agent_support::NoTools;
 use crate::provider_env::{ProviderEnvError, secret_env, u64_from_env};
 
 const DEFAULT_NEWS_MODEL: &str = "openai:gpt-6-luna";
@@ -393,34 +389,20 @@ impl NewsItemGateway {
     ) -> Result<newsly_agent_runtime::AgentOutcome, NewsItemGatewayError> {
         Ok(self
             .engine
-            .run(
-                AgentRequest {
+            .run_structured_raw(
+                crate::rig_engine::RawStructuredRunRequest {
                     feature: feature.to_owned(),
                     model_spec: model.to_owned(),
                     system_prompt: system_prompt.to_owned(),
                     user_prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: schema_name.to_owned(),
-                        schema,
-                        strict: true,
-                        validation_retries,
-                    },
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(u32::from(validation_retries).saturating_add(1)),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(output_tokens),
-                        deadline: self.deadline,
-                    },
+                    schema_name: schema_name.to_owned(),
+                    schema,
+                    deadline: self.deadline,
+                    request_limit: u32::from(validation_retries).saturating_add(1),
+                    output_token_limit: output_tokens,
+                    validation_retries,
                     provider_parameters: Map::new(),
                 },
-                Arc::new(NoTools),
                 events,
             )
             .await?)
@@ -565,9 +547,7 @@ impl NewsItemGatewayError {
     #[must_use]
     pub fn retryable(&self) -> bool {
         match self {
-            Self::Agent(AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_)) => {
-                true
-            }
+            Self::Agent(error) => error.is_retryable(),
             Self::Http(error) => crate::public_http::retryable_http_error(error),
             Self::Embedding(error) => error.retryable(),
             _ => false,

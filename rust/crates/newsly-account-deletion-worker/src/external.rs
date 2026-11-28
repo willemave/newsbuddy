@@ -5,8 +5,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use newsly_providers::IntegrationTokenCipher;
-use object_store::ObjectStoreExt;
-use object_store::path::Path as ObjectPath;
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
@@ -190,24 +188,12 @@ impl ConfiguredArtifactStore {
     ///
     /// Returns an error for an unsafe key or when the configured object store cannot delete it.
     pub async fn delete(&self, key: &str) -> Result<(), ExternalCleanupError> {
-        if !newsly_providers::is_safe_object_key(key) {
-            return Err(ExternalCleanupError::UnsafeObjectKey(key.to_owned()));
-        }
-        match &self.0 {
-            newsly_providers::ObjectStorageBackend::Local { root } => {
-                newsly_providers::delete_local_object(root, key)
-                    .await
-                    .map_err(|error| ExternalCleanupError::ObjectStore(error.to_string()))
+        self.0.delete(key).await.map_err(|error| match error {
+            newsly_providers::ObjectStorageOpError::UnsafeKey(key) => {
+                ExternalCleanupError::UnsafeObjectKey(key)
             }
-            newsly_providers::ObjectStorageBackend::S3 { store } => {
-                let path = ObjectPath::parse(key)
-                    .map_err(|error| ExternalCleanupError::UnsafeObjectKey(error.to_string()))?;
-                match store.delete(&path).await {
-                    Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-                    Err(error) => Err(ExternalCleanupError::ObjectStore(error.to_string())),
-                }
-            }
-        }
+            other => ExternalCleanupError::ObjectStore(other.to_string()),
+        })
     }
 }
 

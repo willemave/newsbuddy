@@ -234,9 +234,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = LearningDeckArtifactStore {
             pool,
-            backend: ArtifactBackend::Local {
-                root: root.path().to_owned(),
-            },
+            backend: ObjectStorageBackend::local(root.path().to_owned()).unwrap(),
             prefix: prefix.to_owned(),
             limits: LearningDeckArtifactLimits {
                 index_html_bytes: 10_000,

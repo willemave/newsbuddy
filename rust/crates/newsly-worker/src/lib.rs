@@ -34,7 +34,6 @@ pub mod feed_discovery;
 pub mod image_generation;
 mod knowledge_tools;
 pub mod learning_deck;
-mod local_object;
 pub mod media;
 pub mod news_item;
 pub mod onboarding_discovery;

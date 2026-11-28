@@ -1,13 +1,12 @@
 use crate::audio_episode_presentation::present_audio_episode;
 use newsly_domain::truncate_chars;
 use std::collections::HashSet;
-use std::env;
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
-use axum::http::header::{HOST, RANGE};
+use axum::http::header::RANGE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, Response};
 use axum::routing::{get, post};
@@ -28,7 +27,6 @@ use newsly_db::{
     mark_audio_episode_sources_read, reset_audio_episode_for_generation, upsert_audio_episode,
 };
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
-use reqwest::Url;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt as _;
@@ -354,19 +352,29 @@ pub(super) async fn create_custom_narration_audio_episode(
         .clamp(CUSTOM_SOURCE_MIN_CHARS, LONGFORM_BODY_MAX_CHARS);
     let mut items = Vec::with_capacity(source_count);
     let mut first_reader_title = None;
-    for content_id in &content_ids {
-        let projection =
-            find_visible_content_detail(state.database.pool(), current_user.id, *content_id)
-                .await
-                .map_err(|error| internal_error(error, &request_id))?
-                .ok_or_else(|| not_found(&format!("Content {content_id}"), &request_id))?;
-        if !matches!(projection.content_type.as_str(), "article" | "podcast") {
-            return Err(bad_request(
-                "Custom narrations only support articles and podcasts",
-                &request_id,
-            ));
-        }
-        let body = load_content_body(&state, current_user.id, *content_id, &request_id).await?;
+    let content_results =
+        futures_util::future::try_join_all(content_ids.iter().copied().map(|content_id| {
+            let state = state.clone();
+            let request_id = request_id.clone();
+            let user_id = current_user.id;
+            async move {
+                let projection =
+                    find_visible_content_detail(state.database.pool(), user_id, content_id)
+                        .await
+                        .map_err(|error| internal_error(error, &request_id))?
+                        .ok_or_else(|| not_found(&format!("Content {content_id}"), &request_id))?;
+                if !matches!(projection.content_type.as_str(), "article" | "podcast") {
+                    return Err(bad_request(
+                        "Custom narrations only support articles and podcasts",
+                        &request_id,
+                    ));
+                }
+                let body = load_content_body(&state, user_id, content_id, &request_id).await?;
+                Ok::<_, ApiError>((projection, body))
+            }
+        }))
+        .await?;
+    for (projection, body) in content_results {
         if first_reader_title.is_none() {
             first_reader_title = Some(content_display_title(&projection));
         }
@@ -376,13 +384,25 @@ pub(super) async fn create_custom_narration_audio_episode(
             .insert("source_kind".to_owned(), json!("long_form"));
         items.push(item);
     }
+    let visible_news_by_id = if news_item_ids.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        newsly_db::find_visible_news_items_by_ids(
+            state.database.pool(),
+            current_user.id,
+            &news_item_ids,
+        )
+        .await
+        .map_err(|error| internal_error(error, &request_id))?
+        .into_iter()
+        .map(|item| (item.id, item))
+        .collect()
+    };
     for news_item_id in &news_item_ids {
-        let item =
-            find_visible_news_item_detail(state.database.pool(), current_user.id, *news_item_id)
-                .await
-                .map_err(|error| internal_error(error, &request_id))?
-                .ok_or_else(|| not_found(&format!("Fast Read {news_item_id}"), &request_id))?;
-        let mut source = news_source_payload(&item);
+        let item = visible_news_by_id
+            .get(news_item_id)
+            .ok_or_else(|| not_found(&format!("Fast Read {news_item_id}"), &request_id))?;
+        let mut source = news_source_payload(item);
         let summary = item.summary_text.as_deref().unwrap_or("").trim();
         if summary.is_empty() && item.summary_key_points.as_array().is_none_or(Vec::is_empty) {
             return Err(bad_request(
@@ -1162,68 +1182,7 @@ fn hash_token(token: &str) -> String {
     hex_encode(&Sha256::digest(token.as_bytes()))
 }
 
-fn external_url(headers: &HeaderMap, path: &str, request_id: &str) -> Result<String, ApiError> {
-    let configured = env::var("PUBLIC_BASE_URL")
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty());
-    let mut base = if let Some(configured) = configured {
-        let parsed = Url::parse(&configured).map_err(|error| internal_error(error, request_id))?;
-        if parsed.host().is_none()
-            || !matches!(parsed.scheme(), "http" | "https")
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-            || !matches!(parsed.path(), "" | "/")
-            || (env::var("ENVIRONMENT").is_ok_and(|value| value.eq_ignore_ascii_case("production"))
-                && parsed.scheme() != "https")
-        {
-            return Err(internal_error("PUBLIC_BASE_URL is invalid", request_id));
-        }
-        parsed
-    } else {
-        if env::var("ENVIRONMENT").is_ok_and(|value| value.eq_ignore_ascii_case("production")) {
-            return Err(internal_error(
-                "PUBLIC_BASE_URL is required in production",
-                request_id,
-            ));
-        }
-        let host = headers
-            .get(HOST)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| internal_error("request Host header is missing", request_id))?;
-        let scheme = headers
-            .get("x-forwarded-proto")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
-            .map(str::trim)
-            .filter(|value| matches!(*value, "http" | "https"))
-            .unwrap_or("http");
-        Url::parse(&format!("{scheme}://{host}"))
-            .map_err(|error| internal_error(error, request_id))?
-    };
-    base.set_path(path);
-    base.set_query(None);
-    base.set_fragment(None);
-    Ok(base.to_string())
-}
-
-fn positive_path_id(
-    path: Result<Path<i64>, PathRejection>,
-    field: &str,
-    request_id: &str,
-) -> Result<i64, ApiError> {
-    let Path(value) =
-        path.map_err(|rejection| validation_error(rejection.body_text(), request_id))?;
-    if value <= 0 {
-        return Err(validation_error(
-            format!("{field} must be greater than zero"),
-            request_id,
-        ));
-    }
-    Ok(value)
-}
+use crate::write_support::{external_url, positive_path_id};
 
 fn decode_query<T>(
     query: Result<Query<T>, QueryRejection>,

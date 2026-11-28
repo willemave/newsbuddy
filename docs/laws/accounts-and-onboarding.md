@@ -22,7 +22,7 @@ A10. Product preferences travel with the account, while purely visual preference
 
 A11. A cached authenticated shell may be shown only for the identity bound to the stored credentials. Transient validation failure preserves that matching shell; only definitive credential rejection transitions it to signed out.
 
-A12. A credential publication binds one complete access/refresh pair to one user and generation. Legacy loose credentials must be server-validated before they can establish cached identity, a stale plaintext mirror cannot resurrect credentials after the bound record exists, and an interrupted one-leg publication cannot be treated as or overwritten by an atomic pair.
+A12. A credential publication binds one complete access/refresh pair to one user and generation. Legacy loose credentials must be server-validated before they can establish cached identity, a stale plaintext mirror cannot resurrect credentials after the bound record exists, and an interrupted one-leg publication cannot be treated as or overwritten by an atomic pair. The App Group plaintext token mirror exists only for Share Extension compatibility during the shared-Keychain migration window and is retired once all supported installed builds read credentials exclusively from the shared Keychain access group.
 
 A13. Completing a discovery run never schedules that discovery again. Later source expansion belongs to the separate durable feed-discovery workflow.
 

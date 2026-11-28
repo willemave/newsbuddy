@@ -14,7 +14,6 @@ newsly-db = { path = "../newsly-db" }
 newsly-providers = { path = "../newsly-providers" }
 newsly-queue = { path = "../newsly-queue" }
 newsly-worker = { path = "../newsly-worker" }
-object_store.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
 serde_json.workspace = true

@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use chrono::Utc;
 use newsly_agent_runtime::{
@@ -27,7 +28,9 @@ mod chat_budget;
 use chat_budget::{CHAT_FINAL_ANSWER_INSTRUCTION, ChatBudgetState, normalize_final_response};
 mod openai_response;
 mod structured;
-pub(crate) use structured::{RunStructuredError, StructuredRunRequest};
+pub(crate) use structured::{
+    RawStructuredRunRequest, RunStructuredError, StructuredRunRequest, TextRunRequest,
+};
 mod transcript;
 use transcript::{newsly_assistant_parts, rig_history_from_transcript, rig_image};
 
@@ -37,11 +40,25 @@ pub struct RigAgentEngine {
     http: Client,
 }
 
+static DEFAULT_AGENT_HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(180))
+        .build()
+        .expect("default RigAgentEngine HTTP client builds")
+});
+
 impl RigAgentEngine {
-    /// Creates a Rig-backed agent engine with a shared HTTP connection pool.
+    /// Returns the shared process-wide timed HTTP client used by default agent engines.
+    #[must_use]
+    pub fn default_http_client() -> Client {
+        DEFAULT_AGENT_HTTP_CLIENT.clone()
+    }
+
+    /// Creates a Rig-backed agent engine with a shared timed HTTP connection pool.
     #[must_use]
     pub fn new(credentials: ProviderCredentials) -> Self {
-        Self::with_http_client(credentials, Client::new())
+        Self::with_http_client(credentials, Self::default_http_client())
     }
 
     /// Creates a Rig-backed agent engine using the supplied shared HTTP connection pool.

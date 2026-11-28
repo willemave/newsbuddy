@@ -156,14 +156,7 @@ pub(super) async fn get_share_action(
     current_user: AuthenticatedUser,
 ) -> Result<Json<ShareActionResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
-    let Path(task_id) =
-        path.map_err(|rejection| validation_error(rejection.body_text(), &request_id))?;
-    if task_id <= 0 {
-        return Err(validation_error(
-            "task_id must be greater than zero",
-            &request_id,
-        ));
-    }
+    let task_id = crate::write_support::positive_path_id(path, "task_id", &request_id)?;
     let task = find_share_action_for_user(state.database.pool(), current_user.id, task_id)
         .await
         .map_err(|error| internal_error(error, &request_id))?

@@ -324,7 +324,7 @@ pub async fn load_admin_dashboard(
             created_at
         FROM processing_tasks
         WHERE status = 'failed'
-          AND created_at >= timezone('UTC', clock_timestamp()) - interval '24 hours'
+          AND COALESCE(completed_at, created_at) >= timezone('UTC', clock_timestamp()) - interval '24 hours'
         ORDER BY COALESCE(completed_at, created_at) DESC
         LIMIT 30
         "#,

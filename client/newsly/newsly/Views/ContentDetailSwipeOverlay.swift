@@ -76,6 +76,13 @@ enum DetailSwipePolicy {
 }
 
 struct ContentDetailSwipeContainer<Content: View>: View {
+    private struct SwipeDragState: Equatable {
+        var offset: CGFloat = 0
+        var isLeadingEdgeActive = false
+    }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let currentIndex: Int
     let contentIds: [Int]
     let surfaceName: String
@@ -88,8 +95,8 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     let onPrevious: () -> Void
     let content: Content
 
-    @State private var dragAmount: CGFloat = 0
-    @State private var isLeadingEdgeSwipeActive = false
+    @GestureState private var dragState = SwipeDragState()
+    @State private var exitOffset: CGFloat = 0
     @State private var didTriggerHaptic = false
     @State private var thresholdFeedbackTrigger = 0
     @State private var completionFeedbackTrigger = 0
@@ -120,19 +127,41 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         GeometryReader { proxy in
             content
                 .overlay(alignment: .leading) {
-                    if dragAmount > 30 && (currentIndex > 0 || isLeadingEdgeSwipeActive) {
-                        swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
+                    if dragState.offset > 30 && (currentIndex > 0 || dragState.isLeadingEdgeActive) {
+                        swipeIndicator(direction: .previous, progress: min(1.0, dragState.offset / 100))
                     }
                 }
                 .overlay(alignment: .trailing) {
-                    if dragAmount < -30 && currentIndex < contentIds.count - 1 {
-                        swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
+                    if dragState.offset < -30 && currentIndex < contentIds.count - 1 {
+                        swipeIndicator(direction: .next, progress: min(1.0, abs(dragState.offset) / 100))
                     }
                 }
                 .simultaneousGesture(swipeGesture(viewportWidth: proxy.size.width))
-                .offset(x: dragAmount)
+                .offset(x: dragState.offset)
+                .animation(
+                    dragState.offset == 0
+                        ? AppMotion.respectingReduceMotion(
+                            reduceMotion,
+                            exitOffset != 0 ? AppMotion.subtle : AppMotion.press
+                        )
+                        : nil,
+                    value: dragState.offset
+                )
+                .offset(x: exitOffset)
+                .onChange(of: dragState.offset) { _, newOffset in
+                    handleDragOffsetChange(newOffset)
+                }
                 .sensoryFeedback(.impact(weight: .light), trigger: thresholdFeedbackTrigger)
                 .sensoryFeedback(.impact(weight: .medium), trigger: completionFeedbackTrigger)
+        }
+    }
+
+    private func handleDragOffsetChange(_ newOffset: CGFloat) {
+        if newOffset == 0 {
+            didTriggerHaptic = false
+        } else if abs(newOffset) > 80 && !didTriggerHaptic {
+            thresholdFeedbackTrigger += 1
+            didTriggerHaptic = true
         }
     }
 
@@ -156,36 +185,28 @@ struct ContentDetailSwipeContainer<Content: View>: View {
 
     private func swipeGesture(viewportWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 50, coordinateSpace: .local)
-            .onChanged { value in
+            .updating($dragState) { value, state, _ in
                 guard let origin = swipeOrigin(
                     startLocation: value.startLocation,
                     viewportWidth: viewportWidth
-                ) else {
-                    return
-                }
-
-                guard let newOffset = DetailSwipePolicy.dragOffset(
+                ),
+                let newOffset = DetailSwipePolicy.dragOffset(
                     origin: origin,
                     translation: value.translation,
                     currentIndex: currentIndex,
                     itemCount: contentIds.count,
                     canDismiss: onDismiss != nil
                 ) else {
+                    state = SwipeDragState()
                     return
                 }
 
-                isLeadingEdgeSwipeActive = origin == .leadingEdge && newOffset > 0
-                dragAmount = newOffset
-
-                if abs(newOffset) > 80 && !didTriggerHaptic {
-                    thresholdFeedbackTrigger += 1
-                    didTriggerHaptic = true
-                }
+                state = SwipeDragState(
+                    offset: newOffset,
+                    isLeadingEdgeActive: origin == .leadingEdge && newOffset > 0
+                )
             }
             .onEnded { value in
-                didTriggerHaptic = false
-                isLeadingEdgeSwipeActive = false
-
                 guard let origin = swipeOrigin(
                     startLocation: value.startLocation,
                     viewportWidth: viewportWidth
@@ -209,7 +230,7 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                 case .previous:
                     completePreviousSwipe(origin: origin, value: value, viewportWidth: viewportWidth)
                 case .ignore:
-                    snapBackAfterIgnoredSwipe(origin: origin, value: value)
+                    logIgnoredSwipeIfNeeded(origin: origin, value: value)
                 }
             }
     }
@@ -221,10 +242,18 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     ) {
         logSwipeDecision("dismiss", origin: origin, value: value)
         triggerCompletionHaptic()
-        withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
-            dragAmount = viewportWidth
+        withAnimation(
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+            completionCriteria: .logicallyComplete
+        ) {
+            exitOffset = viewportWidth
         } completion: {
             onDismiss?()
+            var reset = Transaction()
+            reset.disablesAnimations = true
+            withTransaction(reset) {
+                exitOffset = 0
+            }
         }
     }
 
@@ -235,10 +264,13 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     ) {
         logSwipeDecision("next", origin: origin, value: value)
         triggerCompletionHaptic()
-        withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
-            dragAmount = -viewportWidth
+        withAnimation(
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+            completionCriteria: .logicallyComplete
+        ) {
+            exitOffset = -viewportWidth
         } completion: {
-            resetDragWithoutAnimation()
+            resetExitOffsetWithoutAnimation()
             onNext()
         }
     }
@@ -250,25 +282,26 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     ) {
         logSwipeDecision("previous", origin: origin, value: value)
         triggerCompletionHaptic()
-        withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
-            dragAmount = viewportWidth
+        withAnimation(
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+            completionCriteria: .logicallyComplete
+        ) {
+            exitOffset = viewportWidth
         } completion: {
-            resetDragWithoutAnimation()
+            resetExitOffsetWithoutAnimation()
             onPrevious()
         }
     }
 
-    private func snapBackAfterIgnoredSwipe(origin: DetailSwipeOrigin, value: DragGesture.Value) {
+    private func logIgnoredSwipeIfNeeded(origin: DetailSwipeOrigin, value: DragGesture.Value) {
         if DetailSwipePolicy.dragOffset(
             origin: origin,
             translation: value.translation,
             currentIndex: currentIndex,
-            itemCount: contentIds.count
+            itemCount: contentIds.count,
+            canDismiss: onDismiss != nil
         ) != nil {
             logSwipeDecision("snap_back", origin: origin, value: value)
-        }
-        withAnimation(AppMotion.press) {
-            dragAmount = 0
         }
     }
 
@@ -276,11 +309,11 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         completionFeedbackTrigger += 1
     }
 
-    private func resetDragWithoutAnimation() {
+    private func resetExitOffsetWithoutAnimation() {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            dragAmount = 0
+            exitOffset = 0
         }
     }
 

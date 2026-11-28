@@ -266,6 +266,41 @@ final class ContentListViewModelTests: XCTestCase {
         }
     }
 
+    func testCachedContentsInvalidatesOnReadStateCacheAndFeedUpdates() {
+        let readStateCache = makeTestReadStateCache()
+        let service = RecentlyReadContentService(contents: [])
+        let viewModel = ContentListViewModel(contentService: service, readStateCache: readStateCache)
+        let unread = ContentSummary(
+            id: 77,
+            contentType: .article,
+            url: "https://example.com/77",
+            title: "Unread item",
+            source: "Example",
+            platform: "Example",
+            status: .completed,
+            shortSummary: "Summary",
+            createdAt: "2026-07-12T12:00:00Z",
+            processedAt: "2026-07-12T12:01:00Z",
+            isRead: false,
+            isSavedToKnowledge: true,
+            knowledgeSavedAt: "2026-07-12T12:02:00Z",
+            imageUrl: nil,
+            thumbnailUrl: nil
+        )
+        viewModel.contents = [unread]
+        XCTAssertEqual(viewModel.contents.first?.isRead, false)
+
+        let key = ReadStateKey(id: 77, contentType: .article)
+        readStateCache.markReadLocally([key], adjustUnreadCounts: false)
+        XCTAssertEqual(viewModel.contents.first?.isRead, true)
+
+        readStateCache.rollbackRead([key], adjustUnreadCounts: false)
+        XCTAssertEqual(viewModel.contents.first?.isRead, false)
+
+        viewModel.contents = [unread.updating(isSavedToKnowledge: false)]
+        XCTAssertEqual(viewModel.contents.first?.isSavedToKnowledge, false)
+    }
+
     private func makeReadSummary(
         id: Int,
         status: APIContentStatus = .completed,

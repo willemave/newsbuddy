@@ -67,17 +67,6 @@ pub struct NewTranscriptionUsage<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewNarrationTtsUsage<'a> {
-    pub request_id: &'a str,
-    pub user_id: i64,
-    pub content_id: i64,
-    pub model: &'a str,
-    pub request_count: i32,
-    pub text_chars: u64,
-    pub standard_pricing: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewXUserLookupUsage<'a> {
     pub request_id: &'a str,
     pub user_id: i64,
@@ -189,56 +178,6 @@ pub async fn record_transcription_usage(
     .bind(priced.as_ref().map(|value| value.pricing_version.as_str()))
     .bind(priced.as_ref().map(|_| "public_list_estimate"))
     .bind(Value::Object(metadata))
-    .fetch_optional(&mut **transaction)
-    .await?;
-    Ok(inserted.is_some())
-}
-
-/// Records one successful synchronous ElevenLabs content narration request.
-pub async fn record_narration_tts_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    usage: &NewNarrationTtsUsage<'_>,
-) -> Result<bool, VendorUsageRepositoryError> {
-    let priced = crate::elevenlabs_tts_cost(
-        transaction,
-        usage.model,
-        usage.text_chars,
-        usage.standard_pricing,
-    )
-    .await?;
-    let metadata = serde_json::json!({
-        "text_chars": usage.text_chars,
-        "resource_count_unit": "character",
-        "pricing": priced.as_ref().map(|cost| &cost.metadata),
-        "cost_reason": priced.is_none().then_some("missing_rate_or_nonstandard_endpoint"),
-    });
-    let inserted = sqlx::query_scalar::<_, i64>(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, request_id, content_id, user_id,
-            request_count, resource_count, cost_usd, currency, pricing_version, cost_basis,
-            metadata, created_at
-        )
-        SELECT
-            'elevenlabs', $4, 'content_narration', 'narration.synthesize_content_mp3',
-            'api', $1, $3::bigint::integer, users.id, $5, $6, $7, 'USD', $8, $9, $10,
-            timezone('UTC', clock_timestamp())
-        FROM users
-        WHERE users.id = $2
-          AND users.is_active IS TRUE
-        RETURNING id::bigint
-        "#,
-    )
-    .bind(usage.request_id)
-    .bind(usage.user_id)
-    .bind(usage.content_id)
-    .bind(usage.model)
-    .bind(usage.request_count)
-    .bind(i32::try_from(usage.text_chars).unwrap_or(i32::MAX))
-    .bind(priced.as_ref().map(|value| value.cost_usd))
-    .bind(priced.as_ref().map(|value| value.pricing_version.as_str()))
-    .bind(priced.as_ref().map(|_| "public_list_estimate"))
-    .bind(metadata)
     .fetch_optional(&mut **transaction)
     .await?;
     Ok(inserted.is_some())

@@ -181,6 +181,7 @@ async fn deck_article_handoffs_commit_readable_source_and_summary_together(pool:
     let queue = QueueKernel::new(pool.clone());
     let body = StagedContentBody {
         storage_provider: "local",
+        storage_bucket: None,
         storage_key: "fixture/source.txt".to_owned(),
         content_format: "text",
         sha256: "a".repeat(64),

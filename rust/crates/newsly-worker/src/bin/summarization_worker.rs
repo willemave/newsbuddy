@@ -29,8 +29,7 @@ pub(crate) async fn main() -> Result<()> {
     let queue = QueueKernel::new(database.pool().clone());
     let gateway =
         SummarizationGateway::from_env().context("summarization provider initialization failed")?;
-    let body_store = SummarizationBodyStore::new(config.content_body_local_root.clone())
-        .context("summarization body storage initialization failed")?;
+    let body_store = SummarizationBodyStore::from_backend(config.content_body_storage.clone());
     let services = Arc::new(SummarizationWorkerServices::new(
         database.pool().clone(),
         queue.clone(),

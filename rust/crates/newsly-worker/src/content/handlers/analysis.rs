@@ -23,7 +23,7 @@ use crate::content::repository::load_content_snapshot;
 pub(super) async fn execute_analyze_url(
     services: &ContentWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(content_id) = content_id(plan) else {
         return HandlerExecution::from_result(TaskResult::fail(
@@ -85,17 +85,7 @@ pub(super) async fn execute_analyze_url(
             news_item: None,
             user: None,
         });
-    let extraction = runtime.analyze(&snapshot.url, &request_id, deadline);
-    tokio::pin!(extraction);
-    let attempt = tokio::select! {
-        attempt = &mut extraction => attempt,
-        () = lease.wait_for_ownership_loss() => {
-            return HandlerExecution::from_result(TaskResult::fail(
-                Some("lease ownership was lost during URL analysis".to_owned()),
-                true,
-            ));
-        }
-    };
+    let attempt = runtime.analyze(&snapshot.url, &request_id, deadline).await;
 
     match attempt {
         ExtractionAttempt::Success { article, usage } => {
@@ -116,26 +106,18 @@ pub(super) async fn execute_analyze_url(
                     user_id: plan.owner_user_id,
                 },
             ));
-            let analysis = services.content_analysis.analyze_with_events(
-                &snapshot.url,
-                &article.body,
-                analysis_instruction,
-                usage_sink.clone(),
-            );
-            tokio::pin!(analysis);
-            let analysis = tokio::select! {
-                result = &mut analysis => Some(result),
-                () = lease.wait_for_ownership_loss() => None,
-            };
+            let analysis = services
+                .content_analysis
+                .analyze_with_events(
+                    &snapshot.url,
+                    &article.body,
+                    analysis_instruction,
+                    usage_sink.clone(),
+                )
+                .await;
             usage_sink.finish().await;
             match analysis {
-                None => {
-                    return HandlerExecution::from_result(TaskResult::fail(
-                        Some("lease ownership was lost during structured URL analysis".to_owned()),
-                        true,
-                    ));
-                }
-                Some(Ok(generated)) => {
+                Ok(generated) => {
                     apply_generated_analysis(
                         &generated,
                         &snapshot.url,
@@ -147,7 +129,7 @@ pub(super) async fn execute_analyze_url(
                         crawl_links,
                     );
                 }
-                Some(Err(error)) => {
+                Err(error) => {
                     tracing::warn!(
                         content_id,
                         error = %error,

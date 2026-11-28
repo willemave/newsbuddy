@@ -6,9 +6,7 @@ async fn retry_cleanup_cannot_remove_replacement_bundle(pool: sqlx::PgPool) {
     let root = tempfile::tempdir().unwrap();
     let store = LearningDeckArtifactStore {
         pool,
-        backend: ArtifactBackend::Local {
-            root: root.path().to_owned(),
-        },
+        backend: ObjectStorageBackend::local(root.path().to_owned()).unwrap(),
         prefix: String::new(),
         limits: LearningDeckArtifactLimits {
             index_html_bytes: 10_000,

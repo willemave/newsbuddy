@@ -49,10 +49,23 @@ final class ContentListViewModel {
 
     var contents: [ContentSummary] {
         get {
-            readStateCache.applying(
-                to: feed.items,
-                removeReadItems: false
-            )
+            // Read both observable sources so SwiftUI tracks changes to either
+            // the underlying feed items or local read-state overlays.
+            let items = feed.items
+            let readKeys = readStateCache.readKeys
+            let feedVersion = feed.itemsVersion
+            let readVersion = readStateCache.readKeysVersion
+            if cachedContentsFeedVersion == feedVersion,
+               cachedContentsReadVersion == readVersion {
+                return cachedContents
+            }
+            let projected = readKeys.isEmpty
+                ? items
+                : readStateCache.applying(to: items, removeReadItems: false)
+            cachedContents = projected
+            cachedContentsFeedVersion = feedVersion
+            cachedContentsReadVersion = readVersion
+            return projected
         }
         set {
             feed.replaceItems(newValue)
@@ -121,6 +134,12 @@ final class ContentListViewModel {
     private var contentMutations: [Int: VersionedContentMutation] = [:]
     @ObservationIgnored
     private var contentMutationVersion = 0
+    @ObservationIgnored
+    private var cachedContentsFeedVersion: UInt64 = .max
+    @ObservationIgnored
+    private var cachedContentsReadVersion: UInt64 = .max
+    @ObservationIgnored
+    private var cachedContents: [ContentSummary] = []
 
     init(
         contentService: any ContentSummaryListServicing,

@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use newsly_db::MediaTranscriptPointer;
+use newsly_domain::sha256_hex;
+use newsly_providers::{
+    ObjectStorageBackend, ObjectStorageConfigError, ObjectStorageOpError, path_to_object_key,
+};
 use thiserror::Error;
 use tokio::fs;
-
-use crate::local_object::{
-    LocalObjectError, publish, sha256_hex, storage_key, validate_relative_path,
-};
 
 const MAX_TRANSCRIPT_BYTES: usize = 2_000_000;
 
@@ -14,7 +14,7 @@ const MAX_TRANSCRIPT_BYTES: usize = 2_000_000;
 pub struct MediaFileStore {
     scratch_root: PathBuf,
     tweet_media_root: PathBuf,
-    body_root: PathBuf,
+    body_backend: ObjectStorageBackend,
     body_prefix: PathBuf,
     max_media_bytes: u64,
 }
@@ -27,6 +27,31 @@ pub struct ValidatedMediaFile {
 }
 
 impl MediaFileStore {
+    /// Creates bounded local scratch/media roots paired with a local or S3-compatible transcript
+    /// body storage backend.
+    pub fn from_backend(
+        scratch_root: PathBuf,
+        tweet_media_root: PathBuf,
+        body_backend: ObjectStorageBackend,
+        body_prefix: PathBuf,
+        max_media_bytes: u64,
+    ) -> Result<Self, MediaFileStoreError> {
+        if max_media_bytes == 0 {
+            return Err(MediaFileStoreError::InvalidMediaLimit);
+        }
+        if path_to_object_key(&body_prefix).is_none() {
+            return Err(MediaFileStoreError::UnsafeStorageKey);
+        }
+        let current_directory = std::env::current_dir().map_err(MediaFileStoreError::CurrentDir)?;
+        Ok(Self {
+            scratch_root: absolute_path(scratch_root, &current_directory),
+            tweet_media_root: absolute_path(tweet_media_root, &current_directory),
+            body_backend,
+            body_prefix,
+            max_media_bytes,
+        })
+    }
+
     /// Creates bounded local media/body storage. All roots are made absolute once so durable
     /// metadata never depends on a later process working directory.
     pub fn new(
@@ -36,18 +61,19 @@ impl MediaFileStore {
         body_prefix: PathBuf,
         max_media_bytes: u64,
     ) -> Result<Self, MediaFileStoreError> {
-        if max_media_bytes == 0 {
-            return Err(MediaFileStoreError::InvalidMediaLimit);
-        }
-        validate_relative_path(&body_prefix)?;
-        let current_directory = std::env::current_dir().map_err(MediaFileStoreError::CurrentDir)?;
-        Ok(Self {
-            scratch_root: absolute_path(scratch_root, &current_directory),
-            tweet_media_root: absolute_path(tweet_media_root, &current_directory),
-            body_root: absolute_path(body_root, &current_directory),
+        let body_backend = ObjectStorageBackend::local(body_root).map_err(|error| match error {
+            ObjectStorageConfigError::CurrentDirectory(source) => {
+                MediaFileStoreError::CurrentDir(source)
+            }
+            _ => MediaFileStoreError::UnsafeStorageKey,
+        })?;
+        Self::from_backend(
+            scratch_root,
+            tweet_media_root,
+            body_backend,
             body_prefix,
             max_media_bytes,
-        })
+        )
     }
 
     pub const fn max_media_bytes(&self) -> u64 {
@@ -153,12 +179,14 @@ impl MediaFileStore {
             .body_prefix
             .join(content_id.to_string())
             .join(format!("source-{sha256}.txt"));
-        validate_relative_path(&storage_key_path)?;
-        let storage_key = storage_key(&storage_key_path)?;
-        publish(&self.body_root, &storage_key_path, encoded).await?;
+        let storage_key =
+            path_to_object_key(&storage_key_path).ok_or(MediaFileStoreError::UnsafeStorageKey)?;
+        self.body_backend
+            .put_immutable(&storage_key, encoded, Some("text/plain; charset=utf-8"))
+            .await?;
         Ok(MediaTranscriptPointer {
-            storage_provider: "local".to_owned(),
-            storage_bucket: None,
+            storage_provider: self.body_backend.provider_name().to_owned(),
+            storage_bucket: self.body_backend.bucket().map(str::to_owned),
             storage_key,
             content_format: "text".to_owned(),
             sha256,
@@ -216,24 +244,34 @@ pub enum MediaFileStoreError {
     Read(#[source] std::io::Error),
     #[error("media file write failed")]
     Write(#[source] std::io::Error),
+    #[error("transcript object-store operation failed: {0}")]
+    ObjectStore(String),
 }
 
 impl MediaFileStoreError {
-    /// Only filesystem I/O can succeed on a later attempt; validation outcomes repeat for the
-    /// same input, so retrying would only repeat the download and paid transcription.
+    /// Only filesystem and remote object-store I/O can succeed on a later attempt; validation
+    /// outcomes repeat for the same input, so retrying would only repeat the download and paid
+    /// transcription.
     pub(crate) const fn is_retryable(&self) -> bool {
-        matches!(self, Self::CurrentDir(_) | Self::Read(_) | Self::Write(_))
+        matches!(
+            self,
+            Self::CurrentDir(_) | Self::Read(_) | Self::Write(_) | Self::ObjectStore(_)
+        )
     }
 }
 
-impl From<LocalObjectError> for MediaFileStoreError {
-    fn from(error: LocalObjectError) -> Self {
+impl From<ObjectStorageOpError> for MediaFileStoreError {
+    fn from(error: ObjectStorageOpError) -> Self {
         match error {
-            LocalObjectError::CurrentDirectory(error) => Self::CurrentDir(error),
-            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
-            LocalObjectError::Write(error) => Self::Write(error),
-            LocalObjectError::Read(error) => Self::Read(error),
-            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingBody,
+            ObjectStorageOpError::UnsafeKey(_) | ObjectStorageOpError::UnsafeLocalPath(_) => {
+                Self::UnsafeStorageKey
+            }
+            ObjectStorageOpError::UnsafeExistingObject(_) => Self::UnsafeExistingBody,
+            ObjectStorageOpError::TooLarge { maximum_bytes, .. } => {
+                Self::TranscriptTooLarge(maximum_bytes.saturating_add(1))
+            }
+            ObjectStorageOpError::File { source, .. } => Self::Write(source),
+            ObjectStorageOpError::ObjectStore(message) => Self::ObjectStore(message),
         }
     }
 }
@@ -241,14 +279,18 @@ impl From<LocalObjectError> for MediaFileStoreError {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
 
+    use newsly_providers::ObjectStorageBackend;
+    use object_store::memory::InMemory;
     use uuid::Uuid;
 
     use super::{MediaFileStore, MediaFileStoreError};
 
     #[test]
-    fn only_filesystem_failures_are_retryable() {
+    fn only_storage_io_failures_are_retryable() {
         assert!(MediaFileStoreError::Write(std::io::Error::other("disk")).is_retryable());
+        assert!(MediaFileStoreError::ObjectStore("timeout".to_owned()).is_retryable());
         assert!(!MediaFileStoreError::EmptyTranscript.is_retryable());
         assert!(!MediaFileStoreError::TranscriptTooLarge(3_000_000).is_retryable());
         assert!(!MediaFileStoreError::UnsafeStorageKey.is_retryable());
@@ -280,6 +322,33 @@ mod tests {
             b"hello podcast"
         );
         let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn stages_s3_compatible_transcript_pointer() {
+        let root = std::env::temp_dir().join(format!("newsly-media-s3-{}", Uuid::new_v4()));
+        let backend = ObjectStorageBackend::s3(Arc::new(InMemory::new()), "newsly-bucket");
+        let store = MediaFileStore::from_backend(
+            root.join("scratch"),
+            root.join("tweet"),
+            backend.clone(),
+            PathBuf::from("content"),
+            1_000_000,
+        )
+        .unwrap();
+        let pointer = store
+            .stage_transcript(42, "  hello s3 podcast \n")
+            .await
+            .unwrap();
+        assert_eq!(pointer.storage_provider, "s3_compatible");
+        assert_eq!(pointer.storage_bucket.as_deref(), Some("newsly-bucket"));
+        assert_eq!(
+            backend
+                .read_bounded(&pointer.storage_key, 1024)
+                .await
+                .unwrap(),
+            Some(b"hello s3 podcast".to_vec())
+        );
     }
 
     #[test]

@@ -74,19 +74,25 @@ struct FilterSheet: View {
         }
     }
     
-    private func formatDate(_ dateString: String) -> String {
+    private static let inputDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        
-        guard let date = formatter.date(from: dateString) else {
+        return formatter
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+
+    private func formatDate(_ dateString: String) -> String {
+        guard let date = Self.inputDateFormatter.date(from: dateString) else {
             return dateString
         }
-        
-        let displayFormatter = DateFormatter()
-        displayFormatter.dateStyle = .medium
-        displayFormatter.timeStyle = .none
-        
-        return displayFormatter.string(from: date)
+        return Self.displayDateFormatter.string(from: date)
     }
 
     private var selectedDateTitle: String {

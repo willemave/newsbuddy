@@ -31,8 +31,16 @@ struct ChatMessageList: View {
     @State private var hasAnchoredInitialScroll = false
     private static let thinkingBubbleID = "chat.thinkingBubble"
 
+    private var isShowingThinkingBubble: Bool {
+        isSending && !hasVisiblePartialResponse
+    }
+
     private var messageAnimation: Animation {
-        AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)
+        reduceMotion ? .easeOut(duration: 0.2) : AppMotion.subtle
+    }
+
+    private var scrollAnimation: Animation? {
+        reduceMotion ? nil : AppMotion.subtle
     }
 
     private var messageInsertionTransition: AnyTransition {
@@ -88,24 +96,22 @@ struct ChatMessageList: View {
                             .id(item.id)
                             .transition(messageInsertionTransition)
                         }
-                        .animation(messageAnimation, value: timeline.last?.id)
 
-                        Group {
-                            if isSending && !hasVisiblePartialResponse {
-                                ThinkingBubbleView(
-                                    startDate: thinkingStartedAt,
-                                    statusText: latestProcessSummary
-                                )
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .transition(messageInsertionTransition)
-                                .id(Self.thinkingBubbleID)
-                            }
+                        if isShowingThinkingBubble {
+                            ThinkingBubbleView(
+                                startDate: thinkingStartedAt,
+                                statusText: latestProcessSummary
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transition(messageInsertionTransition)
+                            .id(Self.thinkingBubbleID)
                         }
-                        .animation(messageAnimation, value: isSending)
                     }
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.vertical, 10)
+                .animation(messageAnimation, value: timeline.last?.id)
+                .animation(messageAnimation, value: isShowingThinkingBubble)
             }
             .defaultScrollAnchor(.bottom)
             .contentMargins(.bottom, 12, for: .scrollContent)
@@ -123,7 +129,9 @@ struct ChatMessageList: View {
             }
             .onChange(of: timeline.last?.message.content) { _, _ in
                 guard isNearBottom, let lastId = timeline.last?.id else { return }
-                scrollToBottom(lastId, proxy: proxy)
+                DispatchQueue.main.async {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
             }
             .onChange(of: isSending) { wasSending, sending in
                 handleSendingChange(from: wasSending, to: sending, proxy: proxy)
@@ -132,7 +140,10 @@ struct ChatMessageList: View {
                 scrollToLatest(proxy: proxy)
             }
             .overlay(alignment: .bottom) {
-                jumpToLatestOverlay(proxy: proxy)
+                ZStack {
+                    jumpToLatestOverlay(proxy: proxy)
+                }
+                .animation(messageAnimation, value: hasNewerContentBelow)
             }
         }
     }
@@ -183,7 +194,7 @@ struct ChatMessageList: View {
     }
 
     private func scrollToBottom<ID: Hashable>(_ target: ID, proxy: ScrollViewProxy) {
-        withAnimation(messageAnimation) {
+        withAnimation(scrollAnimation) {
             proxy.scrollTo(target, anchor: .bottom)
         }
     }
@@ -231,7 +242,6 @@ struct ChatMessageList: View {
             .buttonStyle(.plain)
             .padding(.bottom, 10)
             .transition(.opacity)
-            .animation(messageAnimation, value: hasNewerContentBelow)
         }
     }
 

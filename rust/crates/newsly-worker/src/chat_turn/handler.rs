@@ -10,7 +10,7 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 
-use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
+use crate::{HandlerExecution, HandlerFuture, HandlerInterruptionPolicy, LeaseHealth, TaskHandler};
 
 use super::agent::{ChatAgentError, ChatAgentRunKind, ChatAgentRuntime};
 use super::finalizer::{ChatFailureFinalizer, ChatSuccessFinalizer};
@@ -130,12 +130,11 @@ impl ChatPartitionHandler {
         }
         let cancellation = CancellationToken::new();
         let external_snapshot = snapshot.clone();
-        let execution = self.run_external(
+        let mut execution = Box::pin(self.run_external(
             &external_snapshot,
             cancellation.child_token(),
             lease.claim().clone(),
-        );
-        tokio::pin!(execution);
+        ));
         let result = tokio::select! {
             result = &mut execution => result,
             () = lease.wait_for_ownership_loss() => {
@@ -282,6 +281,10 @@ impl TaskHandler for ChatPartitionHandler {
             QueuedChatTaskKind::ChatTurn => TaskType::ChatTurn,
             QueuedChatTaskKind::DigDeeper => TaskType::DigDeeper,
         }
+    }
+
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        HandlerInterruptionPolicy::DrainBounded
     }
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {

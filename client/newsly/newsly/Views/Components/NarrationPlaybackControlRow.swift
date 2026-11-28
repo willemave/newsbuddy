@@ -83,7 +83,7 @@ func narrationTimeLabel(_ time: TimeInterval) -> String {
 /// Podcast playback in the detail header: play, scrubber, speed on one line.
 struct NarrationPlaybackControlRow: View {
     private let playbackService: NarrationPlaybackService
-    private let snapshot: NarrationPlaybackSnapshot
+    private let isPreparing: Bool
 
     let target: NarrationTarget?
     let onTogglePlayback: () -> Void
@@ -95,16 +95,19 @@ struct NarrationPlaybackControlRow: View {
         onTogglePlayback: @escaping () -> Void
     ) {
         self.playbackService = playbackService
-        self.snapshot = NarrationPlaybackSnapshot(
-            playbackService: playbackService,
-            target: target,
-            isPreparing: isPreparing
-        )
+        self.isPreparing = isPreparing
         self.target = target
         self.onTogglePlayback = onTogglePlayback
     }
 
     var body: some View {
+        // Build the snapshot inside `body` so 1 Hz playback progress reads stay
+        // scoped to this row instead of subscribing parent views during `init`.
+        let snapshot = NarrationPlaybackSnapshot(
+            playbackService: playbackService,
+            target: target,
+            isPreparing: isPreparing
+        )
         HStack(spacing: 12) {
             NarrationPlayButton(
                 snapshot: snapshot,
@@ -228,10 +231,12 @@ struct NarrationSpeedMenu: View {
 
 /// Draggable track with elapsed and remaining time at either end.
 struct NarrationScrubber: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let snapshot: NarrationPlaybackSnapshot
     let onSeek: (Double) -> Void
 
-    @State private var dragProgress: Double?
+    @GestureState private var dragProgress: Double?
 
     private var displayedProgress: Double {
         dragProgress ?? snapshot.progress
@@ -261,19 +266,25 @@ struct NarrationScrubber: View {
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
+                        .updating($dragProgress) { value, state, _ in
+                            guard snapshot.canSeek else {
+                                state = nil
+                                return
+                            }
+                            state = min(max(value.location.x / width, 0), 1)
+                        }
                         .onChanged { value in
                             guard snapshot.canSeek else { return }
                             let nextProgress = min(max(value.location.x / width, 0), 1)
-                            dragProgress = nextProgress
                             onSeek(nextProgress)
-                        }
-                        .onEnded { _ in
-                            dragProgress = nil
                         }
                 )
             }
             .frame(height: 24)
-            .animation(.easeOut(duration: 0.12), value: dragProgress == nil)
+            .animation(
+                AppMotion.respectingReduceMotion(reduceMotion, .easeOut(duration: 0.12)),
+                value: dragProgress == nil
+            )
 
             HStack {
                 Text(snapshot.currentTimeLabel)

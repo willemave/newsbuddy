@@ -38,7 +38,7 @@ struct BriefingStartHereView: View {
                     if !sourceChips.isEmpty {
                         FlowLayout(spacing: 8) {
                             ForEach(sourceChips) { chip in
-                                BriefingSourceChipView(chip: chip, reduceMotion: reduceMotion)
+                                BriefingSourceChipView(chip: chip)
                             }
                         }
                     }
@@ -67,12 +67,16 @@ struct BriefingStartHereView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineSpacing(4)
                         .padding(.top, 24)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                         .accessibilityIdentifier("briefing.start_here.ready")
                 }
 
                     Spacer(minLength: 48)
                 }
+                .animation(
+                    AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+                    value: progress.readyCategoryKeys.isEmpty
+                )
                 .id(Self.topAnchor)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 30)
@@ -188,11 +192,10 @@ private struct BriefingSourceChip: Identifiable, Equatable {
 
 private struct BriefingSourceChipView: View {
     let chip: BriefingSourceChip
-    let reduceMotion: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            BriefingSourceChipDot(state: chip.state, reduceMotion: reduceMotion)
+            BriefingSourceChipDot(state: chip.state)
 
             Text(chip.name)
                 .font(.appCaption.weight(.semibold))
@@ -255,21 +258,16 @@ private struct BriefingSourceChipView: View {
 
 private struct BriefingSourceChipDot: View {
     let state: BriefingSourceChip.State
-    let reduceMotion: Bool
-
-    @State private var pulsing = false
 
     var body: some View {
         Circle()
             .fill(dotColor)
             .frame(width: 6, height: 6)
-            .opacity(state == .reading && pulsing ? 0.35 : 1)
-            .onAppear {
-                guard state == .reading, !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                    pulsing = true
-                }
-            }
+            .pulse(
+                isActive: state == .reading,
+                minOpacity: 0.35,
+                animation: .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
+            )
             .accessibilityHidden(true)
     }
 

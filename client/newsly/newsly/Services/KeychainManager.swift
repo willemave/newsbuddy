@@ -69,6 +69,9 @@ final class KeychainManager: AuthTokenStore {
             }
         }
 
+        // Law A12 compatibility bridge: mirror into App Group UserDefaults only
+        // while legacy Share Extension builds may still read it. Safe to remove
+        // once all supported installed builds use the shared Keychain access group.
         if shouldMirrorToSharedDefaults(key: key) {
             mirrorTokenToSharedDefaults(token, key: key)
         } else {

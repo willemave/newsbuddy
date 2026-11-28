@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
+use newsly_domain::sha256_hex;
+use newsly_providers::{
+    ObjectStorageBackend, ObjectStorageConfigError, ObjectStorageOpError, path_to_object_key,
+};
 use serde_json::Value;
 use thiserror::Error;
-
-use crate::local_object::{
-    LocalObjectError, absolute_root, publish, sha256_hex, storage_key, validate_relative_path,
-};
 
 use super::model::RawDiscussionPointer;
 
@@ -14,26 +14,47 @@ const MAX_RAW_DISCUSSION_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct DiscussionObjectStore {
-    root: PathBuf,
+    backend: ObjectStorageBackend,
     prefix: PathBuf,
 }
 
 impl DiscussionObjectStore {
-    /// Creates the canonical local object-store boundary for immutable comment trees.
+    /// Creates the canonical object-store boundary for immutable comment trees over local or S3
+    /// storage.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absolute or traversing storage prefix.
+    pub fn from_backend(
+        backend: ObjectStorageBackend,
+        prefix: PathBuf,
+    ) -> Result<Self, DiscussionObjectStoreError> {
+        if path_to_object_key(&prefix).is_none() {
+            return Err(DiscussionObjectStoreError::UnsafeStorageKey);
+        }
+        Ok(Self { backend, prefix })
+    }
+
+    /// Creates a local object-store boundary for immutable comment trees.
     ///
     /// # Errors
     ///
     /// Rejects an absolute or traversing storage prefix and failure to resolve a relative root.
     pub fn new(root: PathBuf, prefix: PathBuf) -> Result<Self, DiscussionObjectStoreError> {
-        validate_relative_path(&prefix)?;
-        let root = absolute_root(root)?;
-        Ok(Self { root, prefix })
+        let backend = ObjectStorageBackend::local(root).map_err(|error| match error {
+            ObjectStorageConfigError::CurrentDirectory(source) => {
+                DiscussionObjectStoreError::CurrentDirectory(source)
+            }
+            _ => DiscussionObjectStoreError::UnsafeStorageKey,
+        })?;
+        Self::from_backend(backend, prefix)
     }
 
     /// Writes a content-addressed raw-comment object without a live database connection.
     ///
-    /// Existing objects must be regular files with identical contents. A losing task attempt may
-    /// leave an unreferenced object, but the exact queue and row fences control pointer publication.
+    /// Existing local objects must be regular files with identical contents. A losing task attempt
+    /// may leave an unreferenced object, but the exact queue and row fences control pointer
+    /// publication.
     pub(super) async fn stage(
         &self,
         news_item_id: i64,
@@ -50,13 +71,15 @@ impl DiscussionObjectStore {
             .join("news-item-discussions")
             .join(news_item_id.to_string())
             .join(format!("comments-{sha256}.json"));
-        validate_relative_path(&storage_path)?;
-        let storage_key = storage_key(&storage_path)?;
+        let storage_key = path_to_object_key(&storage_path)
+            .ok_or(DiscussionObjectStoreError::UnsafeStorageKey)?;
         let pretty = serde_json::to_vec_pretty(raw_payload)?;
-        publish(&self.root, &storage_path, &pretty).await?;
+        self.backend
+            .put_immutable(&storage_key, &pretty, Some("application/json"))
+            .await?;
         Ok(RawDiscussionPointer {
-            storage_provider: "local",
-            storage_bucket: None,
+            storage_provider: self.backend.provider_name(),
+            storage_bucket: self.backend.bucket().map(str::to_owned),
             storage_key,
             content_format: "json",
             sha256,
@@ -80,26 +103,33 @@ pub enum DiscussionObjectStoreError {
     Serialize(#[from] serde_json::Error),
     #[error("raw discussion object could not be written")]
     Write(#[source] std::io::Error),
-    #[error("raw discussion object could not be read")]
-    Read(#[source] std::io::Error),
+    #[error("raw discussion object-store operation failed: {0}")]
+    ObjectStore(String),
     #[error("an existing content-addressed discussion object is unsafe or has different bytes")]
     UnsafeExistingObject,
 }
 
-impl From<LocalObjectError> for DiscussionObjectStoreError {
-    fn from(error: LocalObjectError) -> Self {
+impl From<ObjectStorageOpError> for DiscussionObjectStoreError {
+    fn from(error: ObjectStorageOpError) -> Self {
         match error {
-            LocalObjectError::CurrentDirectory(error) => Self::CurrentDirectory(error),
-            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
-            LocalObjectError::Write(error) => Self::Write(error),
-            LocalObjectError::Read(error) => Self::Read(error),
-            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingObject,
+            ObjectStorageOpError::UnsafeKey(_) | ObjectStorageOpError::UnsafeLocalPath(_) => {
+                Self::UnsafeStorageKey
+            }
+            ObjectStorageOpError::UnsafeExistingObject(_) => Self::UnsafeExistingObject,
+            ObjectStorageOpError::TooLarge { maximum_bytes, .. } => {
+                Self::PayloadTooLarge(maximum_bytes.saturating_add(1))
+            }
+            ObjectStorageOpError::File { source, .. } => Self::Write(source),
+            ObjectStorageOpError::ObjectStore(message) => Self::ObjectStore(message),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use object_store::memory::InMemory;
     use serde_json::json;
     use tokio::fs;
     use uuid::Uuid;
@@ -124,6 +154,18 @@ mod tests {
         assert_eq!(first.byte_size, i32::try_from(stored.len()).unwrap());
         assert_eq!(first.to_json()["comment_count"], 1);
         let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn stages_s3_compatible_discussion_pointer() {
+        let backend = ObjectStorageBackend::s3(Arc::new(InMemory::new()), "newsly-bucket");
+        let store =
+            DiscussionObjectStore::from_backend(backend.clone(), PathBuf::from("content")).unwrap();
+        let payload = json!({"comments": []});
+        let staged = store.stage(42, &payload, 0).await.unwrap();
+        assert_eq!(staged.storage_provider, "s3_compatible");
+        assert_eq!(staged.storage_bucket.as_deref(), Some("newsly-bucket"));
+        assert!(backend.exists(&staged.storage_key).await.unwrap());
     }
 
     #[test]

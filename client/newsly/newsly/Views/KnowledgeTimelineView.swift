@@ -26,11 +26,9 @@ struct KnowledgeView: View {
     let showsHeaderActions: Bool
 
     @State private var viewModel: KnowledgeTimelineViewModel
-    @State private var composerText = ""
     @State private var deckReaderDestination: LearningDeckReaderDestination?
     @State private var deckSource: ContentSummary?
     @State private var showsInitialLoadingIndicator = false
-    @FocusState private var isComposerFocused: Bool
 
     private static let topAnchor = "knowledge.top"
 
@@ -58,15 +56,6 @@ struct KnowledgeView: View {
         self.showsHeaderActions = showsHeaderActions
     }
 
-    private var trimmedComposerText: String {
-        composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// E2E launches hold the first prompt so visual baselines never capture a mid-roll frame.
-    private var rotatesComposerPlaceholder: Bool {
-        isVisible && !isComposerFocused && !E2ETestLaunch.isEnabled
-    }
-
     private var isWaitingForInitialTimeline: Bool {
         viewModel.isLoading && viewModel.timeline.isEmpty
     }
@@ -82,9 +71,13 @@ struct KnowledgeView: View {
                 .appListRow()
                 .id(Self.topAnchor)
 
-                composer
-                    .padding(.bottom, 24)
-                    .appListRow()
+                KnowledgeComposerBar(
+                    chats: viewModel.chats,
+                    isVisible: isVisible,
+                    onSelectSession: onSelectSession
+                )
+                .padding(.bottom, 24)
+                .appListRow()
 
                 knowledgeErrors
                 timelineContent
@@ -161,9 +154,6 @@ struct KnowledgeView: View {
         .onChange(of: isVisible) { _, isVisible in
             if !isVisible {
                 viewModel.suspendAutomaticReads()
-                // The open display keeps this list mounted while hidden; the
-                // keyboard must not stay attached to an invisible composer.
-                isComposerFocused = false
             }
         }
         .onChange(of: viewModel.chats.completedVoiceRoute) { _, route in
@@ -219,68 +209,6 @@ struct KnowledgeView: View {
             automaticReadsEnabled: viewModel.automaticReadsEnabled,
             hasActiveWork: viewModel.chats.hasActiveChatWork
         )
-    }
-
-    private var composer: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "text.bubble")
-                .font(.appSymbol(size: 16, weight: .medium))
-                .foregroundStyle(Color.onSurfaceSecondary)
-                .accessibilityHidden(true)
-
-            TextField("", text: $composerText, axis: .vertical)
-                .focused($isComposerFocused)
-                .lineLimit(1...4)
-                .submitLabel(.send)
-                .onSubmit(sendComposerMessage)
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .accessibilityLabel("Ask Knowledge")
-                .accessibilityIdentifier("knowledge.chat.input")
-                .overlay(alignment: .leading) {
-                    if composerText.isEmpty {
-                        KnowledgeComposerPlaceholder(isRotating: rotatesComposerPlaceholder)
-                    }
-                }
-                .font(.terracottaBodyLarge)
-
-            if !trimmedComposerText.isEmpty && !viewModel.chats.isVoiceRecording {
-                Button(action: sendComposerMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.appSymbol(size: 28))
-                        .foregroundStyle(
-                            viewModel.chats.isCreatingSession ? Color.onSurfaceSecondary : Color.brandPrimary
-                        )
-                        .frame(width: 44, height: 44)
-                }
-                .disabled(viewModel.chats.isCreatingSession)
-                .accessibilityLabel("Send question")
-                .accessibilityIdentifier("knowledge.chat.send")
-            } else {
-                TapToTalkMicButton(
-                    isEnabled: viewModel.chats.isVoiceRecording ||
-                        (!viewModel.chats.isCreatingSession && !viewModel.chats.isVoiceActionInFlight && !viewModel.chats.isVoiceTranscribing),
-                    isRecording: viewModel.chats.isVoiceRecording,
-                    isTranscribing: viewModel.chats.isVoiceTranscribing,
-                    isBusy: !viewModel.chats.isVoiceRecording &&
-                        (viewModel.chats.isCreatingSession || viewModel.chats.isVoiceActionInFlight || viewModel.chats.isVoiceTranscribing),
-                    size: 36,
-                    action: {
-                        Task {
-                            await viewModel.chats.toggleVoiceRecording()
-                        }
-                    }
-                )
-                .frame(width: 44, height: 44)
-                .accessibilityIdentifier("knowledge.chat.mic")
-            }
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .glassEffect(
-            .regular.interactive(),
-            in: RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-        )
-        .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 
     @ViewBuilder
@@ -533,20 +461,6 @@ struct KnowledgeView: View {
         .foregroundStyle(Color.onSurface)
     }
 
-    private func sendComposerMessage() {
-        let message = trimmedComposerText
-        guard !message.isEmpty else { return }
-        isComposerFocused = false
-        Task {
-            if let route = await viewModel.chats.startChat(message: message) {
-                composerText = ""
-                onSelectSession(route)
-            } else {
-                isComposerFocused = true
-            }
-        }
-    }
-
     /// The newest ready saved row plays the one-time swipe hint, on first view or first save.
     /// E2E launches skip it so visual baselines never capture a half-open row.
     private var sourceSwipeHintContentID: Int? {
@@ -629,6 +543,107 @@ struct KnowledgeView: View {
         guard !deck.hasActiveLatestRun, !viewModel.decks.busyDeckIDs.contains(deck.id) else { return }
         guard await viewModel.decks.regenerate(deck) != nil else { return }
         dependencyFactory.toastService.show("Regenerating your deck", type: .info, duration: 3)
+    }
+}
+
+private struct KnowledgeComposerBar: View {
+    let chats: KnowledgeChatViewModel
+    let isVisible: Bool
+    let onSelectSession: (ChatSessionRoute) -> Void
+
+    @State private var composerText = ""
+    @FocusState private var isComposerFocused: Bool
+
+    private var trimmedComposerText: String {
+        composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// E2E launches hold the first prompt so visual baselines never capture a mid-roll frame.
+    private var rotatesComposerPlaceholder: Bool {
+        isVisible && !isComposerFocused && !E2ETestLaunch.isEnabled
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "text.bubble")
+                .font(.appSymbol(size: 16, weight: .medium))
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .accessibilityHidden(true)
+
+            TextField("", text: $composerText, axis: .vertical)
+                .focused($isComposerFocused)
+                .lineLimit(1...4)
+                .submitLabel(.send)
+                .onSubmit(sendComposerMessage)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .accessibilityLabel("Ask Knowledge")
+                .accessibilityIdentifier("knowledge.chat.input")
+                .overlay(alignment: .leading) {
+                    if composerText.isEmpty {
+                        KnowledgeComposerPlaceholder(isRotating: rotatesComposerPlaceholder)
+                    }
+                }
+                .font(.terracottaBodyLarge)
+
+            if !trimmedComposerText.isEmpty && !chats.isVoiceRecording {
+                Button(action: sendComposerMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.appSymbol(size: 28))
+                        .foregroundStyle(
+                            chats.isCreatingSession ? Color.onSurfaceSecondary : Color.brandPrimary
+                        )
+                        .frame(width: 44, height: 44)
+                }
+                .disabled(chats.isCreatingSession)
+                .accessibilityLabel("Send question")
+                .accessibilityIdentifier("knowledge.chat.send")
+            } else {
+                TapToTalkMicButton(
+                    isEnabled: chats.isVoiceRecording ||
+                        (!chats.isCreatingSession && !chats.isVoiceActionInFlight && !chats.isVoiceTranscribing),
+                    isRecording: chats.isVoiceRecording,
+                    isTranscribing: chats.isVoiceTranscribing,
+                    isBusy: !chats.isVoiceRecording &&
+                        (chats.isCreatingSession || chats.isVoiceActionInFlight || chats.isVoiceTranscribing),
+                    size: 36,
+                    action: {
+                        Task {
+                            await chats.toggleVoiceRecording()
+                        }
+                    }
+                )
+                .frame(width: 44, height: 44)
+                .accessibilityIdentifier("knowledge.chat.mic")
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .glassEffect(
+            .regular.interactive(),
+            in: RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+        )
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .onChange(of: isVisible) { _, isVisible in
+            if !isVisible {
+                // The open display keeps this list mounted while hidden; the
+                // keyboard must not stay attached to an invisible composer.
+                isComposerFocused = false
+            }
+        }
+    }
+
+    private func sendComposerMessage() {
+        let message = trimmedComposerText
+        guard !message.isEmpty else { return }
+        isComposerFocused = false
+        Task {
+            if let route = await chats.startChat(message: message) {
+                composerText = ""
+                onSelectSession(route)
+            } else {
+                isComposerFocused = true
+            }
+        }
     }
 }
 

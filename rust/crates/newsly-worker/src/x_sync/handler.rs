@@ -95,7 +95,7 @@ impl TaskHandler for XSyncIntegrationHandler {
 async fn execute_x_sync(
     services: &XSyncWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(user_id) = plan.payload.get("user_id").and_then(Value::as_i64) else {
         return plain_failure("Missing user_id in sync_integration payload", false);
@@ -197,7 +197,7 @@ async fn execute_x_sync(
             }
         };
         let refreshed =
-            match provider_call(&mut lease, gateway.refresh_oauth_token(&refresh_token)).await {
+            match provider_call(&lease, gateway.refresh_oauth_token(&refresh_token)).await {
                 Ok(Ok(refreshed)) => refreshed,
                 Ok(Err(error)) if unrecoverable_refresh_error(&error) => {
                     let reason = error.to_string();
@@ -275,7 +275,7 @@ async fn execute_x_sync(
         provider_user_id
     } else {
         let authenticated_user =
-            match provider_call(&mut lease, gateway.authenticated_user(&access_token)).await {
+            match provider_call(&lease, gateway.authenticated_user(&access_token)).await {
                 Ok(Ok(user)) => user,
                 Ok(Err(error)) => {
                     return finalized_failure(
@@ -321,7 +321,7 @@ async fn execute_x_sync(
         match fetch_bookmarks(
             services,
             gateway,
-            &mut lease,
+            &lease,
             &access_token,
             &provider_user_id,
             &prepared,
@@ -366,7 +366,7 @@ async fn execute_x_sync(
 async fn fetch_bookmarks(
     services: &XSyncWorkerServices,
     gateway: &XSyncGateway,
-    lease: &mut LeaseHealth,
+    lease: &LeaseHealth,
     access_token: &str,
     provider_user_id: &str,
     prepared: &PreparedXSync,
@@ -481,14 +481,13 @@ where
 }
 
 async fn provider_call<T>(
-    lease: &mut LeaseHealth,
+    lease: &LeaseHealth,
     future: impl Future<Output = T>,
 ) -> Result<T, LeaseLost> {
-    tokio::pin!(future);
-    tokio::select! {
-        result = &mut future => Ok(result),
-        () = lease.wait_for_ownership_loss() => Err(LeaseLost),
+    if lease.ownership_lost() {
+        return Err(LeaseLost);
     }
+    Ok(future.await)
 }
 
 fn finalized_failure(

@@ -29,8 +29,8 @@ pub(crate) async fn main() -> Result<()> {
     let queue = QueueKernel::new(database.pool().clone());
     let gateway =
         ContentMiscGateway::from_env().context("discussion provider initialization failed")?;
-    let object_store = DiscussionObjectStore::new(
-        config.content_body_local_root.clone(),
+    let object_store = DiscussionObjectStore::from_backend(
+        config.content_body_storage.clone(),
         config.content_body_storage_prefix.clone(),
     )
     .context("discussion object-store initialization failed")?;

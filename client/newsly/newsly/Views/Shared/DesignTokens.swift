@@ -364,6 +364,7 @@ enum AppMotion {
     static let press = Animation.spring(response: 0.28, dampingFraction: 0.82)
     static let panel = Animation.spring(duration: 0.3, bounce: 0)
     static let subtle = Animation.easeOut(duration: 0.2)
+    static let readDim = Animation.easeInOut(duration: 0.28)
     static let emphasized = Animation.spring(response: 0.42, dampingFraction: 0.86)
     static let reduced = Animation.linear(duration: 0.01)
 
@@ -373,6 +374,7 @@ enum AppMotion {
     static let typingDotPulse = Animation.easeInOut(duration: 0.4).repeatForever(autoreverses: true)
     static let chatStatusPulse = Animation.easeInOut(duration: 1.5).repeatForever(autoreverses: true)
     static let lanePulse = Animation.easeOut(duration: 1.4).repeatForever(autoreverses: false)
+    static let skeletonPulse = Animation.easeInOut(duration: 1.4).repeatForever(autoreverses: true)
 
     static func respectingReduceMotion(_ reduceMotion: Bool, _ animation: Animation) -> Animation {
         reduceMotion ? reduced : animation

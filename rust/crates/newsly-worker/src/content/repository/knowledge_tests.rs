@@ -80,6 +80,7 @@ async fn article_redirect_preserves_knowledge_and_x_provenance_without_duplicate
                 },
                 body: StagedContentBody {
                     storage_provider: "local",
+                    storage_bucket: None,
                     storage_key: "fixture/source.txt".to_owned(),
                     content_format: "text",
                     sha256: "a".repeat(64),

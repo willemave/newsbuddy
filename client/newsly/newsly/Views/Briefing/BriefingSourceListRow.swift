@@ -10,6 +10,7 @@ struct BriefingSourceListRow: View {
     let card: BriefingSourceCard
     let isSelected: Bool
     var savedSources: BriefingSavedSources?
+    var contentTransitionNamespace: Namespace.ID? = nil
     let onOpenSource: (String) -> Void
     var onSourceAction: ((String, BriefingSourceAction) -> Void)?
     let onMarkRead: () -> Void
@@ -25,6 +26,7 @@ struct BriefingSourceListRow: View {
 
     var body: some View {
         rowBody
+            .matchedContentZoomSource(id: card.contentId, namespace: contentTransitionNamespace)
             .opacity(swipe.cardOpacity)
             .offset(x: swipe.cardOffset)
             .background { swipeBackdrop }
@@ -88,7 +90,7 @@ struct BriefingSourceListRow: View {
                 .fill(isSelected ? Color.surfaceContainer : Color.surfacePrimary.opacity(0.001))
                 .padding(.horizontal, 6)
         }
-        .animation(.easeInOut(duration: 0.25), value: isRead)
+        .animation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.readDim), value: isRead)
     }
 
     /// Publisher (the work's attribution), length, and publication date;

@@ -270,6 +270,7 @@ pub use attempts::{
     create_or_rerun_learning_deck, is_active_learning_deck_conflict, retry_learning_deck,
 };
 pub(crate) use canonical::prepare_learning_deck_generation_source;
+pub use canonical::relink_canonical_user_state;
 pub use lifecycle::{
     delete_learning_deck, disable_learning_deck_share, persist_learning_deck_share,
     prepare_enable_learning_deck_share,

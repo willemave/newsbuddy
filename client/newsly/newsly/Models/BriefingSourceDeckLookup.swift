@@ -10,12 +10,14 @@ enum BriefingSourceDeckLookup {
     ) -> LearningDeck? {
         switch source {
         case .content:
-            return decks.first { $0.knowledgeSource == source }
+            let matches = decks.filter { $0.knowledgeSource == source }
+            return matches.first(where: \.viewerAvailable) ?? matches.first
         case .news:
             guard let url = normalizedNewsURL(sourceURL) else { return nil }
-            return decks.first {
+            let matches = decks.filter {
                 $0.sourceKind == .content && normalizedNewsURL($0.sourceURL) == url
             }
+            return matches.first(where: \.viewerAvailable) ?? matches.first
         }
     }
 

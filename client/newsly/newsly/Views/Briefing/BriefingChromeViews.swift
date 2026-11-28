@@ -55,6 +55,8 @@ struct BriefingFirstRunStrip: View {
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -85,7 +87,10 @@ struct BriefingFirstRunStrip: View {
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
-            .animation(.easeOut(duration: 0.35), value: viewModel.orderedLenses.map(\.key))
+            .animation(
+                AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel),
+                value: viewModel.orderedLenses.map(\.key)
+            )
         }
         .briefingStripEdgeFade()
         .sensoryFeedback(
@@ -107,6 +112,8 @@ struct BriefingCategoryStrip: View {
     let viewModel: BriefingViewModel
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -137,7 +144,7 @@ struct BriefingCategoryStrip: View {
             }
             .onChange(of: viewModel.selectedLensKey) { _, selectedKey in
                 guard let selectedKey else { return }
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {
                     proxy.scrollTo(selectedKey, anchor: .center)
                 }
             }
@@ -173,6 +180,8 @@ private extension View {
 }
 
 private struct BriefingStripPill: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let title: String
     let unreadCount: Int
     let isSelected: Bool
@@ -223,10 +232,13 @@ private struct BriefingStripPill: View {
                     Text("\(unreadCount)")
                         .font(.appCaption2.weight(.bold).monospacedDigit())
                         .foregroundStyle(isSelected ? Color.surfacePrimary : Color.brandPrimary)
-                        .contentTransition(.numericText(countsDown: true))
-                        .animation(.easeInOut(duration: 0.3), value: unreadCount)
+                        .contentTransition(.numericText(value: Double(unreadCount)))
                 }
             }
+            .animation(
+                AppMotion.respectingReduceMotion(reduceMotion, .easeInOut(duration: 0.3)),
+                value: unreadCount
+            )
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
             .frame(minHeight: minHeight)
             .padding(.horizontal, 12)
@@ -313,6 +325,8 @@ struct BriefingNowPlayingPanel: View {
     @Binding var fullHeight: CGFloat
     @Binding var minimizedHeight: CGFloat
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var chapterCount: Int { narration?.chapters.count ?? 0 }
 
     private var boundedIndex: Int {
@@ -342,7 +356,10 @@ struct BriefingNowPlayingPanel: View {
                     fullHeight = height
                 }
                 .opacity(isMinimized ? 0 : 1)
-                .animation(.easeInOut(duration: 0.18), value: isMinimized)
+                .animation(
+                    AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+                    value: isMinimized
+                )
                 .allowsHitTesting(!isMinimized)
                 .accessibilityHidden(isMinimized)
 
@@ -353,7 +370,10 @@ struct BriefingNowPlayingPanel: View {
                     minimizedHeight = height
                 }
                 .opacity(isMinimized ? 1 : 0)
-                .animation(.easeInOut(duration: 0.18), value: isMinimized)
+                .animation(
+                    AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+                    value: isMinimized
+                )
                 .allowsHitTesting(isMinimized)
                 .accessibilityHidden(!isMinimized)
         }

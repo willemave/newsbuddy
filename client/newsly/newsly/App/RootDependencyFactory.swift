@@ -121,10 +121,6 @@ final class RootDependencyFactory {
         )
     }
 
-    func makeChatSessionsViewModel() -> ChatSessionsViewModel {
-        ChatSessionsViewModel(chatService: dependencies.chatService)
-    }
-
     func makeContentListViewModel(readStateCache: ReadStateCache) -> ContentListViewModel {
         ContentListViewModel(
             contentService: dependencies.contentService,

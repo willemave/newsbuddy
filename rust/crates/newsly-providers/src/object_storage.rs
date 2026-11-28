@@ -1,11 +1,18 @@
-//! Validation shared by content-body and immutable artifact storage boundaries.
+//! Validation and unified local / S3-compatible operations for content-body and artifact storage.
 
+use futures_util::StreamExt as _;
 use object_store::aws::AmazonS3Builder;
-use object_store::{ClientOptions, ObjectStore};
+use object_store::path::Path as ObjectPath;
+use object_store::{
+    Attribute, AttributeValue, Attributes, ClientOptions, Error as ObjectStoreError, ObjectStore,
+    ObjectStoreExt as _, PutOptions,
+};
 use reqwest::Url;
 use secrecy::{ExposeSecret, SecretString};
 use std::path::{Component, Path, PathBuf};
 use std::{env, sync::Arc, time::Duration};
+use tokio::io::AsyncWriteExt as _;
+use uuid::Uuid;
 
 /// Whether a configured absolute storage root excludes parent traversal and filesystem roots.
 #[must_use]
@@ -33,6 +40,21 @@ pub fn is_safe_object_key(key: &str) -> bool {
         && Path::new(key)
             .components()
             .all(|component| matches!(component, Component::Normal(_)))
+}
+
+/// Convert a validated relative `Path` into a canonical `/`-separated object key.
+#[must_use]
+pub fn path_to_object_key(path: &Path) -> Option<String> {
+    if !path.to_str().is_some_and(is_safe_object_key) {
+        return None;
+    }
+    path.components()
+        .map(|component| match component {
+            Component::Normal(part) => part.to_str().map(str::to_owned),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|parts| parts.join("/"))
 }
 
 /// Remove an object entry after verifying its parent stays within the canonical root.
@@ -89,11 +111,46 @@ pub enum LocalStorageError {
     },
 }
 
+/// Unified error for local and S3-compatible object operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ObjectStorageOpError {
+    #[error("unsafe object key {0:?}")]
+    UnsafeKey(String),
+    #[error("unsafe local object path {0:?}")]
+    UnsafeLocalPath(PathBuf),
+    #[error("existing local object at {0:?} is unsafe or has different bytes")]
+    UnsafeExistingObject(PathBuf),
+    #[error("object {key:?} exceeds the {maximum_bytes}-byte read limit")]
+    TooLarge { key: String, maximum_bytes: usize },
+    #[error("local object operation failed for {path:?}")]
+    File {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("object-store operation failed: {0}")]
+    ObjectStore(String),
+}
+
+impl From<LocalStorageError> for ObjectStorageOpError {
+    fn from(error: LocalStorageError) -> Self {
+        match error {
+            LocalStorageError::UnsafePath(path) => Self::UnsafeLocalPath(path),
+            LocalStorageError::File { path, source } => Self::File { path, source },
+        }
+    }
+}
+
 /// Storage backend built from validated process configuration; consumers retain product limits.
 #[derive(Clone)]
 pub enum ObjectStorageBackend {
-    Local { root: PathBuf },
-    S3 { store: Arc<dyn ObjectStore> },
+    Local {
+        root: PathBuf,
+    },
+    S3 {
+        store: Arc<dyn ObjectStore>,
+        bucket: String,
+    },
 }
 
 impl std::fmt::Debug for ObjectStorageBackend {
@@ -103,14 +160,59 @@ impl std::fmt::Debug for ObjectStorageBackend {
                 .debug_struct("LocalObjectStorage")
                 .field("root", root)
                 .finish(),
-            Self::S3 { .. } => formatter
+            Self::S3 { bucket, .. } => formatter
                 .debug_struct("S3ObjectStorage")
+                .field("bucket", bucket)
                 .finish_non_exhaustive(),
         }
     }
 }
 
 impl ObjectStorageBackend {
+    /// Build a validated local storage backend, resolving relative paths against the current
+    /// working directory once.
+    ///
+    /// # Errors
+    /// Returns an error if the current directory cannot be resolved or the root is unsafe.
+    pub fn local(root: PathBuf) -> Result<Self, ObjectStorageConfigError> {
+        let root = if root.is_absolute() {
+            root
+        } else {
+            env::current_dir()?.join(root)
+        };
+        if !is_safe_storage_root(&root) {
+            return Err(ObjectStorageConfigError::UnsafeRoot(root));
+        }
+        Ok(Self::Local { root })
+    }
+
+    /// Build an S3-compatible backend from an explicit `ObjectStore` (useful in tests).
+    #[must_use]
+    pub fn s3(store: Arc<dyn ObjectStore>, bucket: impl Into<String>) -> Self {
+        Self::S3 {
+            store,
+            bucket: bucket.into(),
+        }
+    }
+
+    /// Canonical `storage_provider` value written to database pointers.
+    #[must_use]
+    pub const fn provider_name(&self) -> &'static str {
+        match self {
+            Self::Local { .. } => "local",
+            Self::S3 { .. } => "s3_compatible",
+        }
+    }
+
+    /// Configured bucket name for S3-compatible storage, or `None` for local storage.
+    #[must_use]
+    pub fn bucket(&self) -> Option<&str> {
+        match self {
+            Self::Local { .. } => None,
+            Self::S3 { bucket, .. } => Some(bucket.as_str()),
+        }
+    }
+
     /// Build a local or S3-compatible backend from `CONTENT_BODY_STORAGE` settings.
     ///
     /// # Errors
@@ -122,15 +224,7 @@ impl ObjectStorageBackend {
             "local" => {
                 let configured = env::var_os("CONTENT_BODY_LOCAL_ROOT")
                     .map_or_else(|| PathBuf::from("data/content_bodies"), PathBuf::from);
-                let root = if configured.is_absolute() {
-                    configured
-                } else {
-                    env::current_dir()?.join(configured)
-                };
-                if !is_safe_storage_root(&root) {
-                    return Err(ObjectStorageConfigError::UnsafeRoot(root));
-                }
-                Ok(Self::Local { root })
+                Self::local(configured)
             }
             "s3_compatible" => {
                 let bucket = required("CONTENT_BODY_STORAGE_BUCKET")?;
@@ -158,7 +252,7 @@ impl ObjectStorageBackend {
                     ));
                 }
                 let mut builder = AmazonS3Builder::from_env()
-                    .with_bucket_name(bucket)
+                    .with_bucket_name(bucket.clone())
                     .with_disable_bulk_delete(true)
                     .with_client_options(
                         ClientOptions::new().with_timeout(Duration::from_secs(timeout_seconds)),
@@ -181,10 +275,317 @@ impl ObjectStorageBackend {
                     .map_err(|error| ObjectStorageConfigError::ObjectStore(error.to_string()))?;
                 Ok(Self::S3 {
                     store: Arc::new(store),
+                    bucket,
                 })
             }
             _ => Err(ObjectStorageConfigError::UnsupportedProvider(provider)),
         }
+    }
+
+    /// Read at most `maximum_bytes` of an object, indicating whether the stored object was larger.
+    ///
+    /// # Errors
+    /// Returns an error for unsafe keys/paths or backend I/O failures.
+    pub async fn read_prefix(
+        &self,
+        key: &str,
+        maximum_bytes: usize,
+    ) -> Result<Option<LocalObjectSlice>, ObjectStorageOpError> {
+        validate_key(key)?;
+        match self {
+            Self::Local { root } => Ok(read_local_object(root, key, maximum_bytes).await?),
+            Self::S3 { store, .. } => {
+                let path = parse_object_path(key)?;
+                let metadata = match store.head(&path).await {
+                    Ok(metadata) => metadata,
+                    Err(ObjectStoreError::NotFound { .. }) => return Ok(None),
+                    Err(error) => return Err(ObjectStorageOpError::ObjectStore(error.to_string())),
+                };
+                let maximum_u64 = u64::try_from(maximum_bytes).unwrap_or(u64::MAX);
+                let end = metadata.size.min(maximum_u64);
+                let bytes = if end == 0 {
+                    Vec::new()
+                } else {
+                    match store.get_range(&path, 0..end).await {
+                        Ok(bytes) => bytes.to_vec(),
+                        Err(ObjectStoreError::NotFound { .. }) => return Ok(None),
+                        Err(error) => {
+                            return Err(ObjectStorageOpError::ObjectStore(error.to_string()));
+                        }
+                    }
+                };
+                Ok(Some(LocalObjectSlice {
+                    bytes,
+                    truncated: metadata.size > maximum_u64,
+                }))
+            }
+        }
+    }
+
+    /// Read a complete object, rejecting any object larger than `maximum_bytes`.
+    ///
+    /// # Errors
+    /// Returns `ObjectStorageOpError::TooLarge` if the object exceeds `maximum_bytes`, or an error
+    /// for unsafe keys/paths or backend failures.
+    pub async fn read_bounded(
+        &self,
+        key: &str,
+        maximum_bytes: usize,
+    ) -> Result<Option<Vec<u8>>, ObjectStorageOpError> {
+        validate_key(key)?;
+        match self {
+            Self::Local { root } => {
+                let Some(slice) = read_local_object(root, key, maximum_bytes).await? else {
+                    return Ok(None);
+                };
+                if slice.truncated {
+                    return Err(ObjectStorageOpError::TooLarge {
+                        key: key.to_owned(),
+                        maximum_bytes,
+                    });
+                }
+                Ok(Some(slice.bytes))
+            }
+            Self::S3 { store, .. } => {
+                let path = parse_object_path(key)?;
+                let result = match store.get(&path).await {
+                    Ok(result) => result,
+                    Err(ObjectStoreError::NotFound { .. }) => return Ok(None),
+                    Err(error) => return Err(ObjectStorageOpError::ObjectStore(error.to_string())),
+                };
+                if result.meta.size > maximum_bytes as u64 {
+                    return Err(ObjectStorageOpError::TooLarge {
+                        key: key.to_owned(),
+                        maximum_bytes,
+                    });
+                }
+                let initial_capacity = usize::try_from(result.meta.size)
+                    .unwrap_or(maximum_bytes)
+                    .min(maximum_bytes);
+                let mut bytes = Vec::with_capacity(initial_capacity);
+                let mut stream = result.into_stream();
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk
+                        .map_err(|error| ObjectStorageOpError::ObjectStore(error.to_string()))?;
+                    if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
+                        return Err(ObjectStorageOpError::TooLarge {
+                            key: key.to_owned(),
+                            maximum_bytes,
+                        });
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(Some(bytes))
+            }
+        }
+    }
+
+    /// Check whether an object exists without reading its payload.
+    ///
+    /// # Errors
+    /// Returns an error for unsafe keys/paths or backend failures.
+    pub async fn exists(&self, key: &str) -> Result<bool, ObjectStorageOpError> {
+        validate_key(key)?;
+        match self {
+            Self::Local { root } => Ok(read_local_object(root, key, 0).await?.is_some()),
+            Self::S3 { store, .. } => {
+                let path = parse_object_path(key)?;
+                match store.head(&path).await {
+                    Ok(_) => Ok(true),
+                    Err(ObjectStoreError::NotFound { .. }) => Ok(false),
+                    Err(error) => Err(ObjectStorageOpError::ObjectStore(error.to_string())),
+                }
+            }
+        }
+    }
+
+    /// Publish immutable bytes under `key`.
+    ///
+    /// On local storage, the temporary file is created beside the destination and hard-linked into
+    /// place so concurrent writers never clobber a winner; an existing destination is accepted
+    /// only when it is a regular non-symlink file with identical bytes.
+    ///
+    /// # Errors
+    /// Returns an error for unsafe keys/paths, mismatched existing local objects, or backend I/O
+    /// failures.
+    pub async fn put_immutable(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        content_type: Option<&str>,
+    ) -> Result<(), ObjectStorageOpError> {
+        validate_key(key)?;
+        match self {
+            Self::Local { root } => publish_local_immutable(root, key, bytes).await,
+            Self::S3 { store, .. } => {
+                let path = parse_object_path(key)?;
+                let mut options = PutOptions::default();
+                if let Some(content_type) = content_type {
+                    options.attributes = Attributes::from_iter([(
+                        Attribute::ContentType,
+                        AttributeValue::from(content_type.to_owned()),
+                    )]);
+                }
+                store
+                    .put_opts(&path, bytes.to_vec().into(), options)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| ObjectStorageOpError::ObjectStore(error.to_string()))
+            }
+        }
+    }
+
+    /// Delete an object; missing objects are idempotent success.
+    ///
+    /// # Errors
+    /// Returns an error for unsafe keys/paths or backend failures.
+    pub async fn delete(&self, key: &str) -> Result<(), ObjectStorageOpError> {
+        validate_key(key)?;
+        match self {
+            Self::Local { root } => Ok(delete_local_object(root, key).await?),
+            Self::S3 { store, .. } => {
+                let path = parse_object_path(key)?;
+                match store.delete(&path).await {
+                    Ok(()) | Err(ObjectStoreError::NotFound { .. }) => Ok(()),
+                    Err(error) => Err(ObjectStorageOpError::ObjectStore(error.to_string())),
+                }
+            }
+        }
+    }
+}
+
+fn validate_key(key: &str) -> Result<(), ObjectStorageOpError> {
+    if !is_safe_object_key(key) {
+        return Err(ObjectStorageOpError::UnsafeKey(key.to_owned()));
+    }
+    Ok(())
+}
+
+fn parse_object_path(key: &str) -> Result<ObjectPath, ObjectStorageOpError> {
+    ObjectPath::parse(key).map_err(|error| ObjectStorageOpError::UnsafeKey(error.to_string()))
+}
+
+async fn publish_local_immutable(
+    root: &Path,
+    key: &str,
+    bytes: &[u8],
+) -> Result<(), ObjectStorageOpError> {
+    let destination = root.join(key);
+    let parent = destination
+        .parent()
+        .ok_or_else(|| ObjectStorageOpError::UnsafeLocalPath(destination.clone()))?;
+    tokio::fs::create_dir_all(root)
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: root.to_path_buf(),
+            source,
+        })?;
+    let canonical_root =
+        tokio::fs::canonicalize(root)
+            .await
+            .map_err(|source| ObjectStorageOpError::File {
+                path: root.to_path_buf(),
+                source,
+            })?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    let canonical_parent =
+        tokio::fs::canonicalize(parent)
+            .await
+            .map_err(|source| ObjectStorageOpError::File {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err(ObjectStorageOpError::UnsafeLocalPath(destination));
+    }
+
+    let temporary = canonical_parent.join(format!(".{}.tmp", Uuid::new_v4()));
+    if let Err(error) = write_new_file(&temporary, bytes).await {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(error);
+    }
+    match tokio::fs::hard_link(&temporary, &destination).await {
+        Ok(()) => remove_temporary(&temporary).await,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            remove_temporary(&temporary).await?;
+            validate_existing_local(&destination, bytes).await
+        }
+        Err(source) => {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            Err(ObjectStorageOpError::File {
+                path: destination,
+                source,
+            })
+        }
+    }
+}
+
+async fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), ObjectStorageOpError> {
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    file.write_all(bytes)
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    file.flush()
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+async fn remove_temporary(path: &Path) -> Result<(), ObjectStorageOpError> {
+    tokio::fs::remove_file(path)
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+async fn validate_existing_local(path: &Path, expected: &[u8]) -> Result<(), ObjectStorageOpError> {
+    let metadata =
+        tokio::fs::symlink_metadata(path)
+            .await
+            .map_err(|source| ObjectStorageOpError::File {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() != expected.len() as u64
+    {
+        return Err(ObjectStorageOpError::UnsafeExistingObject(
+            path.to_path_buf(),
+        ));
+    }
+    let actual = tokio::fs::read(path)
+        .await
+        .map_err(|source| ObjectStorageOpError::File {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(ObjectStorageOpError::UnsafeExistingObject(
+            path.to_path_buf(),
+        ))
     }
 }
 
@@ -244,10 +645,11 @@ pub struct LocalObjectSlice {
     pub truncated: bool,
 }
 
-/// Read a regular object file within a canonical root, retaining at most the requested bytes.
+/// Read a regular non-symlink object file within a canonical root, retaining at most the requested
+/// bytes.
 ///
 /// # Errors
-/// Returns an error for escaping paths, non-files or filesystem failures.
+/// Returns an error for escaping paths, symlinks, non-files or filesystem failures.
 pub async fn read_local_object(
     root: &Path,
     key: &str,
@@ -256,6 +658,19 @@ pub async fn read_local_object(
     use tokio::io::AsyncReadExt as _;
     let requested = root.join(key);
     if !is_safe_object_key(key) {
+        return Err(LocalStorageError::UnsafePath(requested));
+    }
+    let link_meta = match tokio::fs::symlink_metadata(&requested).await {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(LocalStorageError::File {
+                path: requested,
+                source,
+            });
+        }
+    };
+    if link_meta.file_type().is_symlink() || !link_meta.is_file() {
         return Err(LocalStorageError::UnsafePath(requested));
     }
     let canonical_root = match tokio::fs::canonicalize(root).await {
@@ -309,8 +724,14 @@ pub async fn read_local_object(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_object_key, is_safe_storage_root};
     use std::path::Path;
+    use std::sync::Arc;
+
+    use object_store::memory::InMemory;
+
+    use super::{
+        ObjectStorageBackend, ObjectStorageOpError, is_safe_object_key, is_safe_storage_root,
+    };
 
     #[test]
     fn ambiguous_and_escaping_keys_are_rejected() {
@@ -339,6 +760,113 @@ mod tests {
         for root in ["/", "relative", "/body/../secret"] {
             assert!(!is_safe_storage_root(Path::new(root)));
         }
+    }
+
+    #[tokio::test]
+    async fn local_backend_immutable_publish_and_bounded_reads() {
+        let temporary = tempfile::tempdir().unwrap();
+        let backend = ObjectStorageBackend::local(temporary.path().join("objects")).unwrap();
+        assert_eq!(backend.provider_name(), "local");
+        assert_eq!(backend.bucket(), None);
+
+        backend
+            .put_immutable("content/42/source.txt", b"expected", Some("text/plain"))
+            .await
+            .unwrap();
+        // Idempotent re-publish with identical bytes succeeds.
+        backend
+            .put_immutable("content/42/source.txt", b"expected", None)
+            .await
+            .unwrap();
+        // Mismatched bytes fail without overwriting.
+        let mismatch = backend
+            .put_immutable("content/42/source.txt", b"different", None)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            mismatch,
+            ObjectStorageOpError::UnsafeExistingObject(_)
+        ));
+        assert_eq!(
+            backend
+                .read_bounded("content/42/source.txt", 16)
+                .await
+                .unwrap(),
+            Some(b"expected".to_vec())
+        );
+        assert!(matches!(
+            backend.read_bounded("content/42/source.txt", 4).await,
+            Err(ObjectStorageOpError::TooLarge { .. })
+        ));
+        let prefix = backend
+            .read_prefix("content/42/source.txt", 4)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(prefix.bytes, b"expe");
+        assert!(prefix.truncated);
+        assert!(backend.exists("content/42/source.txt").await.unwrap());
+        backend.delete("content/42/source.txt").await.unwrap();
+        assert!(!backend.exists("content/42/source.txt").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn s3_backend_supports_put_read_exists_and_delete() {
+        let backend = ObjectStorageBackend::s3(Arc::new(InMemory::new()), "newsly-test-bucket");
+        assert_eq!(backend.provider_name(), "s3_compatible");
+        assert_eq!(backend.bucket(), Some("newsly-test-bucket"));
+        assert!(!backend.exists("content/42/source.txt").await.unwrap());
+
+        backend
+            .put_immutable(
+                "content/42/source.txt",
+                b"hello s3",
+                Some("text/plain; charset=utf-8"),
+            )
+            .await
+            .unwrap();
+        assert!(backend.exists("content/42/source.txt").await.unwrap());
+        assert_eq!(
+            backend
+                .read_bounded("content/42/source.txt", 16)
+                .await
+                .unwrap(),
+            Some(b"hello s3".to_vec())
+        );
+        assert!(matches!(
+            backend.read_bounded("content/42/source.txt", 4).await,
+            Err(ObjectStorageOpError::TooLarge { .. })
+        ));
+        let prefix = backend
+            .read_prefix("content/42/source.txt", 5)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(prefix.bytes, b"hello");
+        assert!(prefix.truncated);
+
+        backend.delete("content/42/source.txt").await.unwrap();
+        backend.delete("content/42/source.txt").await.unwrap();
+        assert!(!backend.exists("content/42/source.txt").await.unwrap());
+        assert_eq!(
+            backend
+                .read_bounded("content/42/source.txt", 16)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_identical_local_writers_both_succeed() {
+        let temporary = tempfile::tempdir().unwrap();
+        let backend = ObjectStorageBackend::local(temporary.path().join("objects")).unwrap();
+        let (first, second) = tokio::join!(
+            backend.put_immutable("objects/value.txt", b"expected", None),
+            backend.put_immutable("objects/value.txt", b"expected", None),
+        );
+        first.unwrap();
+        second.unwrap();
     }
 }
 

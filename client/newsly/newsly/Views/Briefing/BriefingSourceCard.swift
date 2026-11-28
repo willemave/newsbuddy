@@ -17,6 +17,7 @@ struct BriefingSourceCard: Equatable {
         }
     }
 
+    let contentId: Int
     let sourceKey: String
     let kind: Kind
     let title: String
@@ -46,6 +47,7 @@ struct BriefingSourceCard: Equatable {
         default:
             return nil
         }
+        self.contentId = source.id
         self.sourceKey = source.sourceKey
         self.title = title
         self.publisher = source.publisher.flatMap(Self.publisherName)

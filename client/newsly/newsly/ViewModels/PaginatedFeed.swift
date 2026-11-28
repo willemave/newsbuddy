@@ -36,11 +36,16 @@ struct Page<Item: Identifiable & Sendable>: Sendable where Item.ID: Sendable {
 @MainActor
 @Observable
 final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable & Sendable {
-    private(set) var items: [Item]
+    private(set) var items: [Item] {
+        didSet { itemsVersion &+= 1 }
+    }
     private(set) var phase: LoadPhase
     private(set) var nextCursor: String?
     private(set) var hasMore: Bool
     private(set) var isRequestInFlight = false
+
+    @ObservationIgnored
+    private(set) var itemsVersion: UInt64 = 0
 
     @ObservationIgnored
     private let loadPage: (_ cursor: String?, _ generation: Int) async throws -> Page<Item>

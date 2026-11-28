@@ -667,6 +667,71 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isCreatingSession)
     }
 
+    func testChatSessionSummaryEquatableDetectsFieldMutations() {
+        let base = ChatSessionSummary.fixture(
+            id: 7,
+            title: "Original title",
+            hasPendingMessage: false,
+            lastMessagePreview: "First answer"
+        )
+        let same = ChatSessionSummary.fixture(
+            id: 7,
+            title: "Original title",
+            hasPendingMessage: false,
+            lastMessagePreview: "First answer"
+        )
+        let renamed = ChatSessionSummary.fixture(
+            id: 7,
+            title: "Updated title",
+            hasPendingMessage: false,
+            lastMessagePreview: "First answer"
+        )
+        let updatedPreview = ChatSessionSummary.fixture(
+            id: 7,
+            title: "Original title",
+            hasPendingMessage: false,
+            lastMessagePreview: "Second answer"
+        )
+        let pending = ChatSessionSummary.fixture(
+            id: 7,
+            title: "Original title",
+            hasPendingMessage: true,
+            lastMessagePreview: "First answer"
+        )
+
+        XCTAssertEqual(base, same)
+        XCTAssertNotEqual(base, renamed)
+        XCTAssertNotEqual(base, updatedPreview)
+        XCTAssertNotEqual(base, pending)
+    }
+
+    func testPreviewCacheReturnsStrippedPreviewAndRefreshesOnUpdate() async {
+        let initial = ChatSessionSummary.fixture(
+            id: 11,
+            title: "Topic",
+            lastMessagePreview: "## **Bold** heading\n\n> Quoted answer"
+        )
+        let updated = ChatSessionSummary.fixture(
+            id: 11,
+            title: "Topic",
+            lastMessagePreview: "- Updated *reply* text"
+        )
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [
+                .success(makeSessionListResponse(sessions: [initial], nextCursor: nil, hasMore: false)),
+                .success(makeSessionListResponse(sessions: [updated], nextCursor: nil, hasMore: false))
+            ],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+
+        await viewModel.loadChats()
+        XCTAssertEqual(viewModel.preview(for: initial), "Bold heading Quoted answer")
+
+        await viewModel.loadChats()
+        XCTAssertEqual(viewModel.preview(for: updated), "Updated reply text")
+    }
+
     private func makeAssistantTurnResponse(sessionId: Int) -> AssistantTurnResponse {
         AssistantTurnResponse(
             session: makeSession(id: sessionId),

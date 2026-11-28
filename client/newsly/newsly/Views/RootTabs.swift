@@ -44,6 +44,7 @@ struct BriefingTab: View {
                 playbackService: dependencyFactory.narrationPlaybackService,
                 scrollToTopRequest: scrollToTopRequest,
                 contentTextSize: contentTextSize,
+                contentTransitionNamespace: contentTransitionNamespace,
                 onOpenContent: pushDetail,
                 onSourceMutation: onSourceMutation
             )
@@ -100,7 +101,7 @@ struct KnowledgeTab: View {
                 contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace,
                 allowsChatHistory: true,
-                dependencyFactory: dependencyFactory
+                chatHistoryViewModel: viewModel.chats
             )
         }
         .toolbar(.hidden, for: .tabBar)

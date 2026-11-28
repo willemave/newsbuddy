@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 const POLICY_VERSION: i32 = 1;
 
+fn default_local_provider() -> String {
+    "local".to_owned()
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparedArticle {
@@ -13,6 +17,8 @@ struct PreparedArticle {
     title: Option<String>,
     article_domain: Option<String>,
     extraction_method: String,
+    #[serde(default = "default_local_provider")]
+    storage_provider: String,
     storage_key: String,
     storage_bucket: Option<String>,
     sha256: String,
@@ -32,10 +38,13 @@ pub(super) async fn load(
     };
     let prepared: PreparedArticle =
         serde_json::from_value(prepared).map_err(|error| error.to_string())?;
+    if prepared.storage_provider != store.provider_name() {
+        return Ok(None);
+    }
     // No connection is retained during file IO. Removed or damaged staged bodies cannot be reused.
     let body = match store
         .read(&BodyPointer {
-            storage_provider: "local".into(),
+            storage_provider: prepared.storage_provider,
             storage_key: prepared.storage_key.clone(),
         })
         .await
@@ -56,7 +65,7 @@ pub(super) async fn load(
         article_domain: prepared.article_domain,
         extraction_method: prepared.extraction_method,
         body: StagedNewsBody {
-            storage_provider: "local",
+            storage_provider: store.provider_name(),
             content_format: "text",
             storage_bucket: prepared.storage_bucket,
             storage_key: prepared.storage_key,
@@ -89,6 +98,7 @@ pub(super) async fn save(
         title: title.clone(),
         article_domain: article_domain.clone(),
         extraction_method: extraction_method.clone(),
+        storage_provider: body.storage_provider.to_owned(),
         storage_key: body.storage_key.clone(),
         storage_bucket: body.storage_bucket.clone(),
         sha256: body.sha256.clone(),

@@ -14,12 +14,14 @@ struct SettingsSourcesSection: View {
 
             VStack(spacing: 0) {
                 NavigationLink {
-                    SourcesView(
-                        kind: .feed,
-                        viewModel: dependencyFactory.makeScraperSettingsViewModel(
-                            filterTypes: APIScraperType.articleFeedRawValues
+                    LazyView {
+                        SourcesView(
+                            kind: .feed,
+                            viewModel: dependencyFactory.makeScraperSettingsViewModel(
+                                filterTypes: APIScraperType.articleFeedRawValues
+                            )
                         )
-                    )
+                    }
                 } label: {
                     SettingsRow(
                         icon: "list.bullet.rectangle",
@@ -31,12 +33,14 @@ struct SettingsSourcesSection: View {
                 RowDivider(leadingInset: Spacing.rowHorizontal)
 
                 NavigationLink {
-                    SourcesView(
-                        kind: .podcast,
-                        viewModel: dependencyFactory.makeScraperSettingsViewModel(
-                            filterTypes: APIScraperType.podcastRawValues
+                    LazyView {
+                        SourcesView(
+                            kind: .podcast,
+                            viewModel: dependencyFactory.makeScraperSettingsViewModel(
+                                filterTypes: APIScraperType.podcastRawValues
+                            )
                         )
-                    )
+                    }
                 } label: {
                     SettingsRow(
                         icon: "waveform",

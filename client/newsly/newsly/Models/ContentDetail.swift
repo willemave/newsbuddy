@@ -45,6 +45,15 @@ struct RelevantLink: Identifiable, Hashable {
 
 typealias InterestingExternalLink = RelevantLink
 
+enum ContentSummaryPayload {
+    case longformArtifact(LongformArtifactEnvelope)
+    case interleavedV1(InterleavedSummary)
+    case interleavedV2(InterleavedSummaryV2)
+    case bulleted(BulletedSummary)
+    case editorial(EditorialNarrativeSummary)
+    case structured(StructuredSummary)
+}
+
 /// Decoded API payloads derived from metadata once, when `ContentDetail` is
 /// decoded. Keeping this immutable preserves value-model semantics while avoiding
 /// repeated JSON re-serialization from SwiftUI view bodies.
@@ -52,15 +61,15 @@ private struct ContentDetailDecodedPayloads {
     let articleMetadata: ArticleMetadata?
     let podcastMetadata: PodcastMetadata?
     let newsMetadata: NewsMetadata?
-    let longformArtifact: LongformArtifactEnvelope?
-    let interleavedSummary: InterleavedSummary?
-    let interleavedSummaryV2: InterleavedSummaryV2?
-    let bulletedSummary: BulletedSummary?
-    let editorialSummary: EditorialNarrativeSummary?
-    let structuredSummary: StructuredSummary?
+    let summaryPayload: ContentSummaryPayload?
+    let interestingExternalLinks: [RelevantLink]
+    let newsRelevantLinks: [RelevantLink]
 
     init(
         contentType: APIContentType,
+        url: String,
+        newsArticleURL: String?,
+        newsDiscussionURL: String?,
         metadata: [String: AnyCodable],
         summaryKind: String?,
         summaryVersion: Int?,
@@ -73,9 +82,10 @@ private struct ContentDetailDecodedPayloads {
         podcastMetadata = contentType == .podcast
             ? Self.decode(PodcastMetadata.self, from: metadata)
             : nil
-        newsMetadata = contentType == .news
+        let decodedNewsMetadata = contentType == .news
             ? Self.decode(NewsMetadata.self, from: metadata)
             : nil
+        newsMetadata = decodedNewsMetadata
 
         let resolvedSummaryKind = summaryKind ?? metadata["summary_kind"]?.value as? String
         let resolvedSummaryVersion = summaryVersion
@@ -84,29 +94,93 @@ private struct ContentDetailDecodedPayloads {
         let rawSummary = structuredSummaryRaw
         let rawArtifact = longformArtifactRaw ?? structuredSummaryRaw
 
-        longformArtifact = resolvedSummaryKind == "longform_artifact"
-            ? Self.decode(LongformArtifactEnvelope.self, from: rawArtifact)
-            : nil
-        interleavedSummary = resolvedSummaryKind == "long_interleaved" && resolvedSummaryVersion == 1
-            ? Self.decode(InterleavedSummary.self, from: rawSummary)
-            : nil
-        interleavedSummaryV2 = resolvedSummaryKind == "long_interleaved" && resolvedSummaryVersion == 2
-            ? Self.decode(InterleavedSummaryV2.self, from: rawSummary)
-            : nil
-        bulletedSummary = resolvedSummaryKind == "long_bullets" && resolvedSummaryVersion == 1
-            ? Self.decode(BulletedSummary.self, from: rawSummary)
-            : nil
-        editorialSummary = resolvedSummaryKind == "long_editorial_narrative"
-            && (resolvedSummaryVersion == 1 || resolvedSummaryVersion == 2)
-            ? Self.decode(EditorialNarrativeSummary.self, from: rawSummary)
-            : nil
-        structuredSummary = resolvedSummaryKind == "long_structured"
-            ? Self.decode(StructuredSummary.self, from: rawSummary)
-            : nil
+        switch (resolvedSummaryKind, resolvedSummaryVersion) {
+        case ("longform_artifact", _):
+            summaryPayload = Self.decode(LongformArtifactEnvelope.self, from: rawArtifact)
+                .map(ContentSummaryPayload.longformArtifact)
+        case ("long_interleaved", 1):
+            summaryPayload = Self.decode(InterleavedSummary.self, from: rawSummary)
+                .map(ContentSummaryPayload.interleavedV1)
+        case ("long_interleaved", 2):
+            summaryPayload = Self.decode(InterleavedSummaryV2.self, from: rawSummary)
+                .map(ContentSummaryPayload.interleavedV2)
+        case ("long_bullets", 1):
+            summaryPayload = Self.decode(BulletedSummary.self, from: rawSummary)
+                .map(ContentSummaryPayload.bulleted)
+        case ("long_editorial_narrative", 1), ("long_editorial_narrative", 2):
+            summaryPayload = Self.decode(EditorialNarrativeSummary.self, from: rawSummary)
+                .map(ContentSummaryPayload.editorial)
+        case ("long_structured", _):
+            summaryPayload = Self.decode(StructuredSummary.self, from: rawSummary)
+                .map(ContentSummaryPayload.structured)
+        default:
+            summaryPayload = nil
+        }
+
+        interestingExternalLinks = Self.decodeInterestingExternalLinks(from: metadata)
+        newsRelevantLinks = Self.decodeNewsRelevantLinks(
+            contentType: contentType,
+            url: url,
+            newsArticleURL: newsArticleURL,
+            newsDiscussionURL: newsDiscussionURL,
+            newsMetadata: decodedNewsMetadata,
+            metadata: metadata
+        )
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from raw: [String: AnyCodable]?) -> T? {
         AnyCodableDecoding.decodeLenient(type, from: raw)
+    }
+
+    private static func decodeInterestingExternalLinks(
+        from metadata: [String: AnyCodable]
+    ) -> [RelevantLink] {
+        guard let rawLinks = metadata["interesting_external_links"]?.value as? [[String: Any]] else {
+            return []
+        }
+
+        var seen: Set<String> = []
+        return rawLinks.compactMap { rawLink in
+            guard let link = InterestingExternalLink(metadata: rawLink),
+                  seen.insert(link.url).inserted else {
+                return nil
+            }
+            return link
+        }
+    }
+
+    private static func decodeNewsRelevantLinks(
+        contentType: APIContentType,
+        url: String,
+        newsArticleURL: String?,
+        newsDiscussionURL: String?,
+        newsMetadata: NewsMetadata?,
+        metadata: [String: AnyCodable]
+    ) -> [RelevantLink] {
+        guard contentType == .news,
+              let rawLinks = metadata["relevant_links"]?.value as? [[String: Any]] else {
+            return []
+        }
+
+        var excluded = Set([
+            url.nonEmptyTrimmed?.lowercased(),
+            newsArticleURL?.nonEmptyTrimmed?.lowercased(),
+            newsDiscussionURL?.nonEmptyTrimmed?.lowercased(),
+            newsMetadata?.discussionURL?.nonEmptyTrimmed?.lowercased(),
+            newsMetadata?.article?.url?.nonEmptyTrimmed?.lowercased()
+        ].compactMap { $0 })
+        var result: [RelevantLink] = []
+
+        for rawLink in rawLinks {
+            guard let link = RelevantLink(metadata: rawLink),
+                  let key = link.url.nonEmptyTrimmed?.lowercased(),
+                  !excluded.contains(key) else {
+                continue
+            }
+            excluded.insert(key)
+            result.append(link)
+        }
+        return result
     }
 }
 
@@ -210,6 +284,9 @@ struct ContentDetail: Identifiable {
 
         decodedPayloads = ContentDetailDecodedPayloads(
             contentType: response.contentType,
+            url: response.url,
+            newsArticleURL: response.newsArticleUrl,
+            newsDiscussionURL: response.newsDiscussionUrl,
             metadata: response.metadata,
             summaryKind: response.summaryKind?.rawValue,
             summaryVersion: response.summaryVersion?.rawValue,
@@ -268,6 +345,9 @@ struct ContentDetail: Identifiable {
 
         decodedPayloads = ContentDetailDecodedPayloads(
             contentType: response.contentType,
+            url: response.url,
+            newsArticleURL: response.newsArticleUrl,
+            newsDiscussionURL: response.newsDiscussionUrl,
             metadata: response.metadata,
             summaryKind: nil,
             summaryVersion: nil,
@@ -331,10 +411,6 @@ struct ContentDetail: Identifiable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func normalizedURLKey(_ value: String?) -> String? {
-        normalizedText(value)?.lowercased()
-    }
-
     var resolvedNewsSummaryText: String? {
         normalizedText(newsMetadata?.summary?.summary)
             ?? normalizedText(newsSummary)
@@ -366,98 +442,58 @@ struct ContentDetail: Identifiable {
     }
 
     var interestingExternalLinks: [RelevantLink] {
-        guard let rawLinks = metadata["interesting_external_links"]?.value as? [[String: Any]] else {
-            return []
-        }
-
-        var seen: Set<String> = []
-        return rawLinks.compactMap { rawLink in
-            guard let link = InterestingExternalLink(metadata: rawLink),
-                  seen.insert(link.url).inserted else {
-                return nil
-            }
-            return link
-        }
+        decodedPayloads.interestingExternalLinks
     }
 
     var newsRelevantLinks: [RelevantLink] {
-        guard contentType == .news,
-              let rawLinks = metadata["relevant_links"]?.value as? [[String: Any]] else {
-            return []
-        }
-
-        var excluded = Set([
-            normalizedURLKey(url),
-            normalizedURLKey(newsArticleURL),
-            normalizedURLKey(newsDiscussionURL),
-            normalizedURLKey(newsMetadata?.discussionURL),
-            normalizedURLKey(newsMetadata?.article?.url)
-        ].compactMap { $0 })
-        var result: [RelevantLink] = []
-
-        for rawLink in rawLinks {
-            guard let link = RelevantLink(metadata: rawLink),
-                  let key = normalizedURLKey(link.url),
-                  !excluded.contains(key) else {
-                continue
-            }
-            excluded.insert(key)
-            result.append(link)
-        }
-        return result
+        decodedPayloads.newsRelevantLinks
     }
 
     var relevantLinks: [RelevantLink] {
         if contentType == .news {
-            return newsRelevantLinks
+            return decodedPayloads.newsRelevantLinks
         }
-        return interestingExternalLinks
+        return decodedPayloads.interestingExternalLinks
     }
 
     // MARK: - Summary Type Detection
 
-    private var resolvedSummaryKind: String? {
-        if let summaryKind { return summaryKind }
-        return metadata["summary_kind"]?.value as? String
-    }
-
-    private var resolvedSummaryVersion: Int? {
-        if let summaryVersion { return summaryVersion }
-        if let version = metadata["summary_version"]?.value as? Int {
-            return version
-        }
-        if let version = metadata["summary_version"]?.value as? Double {
-            return Int(version)
-        }
-        return nil
+    var summaryPayload: ContentSummaryPayload? {
+        decodedPayloads.summaryPayload
     }
 
     var longformArtifact: LongformArtifactEnvelope? {
-        decodedPayloads.longformArtifact
+        if case .longformArtifact(let value) = decodedPayloads.summaryPayload { return value }
+        return nil
     }
 
     /// Parse the raw summary as InterleavedSummary (returns nil if not interleaved format)
     var interleavedSummary: InterleavedSummary? {
-        decodedPayloads.interleavedSummary
+        if case .interleavedV1(let value) = decodedPayloads.summaryPayload { return value }
+        return nil
     }
 
     /// Parse the raw summary as InterleavedSummaryV2 (returns nil if not v2 format)
     var interleavedSummaryV2: InterleavedSummaryV2? {
-        decodedPayloads.interleavedSummaryV2
+        if case .interleavedV2(let value) = decodedPayloads.summaryPayload { return value }
+        return nil
     }
 
     /// Parse the raw summary as BulletedSummary (returns nil if not bulleted format)
     var bulletedSummary: BulletedSummary? {
-        decodedPayloads.bulletedSummary
+        if case .bulleted(let value) = decodedPayloads.summaryPayload { return value }
+        return nil
     }
 
     /// Parse the raw summary as EditorialNarrativeSummary (returns nil if not editorial format)
     var editorialSummary: EditorialNarrativeSummary? {
-        decodedPayloads.editorialSummary
+        if case .editorial(let value) = decodedPayloads.summaryPayload { return value }
+        return nil
     }
 
     /// Parse the raw summary as StructuredSummary (returns nil if interleaved format)
     var structuredSummary: StructuredSummary? {
-        decodedPayloads.structuredSummary
+        if case .structured(let value) = decodedPayloads.summaryPayload { return value }
+        return nil
     }
 }

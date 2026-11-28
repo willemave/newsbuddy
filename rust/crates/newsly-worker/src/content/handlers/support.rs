@@ -107,6 +107,7 @@ pub(super) fn storage_failure(
         ContentBodyStoreError::CurrentDirectory(_)
             | ContentBodyStoreError::Write(_)
             | ContentBodyStoreError::Read(_)
+            | ContentBodyStoreError::ObjectStore(_)
     );
     extraction_failure(
         services,

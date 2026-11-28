@@ -25,7 +25,6 @@ newsly-domain = { path = "../newsly-domain" }
 newsly-providers = { path = "../newsly-providers" }
 newsly-queue = { path = "../newsly-queue" }
 newsly-worker = { path = "../newsly-worker" }
-object_store.workspace = true
 percent-encoding = "=2.3.2"
 reqwest.workspace = true
 secrecy.workspace = true

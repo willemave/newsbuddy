@@ -88,6 +88,7 @@ struct ProcessingStatsView: View {
 
 private struct FeedStatusRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let config: ScraperConfig
 
     private var hasWork: Bool {
@@ -171,6 +172,7 @@ private struct FeedStatusRow: View {
                 .font(.modalBody.weight(.medium))
                 .foregroundStyle(Color.onSurface)
                 .contentTransition(.numericText())
+                .animation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle), value: value)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)

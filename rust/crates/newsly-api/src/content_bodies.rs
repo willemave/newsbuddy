@@ -370,20 +370,7 @@ fn parse_variant(
     }
 }
 
-fn positive_path_id(
-    path: Result<Path<i64>, PathRejection>,
-    field: &str,
-    request_id: &str,
-) -> Result<i64, ApiError> {
-    let Path(id) = path.map_err(|rejection| validation_error(rejection.body_text(), request_id))?;
-    if id <= 0 {
-        return Err(validation_error(
-            format!("{field} must be greater than zero"),
-            request_id,
-        ));
-    }
-    Ok(id)
-}
+use crate::write_support::positive_path_id;
 
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
     ApiError::validation(message, request_id)

@@ -117,7 +117,7 @@ impl TaskHandler for ProcessNewsItemHandler {
 async fn execute_enrichment(
     services: &NewsItemWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(news_item_id) = news_item_id(plan) else {
         return plain_failure(
@@ -171,7 +171,7 @@ async fn execute_enrichment(
             ..
         } => {
             let article_url = super::input::choose_article_url(&snapshot);
-            match read_body_with_lease(services, &snapshot.body_source, &mut lease).await {
+            match read_body_with_lease(services, &snapshot.body_source, &lease).await {
                 BodyRead::Ready(body) => EnrichmentMutation::Content {
                     content_id,
                     article_url: article_url.unwrap_or_default(),
@@ -227,7 +227,7 @@ async fn extract_enrichment(
     snapshot: super::model::NewsSnapshot,
     article_url: String,
     demand_policy: crate::content::FirecrawlDemandPolicy,
-    mut lease: LeaseHealth,
+    _lease: LeaseHealth,
 ) -> HandlerExecution {
     let deadline = Utc::now() + services.extraction_timeout;
     let request_id = format!("news-item-{}-task-{}", snapshot.id, plan.task_id);
@@ -241,14 +241,9 @@ async fn extract_enrichment(
             user: snapshot.owner_user_id,
         })
         .with_demand_policy(demand_policy);
-    let extraction = runtime.process_article(&extraction_url, "article", &request_id, deadline);
-    tokio::pin!(extraction);
-    let attempt = tokio::select! {
-        attempt = &mut extraction => attempt,
-        () = lease.wait_for_ownership_loss() => {
-            return plain_failure("queue lease was lost during news article extraction", true);
-        }
-    };
+    let attempt = runtime
+        .process_article(&extraction_url, "article", &request_id, deadline)
+        .await;
     let observed_usage = match &attempt {
         ExtractionAttempt::Success { usage, .. }
         | ExtractionAttempt::Deferred { usage, .. }
@@ -383,7 +378,7 @@ fn soft_enrichment(
 async fn execute_processing(
     services: &NewsItemWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(news_item_id) = news_item_id(plan) else {
         return plain_failure("process_news_item requires a positive news_item_id", false);
@@ -415,7 +410,7 @@ async fn execute_processing(
         );
     }
     let article_body =
-        match read_body_with_lease(services, &preparation.snapshot.body_source, &mut lease).await {
+        match read_body_with_lease(services, &preparation.snapshot.body_source, &lease).await {
             BodyRead::Ready(body) => Some(body),
             BodyRead::Missing => None,
             BodyRead::LeaseLost => {
@@ -452,33 +447,29 @@ async fn execute_processing(
                 user_id: preparation.snapshot.owner_user_id,
             },
         ));
-        let call = services
+        let generated = services
             .gateway
-            .summarize_with_events(prompt, usage_sink.clone());
-        tokio::pin!(call);
-        let generated = tokio::select! {
-            result = &mut call => Some(result),
-            () = lease.wait_for_ownership_loss() => None,
-        };
+            .summarize_with_events(prompt, usage_sink.clone())
+            .await;
         usage_sink.finish().await;
+        if lease.ownership_lost() {
+            return processing_failure(
+                services,
+                plan,
+                preparation.snapshot,
+                "queue lease was lost during news summarization",
+                true,
+            );
+        }
         let generated = match generated {
-            Some(Ok(result)) => result,
-            Some(Err(error)) => {
+            Ok(result) => result,
+            Err(error) => {
                 return processing_failure(
                     services,
                     plan,
                     preparation.snapshot,
                     &error.to_string(),
                     error.retryable(),
-                );
-            }
-            None => {
-                return processing_failure(
-                    services,
-                    plan,
-                    preparation.snapshot,
-                    "queue lease was lost during news summarization",
-                    true,
                 );
             }
         };
@@ -576,7 +567,7 @@ async fn execute_processing(
             &std::iter::once(news_item_id)
                 .chain(candidate_documents.iter().map(|document| document.id))
                 .collect::<Vec<_>>(),
-            &mut lease,
+            &lease,
         )
         .await;
         match prepared {
@@ -649,19 +640,17 @@ async fn execute_processing(
                             user_id: preparation.snapshot.owner_user_id,
                         },
                     ));
-                    let call = services.gateway.select_relevant_links_with_events(
-                        input.title.as_deref(),
-                        input.source_url.as_deref(),
-                        &input.candidates,
-                        usage_sink.clone(),
-                    );
-                    tokio::pin!(call);
-                    let selection = tokio::select! {
-                        result = &mut call => Some(result),
-                        () = lease.wait_for_ownership_loss() => None,
-                    };
+                    let selection = services
+                        .gateway
+                        .select_relevant_links_with_events(
+                            input.title.as_deref(),
+                            input.source_url.as_deref(),
+                            &input.candidates,
+                            usage_sink.clone(),
+                        )
+                        .await;
                     usage_sink.finish().await;
-                    let Some(selection) = selection else {
+                    if lease.ownership_lost() {
                         return processing_failure(
                             services,
                             plan,
@@ -669,7 +658,7 @@ async fn execute_processing(
                             "queue lease was lost during relevant-link selection",
                             true,
                         );
-                    };
+                    }
                     match selection {
                         Ok(selected) => Some(selected.links),
                         Err(error) => {
@@ -739,7 +728,7 @@ async fn prepare_relation_vectors(
     texts: &[newsly_domain::RelationEmbeddingText],
     owners: &[i64],
     authorized_sources: &[i64],
-    lease: &mut LeaseHealth,
+    lease: &LeaseHealth,
 ) -> Result<EmbeddingVectorStore, (String, bool)> {
     let model = services.gateway.embedding_model();
     let mut vectors = {
@@ -769,12 +758,14 @@ async fn prepare_relation_vectors(
             .iter()
             .map(|index| texts[*index].text.clone())
             .collect::<Vec<_>>();
-        let call = services.gateway.embed(&inputs);
-        tokio::pin!(call);
-        let batch = tokio::select! {
-            result = &mut call => result.map_err(|error| (error.to_string(), error.retryable()))?,
-            () = lease.wait_for_ownership_loss() => return Err(("queue lease lost during relation embeddings".into(), true)),
-        };
+        if lease.ownership_lost() {
+            return Err(("queue lease lost during relation embeddings".into(), true));
+        }
+        let batch = services
+            .gateway
+            .embed(&inputs)
+            .await
+            .map_err(|error| (error.to_string(), error.retryable()))?;
         // Observed costs survive invalid vectors, stale publication, cancellation and lease loss.
         let recorder = AgentUsageRecorder::new(
             services.pool.clone(),
@@ -856,23 +847,19 @@ enum BodyRead {
 async fn read_body_with_lease(
     services: &NewsItemWorkerServices,
     source: &BodySource,
-    lease: &mut LeaseHealth,
+    lease: &LeaseHealth,
 ) -> BodyRead {
+    if lease.ownership_lost() {
+        return BodyRead::LeaseLost;
+    }
     match source {
         BodySource::Inline(text) => BodyRead::Ready(text.clone()),
         BodySource::None => BodyRead::Missing,
-        BodySource::Stored(pointer) => {
-            let read = services.body_store.read(pointer);
-            tokio::pin!(read);
-            tokio::select! {
-                result = &mut read => match result {
-                    Ok(Some(body)) => BodyRead::Ready(body),
-                    Ok(None) => BodyRead::Missing,
-                    Err(error) => BodyRead::Failed(error.to_string()),
-                },
-                () = lease.wait_for_ownership_loss() => BodyRead::LeaseLost,
-            }
-        }
+        BodySource::Stored(pointer) => match services.body_store.read(pointer).await {
+            Ok(Some(body)) => BodyRead::Ready(body),
+            Ok(None) => BodyRead::Missing,
+            Err(error) => BodyRead::Failed(error.to_string()),
+        },
     }
 }
 

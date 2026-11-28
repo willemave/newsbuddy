@@ -1,9 +1,10 @@
+use std::future::Future;
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout_at};
 
 use crate::client::{ApiError, Client};
 
@@ -55,19 +56,37 @@ impl Client {
         options: WaitOptions,
     ) -> Result<Value, ApiError> {
         let deadline = deadline(options.timeout)?;
+        self.wait_for_job_until(job_id, options.interval, deadline)
+            .await
+    }
+
+    pub(crate) async fn wait_for_job_until(
+        &self,
+        job_id: i64,
+        interval: Duration,
+        deadline: Instant,
+    ) -> Result<Value, ApiError> {
+        let mut last_job = Value::Null;
         loop {
-            let job = self.get_job(job_id).await?;
+            let job = await_before_deadline(deadline, self.get_job(job_id), || {
+                timeout_error_with_optional_details(
+                    format!("timed out waiting for job {job_id}"),
+                    last_job.clone(),
+                )
+            })
+            .await?;
             let projection: JobProjection = project(&job, "job")?;
             if is_terminal_status(&projection.status) {
                 return Ok(job);
             }
-            if Instant::now() > deadline {
-                return Err(ApiError::local_with_details(
+            last_job = job;
+            sleep_before_deadline(deadline, interval, || {
+                ApiError::local_with_details(
                     format!("timed out waiting for job {job_id}"),
-                    job,
-                ));
-            }
-            sleep(options.interval).await;
+                    last_job.clone(),
+                )
+            })
+            .await?;
         }
     }
 
@@ -76,21 +95,33 @@ impl Client {
     /// # Errors
     ///
     /// Returns an error when polling fails, processing fails, or the deadline expires.
-    pub(crate) async fn wait_for_submitted_content(
+    pub(crate) async fn wait_for_submitted_content_until(
         &self,
         content_id: i64,
-        options: WaitOptions,
+        interval: Duration,
+        deadline: Instant,
     ) -> Result<Value, ApiError> {
-        let deadline = deadline(options.timeout)?;
+        let timeout_error = || {
+            ApiError::local_with_details(
+                format!("timed out waiting for content {content_id} to become available"),
+                serde_json::json!({ "content_id": content_id }),
+            )
+        };
         loop {
-            match self.get_content(content_id).await {
+            match await_before_deadline(deadline, self.get_content(content_id), timeout_error).await
+            {
                 Ok(content) => return Ok(content),
                 Err(error) if error.is_status(reqwest::StatusCode::NOT_FOUND) => {}
                 Err(error) => return Err(error),
             }
 
             let query = vec![("limit".to_owned(), "100".to_owned())];
-            let response = self.list_content_submission_statuses(&query).await?;
+            let response = await_before_deadline(
+                deadline,
+                self.list_content_submission_statuses(&query),
+                timeout_error,
+            )
+            .await?;
             let projection: SubmissionListProjection =
                 project(&response, "submission status list")?;
             if let Some(submission) = projection
@@ -115,13 +146,7 @@ impl Client {
                 return Err(ApiError::local_with_details(message, details));
             }
 
-            if Instant::now() > deadline {
-                return Err(ApiError::local_with_details(
-                    format!("timed out waiting for content {content_id} to become available"),
-                    serde_json::json!({ "content_id": content_id }),
-                ));
-            }
-            sleep(options.interval).await;
+            sleep_before_deadline(deadline, interval, timeout_error).await?;
         }
     }
 
@@ -136,8 +161,15 @@ impl Client {
         options: WaitOptions,
     ) -> Result<Value, ApiError> {
         let deadline = deadline(options.timeout)?;
+        let mut last_run = Value::Null;
         loop {
-            let run = self.get_onboarding(run_id).await?;
+            let run = await_before_deadline(deadline, self.get_onboarding(run_id), || {
+                timeout_error_with_optional_details(
+                    format!("timed out waiting for onboarding run {run_id}"),
+                    last_run.clone(),
+                )
+            })
+            .await?;
             let projection: OnboardingProjection = project(&run, "onboarding")?;
             if matches!(
                 normalize_status(&projection.run_status).as_str(),
@@ -145,13 +177,14 @@ impl Client {
             ) {
                 return Ok(run);
             }
-            if Instant::now() > deadline {
-                return Err(ApiError::local_with_details(
+            last_run = run;
+            sleep_before_deadline(deadline, options.interval, || {
+                ApiError::local_with_details(
                     format!("timed out waiting for onboarding run {run_id}"),
-                    run,
-                ));
-            }
-            sleep(options.interval).await;
+                    last_run.clone(),
+                )
+            })
+            .await?;
         }
     }
 
@@ -167,8 +200,14 @@ impl Client {
         options: WaitOptions,
     ) -> Result<Value, ApiError> {
         let deadline = deadline(options.timeout)?;
+        let timeout_error = || ApiError::local("timed out waiting for CLI approval");
         loop {
-            let response = self.poll_cli_link(session_id, poll_token).await?;
+            let response = await_before_deadline(
+                deadline,
+                self.poll_cli_link(session_id, poll_token),
+                timeout_error,
+            )
+            .await?;
             let projection: CliLinkProjection = project(&response, "CLI link")?;
             match normalize_status(&projection.status).as_str() {
                 "approved"
@@ -185,18 +224,60 @@ impl Client {
                 "expired" => return Err(ApiError::local("CLI link session expired")),
                 _ => {}
             }
-            if Instant::now() > deadline {
-                return Err(ApiError::local("timed out waiting for CLI approval"));
-            }
-            sleep(options.interval).await;
+            sleep_before_deadline(deadline, options.interval, timeout_error).await?;
         }
     }
 }
 
-fn deadline(timeout: Duration) -> Result<Instant, ApiError> {
+pub(crate) fn deadline(timeout: Duration) -> Result<Instant, ApiError> {
     Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| ApiError::local("wait timeout is too large"))
+}
+
+async fn await_before_deadline<T, F, E>(
+    deadline: Instant,
+    future: F,
+    timeout_error: E,
+) -> Result<T, ApiError>
+where
+    F: Future<Output = Result<T, ApiError>>,
+    E: FnOnce() -> ApiError,
+{
+    if Instant::now() >= deadline {
+        return Err(timeout_error());
+    }
+    match timeout_at(deadline, future).await {
+        Ok(result) => result,
+        Err(_) => Err(timeout_error()),
+    }
+}
+
+async fn sleep_before_deadline<E>(
+    deadline: Instant,
+    interval: Duration,
+    timeout_error: E,
+) -> Result<(), ApiError>
+where
+    E: FnOnce() -> ApiError,
+{
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(timeout_error());
+    }
+    sleep(interval.min(remaining)).await;
+    if Instant::now() >= deadline {
+        return Err(timeout_error());
+    }
+    Ok(())
+}
+
+fn timeout_error_with_optional_details(message: String, details: Value) -> ApiError {
+    if details.is_null() {
+        ApiError::local(message)
+    } else {
+        ApiError::local_with_details(message, details)
+    }
 }
 
 fn project<T>(value: &Value, name: &str) -> Result<T, ApiError>
@@ -239,8 +320,14 @@ struct SubmissionProjection {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_failed_or_skipped_status, is_terminal_status, job_failed_or_skipped};
+    use super::{
+        await_before_deadline, deadline, is_failed_or_skipped_status, is_terminal_status,
+        job_failed_or_skipped, sleep_before_deadline,
+    };
+    use crate::client::ApiError;
     use serde_json::json;
+    use std::time::Duration;
+    use tokio::time::Instant;
 
     #[test]
     fn terminal_statuses_are_case_insensitive_and_trimmed() {
@@ -256,5 +343,31 @@ mod tests {
         assert!(job_failed_or_skipped(&json!({"status": "skipped"})));
         assert!(!job_failed_or_skipped(&json!({"status": "completed"})));
         assert!(!job_failed_or_skipped(&json!({"status": {}})));
+    }
+
+    #[tokio::test]
+    async fn wait_helpers_respect_deadline_without_overrun() {
+        let start = Instant::now();
+        let wait_deadline = deadline(Duration::from_millis(40)).unwrap();
+        let error = await_before_deadline(
+            wait_deadline,
+            async {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                Ok::<_, ApiError>(json!({"status": "completed"}))
+            },
+            || ApiError::local("timed out"),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("timed out"));
+        assert!(start.elapsed() < Duration::from_millis(180));
+
+        let sleep_deadline = deadline(Duration::from_millis(30)).unwrap();
+        let sleep_err = sleep_before_deadline(sleep_deadline, Duration::from_secs(2), || {
+            ApiError::local("sleep timed out")
+        })
+        .await
+        .unwrap_err();
+        assert!(sleep_err.to_string().contains("sleep timed out"));
     }
 }

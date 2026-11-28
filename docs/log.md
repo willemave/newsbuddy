@@ -27,6 +27,30 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-27 — `art/newsly-remediation-2026-11-27` — Full Rust, CLI, and iOS remediation
+
+- **Status:** Complete. Merged to local `main`.
+- **Scope:**
+  - Rust workspace (`newsly-db`, `newsly-queue`, `newsly-api`, `newsly-worker`, `newsly-account-deletion-worker`, `newsly-providers`, `newsly-agent-runtime`, `newsly-e2b`, `newsly-cli`, `newsly-vm-bootstrap`).
+  - iOS app (`client/newsly/newsly` and `client/newsly/newslyTests`) and `docs/laws/accounts-and-onboarding.md`.
+- **Decisions:**
+  - Detail chat action reuses an existing source chat (matching Briefing and Knowledge).
+  - Non-sandbox worker handlers use `HandlerInterruptionPolicy::Cancel` with dead `wait_for_ownership_loss()` arms removed; `ChatPartitionHandler` uses `DrainBounded` so E2B sandboxes (`acquire_sandbox`, Law P19) and detached `llm_task_id` attempts drain cleanly on lease loss instead of leaking on drop.
+  - S3-compatible object storage is kept and unified behind `newsly_providers::ObjectStorageBackend` across API, account deletion, and all five worker stores.
+  - `BriefingTab` keeps `.navigationTransition(.zoom)` and wires `matchedContentZoomSource` into Briefing source cards/rows.
+  - Kept the `newsly-api` -> `newsly-worker` dependency for `share_actions` rather than introducing a new crate solely for two modules.
+- **Changes:**
+  - **Phase 0 (Rust security & correctness):** Enforced Law C3 content visibility across `create_chat_session`, `stage_assistant_turn`, and `build_screen_context_snapshot` (including owned non-deleted `learning_decks`); fixed blank `X_CLIENT_ID`/`X_CLIENT_SECRET` startup failure in `newsly-account-deletion-worker`; unified `relink_canonical_user_state` (including `user_integration_synced_items`); reset stale discussion cache on identity change in `scrape.rs`; batched `enqueue_and_pull_forward_briefing_refreshes` with `FOR UPDATE OF task`, `retry_count = 0`, and queue notification on pull-forward; aligned `admin.rs` recent-failure timestamp filtering on `COALESCE(completed_at, created_at)`.
+  - **Phase 1 (iOS animations & CLI):** Wired Briefing zoom sources; replaced 2.5 Hz skeleton flicker with shared `PulseModifier`/`AppMotion.skeletonPulse`; fixed container `.animation`, Reduce Motion, numeric text transitions, onboarding direction, and cancel-safe `@GestureState` across swipe/press/scrubber gestures; enforced strict deadlines across all 4 `newsly-cli` wait loops, `1..=100` page-limit validation (exit 2), and explicit timeout error messages.
+  - **Phase 2 (Rust & iOS perf/cleanup):** Scoped `pg_notify` per queue (`processing_tasks_<queue>`) and skipped notify on deferred inserts; eliminated N+1 queries in chat, embeddings, warm news, audio episodes, and agent routes; shared HTTP/TLS clients; unified retryable agent error classification and bounded response reads; extracted `BriefingListenPanelView`/`KnowledgeComposerBar` to stop 1 Hz re-renders; added `@ObservationIgnored` to internal `BriefingViewModel` state; retired `ChatSessionsViewModel` onto `KnowledgeChatViewModel`.
+  - **Phase 3 (Consolidations):** Unified `ObjectStorageBackend`, `OpenRouter` Decisions client, `RigAgentEngine` structured/text helpers, `write_support` path/URL helpers, `BriefingSourceDeckLookup`, `ContentSummaryPayload` discriminated enum, and `AppMotion` tokens; split `newsly-db/src/chat/presentation.rs` and `BriefingSupportViews.swift` to stay within module size guardrails; documented Law A12 token mirror removal condition.
+- **Validation:**
+  - `scripts/architecture_guard.sh`, `scripts/check_public_contracts.sh`, `scripts/check_ios_wire_boundaries.sh`.
+  - `cargo fmt --all -- --check`, `SQLX_OFFLINE=true cargo clippy --workspace --all-targets --locked -- -D warnings`, and full `SQLX_OFFLINE=true cargo test --workspace --locked` against live local PostgreSQL.
+  - `xcodebuild build-for-testing` + `test-without-building` (`newslyTests` on iPhone 17 Pro simulator).
+- **Remaining:** Push to `origin/main` left for owner confirmation (push triggers production deploy).
+- **Commits:** Fast-forward merged from `art/newsly-remediation-2026-11-27` to local `main`.
+
 ### 2026-11-27 — `main` — Closed Duo: detail back button in the status column
 
 - **Status:** Complete. Uncommitted.

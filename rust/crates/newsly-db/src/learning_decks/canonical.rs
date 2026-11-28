@@ -262,7 +262,11 @@ pub(super) async fn recover_unrecorded_duplicate(
     }))
 }
 
-pub(super) async fn relink_canonical_user_state(
+/// Move all unique-per-user overlays from a duplicate content row to its canonical winner.
+///
+/// Transfers inbox status, read status, Knowledge saves, unlikes, integration sync records, and
+/// chat session references inside the caller's transaction.
+pub async fn relink_canonical_user_state(
     transaction: &mut Transaction<'_, Postgres>,
     loser_content_id: i64,
     winner_content_id: i64,
@@ -309,6 +313,17 @@ pub(super) async fn relink_canonical_user_state(
             .execute(&mut **transaction)
             .await?;
     }
+    sqlx::query(
+        r#"
+        UPDATE user_integration_synced_items
+        SET content_id = $2::bigint::integer, updated_at = timezone('UTC', now())
+        WHERE content_id = $1::bigint
+        "#,
+    )
+    .bind(loser_content_id)
+    .bind(winner_content_id)
+    .execute(&mut **transaction)
+    .await?;
     sqlx::query(
         "UPDATE chat_sessions SET content_id = $2::bigint::integer, updated_at = timezone('UTC', now()) WHERE content_id = $1::bigint",
     )

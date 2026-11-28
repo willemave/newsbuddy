@@ -165,6 +165,7 @@ pub enum StageChatTurnOutcome {
     NotFound,
     Forbidden,
     Archived,
+    ContentNotFound,
     NewsItemNotFound,
     UserInactive,
 }
@@ -296,10 +297,64 @@ pub async fn list_chat_sessions(
     .await?;
 
     let mut states = load_session_message_states(pool, user_id, &rows).await?;
+    let content_ids = rows
+        .iter()
+        .filter_map(|row| row.content_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let news_ids = rows
+        .iter()
+        .filter_map(|row| {
+            (row.content_id.is_none())
+                .then_some(row.news_item_id)
+                .flatten()
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let waiting_candidates = rows
+        .iter()
+        .filter_map(|row| {
+            let has_messages = states.get(&row.id).is_some_and(|state| state.has_messages);
+            (!has_messages && row.session_type.as_deref() == Some(KNOWLEDGE_SESSION_TYPE))
+                .then_some(row.content_id)
+                .flatten()
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let contents_by_id = load_contents_by_ids(pool, &content_ids).await?;
+    let news_by_id = load_news_by_ids(pool, &news_ids).await?;
+    let waiting_content_ids = load_waiting_content_ids(pool, user_id, &waiting_candidates).await?;
+
     let mut projections = Vec::with_capacity(rows.len());
     for row in rows {
         let state = states.remove(&row.id).unwrap_or_default();
-        projections.push(present_session_with_state(pool, user_id, row, state).await?);
+        let is_waiting_for_content = !state.has_messages
+            && row.session_type.as_deref() == Some(KNOWLEDGE_SESSION_TYPE)
+            && row
+                .content_id
+                .is_some_and(|content_id| waiting_content_ids.contains(&content_id));
+        let article = if let Some(content_id) = row.content_id {
+            contents_by_id
+                .get(&content_id)
+                .map(content_presentation)
+                .unwrap_or_default()
+        } else if let Some(news_item_id) = row.news_item_id {
+            news_by_id
+                .get(&news_item_id)
+                .map(news_presentation)
+                .unwrap_or_default()
+        } else {
+            ArticlePresentation::default()
+        };
+        projections.push(build_session_projection(
+            row,
+            state,
+            is_waiting_for_content,
+            article,
+        ));
     }
     Ok(projections)
 }
@@ -389,7 +444,8 @@ pub async fn create_chat_session(
     }
 
     let content = if let Some(content_id) = input.content_id {
-        let content = load_content_in_transaction(transaction, content_id).await?;
+        let content =
+            load_visible_content_in_transaction(transaction, input.user_id, content_id).await?;
         if content.is_none() {
             return Ok(CreateChatSessionOutcome::ContentNotFound);
         }
@@ -601,6 +657,17 @@ pub async fn stage_assistant_turn(
     input: &StageAssistantTurnInput<'_>,
 ) -> Result<StageChatTurnOutcome, ChatRepositoryError> {
     input.screen_context.validate()?;
+    let content_id = input.screen_context.content_id;
+    let primary_content = if let Some(content_id) = content_id {
+        let item =
+            load_visible_content_in_transaction(transaction, input.user_id, content_id).await?;
+        if item.is_none() {
+            return Ok(StageChatTurnOutcome::ContentNotFound);
+        }
+        item
+    } else {
+        None
+    };
     let primary_news_id = input.screen_context.news_item_id;
     let primary_news = if let Some(news_item_id) = primary_news_id {
         let item =
@@ -615,7 +682,6 @@ pub async fn stage_assistant_turn(
 
     let context_snapshot =
         build_screen_context_snapshot(transaction, input.user_id, input.screen_context).await?;
-    let content_id = input.screen_context.content_id;
     let selected_topic = input.screen_context.selected_topic.clone();
     let screen_title = input.screen_context.screen_title.clone();
 
@@ -634,10 +700,8 @@ pub async fn stage_assistant_turn(
             .clone()
             .or_else(|| row.title.clone())
             .unwrap_or_else(|| "Knowledge Chat".to_owned());
-        if let Some(content_id) = content_id
-            && let Some(content) = load_content_in_transaction(transaction, content_id).await?
-        {
-            title = content_title(&content);
+        if let Some(content) = &primary_content {
+            title = content_title(content);
         } else if let Some(news) = &primary_news {
             title = news_title(news);
         }
@@ -675,9 +739,7 @@ pub async fn stage_assistant_turn(
             return Ok(StageChatTurnOutcome::UserInactive);
         }
         let mut title = screen_title.unwrap_or_else(|| "Knowledge Chat".to_owned());
-        if let Some(content_id) = content_id
-            && let Some(content) = load_content_in_transaction(transaction, content_id).await?
-        {
+        if let Some(content) = &primary_content {
             title = content_display_title(content.title.as_deref(), &content.content_metadata)
                 .unwrap_or(title);
         } else if let Some(news) = &primary_news {
@@ -936,6 +998,31 @@ async fn present_session_with_state(
     row: ChatSessionRow,
     state: SessionMessageState,
 ) -> Result<ChatSessionProjection, ChatRepositoryError> {
+    let is_waiting_for_content =
+        if !state.has_messages && row.session_type.as_deref() == Some(KNOWLEDGE_SESSION_TYPE) {
+            if let Some(content_id) = row.content_id {
+                content_awaiting_first_chat_turn(pool, user_id, content_id).await?
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+    let article = article_presentation(pool, &row).await?;
+    Ok(build_session_projection(
+        row,
+        state,
+        is_waiting_for_content,
+        article,
+    ))
+}
+
+fn build_session_projection(
+    row: ChatSessionRow,
+    state: SessionMessageState,
+    is_waiting_for_content: bool,
+    article: ArticlePresentation,
+) -> ChatSessionProjection {
     let SessionMessageState {
         has_pending_message,
         has_messages,
@@ -950,19 +1037,7 @@ async fn present_session_with_state(
             (Some(preview), Some(role.to_owned()))
         });
 
-    let is_waiting_for_content =
-        if !has_messages && row.session_type.as_deref() == Some(KNOWLEDGE_SESSION_TYPE) {
-            if let Some(content_id) = row.content_id {
-                content_awaiting_first_chat_turn(pool, user_id, content_id).await?
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-    let article = article_presentation(pool, &row).await?;
-
-    Ok(ChatSessionProjection {
+    ChatSessionProjection {
         id: row.id,
         title: row.title,
         content_id: row.content_id,
@@ -995,7 +1070,7 @@ async fn present_session_with_state(
         has_messages,
         last_message_preview,
         last_message_role,
-    })
+    }
 }
 
 async fn article_presentation(
@@ -1012,244 +1087,6 @@ async fn article_presentation(
         return Ok(news_presentation(&news));
     }
     Ok(ArticlePresentation::default())
-}
-
-fn content_presentation(content: &ContentPresentationRow) -> ArticlePresentation {
-    let metadata = content
-        .content_metadata
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    ArticlePresentation {
-        title: Some(content_title(content)),
-        url: Some(content.url.clone()),
-        summary: extract_short_summary(metadata.get("summary")),
-        source: content.source.clone(),
-        image_url: metadata
-            .get("image_url")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        thumbnail_url: metadata
-            .get("thumbnail_url")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-    }
-}
-
-fn news_presentation(news: &NewsPresentationRow) -> ArticlePresentation {
-    ArticlePresentation {
-        title: Some(news_title(news)),
-        url: news
-            .article_url
-            .clone()
-            .or_else(|| news.canonical_story_url.clone()),
-        summary: news.summary_text.clone(),
-        source: first_non_empty([
-            news.source_label.as_deref(),
-            news.article_domain.as_deref(),
-            news.platform.as_deref(),
-            news.source_type.as_deref(),
-        ]),
-        image_url: None,
-        thumbnail_url: None,
-    }
-}
-
-fn content_title(content: &ContentPresentationRow) -> String {
-    content_display_title(content.title.as_deref(), &content.content_metadata)
-        .unwrap_or_else(|| "Untitled".to_owned())
-}
-
-pub(crate) fn content_display_title(title: Option<&str>, metadata: &Value) -> Option<String> {
-    let metadata = metadata
-        .as_object()
-        .map(crate::content_metadata::runtime_metadata)
-        .unwrap_or_default();
-    crate::content_metadata::source_presentation::content_display_title(title, &metadata)
-        .or_else(|| extract_short_summary(metadata.get("summary")))
-        .map(|value| summarize_as_title(&value))
-}
-
-fn news_title(news: &NewsPresentationRow) -> String {
-    let metadata = news.raw_metadata.as_object();
-    let summary_title = metadata
-        .and_then(|value| value.get("summary"))
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("title"))
-        .and_then(Value::as_str);
-    let related_title = metadata
-        .and_then(|value| value.get("cluster"))
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("related_titles"))
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-        .and_then(Value::as_str);
-    let article_title = metadata
-        .and_then(|value| value.get("article"))
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("title"))
-        .and_then(Value::as_str);
-    [summary_title, related_title, article_title]
-        .into_iter()
-        .flatten()
-        .find(|value| !value.trim().is_empty())
-        .map(|value| truncate_chars(value.trim(), 500))
-        .or_else(|| news.summary_text.as_deref().map(summarize_as_title))
-        .unwrap_or_else(|| "Untitled News Item".to_owned())
-}
-
-pub(crate) fn extract_short_summary(value: Option<&Value>) -> Option<String> {
-    match value {
-        Some(Value::String(value)) if !value.trim().is_empty() => Some(value.clone()),
-        Some(Value::Object(summary)) => {
-            for field in ["one_line", "overview", "summary", "hook", "takeaway"] {
-                if let Some(value) = summary.get(field).and_then(Value::as_str)
-                    && !value.trim().is_empty()
-                {
-                    return Some(value.to_owned());
-                }
-            }
-            summary
-                .get("artifact")
-                .and_then(Value::as_object)
-                .and_then(|value| value.get("payload"))
-                .and_then(Value::as_object)
-                .and_then(|value| value.get("overview"))
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .map(str::to_owned)
-        }
-        _ => None,
-    }
-}
-
-pub(crate) async fn build_screen_context_snapshot(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-    context: &AssistantScreenContext,
-) -> Result<String, sqlx::Error> {
-    let screen_type =
-        clean_context_text(Some(&context.screen_type)).unwrap_or_else(|| "unknown".to_owned());
-    let mut lines = vec![format!("Screen Type: {screen_type}")];
-    append_context_line(
-        &mut lines,
-        "Screen Title",
-        clean_context_text(context.screen_title.as_deref()),
-    );
-    append_context_line(
-        &mut lines,
-        "Selected Topic",
-        clean_context_text(context.selected_topic.as_deref()),
-    );
-    append_context_line(
-        &mut lines,
-        "Query",
-        clean_context_text(context.query.as_deref()),
-    );
-    append_context_line(
-        &mut lines,
-        "Client Note",
-        clean_context_text(context.note.as_deref()),
-    );
-    append_context_line(
-        &mut lines,
-        "Assistant Action",
-        clean_context_text(context.assistant_action.as_deref()),
-    );
-
-    let mut content_ids = Vec::new();
-    push_unique_positive(&mut content_ids, context.content_id);
-    for id in context.visible_content_ids.iter().copied() {
-        push_unique_positive(&mut content_ids, Some(id));
-    }
-    if !content_ids.is_empty() {
-        lines.push("Visible Content:".to_owned());
-        for content_id in content_ids {
-            let Some(content) = load_content_in_transaction(transaction, content_id).await? else {
-                continue;
-            };
-            let source = content
-                .source
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-                .map_or_else(String::new, |value| format!(" ({value})"));
-            lines.push(format!(
-                "- [{content_id}] {}{source} — {}",
-                content_title(&content),
-                content.url
-            ));
-            if let Some(summary) = extract_short_summary(
-                content
-                    .content_metadata
-                    .as_object()
-                    .and_then(|value| value.get("summary")),
-            ) {
-                lines.push(format!("  Short Summary: {summary}"));
-            }
-            let excerpt_limit =
-                if screen_type == "learning_deck" && context.content_id == Some(content_id) {
-                    1_800
-                } else {
-                    420
-                };
-            if let Some(excerpt) = content_excerpt(&content.content_metadata, excerpt_limit) {
-                lines.push(format!("  Transcript Excerpt: {excerpt}"));
-            }
-        }
-    }
-
-    let mut news_item_ids = Vec::new();
-    push_unique_positive(&mut news_item_ids, context.news_item_id);
-    for id in context.visible_news_item_ids.iter().copied() {
-        push_unique_positive(&mut news_item_ids, Some(id));
-    }
-    if !news_item_ids.is_empty() {
-        lines.push("Visible News Items:".to_owned());
-        for news_item_id in news_item_ids {
-            let Some(news) =
-                load_visible_news_in_transaction(transaction, user_id, news_item_id).await?
-            else {
-                continue;
-            };
-            let source = first_non_empty([
-                news.source_label.as_deref(),
-                news.article_domain.as_deref(),
-                news.platform.as_deref(),
-                news.source_type.as_deref(),
-            ])
-            .map_or_else(String::new, |value| format!(" ({value})"));
-            lines.push(format!(
-                "- [news:{news_item_id}] {}{source}",
-                news_title(&news)
-            ));
-            if let Some(url) = &news.article_url {
-                lines.push(format!("  Article URL: {url}"));
-            }
-            if news.canonical_story_url != news.article_url
-                && let Some(url) = &news.canonical_story_url
-            {
-                lines.push(format!("  Story URL: {url}"));
-            }
-            if let Some(url) = &news.discussion_url {
-                lines.push(format!("  Discussion URL: {url}"));
-            }
-            if let Some(summary) = &news.summary_text {
-                lines.push(format!("  Summary: {summary}"));
-            }
-            if let Some(points) = news.summary_key_points.as_array()
-                && !points.is_empty()
-            {
-                let rendered = points
-                    .iter()
-                    .take(5)
-                    .map(value_as_display_text)
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                lines.push(format!("  Key Points: {rendered}"));
-            }
-        }
-    }
-    Ok(lines.join("\n"))
 }
 
 async fn load_session(
@@ -1286,14 +1123,18 @@ async fn load_content(
         .await
 }
 
-async fn load_content_in_transaction(
+async fn load_visible_content_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
     content_id: i64,
 ) -> Result<Option<ContentPresentationRow>, sqlx::Error> {
-    sqlx::query_as::<_, ContentPresentationRow>(CONTENT_PRESENTATION_SQL)
-        .bind(content_id)
-        .fetch_optional(&mut **transaction)
-        .await
+    sqlx::query_as::<_, ContentPresentationRow>(AssertSqlSafe(format!(
+        "{CONTENT_PRESENTATION_SQL} AND {VISIBLE_CONTENT_CLAUSE}"
+    )))
+    .bind(content_id)
+    .bind(user_id)
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 async fn load_news(
@@ -1367,36 +1208,9 @@ async fn content_awaiting_first_chat_turn(
     user_id: i64,
     content_id: i64,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, bool>(
-        r"
-        SELECT EXISTS(
-            SELECT 1
-            FROM contents
-            WHERE id = $1::bigint
-              AND (
-                    COALESCE(
-                        content_metadata::jsonb->'processing'->'share_and_chat_requests',
-                        '[]'::jsonb
-                    ) @> jsonb_build_array(jsonb_build_object('user_id', $2::bigint))
-                    OR COALESCE(
-                        content_metadata::jsonb->'share_and_chat_requests',
-                        '[]'::jsonb
-                    ) @> jsonb_build_array(jsonb_build_object('user_id', $2::bigint))
-              )
-        ) OR EXISTS(
-            SELECT 1
-            FROM processing_tasks
-            WHERE content_id = $1::bigint
-              AND task_type = 'dig_deeper'
-              AND status IN ('pending', 'processing')
-              AND payload::jsonb @> jsonb_build_object('user_id', $2::bigint)
-        )
-        ",
-    )
-    .bind(content_id)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
+    Ok(load_waiting_content_ids(pool, user_id, &[content_id])
+        .await?
+        .contains(&content_id))
 }
 
 pub(crate) async fn lock_active_user(
@@ -1478,85 +1292,6 @@ fn is_assistant_session_type(value: Option<&str>) -> bool {
     )
 }
 
-fn clean_context_text(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-fn push_unique_positive(values: &mut Vec<i64>, value: Option<i64>) {
-    if let Some(value) = value.filter(|value| *value > 0)
-        && !values.contains(&value)
-    {
-        values.push(value);
-    }
-}
-
-fn append_context_line(lines: &mut Vec<String>, label: &str, value: Option<String>) {
-    if let Some(value) = value {
-        lines.push(format!("{label}: {value}"));
-    }
-}
-
-fn content_excerpt(metadata: &Value, max_chars: usize) -> Option<String> {
-    let metadata = metadata.as_object()?;
-    let candidates = [
-        metadata.get("excerpt"),
-        metadata.get("transcript"),
-        metadata.get("content"),
-        metadata
-            .get("summary")
-            .and_then(Value::as_object)
-            .and_then(|summary| summary.get("full_markdown")),
-    ];
-    for candidate in candidates.into_iter().flatten() {
-        let Some(text) = candidate.as_str() else {
-            continue;
-        };
-        let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if compact.is_empty() {
-            continue;
-        }
-        if compact.chars().count() <= max_chars {
-            return Some(compact);
-        }
-        let mut excerpt = compact
-            .chars()
-            .take(max_chars.saturating_sub(3))
-            .collect::<String>();
-        excerpt = excerpt.trim_end().to_owned();
-        excerpt.push_str("...");
-        return Some(excerpt);
-    }
-    None
-}
-
-fn summarize_as_title(value: &str) -> String {
-    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.chars().count() <= 120 {
-        return compact;
-    }
-    let excerpt = truncate_chars(&compact, 120);
-    format!("{}…", excerpt.trim_end())
-}
-
-fn first_non_empty<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<String> {
-    values
-        .into_iter()
-        .flatten()
-        .map(str::trim)
-        .find(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-fn value_as_display_text(value: &Value) -> String {
-    match value {
-        Value::String(value) => value.clone(),
-        _ => value.to_string(),
-    }
-}
-
 const SESSION_PROJECTION_SQL: &str = r"
     SELECT
         id::bigint AS id,
@@ -1584,6 +1319,37 @@ const CONTENT_PRESENTATION_SQL: &str = r"
         content_metadata
     FROM contents
     WHERE id = $1::bigint
+";
+
+const VISIBLE_CONTENT_CLAUSE: &str = r"
+    (
+        EXISTS (
+            SELECT 1
+            FROM content_knowledge_saves AS knowledge_save
+            WHERE knowledge_save.user_id = $2::bigint
+              AND knowledge_save.content_id = contents.id
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM content_status AS user_status
+            WHERE user_status.user_id = $2::bigint
+              AND user_status.content_id = contents.id
+              AND user_status.status = 'inbox'
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM chat_sessions AS owned_session
+            WHERE owned_session.user_id = $2::bigint
+              AND owned_session.content_id = contents.id
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM learning_decks AS owned_deck
+            WHERE owned_deck.user_id = $2::bigint
+              AND owned_deck.source_content_id = contents.id
+              AND owned_deck.deleted_at IS NULL
+        )
+    )
 ";
 
 const NEWS_PRESENTATION_SQL: &str = r"
@@ -1661,6 +1427,16 @@ mod screen_context_tests;
 #[cfg(test)]
 #[path = "chat/session_list_tests.rs"]
 mod session_list_tests;
+
+#[path = "chat/presentation.rs"]
+mod presentation;
+pub(crate) use presentation::{
+    build_screen_context_snapshot, content_display_title, extract_short_summary,
+};
+use presentation::{
+    content_presentation, content_title, load_contents_by_ids, load_news_by_ids,
+    load_waiting_content_ids, news_presentation, news_title,
+};
 
 #[path = "chat/session_state.rs"]
 mod session_state;

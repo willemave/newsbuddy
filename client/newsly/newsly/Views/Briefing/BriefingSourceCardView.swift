@@ -11,6 +11,7 @@ struct BriefingSourceCardView: View {
     let model: BriefingSegmentRenderModel
     let card: BriefingSourceCard
     var savedSources: BriefingSavedSources?
+    var contentTransitionNamespace: Namespace.ID? = nil
     let onOpenSource: (String) -> Void
     var onSourceAction: ((String, BriefingSourceAction) -> Void)?
     let onOpenDiscussion: (String) -> Void
@@ -41,6 +42,7 @@ struct BriefingSourceCardView: View {
 
     var body: some View {
         cardBody
+            .matchedContentZoomSource(id: card.contentId, namespace: contentTransitionNamespace)
             .opacity(swipe.cardOpacity)
             .scaleEffect(swipe.cardScale)
             .offset(x: swipe.cardOffset)
@@ -85,7 +87,7 @@ struct BriefingSourceCardView: View {
         .overlay {
             cardShape.strokeBorder(Color.borderSubtle, lineWidth: 1)
         }
-        .animation(.easeInOut(duration: 0.35), value: isRead)
+        .animation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.readDim), value: isRead)
     }
 
     // MARK: Swipe

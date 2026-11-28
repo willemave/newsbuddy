@@ -34,7 +34,8 @@ enum KnowledgeTimelineItem: Identifiable {
         saved: [ContentSummary],
         chats: [ChatSessionSummary],
         decks: [LearningDeck],
-        narrations: [AudioEpisode]
+        narrations: [AudioEpisode],
+        chatPreview: (ChatSessionSummary) -> String? = KnowledgeChatPreview.make(for:)
     ) -> [KnowledgeTimelineItem] {
         let savedSources = Set(saved.map(KnowledgeSource.init))
         let sourceChats = Dictionary(grouping: chats, by: \.knowledgeSource)
@@ -52,7 +53,7 @@ enum KnowledgeTimelineItem: Identifiable {
         }.map { session in
             Self.chat(
                 session: session,
-                preview: KnowledgeChatPreview.make(for: session)
+                preview: chatPreview(session)
             )
         }
         let deckItems = decks.filter { deck in

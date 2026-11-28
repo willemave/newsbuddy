@@ -31,7 +31,12 @@ struct ReadStateKey: Hashable, Sendable {
 @MainActor
 @Observable
 final class ReadStateCache {
-    private(set) var readKeys: Set<ReadStateKey> = []
+    private(set) var readKeys: Set<ReadStateKey> = [] {
+        didSet { readKeysVersion &+= 1 }
+    }
+
+    @ObservationIgnored
+    private(set) var readKeysVersion: UInt64 = 0
 
     @ObservationIgnored
     private let contentReadRepository: ReadStatusRepositoryType
@@ -66,6 +71,9 @@ final class ReadStateCache {
         to items: [ContentSummary],
         removeReadItems: Bool
     ) -> [ContentSummary] {
+        if readKeys.isEmpty && !removeReadItems {
+            return items
+        }
         var projectedItems = items.map(applying(to:))
         if removeReadItems {
             projectedItems.removeAll { $0.isRead }

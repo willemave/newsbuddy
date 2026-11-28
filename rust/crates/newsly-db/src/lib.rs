@@ -192,13 +192,11 @@ pub use content_feeds::{
     list_recently_read_content, search_visible_content,
 };
 pub use content_misc::{
-    ContentConversionPlan, ContentMiscRepositoryError, ConvertedArticle, DiscussionRefreshPlan,
-    DiscussionTargetKind, FeedBackfillEntry, FeedBackfillOrigin, FeedBackfillPersistence,
-    FeedBackfillPlan, FeedBackfillPreparation, NewsConversionPlan, SubmissionPage,
-    SubmissionProjection, finalize_article_conversion, known_feed_urls,
-    list_submission_projections, persist_content_discussion, persist_feed_backfill,
-    persist_news_discussion, prepare_content_conversion, prepare_content_discussion_refresh,
-    prepare_feed_backfill, prepare_news_conversion, prepare_news_discussion_refresh,
+    ContentConversionPlan, ContentMiscRepositoryError, ConvertedArticle, FeedBackfillEntry,
+    FeedBackfillOrigin, FeedBackfillPersistence, FeedBackfillPlan, FeedBackfillPreparation,
+    NewsConversionPlan, SubmissionPage, SubmissionProjection, finalize_article_conversion,
+    known_feed_urls, list_submission_projections, persist_feed_backfill,
+    prepare_content_conversion, prepare_feed_backfill, prepare_news_conversion,
 };
 pub use content_read::{
     ContentDetailProjection, ContentReadRepositoryError, NewsItemProjection, NewsListCursor,
@@ -260,7 +258,8 @@ pub use learning_decks::{
     find_visible_news_item_for_learning_deck, get_hosted_learning_deck, get_learning_deck,
     is_active_learning_deck_conflict, learning_deck_source_needing_summary, list_learning_decks,
     load_submitted_content_learning_deck_source, persist_learning_deck_share,
-    prepare_enable_learning_deck_share, resolve_content_learning_deck_source, retry_learning_deck,
+    prepare_enable_learning_deck_share, relink_canonical_user_state,
+    resolve_content_learning_deck_source, retry_learning_deck,
 };
 pub use llm_task_dispatch::{
     LlmTaskDispatchKind, LlmTaskDispatchRepositoryError, UnsupportedLlmTaskOutcome,
@@ -372,9 +371,8 @@ pub use vendor_pricing::{
 };
 pub(crate) use vendor_pricing::{elevenlabs_tts_cost, openai_transcription_cost};
 pub use vendor_usage::{
-    NewExaSearchUsage, NewNarrationTtsUsage, NewTranscriptionUsage, NewXUserLookupUsage,
-    VendorUsageRepositoryError, record_exa_search_usage, record_narration_tts_usage,
-    record_transcription_usage, record_x_user_lookup_usage,
+    NewExaSearchUsage, NewTranscriptionUsage, NewXUserLookupUsage, VendorUsageRepositoryError,
+    record_exa_search_usage, record_transcription_usage, record_x_user_lookup_usage,
 };
 pub use x_sync::{
     NewXSyncUsage, PrepareXSyncOutcome, PreparedXSync, XSyncConnectionUpdate, XSyncRepositoryError,

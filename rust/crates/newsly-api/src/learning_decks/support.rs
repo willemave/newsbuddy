@@ -3,13 +3,11 @@ use std::path::{Component, Path as FilePath};
 
 use axum::extract::Path;
 use axum::extract::rejection::PathRejection;
-use axum::http::header::HOST;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use newsly_db::{
     ContentSubmissionRepositoryError, LearningDeckRepositoryError, is_active_learning_deck_conflict,
 };
 use newsly_queue::{EnqueueRequest, QueueError, TaskType};
-use reqwest::Url;
 use serde_json::{Map, Value};
 
 use crate::error::ApiError;
@@ -47,70 +45,13 @@ pub(super) fn sandbox_root(request_id: &str) -> Result<String, ApiError> {
     Ok(root.trim_end_matches('/').to_owned())
 }
 
-pub(super) fn external_url(
-    headers: &HeaderMap,
-    path: &str,
-    request_id: &str,
-) -> Result<String, ApiError> {
-    let configured = env::var("PUBLIC_BASE_URL")
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty());
-    let mut base = if let Some(configured) = configured {
-        let parsed = Url::parse(&configured).map_err(|error| internal_error(error, request_id))?;
-        if parsed.host().is_none()
-            || !matches!(parsed.scheme(), "http" | "https")
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-            || !matches!(parsed.path(), "" | "/")
-            || (env::var("ENVIRONMENT").is_ok_and(|value| value.eq_ignore_ascii_case("production"))
-                && parsed.scheme() != "https")
-        {
-            return Err(internal_error("PUBLIC_BASE_URL is invalid", request_id));
-        }
-        parsed
-    } else {
-        if env::var("ENVIRONMENT").is_ok_and(|value| value.eq_ignore_ascii_case("production")) {
-            return Err(internal_error(
-                "PUBLIC_BASE_URL is required in production",
-                request_id,
-            ));
-        }
-        let host = headers
-            .get(HOST)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| internal_error("request Host header is missing", request_id))?;
-        let scheme = headers
-            .get("x-forwarded-proto")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
-            .map(str::trim)
-            .filter(|value| matches!(*value, "http" | "https"))
-            .unwrap_or("http");
-        Url::parse(&format!("{scheme}://{host}"))
-            .map_err(|error| internal_error(error, request_id))?
-    };
-    base.set_path(path);
-    base.set_query(None);
-    base.set_fragment(None);
-    Ok(base.to_string())
-}
+pub(super) use crate::write_support::external_url;
 
 pub(super) fn valid_deck_id(
     path: Result<Path<i64>, PathRejection>,
     request_id: &str,
 ) -> Result<i64, ApiError> {
-    let Path(deck_id) =
-        path.map_err(|rejection| validation_error(rejection.body_text(), request_id))?;
-    if deck_id <= 0 {
-        return Err(validation_error(
-            "deck_id must be greater than zero",
-            request_id,
-        ));
-    }
-    Ok(deck_id)
+    crate::write_support::positive_path_id(path, "deck_id", request_id)
 }
 
 pub(super) fn clean_optional(value: Option<String>) -> Option<String> {

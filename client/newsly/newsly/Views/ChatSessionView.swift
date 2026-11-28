@@ -80,6 +80,7 @@ struct ChatSessionView: View {
 private struct ChatSessionContent: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let lifecycle: AppLifecycle
     private let route: ChatSessionRoute
@@ -95,7 +96,8 @@ private struct ChatSessionContent: View {
     @State private var feedOptionActionModel: AssistantFeedOptionActionModel
     @FocusState private var isInputFocused: Bool
     @State private var scrollToBottomRequest = 0
-    @State private var edgeBackDragOffset: CGFloat = 0
+    @GestureState private var edgeBackDragOffset: CGFloat = 0
+    @State private var edgeBackExitOffset: CGFloat = 0
     @State private var edgeBackSwipeFeedbackTrigger = 0
     /// The chat's own width, so the edge-back swipe slides exactly off its
     /// container (a column or the full screen) rather than the device screen.
@@ -143,6 +145,16 @@ private struct ChatSessionContent: View {
                 bottomDock
             }
             .offset(x: edgeBackDragOffset)
+            .animation(
+                edgeBackDragOffset == 0
+                    ? AppMotion.respectingReduceMotion(
+                        reduceMotion,
+                        edgeBackExitOffset != 0 ? AppMotion.subtle : AppMotion.press
+                    )
+                    : nil,
+                value: edgeBackDragOffset
+            )
+            .offset(x: edgeBackExitOffset)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                 containerWidth = width
             }
@@ -274,22 +286,26 @@ private struct ChatSessionContent: View {
 
     private var edgeBackSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 20, coordinateSpace: .global)
-            .onChanged { value in
-                guard isHorizontalBackSwipe(value) else { return }
-                edgeBackDragOffset = min(value.translation.width * 0.45, 140)
-            }
-            .onEnded { value in
-                guard isCompletedBackSwipe(value) else {
-                    snapBackFromEdgeSwipe()
+            .updating($edgeBackDragOffset) { value, state, _ in
+                guard isHorizontalBackSwipe(value) else {
+                    state = 0
                     return
                 }
+                state = min(value.translation.width * 0.45, 140)
+            }
+            .onEnded { value in
+                guard isCompletedBackSwipe(value) else { return }
 
                 edgeBackSwipeFeedbackTrigger += 1
-                withAnimation(AppMotion.subtle) {
-                    edgeBackDragOffset = max(containerWidth, value.translation.width)
+                withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {
+                    edgeBackExitOffset = max(containerWidth, value.translation.width)
                 } completion: {
                     closeChat()
-                    edgeBackDragOffset = 0
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        edgeBackExitOffset = 0
+                    }
                 }
             }
     }
@@ -373,11 +389,5 @@ private extension ChatSessionContent {
     func isCompletedBackSwipe(_ value: DragGesture.Value) -> Bool {
         isHorizontalBackSwipe(value)
             && value.translation.width > ChatSessionDesign.edgeBackSwipeThreshold
-    }
-
-    func snapBackFromEdgeSwipe() {
-        withAnimation(AppMotion.press) {
-            edgeBackDragOffset = 0
-        }
     }
 }

@@ -30,6 +30,7 @@ struct ToastView: View {
 }
 
 struct ToastModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var toastService: ToastService
 
     init(toastService: ToastService) {
@@ -43,12 +44,15 @@ struct ToastModifier: ViewModifier {
             if let toast = toastService.currentToast {
                 ToastView(toast: toast)
                     .allowsHitTesting(false)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(AppMotion.panel, value: toastService.currentToast?.id)
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     .padding(.top, 8)
                     .zIndex(999)
             }
         }
+        .animation(
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel),
+            value: toastService.currentToast?.id
+        )
     }
 }
 

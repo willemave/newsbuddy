@@ -7,18 +7,48 @@ import Foundation
 import Observation
 
 @MainActor
+protocol DetailChatServicing {
+    func existingSourceChat(for source: KnowledgeSource) async throws -> ChatSessionSummary?
+    func startArticleChat(
+        contentId: Int,
+        provider: ChatModelProvider
+    ) async throws -> ChatSessionSummary
+    func startNewsChat(
+        newsItemId: Int,
+        provider: ChatModelProvider
+    ) async throws -> ChatSessionSummary
+    func startTopicChat(
+        contentId: Int,
+        topic: String,
+        provider: ChatModelProvider
+    ) async throws -> ChatSessionSummary
+    func startNewsTopicChat(
+        newsItemId: Int,
+        topic: String,
+        provider: ChatModelProvider
+    ) async throws -> ChatSessionSummary
+    func createAssistantTurn(
+        message: String,
+        sessionId: Int?,
+        screenContext: AssistantScreenContext
+    ) async throws -> AssistantTurnResponse
+}
+
+extension ChatService: DetailChatServicing {}
+
+@MainActor
 @Observable
 final class DetailChatCoordinator {
     private(set) var isStartingChat = false
     var chatError: String?
 
     private let chatSessionManager: ActiveChatSessionManager
-    private let chatService: ChatService
+    private let chatService: any DetailChatServicing
     private let toastPresenter: any ToastPresenting
 
     init(
         chatSessionManager: ActiveChatSessionManager,
-        chatService: ChatService,
+        chatService: any DetailChatServicing,
         toastPresenter: any ToastPresenting
     ) {
         self.chatSessionManager = chatSessionManager
@@ -61,8 +91,16 @@ final class DetailChatCoordinator {
         provider: ChatModelProvider = .openai
     ) async -> ChatSessionRoute? {
         await performChatStart {
+            let source: KnowledgeSource = content.contentType == .news
+                ? .news(content.id)
+                : .content(content.id)
+            let existing = try await chatService.existingSourceChat(for: source)
+            try Task.checkCancellation()
+
             let session: ChatSessionSummary
-            if content.contentType == .news {
+            if let existing {
+                session = existing
+            } else if content.contentType == .news {
                 session = try await chatService.startNewsChat(
                     newsItemId: content.id,
                     provider: provider
@@ -76,7 +114,7 @@ final class DetailChatCoordinator {
             return chatRoute(
                 sessionId: session.id,
                 content: content,
-                focusComposerOnAppear: true
+                focusComposerOnAppear: existing == nil
             )
         }
     }

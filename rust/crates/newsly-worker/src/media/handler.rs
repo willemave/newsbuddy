@@ -124,7 +124,7 @@ impl TaskHandler for TranscribeTweetVideoHandler {
 async fn execute_podcast(
     services: &MediaWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(content_id) = content_id(plan) else {
         return plain_failure("No content_id provided", false);
@@ -181,7 +181,7 @@ async fn execute_podcast(
     let mut resolved_episode_title = None;
     if resolved_audio_url.is_none() && is_apple_podcast(&snapshot, &metadata) {
         match lease_aware(
-            &mut lease,
+            &lease,
             services
                 .media_gateway
                 .resolve_apple_podcast_episode(&snapshot.url),
@@ -224,7 +224,7 @@ async fn execute_podcast(
     };
     let downloaded = if is_youtube_url(&audio_url) {
         lease_aware(
-            &mut lease,
+            &lease,
             services.media_gateway.download_with_ytdlp(
                 &audio_url,
                 &scratch,
@@ -235,7 +235,7 @@ async fn execute_podcast(
         .await
     } else {
         lease_aware(
-            &mut lease,
+            &lease,
             services.media_gateway.download_public_media(
                 &audio_url,
                 &scratch,
@@ -263,7 +263,7 @@ async fn execute_podcast(
         }
     };
     let normalized = match lease_aware(
-        &mut lease,
+        &lease,
         services.media_gateway.normalize_audio(&downloaded.path),
     )
     .await
@@ -284,7 +284,7 @@ async fn execute_podcast(
         .and_then(|value| value.to_str())
         .unwrap_or("podcast-audio.mp3");
     let transcription = match lease_aware(
-        &mut lease,
+        &lease,
         services.transcription_gateway.transcribe_upload_observed(
             &normalized.path,
             filename,
@@ -350,7 +350,7 @@ async fn execute_podcast(
 async fn execute_tweet_download(
     services: &MediaWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(content_id) = content_id(plan) else {
         return plain_failure("No content_id provided", false);
@@ -388,7 +388,7 @@ async fn execute_tweet_download(
         }
     };
     let downloaded = match lease_aware(
-        &mut lease,
+        &lease,
         services.media_gateway.download_with_ytdlp(
             &tweet_url,
             &attempt_dir,
@@ -447,7 +447,7 @@ async fn execute_tweet_download(
 async fn execute_tweet_transcription(
     services: &MediaWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(content_id) = content_id(plan) else {
         return plain_failure("No content_id provided", false);
@@ -476,7 +476,7 @@ async fn execute_tweet_transcription(
         }
     };
     let transcription = match lease_aware(
-        &mut lease,
+        &lease,
         services.transcription_gateway.transcribe_upload_observed(
             &audio.path,
             &audio.filename,
@@ -815,16 +815,14 @@ fn lease_lost_failure() -> HandlerExecution {
     plain_failure("Media task lease was lost", true)
 }
 
-async fn lease_aware<F, T, E>(lease: &mut LeaseHealth, future: F) -> Result<Result<T, E>, LeaseLost>
+async fn lease_aware<F, T, E>(lease: &LeaseHealth, future: F) -> Result<Result<T, E>, LeaseLost>
 where
     F: Future<Output = Result<T, E>>,
 {
-    tokio::pin!(future);
-    tokio::select! {
-        biased;
-        () = lease.wait_for_ownership_loss() => Err(LeaseLost),
-        result = &mut future => Ok(result),
+    if lease.ownership_lost() {
+        return Err(LeaseLost);
     }
+    Ok(future.await)
 }
 
 #[derive(Debug)]

@@ -14,9 +14,6 @@ struct ChatStatusBanner: View {
     let onDismiss: () -> Void
     var style: BannerStyle = .floating
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isPulsing = false
-
     enum BannerStyle {
         case floating  // Card with shadow (for overlays)
         case inline    // Simple bar (for inline content)
@@ -50,26 +47,15 @@ struct ChatStatusBanner: View {
         .padding(.vertical, style == .inline ? 10 : 12)
         // The pulse dims the content, not the glass: opacity on glass flattens
         // it into a group that stops sampling what sits behind it.
-        .opacity(!reduceMotion && isPulsing && style == .inline && isProcessing ? 0.7 : 1.0)
-        .animation(
-            reduceMotion ? nil : AppMotion.chatStatusPulse,
-            value: isPulsing
+        .pulse(
+            isActive: style == .inline && isProcessing,
+            minOpacity: 0.7,
+            animation: AppMotion.chatStatusPulse
         )
         .glassEffect(glass, in: bannerShape)
         // Glass is not hit-testable content; keep the whole banner tappable.
         .contentShape(bannerShape)
         .applyBannerStyle(style)
-        .onAppear {
-            if !reduceMotion && style == .inline && isProcessing {
-                isPulsing = true
-            }
-        }
-        .onChange(of: isProcessing) { _, processing in
-            isPulsing = !reduceMotion && processing && style == .inline
-        }
-        .onChange(of: reduceMotion) { _, reduceMotion in
-            isPulsing = !reduceMotion && isProcessing && style == .inline
-        }
         .onTapGesture {
             if case .completed = session.status {
                 onTap()

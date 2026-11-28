@@ -249,7 +249,15 @@ impl XLookupGateway {
                 .and_then(|target| normalize_external_url(target.as_str())));
         }
         let response = response.error_for_status()?;
-        let body = response.text().await?;
+        let bytes = crate::read_bounded_response_bytes(response, MAX_X_REDIRECT_BODY_BYTES)
+            .await
+            .map_err(|error| match error {
+                crate::BoundedBodyError::Transport(source) => XSyncGatewayError::Transport(source),
+                crate::BoundedBodyError::TooLarge(_) => XSyncGatewayError::MalformedResponse(
+                    "X short-link response exceeded size limit",
+                ),
+            })?;
+        let body = String::from_utf8_lossy(&bytes);
         Ok(html_redirect_url(&body).and_then(|target| normalize_external_url(&target)))
     }
 
@@ -422,12 +430,22 @@ impl XSyncGateway {
     }
 }
 
+const MAX_X_REDIRECT_BODY_BYTES: usize = 256 * 1024;
+const MAX_X_API_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
 async fn send_json(
     request: reqwest::RequestBuilder,
 ) -> Result<Map<String, Value>, XSyncGatewayError> {
     let response = request.send().await?;
     let status = response.status();
-    let bytes = response.bytes().await?;
+    let bytes = crate::read_bounded_response_bytes(response, MAX_X_API_RESPONSE_BYTES)
+        .await
+        .map_err(|error| match error {
+            crate::BoundedBodyError::Transport(source) => XSyncGatewayError::Transport(source),
+            crate::BoundedBodyError::TooLarge(_) => {
+                XSyncGatewayError::MalformedResponse("X API response exceeded size limit")
+            }
+        })?;
     if !status.is_success() {
         let detail = serde_json::from_slice::<Value>(&bytes)
             .ok()

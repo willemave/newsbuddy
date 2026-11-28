@@ -48,10 +48,10 @@ pub(crate) async fn main() -> Result<()> {
         config.transcription_timeout,
     )
     .context("media transcription gateway initialization failed")?;
-    let file_store = MediaFileStore::new(
+    let file_store = MediaFileStore::from_backend(
         config.podcast_scratch_root.clone(),
         config.tweet_media_root.clone(),
-        config.content_body_local_root.clone(),
+        config.content_body_storage.clone(),
         config.content_body_storage_prefix.clone(),
         config.max_media_bytes,
     )

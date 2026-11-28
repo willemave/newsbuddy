@@ -19,7 +19,7 @@ use crate::content::repository::load_content_snapshot;
 pub(super) async fn execute_process_content(
     services: &ContentWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    _lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(content_id) = content_id(plan) else {
         return HandlerExecution::from_result(TaskResult::fail(
@@ -96,18 +96,9 @@ pub(super) async fn execute_process_content(
                 news_item: None,
                 user: None,
             });
-        let extraction =
-            runtime.process_article(&target_url, &snapshot.content_type, &request_id, deadline);
-        tokio::pin!(extraction);
-        let attempt = tokio::select! {
-            attempt = &mut extraction => attempt,
-            () = lease.wait_for_ownership_loss() => {
-                return HandlerExecution::from_result(TaskResult::fail(
-                    Some("lease ownership was lost during content extraction".to_owned()),
-                    true,
-                ));
-            }
-        };
+        let attempt = runtime
+            .process_article(&target_url, &snapshot.content_type, &request_id, deadline)
+            .await;
         match attempt {
             ExtractionAttempt::Success { article, usage } => (article, usage),
             ExtractionAttempt::Deferred {

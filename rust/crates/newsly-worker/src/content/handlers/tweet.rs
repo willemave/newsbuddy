@@ -38,7 +38,7 @@ pub(super) async fn execute_tweet_analysis(
     plan: &OwnedWorkPlan,
     snapshot: &ContentSnapshot,
     content_id: i64,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(tweet_id) = extract_tweet_id(&snapshot.url) else {
         return terminal_failure(
@@ -73,19 +73,10 @@ pub(super) async fn execute_tweet_analysis(
                 Vec::new(),
             );
         };
-        let lookup = services
+        let result = services
             .x_lookup
-            .fetch_tweet(token.expose_secret(), &tweet_id);
-        tokio::pin!(lookup);
-        let result = tokio::select! {
-            result = &mut lookup => result,
-            () = lease.wait_for_ownership_loss() => {
-                return HandlerExecution::from_result(TaskResult::fail(
-                    Some("lease ownership was lost during X post lookup".to_owned()),
-                    true,
-                ));
-            }
-        };
+            .fetch_tweet(token.expose_secret(), &tweet_id)
+            .await;
         match result {
             Ok((tweet, included)) => (
                 tweet,

@@ -46,8 +46,8 @@ pub(crate) async fn main() -> Result<()> {
         config.firecrawl_credit_cost_usd,
     )
     .context("Firecrawl client initialization failed")?;
-    let body_store = LocalContentBodyStore::new(
-        config.content_body_local_root.clone(),
+    let body_store = LocalContentBodyStore::from_backend(
+        config.content_body_storage.clone(),
         config.content_body_storage_prefix.clone(),
     )
     .context("content-body storage initialization failed")?;

@@ -1,14 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use newsly_agent_runtime::{
-    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError, ProviderUsage};
 use reqwest::{StatusCode, Url};
 use rig_core::schemars::{JsonSchema, schema_for};
 use secrecy::SecretString;
@@ -18,7 +15,6 @@ use thiserror::Error;
 
 use crate::{ModelSpec, ProviderCredentials, RigAgentEngine};
 
-use crate::agent_support::NoTools;
 use crate::elevenlabs::{
     ElevenLabsSynthesisError, ElevenLabsSynthesisRequest, is_standard_api_base, synthesize,
 };
@@ -443,8 +439,8 @@ impl ContentMiscGateway {
         );
         let outcome = self
             .agent_engine
-            .run(
-                AgentRequest {
+            .run_structured_raw(
+                crate::rig_engine::RawStructuredRunRequest {
                     feature: "tweet_suggestions".to_owned(),
                     model_spec,
                     system_prompt: concat!(
@@ -453,28 +449,14 @@ impl ContentMiscGateway {
                     )
                     .to_owned(),
                     user_prompt: prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: "tweet_suggestions".to_owned(),
-                        schema,
-                        strict: true,
-                        validation_retries: 1,
-                    },
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(2),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(1_200),
-                        deadline: Duration::from_secs(60),
-                    },
+                    schema_name: "tweet_suggestions".to_owned(),
+                    schema,
+                    deadline: Duration::from_secs(60),
+                    request_limit: 2,
+                    output_token_limit: 1_200,
+                    validation_retries: 1,
                     provider_parameters: Map::new(),
                 },
-                Arc::new(NoTools),
                 events,
             )
             .await?;
@@ -549,36 +531,22 @@ impl ContentMiscGateway {
         };
         let outcome = self
             .agent_engine
-            .run(
-                AgentRequest {
+            .run_structured_raw(
+                crate::rig_engine::RawStructuredRunRequest {
                     feature: "news_discussions".to_owned(),
                     model_spec: self.discussion_model.canonical(),
                     system_prompt: format!(
                         "{system_prompt} Write an overview of 20-900 characters and one to eight                          topics. Each topic title must contain 2-90 characters and its summary                          10-500 characters. Use concise plain text with single spaces. These are                          character limits, not word limits; rewrite to fit without losing meaning."
                     ),
                     user_prompt: prompt.to_owned(),
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: "discussion_summary".to_owned(),
-                        schema: schema_for!(DiscussionSummaryArtifact),
-                        strict: true,
-                        validation_retries: 2,
-                    },
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(3),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(3_000),
-                        deadline: Duration::from_secs(120),
-                    },
+                    schema_name: "discussion_summary".to_owned(),
+                    schema: schema_for!(DiscussionSummaryArtifact),
+                    deadline: Duration::from_secs(120),
+                    request_limit: 3,
+                    output_token_limit: 3_000,
+                    validation_retries: 2,
                     provider_parameters: Map::new(),
                 },
-                Arc::new(NoTools),
                 events,
             )
             .await
@@ -786,10 +754,7 @@ impl ContentMiscGatewayError {
     pub fn discussion_retryable(&self) -> bool {
         match self {
             Self::DiscussionFetch { retryable, .. } => *retryable,
-            Self::DiscussionGeneration(error) => matches!(
-                error,
-                AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_)
-            ),
+            Self::DiscussionGeneration(error) => error.is_retryable(),
             Self::Http(error) => error.status().is_none_or(|status| {
                 status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
             }),

@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use thiserror::Error;
-
-use crate::local_object::{
-    LocalObjectError, absolute_root, publish, read_optional, sha256_hex, storage_key,
-    validate_relative_path,
+use newsly_domain::sha256_hex;
+use newsly_providers::{
+    ObjectStorageBackend, ObjectStorageConfigError, ObjectStorageOpError, is_safe_object_key,
+    path_to_object_key,
 };
+use thiserror::Error;
 
 use super::model::BodyPointer;
 
@@ -13,7 +13,7 @@ const MAX_NEWS_BODY_BYTES: usize = 2_000_000;
 
 #[derive(Debug, Clone)]
 pub struct NewsArticleBodyStore {
-    root: PathBuf,
+    backend: ObjectStorageBackend,
     prefix: PathBuf,
 }
 
@@ -29,16 +29,40 @@ pub(super) struct StagedNewsBody {
 }
 
 impl NewsArticleBodyStore {
-    /// Builds the local content-addressed store for persisted news article bodies.
+    /// Builds the content-addressed store for persisted news article bodies over local or S3
+    /// storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the storage prefix is unsafe.
+    pub fn from_backend(
+        backend: ObjectStorageBackend,
+        prefix: PathBuf,
+    ) -> Result<Self, NewsBodyStoreError> {
+        if path_to_object_key(&prefix).is_none() {
+            return Err(NewsBodyStoreError::UnsafeStorageKey);
+        }
+        Ok(Self { backend, prefix })
+    }
+
+    /// Builds a local content-addressed store for persisted news article bodies.
     ///
     /// # Errors
     ///
     /// Returns an error when the storage prefix is unsafe or the current working directory cannot
     /// be resolved for a relative root.
     pub fn new(root: PathBuf, prefix: PathBuf) -> Result<Self, NewsBodyStoreError> {
-        validate_relative_path(&prefix)?;
-        let root = absolute_root(root)?;
-        Ok(Self { root, prefix })
+        let backend = ObjectStorageBackend::local(root).map_err(|error| match error {
+            ObjectStorageConfigError::CurrentDirectory(source) => {
+                NewsBodyStoreError::CurrentDirectory(source)
+            }
+            _ => NewsBodyStoreError::UnsafeStorageKey,
+        })?;
+        Self::from_backend(backend, prefix)
+    }
+
+    pub(super) const fn provider_name(&self) -> &'static str {
+        self.backend.provider_name()
     }
 
     pub(super) async fn stage(
@@ -60,12 +84,15 @@ impl NewsArticleBodyStore {
             .join("news-items")
             .join(news_item_id.to_string())
             .join(format!("source-{sha256}.txt"));
-        validate_relative_path(&relative)?;
-        let storage_key = storage_key(&relative)?;
-        publish(&self.root, &relative, bytes).await?;
+        let storage_key =
+            path_to_object_key(&relative).ok_or(NewsBodyStoreError::UnsafeStorageKey)?;
+        self.backend
+            .put_immutable(&storage_key, bytes, Some("text/plain; charset=utf-8"))
+            .await
+            .map_err(map_write_error)?;
         Ok(StagedNewsBody {
-            storage_provider: "local",
-            storage_bucket: None,
+            storage_provider: self.backend.provider_name(),
+            storage_bucket: self.backend.bucket().map(str::to_owned),
             storage_key,
             content_format: "text",
             sha256,
@@ -80,24 +107,52 @@ impl NewsArticleBodyStore {
         &self,
         pointer: &BodyPointer,
     ) -> Result<Option<String>, NewsBodyStoreError> {
-        if pointer.storage_provider != "local" {
+        if pointer.storage_provider != self.backend.provider_name() {
             return Err(NewsBodyStoreError::UnsupportedProvider(
                 pointer.storage_provider.clone(),
             ));
         }
-        let relative = Path::new(&pointer.storage_key);
-        validate_relative_path(relative)?;
-        let Some(slice) = read_optional(&self.root, relative, MAX_NEWS_BODY_BYTES).await? else {
+        if !is_safe_object_key(&pointer.storage_key) {
+            return Err(NewsBodyStoreError::UnsafeStorageKey);
+        }
+        let Some(bytes) = self
+            .backend
+            .read_bounded(&pointer.storage_key, MAX_NEWS_BODY_BYTES)
+            .await
+            .map_err(map_read_error)?
+        else {
             return Ok(None);
         };
-        if slice.truncated {
-            return Err(NewsBodyStoreError::BodyTooLarge(
-                MAX_NEWS_BODY_BYTES.saturating_add(1),
-            ));
-        }
-        String::from_utf8(slice.bytes)
+        String::from_utf8(bytes)
             .map(Some)
             .map_err(NewsBodyStoreError::InvalidUtf8)
+    }
+}
+
+fn map_write_error(error: ObjectStorageOpError) -> NewsBodyStoreError {
+    match error {
+        ObjectStorageOpError::UnsafeKey(_) | ObjectStorageOpError::UnsafeLocalPath(_) => {
+            NewsBodyStoreError::UnsafeStorageKey
+        }
+        ObjectStorageOpError::UnsafeExistingObject(_) => NewsBodyStoreError::UnsafeExistingBody,
+        ObjectStorageOpError::TooLarge { maximum_bytes, .. } => {
+            NewsBodyStoreError::BodyTooLarge(maximum_bytes.saturating_add(1))
+        }
+        ObjectStorageOpError::File { source, .. } => NewsBodyStoreError::Write(source),
+        ObjectStorageOpError::ObjectStore(message) => NewsBodyStoreError::ObjectStore(message),
+    }
+}
+
+fn map_read_error(error: ObjectStorageOpError) -> NewsBodyStoreError {
+    match error {
+        ObjectStorageOpError::UnsafeKey(_) => NewsBodyStoreError::UnsafeStorageKey,
+        ObjectStorageOpError::UnsafeLocalPath(_)
+        | ObjectStorageOpError::UnsafeExistingObject(_) => NewsBodyStoreError::UnsafeExistingBody,
+        ObjectStorageOpError::TooLarge { maximum_bytes, .. } => {
+            NewsBodyStoreError::BodyTooLarge(maximum_bytes.saturating_add(1))
+        }
+        ObjectStorageOpError::File { source, .. } => NewsBodyStoreError::Read(source),
+        ObjectStorageOpError::ObjectStore(message) => NewsBodyStoreError::ObjectStore(message),
     }
 }
 
@@ -117,26 +172,19 @@ pub enum NewsBodyStoreError {
     Write(#[source] std::io::Error),
     #[error("could not read news article body")]
     Read(#[source] std::io::Error),
+    #[error("news article object-store operation failed: {0}")]
+    ObjectStore(String),
     #[error("an existing content-addressed news article body is unsafe or has different bytes")]
     UnsafeExistingBody,
     #[error("stored news article body is not valid UTF-8")]
     InvalidUtf8(#[source] std::string::FromUtf8Error),
 }
 
-impl From<LocalObjectError> for NewsBodyStoreError {
-    fn from(error: LocalObjectError) -> Self {
-        match error {
-            LocalObjectError::CurrentDirectory(error) => Self::CurrentDirectory(error),
-            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
-            LocalObjectError::Write(error) => Self::Write(error),
-            LocalObjectError::Read(error) => Self::Read(error),
-            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingBody,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use object_store::memory::InMemory;
     use uuid::Uuid;
 
     use super::*;
@@ -168,5 +216,22 @@ mod tests {
             Some("fixture body")
         );
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stages_and_reads_s3_compatible_news_body() {
+        let backend = ObjectStorageBackend::s3(Arc::new(InMemory::new()), "newsly-bucket");
+        let store = NewsArticleBodyStore::from_backend(backend, PathBuf::from("content")).unwrap();
+        let staged = store.stage(42, "  s3 article \n").await.unwrap();
+        assert_eq!(staged.storage_provider, "s3_compatible");
+        assert_eq!(staged.storage_bucket.as_deref(), Some("newsly-bucket"));
+        let pointer = BodyPointer {
+            storage_provider: staged.storage_provider.to_owned(),
+            storage_key: staged.storage_key,
+        };
+        assert_eq!(
+            store.read(&pointer).await.unwrap().as_deref(),
+            Some("s3 article")
+        );
     }
 }

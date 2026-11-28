@@ -42,11 +42,13 @@ struct BriefingView: View {
     let viewModel: BriefingViewModel
     let scrollToTopRequest: Int
     let contentTextSize: DynamicTypeSize
+    let contentTransitionNamespace: Namespace.ID?
     let layout: BriefingLayout
     /// True while News is hidden under a chat on the open display, so its
     /// passages are not marked read unseen.
     let isReadTrackingSuspended: Bool
     private let narrationController: BriefingNarrationController
+    private let playbackService: NarrationPlaybackService
     /// Sources push onto the tab's navigation stack rather than opening a sheet,
     /// so the reader gets the standard back stack and edge-swipe.
     private let onOpenContent: (ContentDetailRoute) -> Void
@@ -59,7 +61,6 @@ struct BriefingView: View {
     @State private var pendingDeckReader: LearningDeckReaderDestination?
     @State private var deckReader: LearningDeckReaderDestination?
     @State private var digViewModel: BriefingDigViewModel
-    @State private var playbackService: NarrationPlaybackService
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()
     /// The lens whose collapse the header shows. Follows the selection inside
@@ -101,6 +102,7 @@ struct BriefingView: View {
         playbackService: NarrationPlaybackService,
         scrollToTopRequest: Int = 0,
         contentTextSize: DynamicTypeSize,
+        contentTransitionNamespace: Namespace.ID? = nil,
         layout: BriefingLayout = .pager,
         isReadTrackingSuspended: Bool = false,
         onOpenContent: @escaping (ContentDetailRoute) -> Void,
@@ -109,15 +111,16 @@ struct BriefingView: View {
         self.viewModel = viewModel
         self.scrollToTopRequest = scrollToTopRequest
         self.contentTextSize = contentTextSize
+        self.contentTransitionNamespace = contentTransitionNamespace
         self.layout = layout
         self.isReadTrackingSuspended = isReadTrackingSuspended
         self.narrationController = viewModel.narrationController
+        self.playbackService = playbackService
         self.onOpenContent = onOpenContent
         self.onSourceMutation = onSourceMutation
         self._digViewModel = State(
             initialValue: BriefingDigViewModel(service: viewModel.service)
         )
-        self._playbackService = State(initialValue: playbackService)
     }
 
     private var digSheetPresented: Binding<Bool> {
@@ -321,20 +324,21 @@ struct BriefingView: View {
             } else {
                 TabView(selection: selectedLensBinding) {
                     ForEach(viewModel.pagerLenses, id: \.key) { lens in
+                        let lensState = viewModel.lensStates[lens.key]
                         BriefingLensPageView(
                             lensKey: lens.key,
                             lensTitle: lens.title,
-                            renderModel: viewModel.renderModel(for: lens.key),
+                            renderModel: lensState?.renderModel,
                             firstRunProgress: viewModel.firstRun?.tiers.first { $0.tier == lens.tier.rawValue },
                             isReadTrackingEnabled: viewModel.isActive
                                 && viewModel.selectedLensKey == lens.key,
                             readBoundaryY: readBoundaryY,
-                            documentGeneration: viewModel.documentGeneration(for: lens.key),
+                            documentGeneration: lensState?.documentGeneration ?? 0,
                             scrollToTopRequest: scrollToTopRequest,
                             shouldScrollToTop: viewModel.selectedLensKey == lens.key,
-                            error: viewModel.lensErrors[lens.key],
-                            continuationError: viewModel.lensContinuationErrors[lens.key],
-                            isLoadingContinuation: viewModel.lensContinuationLoadingKeys.contains(lens.key),
+                            error: lensState?.initialError,
+                            continuationError: lensState?.continuationError,
+                            isLoadingContinuation: lensState?.isLoadingContinuation ?? false,
                             chromeCollapse: chromeCollapse,
                             collapsibleChromeHeight: collapsibleChromeHeight,
                             topContentInset: expandedChromeHeight,
@@ -356,7 +360,8 @@ struct BriefingView: View {
                             onMarkSegmentSeen: viewModel.markSegmentSeen,
                             onSetHeaderPinned: { pinned in
                                 viewModel.setHeaderPinned(pinned, forLens: lens.key)
-                            }
+                            },
+                            contentTransitionNamespace: contentTransitionNamespace
                         )
                         .equatable()
                         .dynamicTypeSize(contentTextSize)
@@ -498,7 +503,7 @@ struct BriefingView: View {
                 BriefingCategoryStrip(
                     viewModel: viewModel,
                     onSelectLens: { key in
-                        withAnimation(.smooth(duration: 0.28)) {
+                        withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel)) {
                             viewModel.selectLens(key: key)
                         }
                     },
@@ -513,7 +518,19 @@ struct BriefingView: View {
 
             VStack(spacing: 0) {
                 if let lensKey = viewModel.selectedLensKey, !viewModel.isStartHereSelected {
-                    listenPanel(lensKey: lensKey)
+                    BriefingListenPanelView(
+                        lensKey: lensKey,
+                        lensTitle: viewModel.selectedLensSummary?.title ?? "Briefing",
+                        narrationController: narrationController,
+                        playbackService: playbackService,
+                        isMinimized: isListenPanelMinimized,
+                        onShowChapters: { item in
+                            activeNarrationChapters = item
+                        },
+                        onExpand: { listenPanelPinnedOpen = true },
+                        fullHeight: $listenPanelFullHeight,
+                        minimizedHeight: $listenPanelMinimizedHeight
+                    )
                 }
                 refreshStatus
             }
@@ -546,90 +563,6 @@ struct BriefingView: View {
                 Task { await narrationController.togglePlayback(for: lensKey) }
             }
         )
-    }
-
-    /// Expands beneath the pinned strips only while narration for the selected
-    /// lens is preparing or active, so the resting chrome stays quiet. Once
-    /// the masthead collapses the card minimizes to a single line.
-    @ViewBuilder
-    private func listenPanel(lensKey: String) -> some View {
-        let session = narrationController.session(for: lensKey)
-        let target = narrationController.narrationEpisode(for: lensKey)
-            .map { NarrationTarget.audioEpisode($0.id) }
-        let snapshot = NarrationPlaybackSnapshot(
-            playbackService: playbackService,
-            target: target,
-            isPreparing: session.isPreparing
-        )
-        let isActive = session.isPreparing
-            || (target != nil && target == playbackService.speakingTarget)
-
-        if session.errorMessage != nil || isActive {
-            VStack(alignment: .leading, spacing: 8) {
-                if let errorMessage = session.errorMessage {
-                    Text(errorMessage)
-                        .font(.appCaption)
-                        .foregroundStyle(Color.statusDestructive)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if isActive {
-                    BriefingNowPlayingPanel(
-                        lensTitle: viewModel.orderedLenses.first { $0.key == lensKey }?.title ?? "Briefing",
-                        narration: session.manifest,
-                        selectedIndex: session.selectedChapterIndex,
-                        snapshot: snapshot,
-                        isMinimized: isListenPanelMinimized,
-                        onTogglePlayback: {
-                            Task { await narrationController.togglePlayback(for: lensKey) }
-                        },
-                        onPrevious: {
-                            Task {
-                                await narrationController.playChapter(
-                                    at: session.selectedChapterIndex - 1,
-                                    for: lensKey
-                                )
-                            }
-                        },
-                        onNext: {
-                            Task {
-                                await narrationController.playChapter(
-                                    at: session.selectedChapterIndex + 1,
-                                    for: lensKey
-                                )
-                            }
-                        },
-                        onShowChapters: {
-                            guard let narration = session.manifest else { return }
-                            activeNarrationChapters = BriefingNarrationChapterSheetItem(
-                                lensKey: lensKey,
-                                episodeGroupID: narration.episodeGroupId
-                            )
-                            Task {
-                                await narrationController.refresh(for: lensKey)
-                            }
-                        },
-                        onSeek: { progress in
-                            guard let target else { return }
-                            playbackService.seek(to: progress, for: target)
-                        },
-                        onSetPlaybackRate: { rate in
-                            playbackService.setPlaybackRate(rate)
-                        },
-                        onExpand: { listenPanelPinnedOpen = true },
-                        onDismiss: { narrationController.stopPlayback(for: lensKey) },
-                        fullHeight: $listenPanelFullHeight,
-                        minimizedHeight: $listenPanelMinimizedHeight
-                    )
-                }
-            }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.bottom, 10)
-            .onDisappear {
-                listenPanelFullHeight = 0
-                listenPanelMinimizedHeight = 0
-            }
-        }
     }
 
     // MARK: Open-display column
@@ -752,21 +685,22 @@ struct BriefingView: View {
             )
             .dynamicTypeSize(contentTextSize)
         } else if let lens = viewModel.pagerLenses.first(where: { $0.key == viewModel.selectedLensKey }) {
+            let lensState = viewModel.lensStates[lens.key]
             BriefingLensPageView(
                 lensKey: lens.key,
                 lensTitle: lens.title,
-                renderModel: viewModel.renderModel(for: lens.key),
+                renderModel: lensState?.renderModel,
                 firstRunProgress: viewModel.firstRun?.tiers.first { $0.tier == lens.tier.rawValue },
                 isReadTrackingEnabled: viewModel.isActive && !isColumnResizing && !isReadTrackingSuspended,
                 // The column has no pinned chrome: a passage is read once it
                 // has scrolled fully above the top of the page.
                 readBoundaryY: 0,
-                documentGeneration: viewModel.documentGeneration(for: lens.key),
+                documentGeneration: lensState?.documentGeneration ?? 0,
                 scrollToTopRequest: scrollToTopRequest,
                 shouldScrollToTop: true,
-                error: viewModel.lensErrors[lens.key],
-                continuationError: viewModel.lensContinuationErrors[lens.key],
-                isLoadingContinuation: viewModel.lensContinuationLoadingKeys.contains(lens.key),
+                error: lensState?.initialError,
+                continuationError: lensState?.continuationError,
+                isLoadingContinuation: lensState?.isLoadingContinuation ?? false,
                 chromeCollapse: columnCollapse,
                 collapsibleChromeHeight: 0,
                 topContentInset: 0,
@@ -951,36 +885,4 @@ struct BriefingView: View {
             .map(\.id)
     }
 
-}
-
-struct BriefingLoadingView: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            EditorialMastheadHeader(
-                title: "Briefing",
-                titleAccessibilityIdentifier: "briefing.screen"
-            )
-
-            BuddyLoadingView(message: "Preparing your briefing")
-                .accessibilityIdentifier("briefing.loading")
-        }
-        .background(Color.surfacePrimary)
-    }
-}
-
-private struct BriefingRefreshWaitingView: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            BuddyLoadingIndicator(size: 22)
-                .accessibilityHidden(true)
-
-            Text("Refreshing briefing…")
-                .font(.appCaption)
-                .foregroundStyle(Color.onSurfaceSecondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(Color.surfaceSecondary)
-        .accessibilityIdentifier("briefing.refresh.waiting")
-    }
 }

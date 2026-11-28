@@ -61,9 +61,7 @@ struct OnboardingRedditStep: View {
             .accessibilityIdentifier("onboarding.complete")
 
             Button("Back") {
-                withAnimation(AppMotion.panel) {
-                    viewModel.returnToAggregators()
-                }
+                viewModel.returnToAggregators()
             }
             .font(.appCallout.weight(.medium))
             .foregroundColor(.onSurfaceSecondary)

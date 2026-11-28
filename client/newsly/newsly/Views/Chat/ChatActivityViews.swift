@@ -10,7 +10,12 @@ struct ThinkingBubbleView: View {
     let statusText: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isVisible = false
     @State private var isAnimating = false
+
+    private var shouldAnimate: Bool {
+        isVisible && !reduceMotion
+    }
 
     private func elapsedSeconds(at date: Date) -> Int {
         guard let startDate else { return 0 }
@@ -38,8 +43,7 @@ struct ThinkingBubbleView: View {
                             .frame(width: 6, height: 6)
                             .offset(y: reduceMotion ? 0 : (isAnimating ? -2 : 2))
                             .animation(
-                                reduceMotion ? nil : AppMotion.typingDotPulse
-                                    .delay(Double(index) * 0.1),
+                                isAnimating ? AppMotion.typingDotPulse.delay(Double(index) * 0.1) : nil,
                                 value: isAnimating
                             )
                     }
@@ -64,11 +68,15 @@ struct ThinkingBubbleView: View {
         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 16, bottomTrailingRadius: 16, topTrailingRadius: 16))
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
-            guard !reduceMotion else { return }
-            isAnimating = true
+            isVisible = true
+            isAnimating = shouldAnimate
         }
-        .onChange(of: reduceMotion) { _, reduceMotion in
-            isAnimating = !reduceMotion
+        .onChange(of: reduceMotion) { _, _ in
+            isAnimating = shouldAnimate
+        }
+        .onDisappear {
+            isVisible = false
+            isAnimating = false
         }
     }
 }

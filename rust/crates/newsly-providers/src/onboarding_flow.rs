@@ -403,6 +403,7 @@ impl OnboardingGateway {
                     model_spec: ONBOARDING_MODEL.to_owned(),
                     system_prompt: system_prompt.to_owned(),
                     user_prompt,
+                    schema_name: None,
                     deadline,
                     request_limit: 3,
                     output_token_limit: 3_000,

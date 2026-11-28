@@ -57,18 +57,14 @@ struct OnboardingSuggestionsStep: View {
     private var footer: some View {
         VStack(spacing: 10) {
             onboardingPrimaryButton("Continue") {
-                withAnimation(AppMotion.panel) {
-                    viewModel.advanceToAggregators()
-                }
+                viewModel.advanceToAggregators()
             }
             .disabled(viewModel.isLoading)
             .accessibilityIdentifier("onboarding.suggestions.continue")
 
             if viewModel.shouldOfferRetryFromSuggestions {
                 Button("Try again") {
-                    withAnimation(AppMotion.panel) {
-                        viewModel.retryPersonalization()
-                    }
+                    viewModel.retryPersonalization()
                 }
                 .font(.appCallout.weight(.medium))
                 .foregroundColor(.onSurfaceSecondary)
@@ -76,9 +72,7 @@ struct OnboardingSuggestionsStep: View {
                 .accessibilityIdentifier("onboarding.suggestions.retry")
             } else if viewModel.isShowingDefaultConfirmation {
                 Button("Personalize instead") {
-                    withAnimation(AppMotion.panel) {
-                        viewModel.retryPersonalization()
-                    }
+                    viewModel.retryPersonalization()
                 }
                 .font(.appCallout.weight(.medium))
                 .foregroundColor(.onSurfaceSecondary)

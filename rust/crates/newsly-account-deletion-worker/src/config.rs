@@ -150,11 +150,47 @@ fn absolute_safe_root(name: &'static str, value: PathBuf) -> Result<PathBuf, Pro
 }
 
 fn optional_secret(name: &'static str) -> Result<Option<SecretString>, ProcessConfigError> {
-    match env::var(name) {
-        Ok(value) if value.trim().is_empty() => Err(ProcessConfigError::Empty(name)),
+    parse_optional_secret(name, env::var(name))
+}
+
+fn parse_optional_secret(
+    name: &'static str,
+    value: Result<String, env::VarError>,
+) -> Result<Option<SecretString>, ProcessConfigError> {
+    match value {
+        Ok(value) if value.trim().is_empty() => Ok(None),
         Ok(value) => Ok(Some(SecretString::from(value))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ProcessConfigError::InvalidUnicode(name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_secret_treats_blank_and_missing_as_none() {
+        assert!(
+            parse_optional_secret("X_CLIENT_ID", Err(env::VarError::NotPresent))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_optional_secret("X_CLIENT_ID", Ok(String::new()))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_optional_secret("X_CLIENT_ID", Ok("   ".to_owned()))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_optional_secret("X_CLIENT_ID", Ok("client-id".to_owned()))
+                .unwrap()
+                .is_some()
+        );
     }
 }
 

@@ -379,8 +379,11 @@ async fn execute_submit(
     let response = client.submit_content(&request).await?;
     let mut result = CommandResult::data(command, response.clone());
     if let Some(wait) = wait {
+        let wait_deadline = crate::wait::deadline(wait.timeout)?;
         if let Some(task_id) = optional_i64(&response, "task_id", "content submission")? {
-            let job = client.wait_for_job(task_id, wait).await?;
+            let job = client
+                .wait_for_job_until(task_id, wait.interval, wait_deadline)
+                .await?;
             if job_failed_or_skipped(&job) {
                 return Err(ApiError::local_with_details(
                     "submission job did not complete successfully",
@@ -390,7 +393,9 @@ async fn execute_submit(
             result.job = Some(job);
         }
         let content_id = required_i64(&response, "content_id", "content submission")?;
-        let _ = client.wait_for_submitted_content(content_id, wait).await?;
+        let _ = client
+            .wait_for_submitted_content_until(content_id, wait.interval, wait_deadline)
+            .await?;
     }
     Ok(result)
 }

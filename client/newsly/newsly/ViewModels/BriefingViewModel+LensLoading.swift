@@ -151,12 +151,12 @@ extension BriefingViewModel {
                     }
                     return
                 }
-                if replacingVisibleLens || self.lenses[key]?.hasMore == true {
+                if replacingVisibleLens || self.lensStates[key]?.document?.hasMore == true {
                     self.mutateLensState(key) { state in
                         state.loadPhase = .idle
                         state.failure = .continuation(error.localizedDescription)
                     }
-                } else if key == self.selectedLensKey, self.lenses[key] == nil {
+                } else if key == self.selectedLensKey, self.lensStates[key]?.document == nil {
                     self.mutateLensState(key) { state in
                         state.loadPhase = .idle
                         state.failure = .initial(error.localizedDescription)
@@ -216,7 +216,8 @@ extension BriefingViewModel {
             return nil
         }
 
-        let priorSources = lenses[lensKey]?.sources ?? []
+        let existingLens = lensStates[lensKey]?.document
+        let priorSources = existingLens?.sources ?? []
         let knownSources = priorSources + response.sources
         let optimisticUnreadCount = Dictionary(
             knownSources.map { ($0.sourceKey, $0) },
@@ -224,7 +225,7 @@ extension BriefingViewModel {
         ).values.count(where: { source in
             optimisticallyReadSourceKeys.contains(source.sourceKey) && !source.read
         })
-        let summary = if usesReadCompatibility, let existingSummary = lenses[lensKey]?.lens {
+        let summary = if usesReadCompatibility, let existingSummary = existingLens?.lens {
             existingSummary
         } else {
             response.lens.with(

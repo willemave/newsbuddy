@@ -1,43 +1,19 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
 
-use futures_util::StreamExt as _;
-use object_store::Error as ObjectStoreError;
-use object_store::path::Path as ObjectPath;
-use object_store::{ObjectStore, ObjectStoreExt};
+use newsly_providers::{ObjectStorageBackend, ObjectStorageOpError};
 use thiserror::Error;
 
-#[derive(Clone)]
-pub(super) enum LearningDeckArtifactStore {
-    Local { root: PathBuf },
-    S3 { store: Arc<dyn ObjectStore> },
-}
-
-impl std::fmt::Debug for LearningDeckArtifactStore {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Local { root } => formatter
-                .debug_struct("LocalLearningDeckArtifactStore")
-                .field("root", root)
-                .finish(),
-            Self::S3 { .. } => formatter
-                .debug_struct("S3LearningDeckArtifactStore")
-                .finish_non_exhaustive(),
-        }
-    }
+#[derive(Debug, Clone)]
+pub(super) struct LearningDeckArtifactStore {
+    backend: ObjectStorageBackend,
 }
 
 impl LearningDeckArtifactStore {
     pub(super) fn from_content_store(
         store: &crate::content_body_storage::ContentBodyStore,
     ) -> Self {
-        match store {
-            crate::content_body_storage::ContentBodyStore::Local { root } => {
-                Self::Local { root: root.clone() }
-            }
-            crate::content_body_storage::ContentBodyStore::S3 { store } => Self::S3 {
-                store: Arc::clone(store),
-            },
+        Self {
+            backend: store.backend(),
         }
     }
 
@@ -49,7 +25,7 @@ impl LearningDeckArtifactStore {
         object_keys: &[String],
     ) -> Result<(), LearningDeckArtifactError> {
         for key in object_keys {
-            self.delete(key).await?;
+            self.backend.delete(key).await?;
         }
         Ok(())
     }
@@ -60,110 +36,8 @@ impl LearningDeckArtifactStore {
         key: &str,
         maximum_bytes: usize,
     ) -> Result<Option<Vec<u8>>, LearningDeckArtifactError> {
-        validate_object_key(key)?;
-        match self {
-            Self::Local { root } => read_local_bounded(root, key, maximum_bytes).await,
-            Self::S3 { store } => {
-                let path = ObjectPath::parse(key).map_err(|error| {
-                    LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
-                })?;
-                let result = match store.get(&path).await {
-                    Ok(result) => result,
-                    Err(ObjectStoreError::NotFound { .. }) => return Ok(None),
-                    Err(error) => {
-                        return Err(LearningDeckArtifactError::ObjectStore(error.to_string()));
-                    }
-                };
-                if result.meta.size > maximum_bytes as u64 {
-                    return Err(LearningDeckArtifactError::TooLarge {
-                        key: key.to_owned(),
-                        maximum_bytes,
-                    });
-                }
-                let initial_capacity = usize::try_from(result.meta.size)
-                    .expect("artifact size is bounded by maximum_bytes");
-                let mut bytes = Vec::with_capacity(initial_capacity);
-                let mut stream = result.into_stream();
-                while let Some(chunk) = stream.next().await {
-                    let chunk = chunk.map_err(|error| {
-                        LearningDeckArtifactError::ObjectStore(error.to_string())
-                    })?;
-                    if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
-                        return Err(LearningDeckArtifactError::TooLarge {
-                            key: key.to_owned(),
-                            maximum_bytes,
-                        });
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                Ok(Some(bytes))
-            }
-        }
+        Ok(self.backend.read_bounded(key, maximum_bytes).await?)
     }
-
-    async fn delete(&self, key: &str) -> Result<(), LearningDeckArtifactError> {
-        validate_object_key(key)?;
-        match self {
-            Self::Local { root } => delete_local(root, key).await,
-            Self::S3 { store } => {
-                let path = ObjectPath::parse(key).map_err(|error| {
-                    LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
-                })?;
-                match store.delete(&path).await {
-                    Ok(()) | Err(ObjectStoreError::NotFound { .. }) => Ok(()),
-                    Err(error) => Err(LearningDeckArtifactError::ObjectStore(error.to_string())),
-                }
-            }
-        }
-    }
-}
-
-async fn read_local_bounded(
-    root: &Path,
-    key: &str,
-    maximum_bytes: usize,
-) -> Result<Option<Vec<u8>>, LearningDeckArtifactError> {
-    let slice = newsly_providers::read_local_object(root, key, maximum_bytes)
-        .await
-        .map_err(|error| match error {
-            newsly_providers::LocalStorageError::UnsafePath(path) => {
-                LearningDeckArtifactError::UnsafeLocalPath(path)
-            }
-            newsly_providers::LocalStorageError::File { path, source } => {
-                LearningDeckArtifactError::File { path, source }
-            }
-        })?;
-    slice
-        .map(|slice| {
-            if slice.truncated {
-                return Err(LearningDeckArtifactError::TooLarge {
-                    key: key.to_owned(),
-                    maximum_bytes,
-                });
-            }
-            Ok(slice.bytes)
-        })
-        .transpose()
-}
-
-async fn delete_local(root: &Path, key: &str) -> Result<(), LearningDeckArtifactError> {
-    newsly_providers::delete_local_object(root, key)
-        .await
-        .map_err(|error| match error {
-            newsly_providers::LocalStorageError::UnsafePath(path) => {
-                LearningDeckArtifactError::UnsafeLocalPath(path)
-            }
-            newsly_providers::LocalStorageError::File { path, source } => {
-                LearningDeckArtifactError::File { path, source }
-            }
-        })
-}
-
-fn validate_object_key(key: &str) -> Result<(), LearningDeckArtifactError> {
-    if !newsly_providers::is_safe_object_key(key) {
-        return Err(LearningDeckArtifactError::UnsafeObjectKey(key.to_owned()));
-    }
-    Ok(())
 }
 
 #[derive(Debug, Error)]
@@ -184,6 +58,21 @@ pub(super) enum LearningDeckArtifactError {
     },
 }
 
+impl From<ObjectStorageOpError> for LearningDeckArtifactError {
+    fn from(error: ObjectStorageOpError) -> Self {
+        match error {
+            ObjectStorageOpError::UnsafeKey(key) => Self::UnsafeObjectKey(key),
+            ObjectStorageOpError::UnsafeLocalPath(path)
+            | ObjectStorageOpError::UnsafeExistingObject(path) => Self::UnsafeLocalPath(path),
+            ObjectStorageOpError::TooLarge { key, maximum_bytes } => {
+                Self::TooLarge { key, maximum_bytes }
+            }
+            ObjectStorageOpError::File { path, source } => Self::File { path, source },
+            ObjectStorageOpError::ObjectStore(message) => Self::ObjectStore(message),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,7 +87,9 @@ mod tests {
         tokio::fs::write(root.join("learning/deck/index.html"), b"deck")
             .await
             .unwrap();
-        let store = LearningDeckArtifactStore::Local { root };
+        let store = LearningDeckArtifactStore {
+            backend: ObjectStorageBackend::local(root).unwrap(),
+        };
 
         assert_eq!(
             store
@@ -223,8 +114,8 @@ mod tests {
     #[tokio::test]
     async fn local_reads_reject_parent_components() {
         let temporary = tempfile::tempdir().unwrap();
-        let store = LearningDeckArtifactStore::Local {
-            root: temporary.path().to_path_buf(),
+        let store = LearningDeckArtifactStore {
+            backend: ObjectStorageBackend::local(temporary.path().to_path_buf()).unwrap(),
         };
         assert!(matches!(
             store.read_bounded("../outside", 10).await,

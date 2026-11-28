@@ -1,7 +1,7 @@
 //! Direct envd Process `ConnectRPC` client and bounded event normalization.
 
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -209,23 +209,31 @@ impl EnvdProcessClient {
         sandbox: &SandboxHandle,
         max_message_size: usize,
     ) -> Result<process::ProcessClient<HttpClient>, E2bError> {
+        static SHARED_ENVD_HTTP_CLIENT: LazyLock<Result<HttpClient, String>> =
+            LazyLock::new(|| {
+                let roots = webpki_roots::TLS_SERVER_ROOTS
+                    .iter()
+                    .cloned()
+                    .collect::<connectrpc::rustls::RootCertStore>();
+                let tls = connectrpc::rustls::ClientConfig::builder_with_provider(Arc::new(
+                    connectrpc::rustls::crypto::aws_lc_rs::default_provider(),
+                ))
+                .with_safe_default_protocol_versions()
+                .map_err(|error| error.to_string())?
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+                Ok(HttpClient::with_tls(Arc::new(tls)))
+            });
+
         let base = self.control.envd_base_url(sandbox)?;
         let uri = base
             .as_str()
             .parse::<http::Uri>()
             .map_err(|error| E2bError::Configuration(error.to_string()))?;
-        let roots = webpki_roots::TLS_SERVER_ROOTS
-            .iter()
-            .cloned()
-            .collect::<connectrpc::rustls::RootCertStore>();
-        let tls = connectrpc::rustls::ClientConfig::builder_with_provider(Arc::new(
-            connectrpc::rustls::crypto::aws_lc_rs::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map_err(|error| E2bError::Configuration(error.to_string()))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-        let http = HttpClient::with_tls(Arc::new(tls));
+        let http = SHARED_ENVD_HTTP_CLIENT
+            .as_ref()
+            .map_err(|error| E2bError::Configuration(error.clone()))?
+            .clone();
         let wire_message_size = max_message_size
             .saturating_mul(4)
             .div_ceil(3)

@@ -17,8 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use newsly_agent_runtime::{
-    AgentEvent, AgentEventSink, AgentLimits, AgentOutcome, AgentRequest, AgentRuntimeError,
-    NewslyTranscript, ProviderUsage, ResponseContract, ToolPolicy,
+    AgentEvent, AgentEventSink, AgentOutcome, AgentRuntimeError, ProviderUsage,
 };
 use schemars::JsonSchema;
 use secrecy::SecretString;
@@ -29,7 +28,6 @@ use thiserror::Error;
 use crate::openrouter_embeddings::{OpenRouterEmbeddingClient, OpenRouterEmbeddingError};
 use crate::{ProviderCredentials, RigAgentEngine};
 
-use crate::agent_support::NoTools;
 use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
@@ -517,34 +515,20 @@ impl BriefingCompositionGateway {
         } = request;
         let events = Arc::new(ObservedUsage::new(forwarded_events));
         self.engine
-            .run(
-                AgentRequest {
+            .run_structured_raw(
+                crate::rig_engine::RawStructuredRunRequest {
                     feature: feature.to_owned(),
                     model_spec: model_spec.to_owned(),
                     system_prompt: system_prompt.to_owned(),
                     user_prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: schema_name.to_owned(),
-                        schema,
-                        strict: true,
-                        validation_retries,
-                    },
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(u32::from(validation_retries).saturating_add(1)),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(output_tokens),
-                        deadline: self.deadline,
-                    },
+                    schema_name: schema_name.to_owned(),
+                    schema,
+                    deadline: self.deadline,
+                    request_limit: u32::from(validation_retries).saturating_add(1),
+                    output_token_limit: output_tokens,
+                    validation_retries,
                     provider_parameters: Map::new(),
                 },
-                Arc::new(NoTools),
                 events.clone(),
             )
             .await
@@ -695,13 +679,7 @@ impl BriefingCompositionGatewayError {
     }
     pub fn retryable(&self) -> bool {
         match self {
-            Self::ObservedAgent {
-                source: AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_),
-                ..
-            }
-            | Self::Agent(AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_)) => {
-                true
-            }
+            Self::ObservedAgent { source, .. } | Self::Agent(source) => source.is_retryable(),
             Self::Http(error) => error
                 .status()
                 .is_none_or(|status| status.as_u16() == 429 || status.is_server_error()),

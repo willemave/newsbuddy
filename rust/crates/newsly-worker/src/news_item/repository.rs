@@ -1269,8 +1269,6 @@ async fn enqueue_ready_fanout(
     .fetch_all(&mut **transaction)
     .await?;
     let mut requests = Vec::with_capacity(pending_counts.len());
-    let mut dedupe_keys = Vec::with_capacity(pending_counts.len());
-    let mut deadlines = Vec::with_capacity(pending_counts.len());
     let now = Utc::now();
     for (user_id, pending_count, append_running) in pending_counts {
         // A filtered source has no pending row to trigger the batch threshold yet. Wake
@@ -1300,34 +1298,14 @@ async fn enqueue_ready_fanout(
         request.dedupe = Some(true);
         request.dedupe_key = Some(dedupe_key.clone());
         request.available_at = Some(available_at);
-        dedupe_keys.push(dedupe_key);
-        deadlines.push(available_at.naive_utc());
         requests.push(request);
     }
     if !requests.is_empty() {
-        queue
-            .enqueue_many_in_transaction(transaction, requests)
-            .await?;
-        sqlx::query(
-            r#"
-            WITH locked AS MATERIALIZED (
-                SELECT task.id, wake.available_at
-                FROM processing_tasks AS task
-                JOIN unnest($1::text[], $2::timestamp[]) AS wake(dedupe_key, available_at)
-                  ON task.dedupe_key = wake.dedupe_key
-                WHERE task.status = 'pending' AND task.retry_count = 0
-                ORDER BY task.id
-                FOR UPDATE OF task
-            )
-            UPDATE processing_tasks AS task
-            SET available_at = LEAST(task.available_at, locked.available_at)
-            FROM locked
-            WHERE task.id = locked.id
-            "#,
+        crate::briefing_refresh::enqueue_and_pull_forward_briefing_refreshes(
+            transaction,
+            queue,
+            requests,
         )
-        .bind(&dedupe_keys)
-        .bind(&deadlines)
-        .execute(&mut **transaction)
         .await?;
     }
     Ok(())

@@ -29,13 +29,8 @@ fn only_podcast_requests_ask_for_a_scene_alongside_the_reader_summary() {
         let source = source(content_type, "https://example.com/source", None);
         let hint = resolve_artifact_source_hint(&source);
         let (system, _) = build_prompts(&source, &hint);
-        let ResponseContract::JsonSchema { schema, strict, .. } =
-            summarization_response_contract(podcast)
-        else {
-            panic!("summarization needs a structured response");
-        };
+        let (_, schema) = summarization_schema(podcast);
         let schema = Value::from(schema);
-        assert!(strict);
         assert_eq!(
             system.contains("observable action with its visible consequence"),
             podcast

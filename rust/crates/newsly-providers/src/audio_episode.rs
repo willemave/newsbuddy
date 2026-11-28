@@ -1,5 +1,4 @@
 use newsly_domain::{BriefingNarrationMetadata, BriefingNarrationStyle, NewsNarrationWindow};
-use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -8,10 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
-use newsly_agent_runtime::{
-    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError, ProviderUsage};
 use reqwest::{StatusCode, Url};
 use schemars::{JsonSchema, schema_for};
 use secrecy::SecretString;
@@ -24,7 +20,6 @@ use tokio::sync::Semaphore;
 
 use crate::{ProviderCredentials, RigAgentEngine};
 
-use crate::agent_support::NoTools;
 use crate::elevenlabs::{
     ElevenLabsSynthesisError, ElevenLabsSynthesisRequest, is_standard_api_base, synthesize,
 };
@@ -148,36 +143,24 @@ impl AudioEpisodeGateway {
         source_snapshot: &Value,
         events: Arc<dyn AgentEventSink>,
     ) -> Result<GeneratedAudioEpisodeScript, AudioEpisodeGatewayError> {
-        let schema = schema_for!(AudioEpisodeScript);
-        let request = AgentRequest {
-            feature: "audio_episode_script".to_owned(),
-            model_spec: self.config.script_model.clone(),
-            system_prompt: SCRIPT_SYSTEM_PROMPT.to_owned(),
-            user_prompt: script_user_prompt(kind, source_snapshot)?,
-            transcript: NewslyTranscript::default(),
-            response_contract: ResponseContract::JsonSchema {
-                name: "audio_episode_script".to_owned(),
-                schema,
-                strict: true,
-                validation_retries: 1,
-            },
-            tools: Vec::new(),
-            tool_policy: ToolPolicy {
-                allowed: BTreeSet::new(),
-                require_tool: false,
-                allow_parallel_calls: false,
-            },
-            limits: AgentLimits {
-                request_limit: Some(2),
-                tool_call_limit: 0,
-                output_token_limit: Some(3_000),
-                deadline: self.config.script_timeout,
-            },
-            provider_parameters: Map::new(),
-        };
         let outcome = self
             .script_engine
-            .run(request, Arc::new(NoTools), events)
+            .run_structured_raw(
+                crate::rig_engine::RawStructuredRunRequest {
+                    feature: "audio_episode_script".to_owned(),
+                    model_spec: self.config.script_model.clone(),
+                    system_prompt: SCRIPT_SYSTEM_PROMPT.to_owned(),
+                    user_prompt: script_user_prompt(kind, source_snapshot)?,
+                    schema_name: "audio_episode_script".to_owned(),
+                    schema: schema_for!(AudioEpisodeScript),
+                    deadline: self.config.script_timeout,
+                    request_limit: 2,
+                    output_token_limit: 3_000,
+                    validation_retries: 1,
+                    provider_parameters: Map::new(),
+                },
+                events,
+            )
             .await?;
         let payload = outcome
             .structured_output

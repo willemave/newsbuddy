@@ -21,13 +21,9 @@ impl TaskHandler for PrepareNewsLensHandler {
     fn task_type(&self) -> TaskType {
         TaskType::PrepareNewsLens
     }
-    fn execute(&self, plan: Arc<OwnedWorkPlan>, mut lease: LeaseHealth) -> HandlerFuture<'_> {
+    fn execute(&self, plan: Arc<OwnedWorkPlan>, _lease: LeaseHealth) -> HandlerFuture<'_> {
         Box::pin(async move {
-            let result = tokio::select! {
-                result = prepare(&self.services, &plan) => result,
-                () = lease.wait_for_ownership_loss() => return HandlerExecution::from_result(TaskResult::fail(Some("news embedding lease lost".into()), true)),
-            };
-            match result {
+            match prepare(&self.services, &plan).await {
                 Ok(Preparation::Ready(embedding)) => HandlerExecution::with_finalizer(
                     TaskResult::ok(),
                     EmbeddingFinalizer { embedding },
@@ -245,10 +241,12 @@ async fn expedite_waiting_refreshes(
     .execute(&mut **tx)
     .await?;
     if updated.rows_affected() > 0 {
-        sqlx::query("SELECT pg_notify('processing_tasks', $1)")
-            .bind(serde_json::json!({"reason": "news_embeddings_ready"}).to_string())
-            .execute(&mut **tx)
-            .await?;
+        newsly_queue::notify_queue_in_transaction(
+            tx,
+            TaskType::BriefingRefresh.spec().queue,
+            &serde_json::json!({"reason": "news_embeddings_ready"}).to_string(),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -268,22 +266,32 @@ pub(super) async fn ready_news(
     model: &str,
 ) -> Result<ReadyNews, sqlx::Error> {
     let mut result = ReadyNews::default();
+    if pending.is_empty() {
+        return Ok(result);
+    }
+    let keyed = pending
+        .iter()
+        .map(|source| {
+            (
+                source.source_id,
+                news_lens_embeddings::input_hash(&source.source.embedding_text()),
+            )
+        })
+        .collect::<Vec<_>>();
     let mut connection = pool.acquire().await?;
+    let mut loaded = news_lens_embeddings::load_many(&mut connection, &keyed, model).await?;
+    let missing = keyed
+        .iter()
+        .filter(|(id, _)| !loaded.contains_key(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let failed =
+        news_lens_embeddings::preparation_failed_many(&mut connection, &missing, model).await?;
     for source in pending {
-        let text = source.source.embedding_text();
-        if let Some(vector) =
-            news_lens_embeddings::load(&mut connection, source.source_id, model, &text).await?
-        {
+        if let Some(vector) = loaded.remove(&source.source_id) {
             result.sources.push(source.clone());
             result.vectors.push(vector);
-        } else if news_lens_embeddings::preparation_failed(
-            &mut connection,
-            source.source_id,
-            model,
-            &text,
-        )
-        .await?
-        {
+        } else if failed.contains(&source.source_id) {
             result.failed.push(source.clone());
         } else {
             result.requests.push(request(source.source_id));

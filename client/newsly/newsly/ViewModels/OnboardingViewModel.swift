@@ -28,6 +28,11 @@ protocol OnboardingServicing: AnyObject {
 
 extension OnboardingService: OnboardingServicing {}
 
+enum OnboardingStepDirection: Equatable {
+    case forward
+    case backward
+}
+
 enum OnboardingStep: Int, Codable {
     case intro = 0
     case choice = 1
@@ -184,7 +189,13 @@ final class OnboardingViewModel {
         case discoveryPolling
     }
 
-    var step: OnboardingStep = .intro
+    var step: OnboardingStep = .intro {
+        didSet {
+            guard step != oldValue else { return }
+            stepDirection = step.rawValue < oldValue.rawValue ? .backward : .forward
+        }
+    }
+    private(set) var stepDirection: OnboardingStepDirection = .forward
     var suggestions: OnboardingFastDiscoverResponse?
     var selectedSuggestionIDs: Set<Int> = []
     var selectedAggregators: Set<String> = []

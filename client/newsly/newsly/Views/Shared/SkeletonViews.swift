@@ -110,30 +110,10 @@ struct ContentDetailSkeletonView: View {
     }
 }
 
-private struct SkeletonPulseModifier: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isDimmed = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(isDimmed ? 0.62 : 1)
-            .redacted(reason: .placeholder)
-            .animation(
-                reduceMotion
-                    ? nil
-                    : AppMotion.subtle.repeatForever(autoreverses: true),
-                value: isDimmed
-            )
-            .onAppear {
-                guard !reduceMotion else { return }
-                isDimmed = true
-            }
-    }
-}
-
 private extension View {
     func skeletonPulse() -> some View {
-        modifier(SkeletonPulseModifier())
+        redacted(reason: .placeholder)
+            .pulse(minOpacity: 0.62, animation: AppMotion.skeletonPulse)
     }
 }
 

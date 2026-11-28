@@ -8,7 +8,9 @@ use crate::queue_process_config::{
     QueueWorkerProcessConfig, QueueWorkerProcessConfigError, QueueWorkerProcessEnv,
 };
 use newsly_domain::RelationThresholds;
-use newsly_providers::{ModelProvider, ModelSpec, ProviderCredentials};
+use newsly_providers::{
+    ModelProvider, ModelSpec, ObjectStorageBackend, ObjectStorageConfigError, ProviderCredentials,
+};
 use secrecy::SecretString;
 use thiserror::Error;
 use url::Url;
@@ -71,7 +73,7 @@ pub struct ContentWorkerProcessConfig {
     pub firecrawl_credit_cost_usd: f64,
     pub x_api_base_url: Url,
     pub x_app_bearer_token: Option<SecretString>,
-    pub content_body_local_root: PathBuf,
+    pub content_body_storage: ObjectStorageBackend,
     pub content_body_storage_prefix: PathBuf,
 }
 
@@ -99,7 +101,7 @@ impl Debug for ContentWorkerProcessConfig {
                 "x_app_bearer_token",
                 &self.x_app_bearer_token.as_ref().map(|_| "[REDACTED]"),
             )
-            .field("content_body_local_root", &self.content_body_local_root)
+            .field("content_body_storage", &self.content_body_storage)
             .field(
                 "content_body_storage_prefix",
                 &self.content_body_storage_prefix,
@@ -178,15 +180,7 @@ impl ContentWorkerProcessConfig {
         let x_app_bearer_token =
             optional_trimmed_secret_alias("X_APP_BEARER_TOKEN", "TWITTER_AUTH_TOKEN");
 
-        let storage_provider =
-            env::var("CONTENT_BODY_STORAGE_PROVIDER").unwrap_or_else(|_| "local".to_owned());
-        if storage_provider != "local" {
-            return Err(WorkerConfigError::UnsupportedStorageProvider(
-                storage_provider,
-            ));
-        }
-        let content_body_local_root = env::var_os("CONTENT_BODY_LOCAL_ROOT")
-            .map_or_else(|| PathBuf::from("./data/content_bodies"), PathBuf::from);
+        let content_body_storage = ObjectStorageBackend::from_environment()?;
         let content_body_storage_prefix = PathBuf::from(
             env::var("CONTENT_BODY_STORAGE_PREFIX").unwrap_or_else(|_| "content".to_owned()),
         );
@@ -204,7 +198,7 @@ impl ContentWorkerProcessConfig {
             firecrawl_credit_cost_usd,
             x_api_base_url,
             x_app_bearer_token,
-            content_body_local_root,
+            content_body_storage,
             content_body_storage_prefix,
         })
     }
@@ -225,7 +219,7 @@ pub struct NewsItemWorkerProcessConfig {
     pub firecrawl_api_key: Option<SecretString>,
     pub firecrawl_timeout: Duration,
     pub firecrawl_credit_cost_usd: f64,
-    pub content_body_local_root: PathBuf,
+    pub content_body_storage: ObjectStorageBackend,
     pub content_body_storage_prefix: PathBuf,
     pub relation_thresholds: RelationThresholds,
     pub briefing_debounce_seconds: i64,
@@ -251,7 +245,7 @@ impl Debug for NewsItemWorkerProcessConfig {
             )
             .field("firecrawl_timeout", &self.firecrawl_timeout)
             .field("firecrawl_credit_cost_usd", &self.firecrawl_credit_cost_usd)
-            .field("content_body_local_root", &self.content_body_local_root)
+            .field("content_body_storage", &self.content_body_storage)
             .field(
                 "content_body_storage_prefix",
                 &self.content_body_storage_prefix,
@@ -285,7 +279,7 @@ impl NewsItemWorkerProcessConfig {
             firecrawl_api_key,
             firecrawl_timeout,
             firecrawl_credit_cost_usd,
-            content_body_local_root,
+            content_body_storage,
             content_body_storage_prefix,
             ..
         } = content;
@@ -352,7 +346,7 @@ impl NewsItemWorkerProcessConfig {
             firecrawl_api_key,
             firecrawl_timeout,
             firecrawl_credit_cost_usd,
-            content_body_local_root,
+            content_body_storage,
             content_body_storage_prefix,
             relation_thresholds: RelationThresholds { primary, secondary },
             briefing_debounce_seconds,
@@ -386,7 +380,7 @@ fn validate_production_news_models(
 #[derive(Clone)]
 pub struct SummarizationWorkerProcessConfig {
     pub process: QueueWorkerProcessConfig,
-    pub content_body_local_root: PathBuf,
+    pub content_body_storage: ObjectStorageBackend,
     pub briefing_debounce_seconds: i64,
     pub briefing_batch_minimum: i64,
 }
@@ -396,7 +390,7 @@ impl Debug for SummarizationWorkerProcessConfig {
         formatter
             .debug_struct("SummarizationWorkerProcessConfig")
             .field("process", &self.process)
-            .field("content_body_local_root", &self.content_body_local_root)
+            .field("content_body_storage", &self.content_body_storage)
             .field("briefing_debounce_seconds", &self.briefing_debounce_seconds)
             .field("briefing_batch_minimum", &self.briefing_batch_minimum)
             .finish()
@@ -406,8 +400,8 @@ impl Debug for SummarizationWorkerProcessConfig {
 impl SummarizationWorkerProcessConfig {
     /// Loads the isolated summarization worker configuration.
     ///
-    /// The worker accepts only local immutable body pointers. Provider credentials and model
-    /// selection are validated by `SummarizationGateway` before the queue loop starts.
+    /// Provider credentials and model selection are validated by `SummarizationGateway` before the
+    /// queue loop starts.
     pub fn from_env() -> Result<Self, WorkerConfigError> {
         let process = load_queue_process(
             "newsly-summarization-worker",
@@ -423,13 +417,7 @@ impl SummarizationWorkerProcessConfig {
             ),
         )?;
 
-        let storage_provider =
-            env::var("CONTENT_BODY_STORAGE_PROVIDER").unwrap_or_else(|_| "local".to_owned());
-        if storage_provider != "local" {
-            return Err(WorkerConfigError::UnsupportedStorageProvider(
-                storage_provider,
-            ));
-        }
+        let content_body_storage = ObjectStorageBackend::from_environment()?;
         let briefing_debounce_seconds = parse_i64("BRIEFING_DEBOUNCE_SECONDS", 900)?;
         if !(0..=86_400).contains(&briefing_debounce_seconds) {
             return Err(WorkerConfigError::InvalidRange("BRIEFING_DEBOUNCE_SECONDS"));
@@ -441,8 +429,7 @@ impl SummarizationWorkerProcessConfig {
 
         Ok(Self {
             process,
-            content_body_local_root: env::var_os("CONTENT_BODY_LOCAL_ROOT")
-                .map_or_else(|| PathBuf::from("./data/content_bodies"), PathBuf::from),
+            content_body_storage,
             briefing_debounce_seconds,
             briefing_batch_minimum,
         })
@@ -456,7 +443,7 @@ impl SummarizationWorkerProcessConfig {
 #[derive(Clone)]
 pub struct DiscussionWorkerProcessConfig {
     pub process: QueueWorkerProcessConfig,
-    pub content_body_local_root: PathBuf,
+    pub content_body_storage: ObjectStorageBackend,
     pub content_body_storage_prefix: PathBuf,
 }
 
@@ -465,7 +452,7 @@ impl Debug for DiscussionWorkerProcessConfig {
         formatter
             .debug_struct("DiscussionWorkerProcessConfig")
             .field("process", &self.process)
-            .field("content_body_local_root", &self.content_body_local_root)
+            .field("content_body_storage", &self.content_body_storage)
             .field(
                 "content_body_storage_prefix",
                 &self.content_body_storage_prefix,
@@ -477,8 +464,7 @@ impl Debug for DiscussionWorkerProcessConfig {
 impl DiscussionWorkerProcessConfig {
     /// Loads the isolated Hacker News and Reddit discussion worker configuration.
     ///
-    /// The worker deliberately supports only immutable local object storage. Provider
-    /// credentials and the typed summary model are validated by `ContentMiscGateway`.
+    /// Provider credentials and the typed summary model are validated by `ContentMiscGateway`.
     pub fn from_env() -> Result<Self, WorkerConfigError> {
         let process = load_queue_process(
             "newsly-discussion-worker",
@@ -494,13 +480,7 @@ impl DiscussionWorkerProcessConfig {
             ),
         )?;
 
-        let storage_provider =
-            env::var("CONTENT_BODY_STORAGE_PROVIDER").unwrap_or_else(|_| "local".to_owned());
-        if storage_provider != "local" {
-            return Err(WorkerConfigError::UnsupportedStorageProvider(
-                storage_provider,
-            ));
-        }
+        let content_body_storage = ObjectStorageBackend::from_environment()?;
         let content_body_storage_prefix = PathBuf::from(
             env::var("CONTENT_BODY_STORAGE_PREFIX").unwrap_or_else(|_| "content".to_owned()),
         );
@@ -508,8 +488,7 @@ impl DiscussionWorkerProcessConfig {
 
         Ok(Self {
             process,
-            content_body_local_root: env::var_os("CONTENT_BODY_LOCAL_ROOT")
-                .map_or_else(|| PathBuf::from("./data/content_bodies"), PathBuf::from),
+            content_body_storage,
             content_body_storage_prefix,
         })
     }
@@ -993,8 +972,8 @@ pub enum WorkerConfigError {
     InvalidRange(&'static str),
     #[error("{0} must be a safe relative path")]
     InvalidPath(&'static str),
-    #[error("Rust content workers currently require local content-body storage, got {0:?}")]
-    UnsupportedStorageProvider(String),
+    #[error("invalid content-body storage configuration: {0}")]
+    StorageConfig(#[from] ObjectStorageConfigError),
     #[error(
         "NEWS_LIST_RERANKER_ENABLED is unsupported in production Rust workers; keep local Qwen reranking in the offline Python eval island"
     )]

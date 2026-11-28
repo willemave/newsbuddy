@@ -67,7 +67,7 @@ impl TaskHandler for FetchNewsItemDiscussionHandler {
 async fn execute_discussion(
     services: &DiscussionWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(news_item_id) = plan
         .payload
@@ -114,20 +114,14 @@ async fn execute_discussion(
         return plain_failure("queue lease was lost before discussion fetch", true);
     }
 
-    let fetched = {
-        let fetch = services.gateway.refresh_discussion(
+    let fetched = services
+        .gateway
+        .refresh_discussion(
             Some(&snapshot.platform),
             Some(&snapshot.discussion_url),
             Some(&snapshot.external_id),
-        );
-        tokio::pin!(fetch);
-        tokio::select! {
-            result = &mut fetch => result,
-            () = lease.wait_for_ownership_loss() => {
-                return plain_failure("queue lease was lost during discussion fetch", true);
-            }
-        }
-    };
+        )
+        .await;
     let fetched = match fetched {
         Ok(fetched) => fetched,
         Err(error) => {
@@ -222,7 +216,7 @@ async fn execute_discussion(
                 requested_mode == DiscussionSummaryMode::Merge,
                 &snapshot,
                 plan.task_id,
-                &mut lease,
+                &lease,
             )
             .await;
             let (generated, effective_mode) = match first {
@@ -257,7 +251,7 @@ async fn execute_discussion(
                         false,
                         &snapshot,
                         plan.task_id,
-                        &mut lease,
+                        &lease,
                     )
                     .await
                     {
@@ -330,7 +324,7 @@ async fn summarize_with_lease(
     merge: bool,
     snapshot: &DiscussionSnapshot,
     task_id: i64,
-    lease: &mut LeaseHealth,
+    lease: &LeaseHealth,
 ) -> SummaryCall {
     if lease.ownership_lost() {
         return SummaryCall::LeaseLost;
@@ -359,21 +353,23 @@ async fn summarize_with_lease(
             user_id: snapshot.owner_user_id,
         },
     ));
-    let call = services.gateway.summarize_discussion_with_events(
-        prompt,
-        merge,
-        Some(&snapshot.discussion_url),
-        usage_sink.clone(),
-    );
-    tokio::pin!(call);
-    let result = tokio::select! {
-        result = &mut call => match result {
-            Ok(generated) => SummaryCall::Generated(generated),
-            Err(error) => SummaryCall::Failed(error),
-        },
-        () = lease.wait_for_ownership_loss() => SummaryCall::LeaseLost,
+    let result = match services
+        .gateway
+        .summarize_discussion_with_events(
+            prompt,
+            merge,
+            Some(&snapshot.discussion_url),
+            usage_sink.clone(),
+        )
+        .await
+    {
+        Ok(generated) => SummaryCall::Generated(generated),
+        Err(error) => SummaryCall::Failed(error),
     };
     usage_sink.finish().await;
+    if lease.ownership_lost() {
+        return SummaryCall::LeaseLost;
+    }
     result
 }
 
@@ -485,7 +481,7 @@ fn storage_error_is_retryable(error: &DiscussionObjectStoreError) -> bool {
         error,
         DiscussionObjectStoreError::CurrentDirectory(_)
             | DiscussionObjectStoreError::Write(_)
-            | DiscussionObjectStoreError::Read(_)
+            | DiscussionObjectStoreError::ObjectStore(_)
     )
 }
 

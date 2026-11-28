@@ -508,10 +508,16 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval
             ?? 0.25
+        let curveOption: UIView.AnimationOptions =
+            if let curveRaw = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt {
+                UIView.AnimationOptions(rawValue: curveRaw << 16)
+            } else {
+                .curveEaseInOut
+            }
         UIView.animate(
             withDuration: duration,
             delay: 0,
-            options: [.beginFromCurrentState, .curveEaseInOut]
+            options: [.beginFromCurrentState, curveOption]
         ) {
             self.view.layoutIfNeeded()
             self.scrollActivePromptIntoView(animated: false)

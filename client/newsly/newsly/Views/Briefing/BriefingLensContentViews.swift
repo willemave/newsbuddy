@@ -155,6 +155,7 @@ struct BriefingLensPageView: View, Equatable {
     var columnLayout: BriefingColumnLayout? = nil
     /// Keeps a segment in view when News reflows (a story opens or closes).
     var anchorRequest: BriefingScrollAnchorRequest? = nil
+    var contentTransitionNamespace: Namespace.ID? = nil
 
     private var readingWidth: CGFloat? { columnLayout?.readingWidth }
     private var presentsCardsAsRows: Bool { columnLayout?.presentsCardsAsRows ?? false }
@@ -195,6 +196,7 @@ struct BriefingLensPageView: View, Equatable {
             && lhs.savedSources === rhs.savedSources
             && lhs.columnLayout == rhs.columnLayout
             && lhs.anchorRequest == rhs.anchorRequest
+            && lhs.contentTransitionNamespace == rhs.contentTransitionNamespace
     }
 
     /// One scroll observer owns both chrome movement and read passage. The
@@ -463,6 +465,7 @@ struct BriefingLensPageView: View, Equatable {
                 card: card,
                 isSelected: isSelected(segmentModel),
                 savedSources: savedSources,
+                contentTransitionNamespace: contentTransitionNamespace,
                 onOpenSource: onOpenSource,
                 onSourceAction: onSourceAction,
                 onMarkRead: { onMarkSegmentSeen(segmentModel.segment) }
@@ -472,6 +475,7 @@ struct BriefingLensPageView: View, Equatable {
                 model: segmentModel,
                 card: card,
                 savedSources: savedSources,
+                contentTransitionNamespace: contentTransitionNamespace,
                 onOpenSource: onOpenSource,
                 onSourceAction: onSourceAction,
                 onOpenDiscussion: { openDiscussion(forSourceKey: $0, in: segmentModel) },
@@ -593,11 +597,23 @@ struct BriefingTimelineStamp: Equatable {
         )
     }
 
+    private static let defaultTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
     private static func timeLabel(
         for date: Date,
         locale: Locale,
         timeZone: TimeZone
     ) -> String {
+        if locale == .autoupdatingCurrent && timeZone == .autoupdatingCurrent {
+            return defaultTimeFormatter.string(from: date)
+        }
         let formatter = DateFormatter()
         formatter.locale = locale
         formatter.timeZone = timeZone
@@ -657,7 +673,10 @@ private struct BriefingSegmentView: View {
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
+        let readAnimation = AppMotion.respectingReduceMotion(reduceMotion, AppMotion.readDim)
         VStack(alignment: .leading, spacing: 16) {
             ForEach(model.passageBlockIndices, id: \.self) { index in
                 if let content = model.passageContentByBlockIndex[index] {
@@ -670,14 +689,14 @@ private struct BriefingSegmentView: View {
                         onDig: onDig
                     )
                     .opacity(opacity)
-                    .animation(.easeInOut(duration: 0.35), value: opacity)
+                    .animation(readAnimation, value: opacity)
                 }
             }
         }
         .padding(.vertical, 2)
         // Read segments recede without losing legibility.
         .opacity(model.allSourcesRead ? 0.72 : 1)
-        .animation(.easeInOut(duration: 0.35), value: model.allSourcesRead)
+        .animation(readAnimation, value: model.allSourcesRead)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("briefing.segment.\(model.segment.id)")
     }

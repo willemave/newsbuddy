@@ -85,7 +85,7 @@ struct ContentView: View {
                     path: $settingsPath,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
-                    dependencyFactory: dependencyFactory
+                    chatHistoryViewModel: knowledgeViewModel.chats
                 )
             }
             .attachedChatHost(

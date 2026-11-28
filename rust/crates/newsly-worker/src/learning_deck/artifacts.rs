@@ -1,16 +1,10 @@
-use futures_util::StreamExt as _;
 use std::collections::BTreeSet;
 use std::env;
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 
 use newsly_db::StoredLearningDeckArtifact;
-use object_store::path::Path as ObjectPath;
-use object_store::{
-    Attribute, AttributeValue, Attributes, Error as ObjectStoreError, ObjectStore, ObjectStoreExt,
-    PutOptions,
-};
+use newsly_providers::{ObjectStorageBackend, ObjectStorageOpError};
 use regex::Regex;
 use reqwest::Url;
 use serde_json::Value;
@@ -44,7 +38,7 @@ pub(super) struct LearningDeckAsset {
 #[derive(Clone)]
 pub(super) struct LearningDeckArtifactStore {
     pool: sqlx::PgPool,
-    backend: ArtifactBackend,
+    backend: ObjectStorageBackend,
     prefix: String,
     limits: LearningDeckArtifactLimits,
 }
@@ -60,32 +54,9 @@ impl std::fmt::Debug for LearningDeckArtifactStore {
     }
 }
 
-#[derive(Clone)]
-enum ArtifactBackend {
-    Local { root: PathBuf },
-    S3 { store: Arc<dyn ObjectStore> },
-}
-
-impl std::fmt::Debug for ArtifactBackend {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Local { root } => formatter
-                .debug_struct("LocalArtifactBackend")
-                .field("root", root)
-                .finish(),
-            Self::S3 { .. } => formatter.debug_struct("S3ArtifactBackend").finish(),
-        }
-    }
-}
-
 impl LearningDeckArtifactStore {
     pub(super) fn from_env(pool: sqlx::PgPool) -> Result<Self, LearningDeckArtifactError> {
-        let backend = match newsly_providers::ObjectStorageBackend::from_environment()? {
-            newsly_providers::ObjectStorageBackend::Local { root } => {
-                ArtifactBackend::Local { root }
-            }
-            newsly_providers::ObjectStorageBackend::S3 { store } => ArtifactBackend::S3 { store },
-        };
+        let backend = ObjectStorageBackend::from_environment()?;
         let prefix = normalize_prefix(
             &env::var("CONTENT_BODY_STORAGE_PREFIX").unwrap_or_else(|_| "content".to_owned()),
         )?;
@@ -259,122 +230,25 @@ impl LearningDeckArtifactStore {
         bytes: Vec<u8>,
         content_type: &str,
     ) -> Result<(), LearningDeckArtifactError> {
-        validate_object_key(key)?;
-        match &self.backend {
-            ArtifactBackend::Local { root } => write_local(root, key, bytes).await,
-            ArtifactBackend::S3 { store } => {
-                let path = ObjectPath::parse(key).map_err(|error| {
-                    LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
-                })?;
-                let attributes = Attributes::from_iter([(
-                    Attribute::ContentType,
-                    AttributeValue::from(content_type.to_owned()),
-                )]);
-                store
-                    .put_opts(
-                        &path,
-                        bytes.into(),
-                        PutOptions {
-                            attributes,
-                            ..PutOptions::default()
-                        },
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| LearningDeckArtifactError::ObjectStore(error.to_string()))
-            }
-        }
+        Ok(self
+            .backend
+            .put_immutable(key, &bytes, Some(content_type))
+            .await?)
     }
 
     async fn get_bytes(&self, key: &str) -> Result<Option<Vec<u8>>, LearningDeckArtifactError> {
-        validate_object_key(key)?;
-        match &self.backend {
-            ArtifactBackend::Local { root } => read_local(root, key).await,
-            ArtifactBackend::S3 { store } => {
-                let path = ObjectPath::parse(key).map_err(|error| {
-                    LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
-                })?;
-                let result = match store.get(&path).await {
-                    Ok(result) => result,
-                    Err(ObjectStoreError::NotFound { .. }) => return Ok(None),
-                    Err(error) => {
-                        return Err(LearningDeckArtifactError::ObjectStore(error.to_string()));
-                    }
-                };
-                let maximum = newsly_providers::MAX_SOURCE_BODY_BYTES;
-                if result.meta.size > maximum as u64 {
-                    return Err(LearningDeckArtifactError::SourceTooLarge(maximum));
-                }
-                let mut bytes = Vec::with_capacity(
-                    usize::try_from(result.meta.size)
-                        .unwrap_or(maximum)
-                        .min(maximum),
-                );
-                let mut stream = result.into_stream();
-                while let Some(chunk) = stream.next().await {
-                    let chunk = chunk.map_err(|error| {
-                        LearningDeckArtifactError::ObjectStore(error.to_string())
-                    })?;
-                    if bytes.len().saturating_add(chunk.len()) > maximum {
-                        return Err(LearningDeckArtifactError::SourceTooLarge(maximum));
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                Ok(Some(bytes))
-            }
-        }
+        Ok(self
+            .backend
+            .read_bounded(key, newsly_providers::MAX_SOURCE_BODY_BYTES)
+            .await?)
     }
 
     async fn exists(&self, key: &str) -> Result<bool, LearningDeckArtifactError> {
-        validate_object_key(key)?;
-        match &self.backend {
-            ArtifactBackend::Local { root } => newsly_providers::read_local_object(root, key, 0)
-                .await
-                .map(|slice| slice.is_some())
-                .map_err(|error| match error {
-                    newsly_providers::LocalStorageError::UnsafePath(path) => {
-                        LearningDeckArtifactError::UnsafeLocalPath(path)
-                    }
-                    newsly_providers::LocalStorageError::File { path, source } => {
-                        LearningDeckArtifactError::File { path, source }
-                    }
-                }),
-            ArtifactBackend::S3 { store } => {
-                let path = ObjectPath::parse(key).map_err(|error| {
-                    LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
-                })?;
-                match store.head(&path).await {
-                    Ok(_) => Ok(true),
-                    Err(ObjectStoreError::NotFound { .. }) => Ok(false),
-                    Err(error) => Err(LearningDeckArtifactError::ObjectStore(error.to_string())),
-                }
-            }
-        }
+        Ok(self.backend.exists(key).await?)
     }
 
     async fn delete(&self, key: &str) -> Result<(), LearningDeckArtifactError> {
-        validate_object_key(key)?;
-        match &self.backend {
-            ArtifactBackend::Local { root } => newsly_providers::delete_local_object(root, key)
-                .await
-                .map_err(|error| match error {
-                    newsly_providers::LocalStorageError::UnsafePath(path) => {
-                        LearningDeckArtifactError::UnsafeLocalPath(path)
-                    }
-                    newsly_providers::LocalStorageError::File { path, source } => {
-                        LearningDeckArtifactError::File { path, source }
-                    }
-                }),
-            ArtifactBackend::S3 { store } => {
-                let path = ObjectPath::parse(key).map_err(|error| {
-                    LearningDeckArtifactError::UnsafeObjectKey(error.to_string())
-                })?;
-                match store.delete(&path).await {
-                    Ok(()) | Err(ObjectStoreError::NotFound { .. }) => Ok(()),
-                    Err(error) => Err(LearningDeckArtifactError::ObjectStore(error.to_string())),
-                }
-            }
-        }
+        Ok(self.backend.delete(key).await?)
     }
 }
 
@@ -400,35 +274,33 @@ pub(super) fn validate_learning_deck_artifact(
     if !lower.contains("<section") || !lower.contains("reveal") {
         errors.push("index.html does not look like a Reveal.js deck".to_owned());
     }
-    if !has_responsive_layout(index_html)? {
+    if !has_responsive_layout(index_html) {
         errors.push(format!(
             "index.html must declare the {RESPONSIVE_LAYOUT_VERSION} Learning Deck layout metadata"
         ));
     }
-    let event_attribute = Regex::new(r"(?i)\son[a-z]+\s*=")?;
-    if event_attribute.is_match(index_html) {
+    if EVENT_ATTRIBUTE_RE.is_match(index_html) {
         errors.push("index.html contains inline event-handler attributes".to_owned());
     }
-    if !has_custom_style(index_html)? {
+    if !has_custom_style(index_html) {
         errors
             .push("index.html must include custom deck styling beyond stock Reveal.js".to_owned());
     }
-    for source in extract_attribute(index_html, "script", "src")? {
+    for source in extract_script_srcs(index_html) {
         if !allowed_script_source(&source) {
             errors.push(format!(
                 "index.html contains disallowed script source: {source}"
             ));
         }
     }
-    for stylesheet in stylesheet_hrefs(index_html)? {
+    for stylesheet in stylesheet_hrefs(index_html) {
         if is_reveal_cdn_url(&stylesheet) && !supported_reveal_url(&stylesheet) {
             errors.push(format!(
                 "index.html must pin Reveal.js stylesheets to version {REVEAL_VERSION}: {stylesheet}"
             ));
         }
     }
-    let source_heading = Regex::new(r"(?im)^#{1,3}\s+source")?;
-    if !source_heading.is_match(source_notes_md) {
+    if !SOURCE_HEADING_RE.is_match(source_notes_md) {
         errors.push("source-notes.md must include a source section".to_owned());
     }
     append_secret_and_host_path_errors(&mut errors, index_html, source_notes_md);
@@ -439,12 +311,39 @@ pub(super) fn validate_learning_deck_artifact(
     }
 }
 
-fn has_responsive_layout(html: &str) -> Result<bool, LearningDeckArtifactError> {
-    let meta = Regex::new(r"(?is)<meta\b[^>]*>")?;
-    let name = Regex::new(r#"(?i)\bname\s*=\s*['\"]([^'\"]+)['\"]"#)?;
-    let content = Regex::new(r#"(?i)\bcontent\s*=\s*['\"]([^'\"]+)['\"]"#)?;
-    Ok(meta.find_iter(html).any(|tag| {
-        name.captures(tag.as_str())
+static EVENT_ATTRIBUTE_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?i)\son[a-z]+\s*=").expect("valid regex"));
+static SOURCE_HEADING_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?im)^#{1,3}\s+source").expect("valid regex"));
+static META_TAG_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?is)<meta\b[^>]*>").expect("valid regex"));
+static NAME_ATTR_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#"(?i)\bname\s*=\s*['\"]([^'\"]+)['\"]"#).expect("valid regex")
+});
+static CONTENT_ATTR_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#"(?i)\bcontent\s*=\s*['\"]([^'\"]+)['\"]"#).expect("valid regex")
+});
+static STYLE_TAG_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"(?is)<style\b[^>]*>.*?</style>").expect("valid regex")
+});
+static LINK_TAG_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?is)<link\b[^>]*>").expect("valid regex"));
+static REL_ATTR_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#"(?i)\brel\s*=\s*['\"]([^'\"]+)['\"]"#).expect("valid regex")
+});
+static HREF_ATTR_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#"(?i)\bhref\s*=\s*['\"]([^'\"]+)['\"]"#).expect("valid regex")
+});
+static SCRIPT_TAG_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?is)<script\b[^>]*>").expect("valid regex"));
+static SRC_ATTR_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#"(?i)\bsrc\s*=\s*['\"]([^'\"]+)['\"]"#).expect("valid regex")
+});
+
+fn has_responsive_layout(html: &str) -> bool {
+    META_TAG_RE.find_iter(html).any(|tag| {
+        NAME_ATTR_RE
+            .captures(tag.as_str())
             .and_then(|capture| capture.get(1))
             .is_some_and(|value| {
                 value
@@ -452,7 +351,7 @@ fn has_responsive_layout(html: &str) -> Result<bool, LearningDeckArtifactError> 
                     .trim()
                     .eq_ignore_ascii_case(RESPONSIVE_LAYOUT_META_NAME)
             })
-            && content
+            && CONTENT_ATTR_RE
                 .captures(tag.as_str())
                 .and_then(|capture| capture.get(1))
                 .is_some_and(|value| {
@@ -461,54 +360,46 @@ fn has_responsive_layout(html: &str) -> Result<bool, LearningDeckArtifactError> 
                         .trim()
                         .eq_ignore_ascii_case(RESPONSIVE_LAYOUT_VERSION)
                 })
-    }))
+    })
 }
 
-fn has_custom_style(html: &str) -> Result<bool, LearningDeckArtifactError> {
-    if Regex::new(r"(?is)<style\b[^>]*>.*?</style>")?.is_match(html) {
-        return Ok(true);
+fn has_custom_style(html: &str) -> bool {
+    if STYLE_TAG_RE.is_match(html) {
+        return true;
     }
-    Ok(stylesheet_hrefs(html)?
+    stylesheet_hrefs(html)
         .into_iter()
-        .any(|href| !is_reveal_cdn_url(&href)))
+        .any(|href| !is_reveal_cdn_url(&href))
 }
 
-fn stylesheet_hrefs(html: &str) -> Result<Vec<String>, LearningDeckArtifactError> {
-    let links = Regex::new(r"(?is)<link\b[^>]*>")?;
-    let rel = Regex::new(r#"(?i)\brel\s*=\s*['\"]([^'\"]+)['\"]"#)?;
-    let href = Regex::new(r#"(?i)\bhref\s*=\s*['\"]([^'\"]+)['\"]"#)?;
-    Ok(links
+fn stylesheet_hrefs(html: &str) -> Vec<String> {
+    LINK_TAG_RE
         .find_iter(html)
         .filter_map(|tag| {
-            let rel = rel.captures(tag.as_str())?.get(1)?.as_str();
+            let rel = REL_ATTR_RE.captures(tag.as_str())?.get(1)?.as_str();
             rel.split_ascii_whitespace()
                 .any(|value| value.eq_ignore_ascii_case("stylesheet"))
                 .then(|| {
-                    href.captures(tag.as_str())?
+                    HREF_ATTR_RE
+                        .captures(tag.as_str())?
                         .get(1)
                         .map(|value| value.as_str().to_owned())
                 })
                 .flatten()
         })
-        .collect())
+        .collect()
 }
 
-fn extract_attribute(
-    html: &str,
-    tag: &str,
-    attribute: &str,
-) -> Result<Vec<String>, LearningDeckArtifactError> {
-    let tags = Regex::new(&format!(r"(?is)<{tag}\b[^>]*>"))?;
-    let attribute = Regex::new(&format!(r#"(?i)\b{attribute}\s*=\s*['\"]([^'\"]+)['\"]"#))?;
-    Ok(tags
+fn extract_script_srcs(html: &str) -> Vec<String> {
+    SCRIPT_TAG_RE
         .find_iter(html)
         .filter_map(|tag| {
-            attribute
+            SRC_ATTR_RE
                 .captures(tag.as_str())
                 .and_then(|capture| capture.get(1))
                 .map(|value| value.as_str().to_owned())
         })
-        .collect())
+        .collect()
 }
 
 fn allowed_script_source(source: &str) -> bool {
@@ -745,83 +636,6 @@ fn validate_object_key(key: &str) -> Result<(), LearningDeckArtifactError> {
     Ok(())
 }
 
-async fn write_local(
-    root: &Path,
-    key: &str,
-    bytes: Vec<u8>,
-) -> Result<(), LearningDeckArtifactError> {
-    tokio::fs::create_dir_all(root)
-        .await
-        .map_err(|source| LearningDeckArtifactError::File {
-            path: root.to_path_buf(),
-            source,
-        })?;
-    let canonical_root =
-        tokio::fs::canonicalize(root)
-            .await
-            .map_err(|source| LearningDeckArtifactError::File {
-                path: root.to_path_buf(),
-                source,
-            })?;
-    let path = root.join(key);
-    let parent = path
-        .parent()
-        .ok_or_else(|| LearningDeckArtifactError::UnsafeLocalPath(path.clone()))?;
-    tokio::fs::create_dir_all(parent)
-        .await
-        .map_err(|source| LearningDeckArtifactError::File {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    let canonical_parent = tokio::fs::canonicalize(parent).await.map_err(|source| {
-        LearningDeckArtifactError::File {
-            path: parent.to_path_buf(),
-            source,
-        }
-    })?;
-    if !canonical_parent.starts_with(&canonical_root) {
-        return Err(LearningDeckArtifactError::UnsafeLocalPath(path));
-    }
-    let temporary = canonical_parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("artifact"),
-        uuid::Uuid::new_v4().simple()
-    ));
-    tokio::fs::write(&temporary, bytes)
-        .await
-        .map_err(|source| LearningDeckArtifactError::File {
-            path: temporary.clone(),
-            source,
-        })?;
-    tokio::fs::rename(&temporary, &path)
-        .await
-        .map_err(|source| LearningDeckArtifactError::File { path, source })
-}
-
-async fn read_local(root: &Path, key: &str) -> Result<Option<Vec<u8>>, LearningDeckArtifactError> {
-    let maximum = newsly_providers::MAX_SOURCE_BODY_BYTES;
-    let slice = newsly_providers::read_local_object(root, key, maximum)
-        .await
-        .map_err(|error| match error {
-            newsly_providers::LocalStorageError::UnsafePath(path) => {
-                LearningDeckArtifactError::UnsafeLocalPath(path)
-            }
-            newsly_providers::LocalStorageError::File { path, source } => {
-                LearningDeckArtifactError::File { path, source }
-            }
-        })?;
-    slice
-        .map(|slice| {
-            if slice.truncated {
-                return Err(LearningDeckArtifactError::SourceTooLarge(maximum));
-            }
-            Ok(slice.bytes)
-        })
-        .transpose()
-}
-
 fn bounded_usize(
     name: &'static str,
     default: usize,
@@ -903,6 +717,21 @@ pub(super) enum LearningDeckArtifactError {
 impl LearningDeckArtifactError {
     pub(super) const fn repairable(&self) -> bool {
         matches!(self, Self::RepairableContract(_))
+    }
+}
+
+impl From<ObjectStorageOpError> for LearningDeckArtifactError {
+    fn from(error: ObjectStorageOpError) -> Self {
+        match error {
+            ObjectStorageOpError::UnsafeKey(key) => Self::UnsafeObjectKey(key),
+            ObjectStorageOpError::UnsafeLocalPath(path)
+            | ObjectStorageOpError::UnsafeExistingObject(path) => Self::UnsafeLocalPath(path),
+            ObjectStorageOpError::TooLarge { maximum_bytes, .. } => {
+                Self::SourceTooLarge(maximum_bytes)
+            }
+            ObjectStorageOpError::File { path, source } => Self::File { path, source },
+            ObjectStorageOpError::ObjectStore(message) => Self::ObjectStore(message),
+        }
     }
 }
 

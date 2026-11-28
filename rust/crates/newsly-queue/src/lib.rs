@@ -14,7 +14,7 @@ mod ownership;
 pub use compatibility_json::compatibility_canonical_json;
 pub use kernel::{
     ClaimRequest, EnqueueBatchResult, FencedFinalization, PrepareWorkOutcome, QueueError,
-    QueueKernel,
+    QueueKernel, notify_queue_in_transaction,
 };
 pub use model::{
     ClaimedTask, EnqueueRequest, FinalizationOutcome, LlmTaskDeliveryKind, OwnedWorkPlan,

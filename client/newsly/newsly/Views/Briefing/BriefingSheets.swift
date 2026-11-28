@@ -3,6 +3,7 @@ import SwiftUI
 struct BriefingDigSheet: View {
     let viewModel: BriefingDigViewModel
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var safariItem: BriefingSafariItem?
 
     var body: some View {
@@ -20,7 +21,10 @@ struct BriefingDigSheet: View {
             .background(Color.surfacePrimary)
             .navigationTitle("Dig Deeper")
             .navigationBarTitleDisplayMode(.inline)
-            .animation(.easeInOut(duration: 0.25), value: viewModel.stateKey)
+            .animation(
+                AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+                value: viewModel.stateKey
+            )
             .accessibilityIdentifier("briefing.dig_sheet")
         }
         .sheet(item: $safariItem) { item in

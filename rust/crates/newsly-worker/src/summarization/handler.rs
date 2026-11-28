@@ -80,7 +80,7 @@ impl TaskHandler for SummarizeHandler {
 async fn execute_summarization(
     services: &SummarizationWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(content_id) = plan
         .content_id
@@ -228,18 +228,11 @@ async fn execute_summarization(
             user_id: usage_user_id,
         },
     ));
-    let provider_call = services
+    let generated = services
         .gateway
-        .summarize_with_events(&source, usage_sink.clone());
-    tokio::pin!(provider_call);
-    let generated = tokio::select! {
-        result = &mut provider_call => Some(result),
-        () = lease.wait_for_ownership_loss() => None,
-    };
+        .summarize_with_events(&source, usage_sink.clone())
+        .await;
     usage_sink.finish().await;
-    let Some(generated) = generated else {
-        return plain_failure("lease ownership was lost during summarization", true);
-    };
     match generated {
         Ok(generated) => {
             if lease.ownership_lost() {

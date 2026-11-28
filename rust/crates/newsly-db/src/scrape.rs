@@ -562,6 +562,81 @@ async fn sync_news_discussion(
             score = COALESCE(EXCLUDED.score, news_item_discussions.score),
             comment_count = COALESCE(EXCLUDED.comment_count, news_item_discussions.comment_count),
             last_count_checked_at = EXCLUDED.last_count_checked_at,
+            raw_comments_ref = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.raw_comments_ref END,
+            raw_comments_sha256 = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.raw_comments_sha256 END,
+            summary = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary END,
+            summary_status = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN 'not_ready' ELSE news_item_discussions.summary_status END,
+            summary_input_sha256 = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_input_sha256 END,
+            summary_comment_count = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_comment_count END,
+            summary_comment_fingerprints = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_comment_fingerprints END,
+            summary_seen_input_sha256 = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_seen_input_sha256 END,
+            summary_seen_comment_count = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_seen_comment_count END,
+            summary_seen_comment_fingerprints = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_seen_comment_fingerprints END,
+            summary_incremental_update_count = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN 0 ELSE news_item_discussions.summary_incremental_update_count END,
+            summary_generated_at = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.summary_generated_at END,
+            next_refresh_after = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.next_refresh_after END,
+            last_refresh_status = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN 'pending' ELSE news_item_discussions.last_refresh_status END,
+            last_refresh_error = CASE WHEN
+                news_item_discussions.platform IS DISTINCT FROM EXCLUDED.platform OR
+                news_item_discussions.external_id IS DISTINCT FROM EXCLUDED.external_id OR
+                news_item_discussions.discussion_url IS DISTINCT FROM EXCLUDED.discussion_url
+                THEN NULL ELSE news_item_discussions.last_refresh_error END,
             updated_at = EXCLUDED.updated_at
         "#,
     )

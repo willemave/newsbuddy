@@ -27,6 +27,7 @@ mod object_storage;
 mod onboarding_flow;
 mod openai_transcription;
 mod openrouter;
+mod openrouter_decisions;
 mod openrouter_embeddings;
 mod podcast_directory;
 mod provider_env;
@@ -39,6 +40,37 @@ mod summarization;
 mod token_cipher;
 mod x_oauth;
 mod x_sync;
+
+pub(crate) enum BoundedBodyError {
+    Transport(reqwest::Error),
+    TooLarge(usize),
+}
+
+pub(crate) async fn read_bounded_response_bytes(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, BoundedBodyError> {
+    if let Some(len) = response.content_length()
+        && usize::try_from(len).is_ok_and(|value| value > max_bytes)
+    {
+        return Err(BoundedBodyError::TooLarge(
+            usize::try_from(len).unwrap_or(usize::MAX),
+        ));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(BoundedBodyError::Transport)?
+    {
+        let next_len = bytes.len().saturating_add(chunk.len());
+        if next_len > max_bytes {
+            return Err(BoundedBodyError::TooLarge(next_len));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
 
 pub use audio_episode::{
     AudioEpisodeGateway, AudioEpisodeGatewayConfig, AudioEpisodeGatewayError, AudioEpisodeScript,
@@ -132,9 +164,10 @@ pub mod briefing_links;
 
 pub use object_storage::{
     LocalStorageError, delete_local_object, is_safe_object_key, is_safe_storage_root,
+    path_to_object_key,
 };
 
-pub use object_storage::{ObjectStorageBackend, ObjectStorageConfigError};
+pub use object_storage::{ObjectStorageBackend, ObjectStorageConfigError, ObjectStorageOpError};
 
 pub use object_storage::{LocalObjectSlice, MAX_SOURCE_BODY_BYTES, read_local_object};
 

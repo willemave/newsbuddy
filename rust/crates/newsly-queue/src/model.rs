@@ -94,6 +94,14 @@ string_enum!(TaskQueue {
     Llm => "llm",
 });
 
+impl TaskQueue {
+    /// Returns the queue-scoped `PostgreSQL` `LISTEN/NOTIFY` channel name.
+    #[must_use]
+    pub fn notify_channel(self) -> String {
+        format!("processing_tasks_{}", self.as_str())
+    }
+}
+
 string_enum!(TaskStatus {
     Pending => "pending",
     Processing => "processing",

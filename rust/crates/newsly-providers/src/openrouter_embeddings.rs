@@ -87,10 +87,16 @@ impl OpenRouterEmbeddingClient {
             .get("x-request-id")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let bytes = response.bytes().await?;
-        if bytes.len() > MAX_PROVIDER_RESPONSE_BYTES {
-            return Err(OpenRouterEmbeddingError::ResponseTooLarge(bytes.len()));
-        }
+        let bytes = crate::read_bounded_response_bytes(response, MAX_PROVIDER_RESPONSE_BYTES)
+            .await
+            .map_err(|error| match error {
+                crate::BoundedBodyError::Transport(source) => {
+                    OpenRouterEmbeddingError::Http(source)
+                }
+                crate::BoundedBodyError::TooLarge(size) => {
+                    OpenRouterEmbeddingError::ResponseTooLarge(size)
+                }
+            })?;
         if !status.is_success() {
             return Err(OpenRouterEmbeddingError::Provider {
                 status,

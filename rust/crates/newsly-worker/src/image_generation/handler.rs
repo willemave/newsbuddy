@@ -76,7 +76,7 @@ impl TaskHandler for GenerateImageHandler {
 async fn execute_image_generation(
     services: &ImageWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let prepared = match prepare_image_generation(services, plan).await {
         Ok(prepared) => prepared,
@@ -95,20 +95,16 @@ async fn execute_image_generation(
             pool: services.pool.clone(),
             attempt: prepared.attempt.clone(),
         });
-    let provider_call = services.gateway.generate_infographic(
-        &prepared.prompt,
-        content_id,
-        task_id,
-        subject,
-        usage_observer,
-    );
-    tokio::pin!(provider_call);
-    let generated = tokio::select! {
-        result = &mut provider_call => result,
-        () = lease.wait_for_ownership_loss() => {
-            return plain_failure("lease ownership was lost during image generation", true);
-        }
-    };
+    let generated = services
+        .gateway
+        .generate_infographic(
+            &prepared.prompt,
+            content_id,
+            task_id,
+            subject,
+            usage_observer,
+        )
+        .await;
     let generated = match generated {
         Ok(generated) => generated,
         Err(error) => {

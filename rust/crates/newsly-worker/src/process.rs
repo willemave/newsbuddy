@@ -43,11 +43,17 @@ pub async fn run_queue_worker(
     notification_url: String,
     run_config: QueueWorkerRunConfig<'_>,
 ) -> Result<()> {
-    let notification_hub = QueueNotificationHub::spawn(notification_url);
+    let queue_name = match queue_for_task_scope(run_config.task_types) {
+        Ok(queue_name) => queue_name,
+        Err(error) => {
+            database.close().await;
+            return Err(error);
+        }
+    };
+    let notification_hub = QueueNotificationHub::spawn_for_queue(notification_url, queue_name);
     let notifications = notification_hub.subscribe();
 
     let run_result = async {
-        let queue_name = queue_for_task_scope(run_config.task_types)?;
         let namespaces = run_config
             .task_types
             .iter()

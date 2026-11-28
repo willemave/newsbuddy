@@ -9,6 +9,8 @@ import SwiftUI
 
 /// Numeric count badge (e.g. unread count in More tab).
 struct CountBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let count: Int
     var color: Color = .onSurfaceSecondary
 
@@ -17,7 +19,8 @@ struct CountBadge: View {
             .font(.appSans(size: 14, weight: .medium))
             .foregroundStyle(color)
             .monospacedDigit()
-            .contentTransition(.numericText())
+            .contentTransition(.numericText(value: Double(count)))
+            .animation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle), value: count)
     }
 }
 

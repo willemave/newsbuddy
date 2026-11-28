@@ -559,6 +559,77 @@ async fn deadline_drains_sandbox_allocation_before_finalizing(pool: PgPool) {
     assert!(cleaned.load(std::sync::atomic::Ordering::SeqCst));
 }
 
+#[derive(Debug)]
+struct CancelDropHandler {
+    dropped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl TaskHandler for CancelDropHandler {
+    fn task_type(&self) -> TaskType {
+        TaskType::ChatTurn
+    }
+
+    fn execute(
+        &self,
+        _plan: std::sync::Arc<newsly_queue::OwnedWorkPlan>,
+        _lease: LeaseHealth,
+    ) -> HandlerFuture<'_> {
+        struct DropFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let dropped = self.dropped.clone();
+        Box::pin(async move {
+            let _guard = DropFlag(dropped);
+            std::future::pending::<()>().await;
+            HandlerExecution::from_result(TaskResult::ok())
+        })
+    }
+}
+
+#[sqlx::test]
+async fn cancel_policy_drops_handler_future_and_runs_drop_guard_on_deadline(pool: PgPool) {
+    let (mut worker, _) =
+        worker_with_failing_finalizer(&pool, 0, FinalizerErrorDisposition::Retryable).await;
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('cancel-drop', 'cancel-drop@example.test', FALSE, TRUE) RETURNING id::bigint",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut request = EnqueueRequest::new(TaskType::ChatTurn);
+    request.owner_user_id = Some(user_id);
+    request.payload = serde_json::json!({
+        "user_id": user_id,
+        "session_id": 1,
+        "message_id": 1,
+    })
+    .as_object()
+    .cloned();
+    worker.queue.enqueue(request).await.unwrap();
+    let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    worker.handlers = HandlerRegistry::new();
+    worker
+        .handlers
+        .register(CancelDropHandler {
+            dropped: dropped.clone(),
+        })
+        .unwrap();
+    let scope =
+        ClaimRuntimeScope::namespaces(RuntimeOwner::Rust, [ResourceKey::new("chat_turn").unwrap()])
+            .unwrap();
+    worker.config.claim = ClaimRequest::for_queue("cancel-drop-test", TaskQueue::Chat, scope);
+    worker.config.attempt_timeout = Duration::from_millis(20);
+    let attempt = tokio::time::timeout(Duration::from_secs(2), worker.run_once())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(attempt, WorkerAttempt::Failed(_)));
+    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+}
+
 #[sqlx::test]
 async fn deadline_drains_in_flight_audit_without_starting_a_second_paid_call(pool: PgPool) {
     newsly_db::run_migrations(&pool).await.unwrap();

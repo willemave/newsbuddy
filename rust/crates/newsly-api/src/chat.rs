@@ -854,6 +854,7 @@ fn staged_result(
             "Archived sessions cannot accept messages",
             request_id.to_owned(),
         )),
+        StageChatTurnOutcome::ContentNotFound => Err(not_found("Content not found", request_id)),
         StageChatTurnOutcome::NewsItemNotFound => Err(not_found("News item not found", request_id)),
         StageChatTurnOutcome::UserInactive => Err(inactive_user(request_id)),
     }

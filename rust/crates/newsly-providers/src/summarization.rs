@@ -1,14 +1,10 @@
-use std::collections::BTreeSet;
 use std::env;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use newsly_agent_runtime::{
-    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError, ProviderUsage};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -16,7 +12,6 @@ use thiserror::Error;
 
 use crate::{ProviderCredentials, RigAgentEngine};
 
-use crate::agent_support::NoTools;
 use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_SUMMARIZATION_MODEL: &str = "openai:gpt-6-luna";
@@ -448,31 +443,23 @@ impl SummarizationGateway {
         let hint = resolve_artifact_source_hint(source);
         let (system_prompt, user_prompt) = build_prompts(source, &hint);
         let podcast = source.content_type == "podcast";
+        let (schema_name, schema) = summarization_schema(podcast);
         let outcome = self
             .engine
-            .run(
-                AgentRequest {
+            .run_structured_raw(
+                crate::rig_engine::RawStructuredRunRequest {
                     feature: "summarization".to_owned(),
                     model_spec: self.model_spec.clone(),
                     system_prompt,
                     user_prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: summarization_response_contract(podcast),
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(3),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(6_000),
-                        deadline: self.deadline,
-                    },
+                    schema_name: schema_name.to_owned(),
+                    schema,
+                    deadline: self.deadline,
+                    request_limit: 3,
+                    output_token_limit: 6_000,
+                    validation_retries: 2,
                     provider_parameters: Map::new(),
                 },
-                Arc::new(NoTools),
                 events,
             )
             .await?;
@@ -493,8 +480,8 @@ impl SummarizationGateway {
     }
 }
 
-fn summarization_response_contract(podcast: bool) -> ResponseContract {
-    let (name, schema) = if podcast {
+fn summarization_schema(podcast: bool) -> (&'static str, schemars::Schema) {
+    if podcast {
         (
             "podcast_summarization_v1",
             schemars::schema_for!(PodcastSummarizationOutput),
@@ -504,12 +491,6 @@ fn summarization_response_contract(podcast: bool) -> ResponseContract {
             "longform_artifact_v1",
             schemars::schema_for!(LongformArtifactEnvelope),
         )
-    };
-    ResponseContract::JsonSchema {
-        name: name.to_owned(),
-        schema,
-        strict: true,
-        validation_retries: 2,
     }
 }
 
@@ -843,10 +824,7 @@ pub enum SummarizationGatewayError {
 impl SummarizationGatewayError {
     #[must_use]
     pub fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Agent(AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_))
-        )
+        matches!(self, Self::Agent(error) if error.is_retryable())
     }
 }
 

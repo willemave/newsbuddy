@@ -52,31 +52,12 @@ pub(crate) async fn enqueue_briefing_followups(
 ) -> Result<(), SummarizationFanoutError> {
     let briefing_requests =
         prepare_briefing_requests(transaction, content_id, debounce_seconds, batch_minimum).await?;
-    let briefing_deadlines = briefing_requests
-        .iter()
-        .filter_map(|request| Some((request.dedupe_key.clone()?, request.available_at?)))
-        .collect::<Vec<_>>();
-    if !briefing_requests.is_empty() {
-        queue
-            .enqueue_many_in_transaction(transaction, briefing_requests)
-            .await?;
-    }
-    // An active deduped refresh may predate this source. Pull it forward to the newly computed
-    // deadline instead of waiting for the older schedule.
-    for (dedupe_key, available_at) in briefing_deadlines {
-        sqlx::query(
-            r"
-            UPDATE processing_tasks
-            SET available_at = LEAST(available_at, $2)
-            WHERE dedupe_key = $1
-              AND status = 'pending'
-            ",
-        )
-        .bind(dedupe_key)
-        .bind(available_at.naive_utc())
-        .execute(&mut **transaction)
-        .await?;
-    }
+    crate::briefing_refresh::enqueue_and_pull_forward_briefing_refreshes(
+        transaction,
+        queue,
+        briefing_requests,
+    )
+    .await?;
     Ok(())
 }
 
@@ -214,38 +195,44 @@ async fn prepare_briefing_requests(
     } else {
         "articles"
     };
-    let mut unique_users = BTreeSet::new();
-    for user_id in user_ids {
-        unique_users.insert(user_id);
-        sqlx::query(
-            r"
-            INSERT INTO briefing_pending_sources (
-                user_id, lens_key, source_kind, source_id, enqueued_at
-            )
-            VALUES ($1, $2, 'content', $3, timezone('UTC', clock_timestamp()))
-            ON CONFLICT (user_id, source_kind, source_id) DO UPDATE
-            SET lens_key = COALESCE(briefing_pending_sources.lens_key, EXCLUDED.lens_key)
-            ",
+    let unique_users = user_ids.into_iter().collect::<BTreeSet<_>>();
+    let unique_user_vec = unique_users.into_iter().collect::<Vec<_>>();
+    sqlx::query(
+        r"
+        INSERT INTO briefing_pending_sources (
+            user_id, lens_key, source_kind, source_id, enqueued_at
         )
-        .bind(user_id)
-        .bind(lens_key)
-        .bind(content_id)
-        .execute(&mut **transaction)
-        .await?;
-    }
-    let mut requests = Vec::with_capacity(unique_users.len());
-    for user_id in unique_users {
-        let count = sqlx::query_scalar::<_, i64>(
-            r"
-            SELECT count(*)::bigint
-            FROM briefing_pending_sources
-            WHERE user_id = $1::bigint AND lens_key = $2
-            ",
-        )
-        .bind(user_id)
-        .bind(lens_key)
-        .fetch_one(&mut **transaction)
-        .await?;
+        SELECT user_id, $2, 'content', $3, timezone('UTC', clock_timestamp())
+        FROM unnest($1::bigint[]) AS user_id
+        ON CONFLICT (user_id, source_kind, source_id) DO UPDATE
+        SET lens_key = COALESCE(briefing_pending_sources.lens_key, EXCLUDED.lens_key)
+        ",
+    )
+    .bind(&unique_user_vec)
+    .bind(lens_key)
+    .bind(content_id)
+    .execute(&mut **transaction)
+    .await?;
+
+    let counts = sqlx::query_as::<_, (i64, i64)>(
+        r"
+        SELECT user_id::bigint, count(*)::bigint
+        FROM briefing_pending_sources
+        WHERE user_id = ANY($1::bigint[]) AND lens_key = $2
+        GROUP BY user_id
+        ",
+    )
+    .bind(&unique_user_vec)
+    .bind(lens_key)
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .collect::<std::collections::HashMap<_, _>>();
+
+    let now = Utc::now();
+    let mut requests = Vec::with_capacity(unique_user_vec.len());
+    for user_id in unique_user_vec {
+        let count = counts.get(&user_id).copied().unwrap_or(0);
         let delay = if count >= batch_minimum.max(1) {
             0
         } else {
@@ -259,7 +246,7 @@ async fn prepare_briefing_requests(
         request.owner_user_id = Some(user_id);
         request.dedupe = Some(true);
         request.dedupe_key = Some(format!("briefing_refresh:{user_id}:append"));
-        request.available_at = Some(Utc::now() + Duration::seconds(delay));
+        request.available_at = Some(now + Duration::seconds(delay));
         requests.push(request);
     }
     Ok(requests)

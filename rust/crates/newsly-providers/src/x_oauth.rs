@@ -185,12 +185,21 @@ impl XOAuthGateway {
     }
 }
 
+const MAX_X_OAUTH_RESPONSE_BYTES: usize = 256 * 1024;
+
 async fn send_json(
     request: reqwest::RequestBuilder,
 ) -> Result<Map<String, Value>, XOAuthGatewayError> {
     let response = request.send().await?;
     let status = response.status();
-    let bytes = response.bytes().await?;
+    let bytes = crate::read_bounded_response_bytes(response, MAX_X_OAUTH_RESPONSE_BYTES)
+        .await
+        .map_err(|error| match error {
+            crate::BoundedBodyError::Transport(source) => XOAuthGatewayError::Transport(source),
+            crate::BoundedBodyError::TooLarge(_) => {
+                XOAuthGatewayError::MalformedResponse("X provider response exceeded size limit")
+            }
+        })?;
     let value = if bytes.is_empty() {
         Value::Object(Map::new())
     } else {

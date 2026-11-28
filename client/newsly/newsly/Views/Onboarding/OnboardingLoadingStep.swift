@@ -32,11 +32,11 @@ struct OnboardingLoadingStep: View {
                 } else {
                     VStack(spacing: 6) {
                         ForEach(Array(viewModel.discoveryLanes.enumerated()), id: \.element.id) { index, lane in
-                            LaneStatusRow(lane: lane)
-                                .animation(
-                                    laneEntranceAnimation(index: index),
-                                    value: viewModel.discoveryLanes
-                                )
+                            StaggeredLaneRow(
+                                lane: lane,
+                                index: index,
+                                reduceMotion: reduceMotion
+                            )
 
                             if index < viewModel.discoveryLanes.count - 1 || isFinalizingLanes {
                                 Rectangle()
@@ -101,9 +101,7 @@ struct OnboardingLoadingStep: View {
 
             if viewModel.shouldOfferRetryFromLoading {
                 Button {
-                    withAnimation(AppMotion.panel) {
-                        viewModel.retryPersonalization()
-                    }
+                    viewModel.retryPersonalization()
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.counterclockwise")
@@ -223,12 +221,29 @@ struct OnboardingLoadingStep: View {
         }
         return nil
     }
+}
 
-    private func laneEntranceAnimation(index: Int) -> Animation {
-        AppMotion.respectingReduceMotion(
-            reduceMotion,
-            AppMotion.emphasized.delay(Double(index) * 0.06)
-        )
+private struct StaggeredLaneRow: View {
+    let lane: OnboardingDiscoveryLaneStatus
+    let index: Int
+    let reduceMotion: Bool
+
+    @State private var hasAppeared = false
+
+    var body: some View {
+        LaneStatusRow(lane: lane)
+            .opacity(hasAppeared || reduceMotion ? 1 : 0)
+            .offset(y: hasAppeared || reduceMotion ? 0 : 8)
+            .onAppear {
+                guard !hasAppeared else { return }
+                if reduceMotion {
+                    hasAppeared = true
+                } else {
+                    withAnimation(AppMotion.emphasized.delay(Double(index) * 0.06)) {
+                        hasAppeared = true
+                    }
+                }
+            }
     }
 }
 

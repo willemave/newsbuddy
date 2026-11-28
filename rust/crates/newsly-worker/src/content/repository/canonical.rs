@@ -38,111 +38,12 @@ pub(super) async fn duplicate_can_prepare_or_read(
 
 /// Move all unique-per-user overlays from a classification loser to its canonical winner.
 ///
-/// Each insert absorbs a concurrent or pre-existing winner row before the loser is deleted. The
-/// timestamped overlays retain the newer interaction, while independent chat histories only
-/// change their content destination. The relink runs inside the queue/product finalize fence.
+/// Delegates to [`newsly_db::relink_canonical_user_state`] so content classification and
+/// Learning Deck canonical recovery stay on one transactional implementation.
 pub(super) async fn relink_canonical_user_state(
     transaction: &mut Transaction<'static, Postgres>,
     loser_content_id: i64,
     winner_content_id: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r"
-        INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
-        SELECT user_id, $2, status, created_at, updated_at
-        FROM content_status
-        WHERE content_id = $1::bigint
-        ON CONFLICT (user_id, content_id) DO NOTHING
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_status WHERE content_id = $1::bigint")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        INSERT INTO content_read_status (user_id, content_id, read_at, created_at)
-        SELECT user_id, $2, read_at, created_at
-        FROM content_read_status
-        WHERE content_id = $1::bigint
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET read_at = GREATEST(content_read_status.read_at, EXCLUDED.read_at)
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_read_status WHERE content_id = $1::bigint")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        INSERT INTO content_knowledge_saves (user_id, content_id, saved_at, created_at)
-        SELECT user_id, $2, saved_at, created_at
-        FROM content_knowledge_saves
-        WHERE content_id = $1::bigint
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET saved_at = GREATEST(content_knowledge_saves.saved_at, EXCLUDED.saved_at)
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_knowledge_saves WHERE content_id = $1::bigint")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        INSERT INTO content_unlikes (user_id, content_id, unliked_at, created_at)
-        SELECT user_id, $2, unliked_at, created_at
-        FROM content_unlikes
-        WHERE content_id = $1::bigint
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET unliked_at = GREATEST(content_unlikes.unliked_at, EXCLUDED.unliked_at)
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query("DELETE FROM content_unlikes WHERE content_id = $1::bigint")
-        .bind(loser_content_id)
-        .execute(&mut **transaction)
-        .await?;
-
-    sqlx::query(
-        r"
-        UPDATE user_integration_synced_items
-        SET content_id = $2, updated_at = timezone('UTC', now())
-        WHERE content_id = $1::bigint
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-
-    sqlx::query(
-        r"
-        UPDATE chat_sessions
-        SET content_id = $2, updated_at = timezone('UTC', now())
-        WHERE content_id = $1::bigint
-        ",
-    )
-    .bind(loser_content_id)
-    .bind(winner_content_id)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
+    newsly_db::relink_canonical_user_state(transaction, loser_content_id, winner_content_id).await
 }

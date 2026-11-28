@@ -53,9 +53,19 @@ final class KnowledgeChatViewModel {
         let session: ChatSessionSummary
     }
 
+    private struct CachedChatPreview {
+        let lastMessagePreview: String?
+        let articleSummary: String?
+        let displaySubtitle: String?
+        let preview: String?
+    }
+
     var sessions: [ChatSessionSummary] {
         get { feed.items }
-        set { feed.replaceItems(newValue) }
+        set {
+            feed.replaceItems(newValue)
+            syncPreviewCache(for: newValue)
+        }
     }
 
     var isLoading: Bool {
@@ -98,6 +108,8 @@ final class KnowledgeChatViewModel {
     private var sessionMutationRevision = 0
     @ObservationIgnored
     private var locallyCreatedSessions: [Int: LocallyCreatedSession] = [:]
+    @ObservationIgnored
+    private var previewCache: [Int: CachedChatPreview] = [:]
     @ObservationIgnored
     private let activeChatPollIntervalNanoseconds: UInt64
 
@@ -149,6 +161,7 @@ final class KnowledgeChatViewModel {
         }) { item, boundary in
             item.id != boundary.id && item.lastActivityDate >= boundary.lastActivityDate
         }
+        syncPreviewCache(for: feed.items)
         loadErrorMessage = feedErrorMessage
     }
 
@@ -183,7 +196,28 @@ final class KnowledgeChatViewModel {
         beginSessionListRequest()
         defer { finishSessionListRequest() }
         await feed.loadNextPage(reconcilingItems: visibleSessions)
+        syncPreviewCache(for: feed.items)
         hasLoadMoreError = feedErrorMessage != nil
+    }
+
+    /// Returns a cached plain-text preview for `session` so typing in search
+    /// or re-rendering rows never re-runs markdown stripping and regexes.
+    func preview(for session: ChatSessionSummary) -> String? {
+        let subtitle = session.displaySubtitle
+        if let cached = previewCache[session.id],
+           cached.lastMessagePreview == session.lastMessagePreview,
+           cached.articleSummary == session.articleSummary,
+           cached.displaySubtitle == subtitle {
+            return cached.preview
+        }
+        let computed = KnowledgeChatPreview.make(for: session)
+        previewCache[session.id] = CachedChatPreview(
+            lastMessagePreview: session.lastMessagePreview,
+            articleSummary: session.articleSummary,
+            displaySubtitle: subtitle,
+            preview: computed
+        )
+        return computed
     }
 
     func startChat(message: String) async -> ChatSessionRoute? {
@@ -208,6 +242,7 @@ final class KnowledgeChatViewModel {
             try await chatService.deleteSession(sessionId: session.id)
             deletedSessionIDs.insert(session.id)
             locallyCreatedSessions.removeValue(forKey: session.id)
+            previewCache.removeValue(forKey: session.id)
             feed.replaceItems(sessions.filter { $0.id != session.id })
             discardSettledDeletionTombstones()
         } catch where ClientFailure.classify(error) == .cancelled {
@@ -304,6 +339,17 @@ final class KnowledgeChatViewModel {
         var updatedSessions = sessions.filter { $0.id != session.id }
         updatedSessions.insert(session, at: 0)
         feed.replaceItems(updatedSessions)
+        _ = preview(for: session)
+    }
+
+    private func syncPreviewCache(for currentSessions: [ChatSessionSummary]) {
+        let validIDs = Set(currentSessions.map(\.id))
+        if !previewCache.isEmpty {
+            previewCache = previewCache.filter { validIDs.contains($0.key) }
+        }
+        for session in currentSessions {
+            _ = preview(for: session)
+        }
     }
 
     private var feedErrorMessage: String? {

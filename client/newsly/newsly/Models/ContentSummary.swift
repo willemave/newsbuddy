@@ -30,6 +30,7 @@ struct ContentSummary: Identifiable, Equatable {
     let imageUrl: String?
     let thumbnailUrl: String?
     let savedSource: String?
+    private let cachedCreatedDate: Date?
     private let cachedProcessedDate: Date?
     private let cachedKnowledgeSavedDate: Date?
 
@@ -61,7 +62,10 @@ struct ContentSummary: Identifiable, Equatable {
         knowledgeSavedAt: String? = nil,
         imageUrl: String? = nil,
         thumbnailUrl: String? = nil,
-        savedSource: String? = nil
+        savedSource: String? = nil,
+        createdAtDate: Date? = nil,
+        processedAtDate: Date? = nil,
+        knowledgeSavedAtDate: Date? = nil
     ) {
         self.id = id
         self.contentType = contentType
@@ -79,10 +83,9 @@ struct ContentSummary: Identifiable, Equatable {
         self.imageUrl = imageUrl
         self.thumbnailUrl = thumbnailUrl
         self.savedSource = savedSource
-        let processedDate = processedAt.flatMap(Self.parseDate)
-        let knowledgeSavedDate = knowledgeSavedAt.flatMap(Self.parseDate)
-        self.cachedProcessedDate = processedDate
-        self.cachedKnowledgeSavedDate = knowledgeSavedDate
+        self.cachedCreatedDate = createdAtDate ?? Self.parseDate(createdAt)
+        self.cachedProcessedDate = processedAtDate ?? processedAt.flatMap(Self.parseDate)
+        self.cachedKnowledgeSavedDate = knowledgeSavedAtDate ?? knowledgeSavedAt.flatMap(Self.parseDate)
     }
 
     init(api response: APIContentSummaryResponse) {
@@ -102,7 +105,10 @@ struct ContentSummary: Identifiable, Equatable {
             knowledgeSavedAt: response.knowledgeSavedAt.map(ServerDate.format),
             imageUrl: response.imageUrl,
             thumbnailUrl: response.thumbnailUrl,
-            savedSource: response.savedSource?.rawValue
+            savedSource: response.savedSource?.rawValue,
+            createdAtDate: response.createdAt,
+            processedAtDate: response.processedAt,
+            knowledgeSavedAtDate: response.knowledgeSavedAt
         )
     }
 
@@ -119,7 +125,9 @@ struct ContentSummary: Identifiable, Equatable {
             createdAt: ServerDate.format(response.createdAt),
             processedAt: response.processedAt.map(ServerDate.format),
             isRead: response.isRead,
-            isSavedToKnowledge: response.isSavedToKnowledge
+            isSavedToKnowledge: response.isSavedToKnowledge,
+            createdAtDate: response.createdAt,
+            processedAtDate: response.processedAt
         )
     }
 
@@ -192,7 +200,7 @@ struct ContentSummary: Identifiable, Equatable {
     }
 
     var knowledgeActivityDate: Date {
-        cachedKnowledgeSavedDate ?? Self.parseDate(createdAt) ?? .distantPast
+        cachedKnowledgeSavedDate ?? cachedCreatedDate ?? .distantPast
     }
 
     var knowledgeRelativeTimeDisplay: String? {
@@ -220,7 +228,10 @@ struct ContentSummary: Identifiable, Equatable {
             knowledgeSavedAt: knowledgeSavedAt,
             imageUrl: imageUrl,
             thumbnailUrl: thumbnailUrl,
-            savedSource: savedSource
+            savedSource: savedSource,
+            createdAtDate: cachedCreatedDate,
+            processedAtDate: cachedProcessedDate,
+            knowledgeSavedAtDate: cachedKnowledgeSavedDate
         )
     }
 }

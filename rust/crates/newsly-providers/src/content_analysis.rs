@@ -1,12 +1,8 @@
-use std::collections::BTreeSet;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use newsly_agent_runtime::{
-    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError, ProviderUsage};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
@@ -14,7 +10,6 @@ use thiserror::Error;
 
 use crate::{ModelSpec, ProviderCredentials, RigAgentEngine};
 
-use crate::agent_support::NoTools;
 use crate::provider_env::{ProviderEnvError, u64_from_env};
 
 const DEFAULT_CONTENT_ANALYSIS_MODEL: &str = "openai:gpt-6-luna";
@@ -165,44 +160,35 @@ impl ContentAnalysisGateway {
             "URL: {url}\nWORD COUNT: {word_count}\nINSTRUCTION: {}\n\nPAGE CONTENT:\n{page_text}",
             instruction.as_deref().unwrap_or("None")
         );
-        let outcome = self
+        let (document, outcome) = self
             .engine
-            .run(
-                AgentRequest {
+            .run_structured::<ContentAnalysisDocument>(
+                crate::rig_engine::StructuredRunRequest {
                     feature: "content_analysis".to_owned(),
                     model_spec: self.model_spec.clone(),
                     system_prompt: SYSTEM_PROMPT.to_owned(),
                     user_prompt: prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::JsonSchema {
-                        name: "content_analysis_v1".to_owned(),
-                        schema: schemars::schema_for!(ContentAnalysisDocument),
-                        strict: true,
-                        validation_retries: 2,
-                    },
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(3),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(2_500),
-                        deadline: self.deadline,
-                    },
+                    schema_name: Some("content_analysis_v1".to_owned()),
+                    deadline: self.deadline,
+                    request_limit: 3,
+                    output_token_limit: 2_500,
+                    validation_retries: 2,
                     provider_parameters: Map::new(),
                 },
-                Arc::new(NoTools),
                 events,
             )
-            .await?;
-        let document = serde_json::from_value::<ContentAnalysisDocument>(
-            outcome
-                .structured_output
-                .ok_or(ContentAnalysisGatewayError::MissingStructuredOutput)?,
-        )?;
+            .await
+            .map_err(|error| match error {
+                crate::rig_engine::RunStructuredError::Runtime(error) => {
+                    ContentAnalysisGatewayError::Agent(error)
+                }
+                crate::rig_engine::RunStructuredError::MissingOutput => {
+                    ContentAnalysisGatewayError::MissingStructuredOutput
+                }
+                crate::rig_engine::RunStructuredError::Decode(error) => {
+                    ContentAnalysisGatewayError::Json(error)
+                }
+            })?;
         validate_document(&document, input_url.as_str(), instruction.is_some())?;
         Ok(GeneratedContentAnalysis {
             analysis: document.analysis,

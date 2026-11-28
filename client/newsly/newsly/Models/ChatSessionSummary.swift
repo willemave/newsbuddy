@@ -9,13 +9,6 @@ import Foundation
 
 /// Summary of a chat session for list view
 struct ChatSessionSummary: Identifiable, Hashable {
-    static func == (lhs: ChatSessionSummary, rhs: ChatSessionSummary) -> Bool {
-        lhs.id == rhs.id
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
     let id: Int
     let contentId: Int?
     let newsItemId: Int?

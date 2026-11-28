@@ -70,14 +70,14 @@ impl TaskHandler for GenerateAudioEpisodeHandler {
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
         let services = Arc::clone(&self.services);
-        Box::pin(async move { execute_generation(&services, &plan, lease).await })
+        Box::pin(async move { Box::pin(execute_generation(&services, &plan, lease)).await })
     }
 }
 
 async fn execute_generation(
     services: &AudioEpisodeWorkerServices,
     plan: &OwnedWorkPlan,
-    mut lease: LeaseHealth,
+    lease: LeaseHealth,
 ) -> HandlerExecution {
     let Some(user_id) = plan.payload.get("user_id").and_then(Value::as_i64) else {
         return HandlerExecution::from_result(TaskResult::fail(
@@ -143,7 +143,7 @@ async fn execute_generation(
     log_timing(plan, audio_episode_id, "prepare", prepare_started, true);
 
     let script_started = Instant::now();
-    let script = match prepare_script(services, &prepared, &mut lease).await {
+    let script = match prepare_script(services, &prepared, &lease).await {
         Ok(script) => {
             info!(
                 task_id = prepared.task_id,
@@ -209,7 +209,7 @@ async fn execute_generation(
         source_content_id: prepared.source_content_id,
     });
     let dialogue = match provider_call(
-        &mut lease,
+        &lease,
         services
             .gateway
             .synthesize_dialogue(&script.script.turns, usage_observer),
@@ -385,7 +385,7 @@ fn prepared_attempt(
 async fn prepare_script(
     services: &AudioEpisodeWorkerServices,
     attempt: &PreparedAudioEpisodeAttempt,
-    lease: &mut LeaseHealth,
+    lease: &LeaseHealth,
 ) -> Result<PreparedScript, GenerationStageError> {
     let style = if attempt.kind == "briefing_narration" {
         Some(
@@ -586,19 +586,14 @@ fn lease_lost_failure() -> HandlerExecution {
     ))
 }
 
-async fn provider_call<F, T, E>(
-    lease: &mut LeaseHealth,
-    future: F,
-) -> Result<Result<T, E>, LeaseLost>
+async fn provider_call<F, T, E>(lease: &LeaseHealth, future: F) -> Result<Result<T, E>, LeaseLost>
 where
     F: Future<Output = Result<T, E>>,
 {
-    tokio::pin!(future);
-    tokio::select! {
-        biased;
-        () = lease.wait_for_ownership_loss() => Err(LeaseLost),
-        result = &mut future => Ok(result),
+    if lease.ownership_lost() {
+        return Err(LeaseLost);
     }
+    Ok(future.await)
 }
 
 #[derive(Debug)]

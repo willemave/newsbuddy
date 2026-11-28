@@ -1,22 +1,15 @@
-use std::collections::BTreeSet;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use newsly_agent_runtime::{
-    AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ProviderUsage,
-    ResponseContract, ToolPolicy,
-};
+use newsly_agent_runtime::{AgentEventSink, AgentRuntimeError, ProviderUsage};
 use reqwest::Url;
 use secrecy::SecretString;
-use serde_json::Map;
 use thiserror::Error;
 
 use crate::exa::{ExaSearchOptions, ExaSearchUsage, search_exa};
 use crate::provider_env::{ProviderEnvError, secret_env, u64_from_env};
 use crate::{ProviderCredentials, RigAgentEngine};
-
-use crate::agent_support::NoTools;
 
 const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
 
@@ -181,29 +174,15 @@ impl BriefingDigGateway {
     ) -> Result<BriefingDigSummary, BriefingDigGatewayError> {
         let outcome = self
             .engine
-            .run(
-                AgentRequest {
+            .run_text(
+                crate::rig_engine::TextRunRequest {
                     feature: "briefing_dig".to_owned(),
                     model_spec: self.model_spec.clone(),
                     system_prompt,
                     user_prompt,
-                    transcript: NewslyTranscript::default(),
-                    response_contract: ResponseContract::Text,
-                    tools: Vec::new(),
-                    tool_policy: ToolPolicy {
-                        allowed: BTreeSet::new(),
-                        require_tool: false,
-                        allow_parallel_calls: false,
-                    },
-                    limits: AgentLimits {
-                        request_limit: Some(1),
-                        tool_call_limit: 0,
-                        output_token_limit: Some(1_200),
-                        deadline: Duration::from_secs(60),
-                    },
-                    provider_parameters: Map::new(),
+                    output_token_limit: 1_200,
+                    deadline: Duration::from_secs(60),
                 },
-                Arc::new(NoTools),
                 events,
             )
             .await?;
