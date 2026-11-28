@@ -1202,9 +1202,16 @@ Knowledge, player) and the selected tier:
   sidebar hides its masthead buttons (`showsHeaderActions: false`).
 - On the closed Duo the status bar and camera form a column at the top of
   the trailing edge, reported as an occlusion region (not a safe-area inset).
-  `SideStatusGutter` finds it through `onGeometryChange` and keeps the first
-  reading, because some passes report no regions. The detail's floating
+  `readsSideStatusGutter` finds it through `onGeometryChange` and keeps a
+  found column while the container size holds, because some passes report
+  no regions; a new size (rotation) reads again. The detail's floating
   back button then sits centred in that column, below the status items.
+  Knowledge stacks Search and Settings there the same way and drops them
+  from its masthead. The detail stacks its `DetailActionBar` (vertical axis)
+  under the back button and drops the row from the hero. Briefing's pager
+  puts its tiers (`BriefingViewModel.railItems`, drawn with the rail's
+  `RailIconTile`) and `RailPlayerButton` there and drops the tier strip and
+  masthead play button; the News category strip stays in the header.
 - `ContentView` holds `rootLayout` while the app is not active, because the
   system reports compact size classes while snapshotting a backgrounded
   open display; following them would swap shells and rebuild the detail.

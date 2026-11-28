@@ -6,15 +6,13 @@ final class BriefingPinnedChromeTests: XCTestCase {
     private let distance: CGFloat = 150
     private var deep: CGFloat { masthead + distance + 200 }
 
-    private func step(
-        hide: CGFloat = 0,
-        upwardTravel: CGFloat = 0,
+    private func hide(
+        _ hide: CGFloat = 0,
         from last: CGFloat?,
         to scrolled: CGFloat
-    ) -> BriefingPinnedChromeStep {
-        briefingPinnedChromeStep(
+    ) -> CGFloat {
+        briefingPinnedChromeHide(
             hide: hide,
-            upwardTravel: upwardTravel,
             lastScrolled: last,
             scrolled: scrolled,
             mastheadHeight: masthead,
@@ -23,79 +21,39 @@ final class BriefingPinnedChromeTests: XCTestCase {
     }
 
     func testChromeStaysWhileMastheadCollapses() {
-        XCTAssertEqual(step(from: 40, to: 100).hide, 0)
+        XCTAssertEqual(hide(from: 40, to: 100), 0)
     }
 
     func testScrollingPastMastheadCarriesChromeWithTheText() {
-        let crossing = step(from: masthead - 20, to: masthead + 30)
-        XCTAssertEqual(crossing.hide, 30, "pills start leaving exactly where the masthead finished")
-        XCTAssertEqual(step(hide: crossing.hide, from: masthead + 30, to: masthead + 70).hide, 70)
+        let crossing = hide(from: masthead - 20, to: masthead + 30)
+        XCTAssertEqual(crossing, 30, "pills start leaving exactly where the masthead finished")
+        XCTAssertEqual(hide(crossing, from: masthead + 30, to: masthead + 70), 70)
     }
 
     func testHideStopsAtTheFullDistance() {
-        XCTAssertEqual(step(hide: distance - 5, from: deep, to: deep + 40).hide, distance)
+        XCTAssertEqual(hide(distance - 5, from: deep, to: deep + 40), distance)
     }
 
     func testDownwardScrollAfterRevealHidesByTheDistanceScrolled() {
-        XCTAssertEqual(step(hide: 0, from: deep, to: deep + 12).hide, 12)
+        XCTAssertEqual(hide(0, from: deep, to: deep + 12), 12)
     }
 
-    func testSmallUpwardScrollReveals() {
-        let jitter = step(hide: distance, from: deep, to: deep - 5)
-        XCTAssertEqual(jitter.hide, distance, "jitter under the reveal distance is ignored")
-        XCTAssertFalse(jitter.revealed)
-        let reveal = step(hide: distance, upwardTravel: jitter.upwardTravel, from: deep - 5, to: deep - 10)
-        XCTAssertTrue(reveal.revealed)
-        XCTAssertEqual(reveal.hide, 0)
-    }
-
-    func testDownwardMoveRestartsUpwardTravel() {
-        let up = step(hide: distance, from: deep, to: deep - 6)
-        XCTAssertEqual(up.upwardTravel, 6)
-        XCTAssertEqual(step(hide: distance, upwardTravel: up.upwardTravel, from: deep - 6, to: deep).upwardTravel, 0)
+    func testUpwardScrollDoesNotBringChromeBack() {
+        XCTAssertEqual(hide(distance, from: deep, to: deep - 200), distance)
     }
 
     func testReturningNearTheTopBringsChromeDownWithTheText() {
-        let near = step(hide: 60, from: masthead + 61, to: masthead + 40)
-        XCTAssertEqual(near.hide, 0, "past the reveal distance it slides back")
-        let small = step(hide: 60, from: masthead + 62, to: masthead + 58)
-        XCTAssertEqual(small.hide, 58, "never hidden by more than the distance past the masthead")
-        XCTAssertFalse(small.revealed)
+        XCTAssertEqual(hide(distance, from: masthead + 61, to: masthead + 40), 40)
+        XCTAssertEqual(hide(distance, from: masthead + 40, to: masthead - 10), 0)
     }
 
     func testFirstSampleOnlySetsBaseline() {
-        XCTAssertEqual(step(from: nil, to: 3000).hide, 0)
-        XCTAssertEqual(step(hide: distance, from: nil, to: masthead + 20).hide, 20)
+        XCTAssertEqual(hide(from: nil, to: 3000), 0)
+        XCTAssertEqual(hide(distance, from: nil, to: masthead + 20), 20)
     }
 
-    func testSettleFinishesInTheDirectionOfTravel() {
-        XCTAssertEqual(
-            briefingPinnedChromeSettleTarget(hide: 40, ceiling: distance, hideDistance: distance, movingDown: true),
-            distance
-        )
-        XCTAssertEqual(
-            briefingPinnedChromeSettleTarget(hide: 40, ceiling: distance, hideDistance: distance, movingDown: false),
-            0
-        )
-    }
-
-    func testSettleRevealsWhenThereIsNoRoomToHide() {
-        XCTAssertEqual(
-            briefingPinnedChromeSettleTarget(hide: 40, ceiling: 40, hideDistance: distance, movingDown: true),
-            0
-        )
-    }
-
-    func testSettleLeavesRestingChromeAlone() {
-        XCTAssertNil(briefingPinnedChromeSettleTarget(hide: 0, ceiling: distance, hideDistance: distance, movingDown: true))
-        XCTAssertNil(briefingPinnedChromeSettleTarget(hide: distance, ceiling: distance, hideDistance: distance, movingDown: false))
-    }
-
-    func testHideDistanceClearsStatusBarAndFade() {
-        XCTAssertEqual(
-            briefingPinnedChromeHideDistance(screenTop: 59, pinnedHeight: 52),
-            59 + 52 + BriefingPinnedChromeBacking.fadeHeight + 4
-        )
+    func testHideDistanceClearsStatusBar() {
+        XCTAssertEqual(briefingPinnedChromeHideDistance(screenTop: 59, pinnedHeight: 52), 59 + 52 + 4)
     }
 
     // MARK: Model
@@ -112,8 +70,7 @@ final class BriefingPinnedChromeTests: XCTestCase {
         model.trackPinnedChrome(
             forLens: "news",
             scrolled: scrolled,
-            mastheadHeight: masthead,
-            reduceMotion: false
+            mastheadHeight: masthead
         )
     }
 
@@ -131,35 +88,32 @@ final class BriefingPinnedChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testRevealSlideIsNotOverwrittenByTheNextSamples() {
+    func testScrollingUpKeepsChromeHiddenUntilTheTop() {
         let clock = TestClock()
         let model = makeModel(clock: clock)
         track(model, 0)
         track(model, deep)
-        track(model, deep - 10)
+        track(model, deep - 100)
+        XCTAssertTrue(model.isPinnedChromeHidden(forLens: "news"))
+        track(model, masthead + 30)
+        XCTAssertEqual(model.pinnedHide(forLens: "news"), 30)
+        track(model, 0)
         XCTAssertEqual(model.pinnedHide(forLens: "news"), 0)
+    }
 
+    @MainActor
+    func testPageRevealSlideIsNotOverwrittenByTheNextSamples() {
+        let clock = TestClock()
+        let model = makeModel(clock: clock)
+        track(model, 0)
+        track(model, deep)
+        model.revealPinnedChrome(forLens: "news", reduceMotion: false)
         track(model, deep + 20)
         XCTAssertEqual(model.pinnedHide(forLens: "news"), 0, "downward samples wait for the slide")
 
         clock.now += BriefingChromeCollapseModel.slideDuration + 0.01
         track(model, deep + 30)
         XCTAssertEqual(model.pinnedHide(forLens: "news"), 10, "then hide from where the reader is")
-    }
-
-    @MainActor
-    func testSettleOnIdleFinishesAPartialHide() {
-        let clock = TestClock()
-        let model = makeModel(clock: clock)
-        track(model, 0)
-        track(model, deep)
-        track(model, deep - 10)
-        clock.now += 1
-        track(model, deep + 30)
-        XCTAssertEqual(model.pinnedHide(forLens: "news"), 40)
-
-        model.settlePinnedChrome(forLens: "news", reduceMotion: true)
-        XCTAssertTrue(model.isPinnedChromeHidden(forLens: "news"))
     }
 
     @MainActor

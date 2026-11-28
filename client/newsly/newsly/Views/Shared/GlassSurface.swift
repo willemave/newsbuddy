@@ -15,17 +15,17 @@ extension Glass {
 }
 
 extension View {
-    /// Registers a near-invisible top bar so the system soft scroll-edge effect
-    /// runs under the status bar, plus `height` of custom floating chrome, on
-    /// screens that hide the navigation bar. The bar must render something:
-    /// with `Color.clear` the system never draws the effect. It is real layout:
-    /// the scroll view's top inset grows by `height`.
-    func systemTopScrollEdge(height: CGFloat = 1) -> some View {
+    /// Reserves `height` at the top of a scroll view as a safe-area bar (real
+    /// layout: the top inset grows by `height`) on screens that hide the
+    /// navigation bar. No top scroll-edge effect: text runs under the status
+    /// bar with no fade or blur.
+    func topScrollInsetBar(height: CGFloat) -> some View {
         safeAreaBar(edge: .top, spacing: 0) {
             Color.surfacePrimary.opacity(0.01)
                 .frame(height: height)
                 .allowsHitTesting(false)
         }
+        .scrollEdgeEffectHidden(true, for: .top)
     }
 
     func glassSurface<S: Shape>(

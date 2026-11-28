@@ -79,6 +79,31 @@ final class OpenDisplayLayoutTests: XCTestCase {
         XCTAssertNil(SideStatusGutter.resolve(occlusions: [], containerWidth: 402))
     }
 
+    func testSideStatusGutterKeepsAColumnUntilTheWidthChanges() {
+        let portrait: CGFloat = 466
+        let landscape: CGFloat = 678
+        let column = SideStatusGutter(width: 84, statusBottom: 174)
+        let found = SideStatusGutterReading(width: portrait, gutter: column)
+
+        // An empty pass at the same width keeps the column, whatever the
+        // height (the keyboard changes only height).
+        XCTAssertEqual(
+            SideStatusGutterReading.next(after: found, reading: .init(width: portrait, gutter: nil)),
+            found
+        )
+        // Rotating drops it, and an empty pass there does not bring it back.
+        let rotated = SideStatusGutterReading.next(after: found, reading: .init(width: landscape, gutter: nil))
+        XCTAssertNil(rotated.gutter)
+        XCTAssertNil(
+            SideStatusGutterReading.next(after: rotated, reading: .init(width: landscape, gutter: nil)).gutter
+        )
+        // Rotating back finds it again.
+        XCTAssertEqual(
+            SideStatusGutterReading.next(after: rotated, reading: found),
+            found
+        )
+    }
+
     func testNewsBesideAStoryEndsFortyPointsBeforeTheHinge() {
         let hinge = OpenDisplayMetrics.hingeX(
             foldFrame: CGRect(x: 402, y: 0, width: 40, height: 669),

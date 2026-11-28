@@ -27,6 +27,40 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-11-27 — `vader/knowledge-status-column-actions` — Closed Duo column for Briefing and detail; no quick return; no top fades
+
+- **Status:** Complete.
+- **Scope:** `BriefingView`, `BriefingChromeCollapse`, `BriefingLensContentViews`, `OpenDisplayRail` (shared tiles and `BriefingViewModel.railItems`), `OpenDisplayShell`, `ContentDetailView`, `DetailActionBar`, `GlassSurface`, `DesignTokens`.
+- **Decisions:**
+  - The user asked for Briefing's lenses and play button, and the detail actions, to move into the closed Duo's right column.
+  - The column is 84 pt wide, too narrow for the text pills, so the tiers use the open-display rail's icon tiles with unread badges. The rail's tile, player button and item builder moved to shared types so both use one copy. The News category strip stays inline (it is a sub-filter).
+  - The detail action bar gained a vertical axis. With back on top, seven actions fit below the clock on the 678 pt outer display.
+  - Pills and player no longer come back on an upward scroll (phones and closed Duo). Their hide is now a pure ratchet clamped to the distance past the masthead, so they return only with the text near the top. Removed the reveal threshold, the idle settle, and their tests. A page reached by swipe or tap still starts with its pills shown.
+  - Removed every top-of-screen fade on all devices: Briefing's status-bar fade and the backing behind the pills, the detail's `topScreenSoftEdge`, and the system top scroll-edge effect on Briefing pages and Knowledge (`topScrollInsetBar` keeps the layout bar and hides the effect).
+  - Long-press "mark all read" on a tier pill is not available from the column icons.
+- **Validation:**
+  - Closed Duo simulator (iOS 27.2) with `axe` physical taps: Briefing column shows News, Podcasts and Articles icons with badges and the play button; tapping News selects it and the category strip shows inline; scroll down then up leaves the header hidden. Article, podcast and news details show back plus actions stacked in the column; tapping Share opens the share sheet.
+  - iPhone 17: Briefing pills scroll away and stay away on an upward scroll; podcast detail keeps the action row.
+  - `newslyTests` on iPhone 17: 853 passed, 0 failed (857 before; quick-return and settle tests removed, two new ratchet tests added).
+- **Remaining:** Duo rotation, VoiceOver order, and the open display were not exercised at runtime.
+- **Commits:** See git history.
+
+### 2026-11-27 — `vader/knowledge-status-column-actions` — Closed Duo: Knowledge buttons in the status column
+
+- **Status:** Complete.
+- **Scope:** `KnowledgeView` masthead actions (`KnowledgeTimelineView.swift`); shared gutter helpers in `OpenDisplayLayout.swift`; `ContentDetailView` back button moved onto them.
+- **Decisions:**
+  - The user asked for Knowledge's Search and Settings buttons to move to the closed Duo's right-side column.
+  - When a column is found, the buttons stack vertically in it below the status items and leave the masthead. Phones and the open display keep their current placement.
+  - The buttons are fixed in the column (they do not scroll with the list), matching the detail back button.
+  - Review found that the old latch kept a found column forever, so a rotation left buttons pinned at the portrait column. Detection is now one modifier (`readsSideStatusGutter`) that keeps a found column only while the container size holds; `placedInSideStatusGutter` holds the shared placement. The detail back button uses both.
+- **Validation:**
+  - Closed Duo simulator (iOS 27.2): Knowledge shows both buttons stacked in the column below the clock and Wi-Fi, masthead shows the title only; detail back button still sits in the column.
+  - iPhone 17 screenshot: unchanged, buttons beside the title.
+  - `newslyTests` on iPhone 17: 857 passed, 0 failed, including a new latch test for rotation.
+- **Remaining:** Not exercised at runtime: tapping the column buttons, rotation on the Duo (Simulator automation unavailable on this host), VoiceOver order of the column buttons, and the open display (the overlay does not render there because the rail owns the buttons).
+- **Commits:** See git history.
+
 ### 2026-11-27 — `art/newsly-remediation-2026-11-27` — Full Rust, CLI, and iOS remediation
 
 - **Status:** Complete. Merged to local `main`.

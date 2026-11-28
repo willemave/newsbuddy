@@ -174,6 +174,20 @@ struct SideStatusGutter: Equatable {
     }
 }
 
+/// One gutter reading and the container width it was taken at.
+struct SideStatusGutterReading: Equatable {
+    let width: CGFloat
+    let gutter: SideStatusGutter?
+
+    /// Some layout passes report no regions, so an empty reading keeps the
+    /// column found at the same width. A new width (rotation) starts over;
+    /// height alone (the keyboard) does not.
+    static func next(after previous: SideStatusGutterReading?, reading: SideStatusGutterReading) -> SideStatusGutterReading {
+        guard let previous, previous.width == reading.width else { return reading }
+        return SideStatusGutterReading(width: reading.width, gutter: reading.gutter ?? previous.gutter)
+    }
+}
+
 private struct DetailPaneRootKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -210,6 +224,21 @@ extension EnvironmentValues {
 }
 
 extension View {
+    /// Reports the closed Duo's status column into `gutter`, nil elsewhere.
+    /// Apply to a full-screen overlay; it extends that overlay to the
+    /// trailing screen edge, where the column sits.
+    func readsSideStatusGutter(_ gutter: Binding<SideStatusGutter?>) -> some View {
+        modifier(SideStatusGutterReader(gutter: gutter))
+    }
+
+    /// Centres this view in the status column, below the status items. Use
+    /// inside an overlay that reads the gutter.
+    func placedInSideStatusGutter(_ gutter: SideStatusGutter) -> some View {
+        frame(width: gutter.width)
+            .padding(.top, gutter.statusBottom + 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    }
+
     /// Runs this pane screen to the trailing screen edge on the open display,
     /// where the status bar and camera float over content. No-op elsewhere.
     func extendsToOpenDisplayEdge() -> some View {
@@ -222,5 +251,31 @@ private struct OpenDisplayEdgeExtension: ViewModifier {
 
     func body(content: Content) -> some View {
         content.ignoresSafeArea(.container, edges: isInOpenDisplayPane ? .trailing : [])
+    }
+}
+
+private struct SideStatusGutterReader: ViewModifier {
+    @Binding var gutter: SideStatusGutter?
+    @Environment(\.isInOpenDisplayPane) private var isInOpenDisplayPane
+    @State private var latest: SideStatusGutterReading?
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: SideStatusGutterReading.self) { proxy in
+                SideStatusGutterReading(
+                    width: proxy.size.width,
+                    gutter: SideStatusGutter.resolve(
+                        occlusions: SideStatusGutter.occlusions(in: proxy),
+                        containerWidth: proxy.size.width
+                    )
+                )
+            } action: { reading in
+                // Open-display panes never sit in the closed Duo's column.
+                guard !isInOpenDisplayPane else { return }
+                let next = SideStatusGutterReading.next(after: latest, reading: reading)
+                latest = next
+                gutter = next.gutter
+            }
+            .ignoresSafeArea(.container, edges: .trailing)
     }
 }

@@ -501,20 +501,6 @@ extension View {
         self.background(Color.surfacePrimary)
     }
 
-    /// Soften scrolled content under the status bar for screens that hide the
-    /// navigation bar and so get no system scroll-edge effect. A blur that thins
-    /// out downward, approximating the system soft edge rather than a solid band.
-    /// Screens with full-bleed artwork under the status bar drive `opacity` from
-    /// scroll position so the effect only arrives once that artwork is gone.
-    func topScreenSoftEdge(fadeHeight: CGFloat = 28, opacity: Double = 1) -> some View {
-        overlay(alignment: .top) {
-            TopScreenSoftEdge(fadeHeight: fadeHeight)
-                .opacity(opacity)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
-        }
-    }
-
     /// Uses the app's serif title treatment even when SwiftUI's navigation-bar
     /// appearance proxy has not yet been applied to a newly-created stack.
     func appNavigationTitle(
@@ -561,40 +547,6 @@ private struct AppShadowModifier: ViewModifier {
                 y: style.primary.y
             )
         }
-    }
-}
-
-private struct TopScreenSoftEdge: View {
-    let fadeHeight: CGFloat
-
-    // Overlays on ScrollView don't receive safe-area geometry, so read the
-    // window inset directly to size the solid block over the status bar.
-    private var topInset: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-            .first?.safeAreaInsets.top ?? 0
-    }
-
-    var body: some View {
-        let height = topInset + fadeHeight
-        let fade = LinearGradient(
-            stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: topInset / max(height, 1) * 0.6),
-                .init(color: .black.opacity(0), location: 1),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-
-        ZStack {
-            Rectangle().fill(.ultraThinMaterial)
-            // A light dim keeps the clock legible over bright text.
-            Color.surfacePrimary.opacity(0.45)
-        }
-        .mask(fade)
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
     }
 }
 

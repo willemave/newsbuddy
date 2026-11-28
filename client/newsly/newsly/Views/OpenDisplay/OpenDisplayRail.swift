@@ -68,7 +68,8 @@ struct OpenDisplayRail: View {
             .padding(.bottom, 8)
 
             if let player {
-                playerButton(player)
+                RailPlayerButton(player: player)
+                    .accessibilityIdentifier("open.rail.player")
             }
         }
         // The display's rounded corner curves through the top of the rail;
@@ -95,30 +96,7 @@ struct OpenDisplayRail: View {
         return Button {
             onSelect(item.destination)
         } label: {
-            Image(systemName: item.systemImage)
-                .font(.appSymbol(size: 17, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color.onSurface : Color.onSurfaceSecondary)
-                .frame(width: 36, height: 36)
-                .background {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(isSelected ? Color.surfaceContainer : Color.clear)
-                }
-                .overlay(alignment: .topTrailing) {
-                    if item.badge > 0 {
-                        Text(item.badge > 99 ? "99+" : "\(item.badge)")
-                            .font(.appSans(size: 8, weight: .bold))
-                            .foregroundStyle(Color.surfacePrimary)
-                            .padding(.horizontal, 3.5)
-                            .frame(minWidth: 14, minHeight: 14)
-                            .background(Capsule().fill(Color.appChromeAccent))
-                            .overlay(Capsule().strokeBorder(Color.surfaceTertiary, lineWidth: 1.5))
-                            .offset(x: 5, y: -4)
-                            .accessibilityHidden(true)
-                    }
-                }
-                // A full 44 pt target around the 36 pt tile.
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            RailIconTile(item: item, isSelected: isSelected, backing: .surfaceTertiary)
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
@@ -142,9 +120,7 @@ struct OpenDisplayRail: View {
                     .accessibilityHidden(true)
             }
         }
-        .accessibilityLabel(item.badge > 0 ? "\(item.title), \(item.badge) unread" : item.title)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier(item.accessibilityIdentifier)
+        .railItemAccessibility(item, isSelected: isSelected)
     }
 
     /// Search and Settings: actions, not destinations, so they never show
@@ -177,8 +153,49 @@ struct OpenDisplayRail: View {
         .accessibilityValue(showsAttention ? "Needs attention" : "")
         .accessibilityIdentifier(identifier)
     }
+}
 
-    private func playerButton(_ player: PlayerState) -> some View {
+/// A rail destination's icon tile with its unread badge, inside a 44 pt
+/// target. Shared by the open-display rail and the closed Duo's status
+/// column. `backing` is the surface behind it, which rims the badge.
+struct RailIconTile: View {
+    let item: OpenDisplayRail.Item
+    let isSelected: Bool
+    let backing: Color
+
+    var body: some View {
+        Image(systemName: item.systemImage)
+            .font(.appSymbol(size: 17, weight: isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? Color.onSurface : Color.onSurfaceSecondary)
+            .frame(width: 36, height: 36)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.surfaceContainer : Color.clear)
+            }
+            .overlay(alignment: .topTrailing) {
+                if item.badge > 0 {
+                    Text(item.badge > 99 ? "99+" : "\(item.badge)")
+                        .font(.appSans(size: 8, weight: .bold))
+                        .foregroundStyle(Color.surfacePrimary)
+                        .padding(.horizontal, 3.5)
+                        .frame(minWidth: 14, minHeight: 14)
+                        .background(Capsule().fill(Color.appChromeAccent))
+                        .overlay(Capsule().strokeBorder(backing, lineWidth: 1.5))
+                        .offset(x: 5, y: -4)
+                        .accessibilityHidden(true)
+                }
+            }
+            // A full 44 pt target around the 36 pt tile.
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+/// The Briefing play button on the rail and in the closed Duo's status column.
+struct RailPlayerButton: View {
+    let player: OpenDisplayRail.PlayerState
+
+    var body: some View {
         Button(action: player.onToggle) {
             ZStack {
                 Circle().fill(Color.appChromeAccent)
@@ -202,6 +219,73 @@ struct OpenDisplayRail: View {
             player.isPreparing ? "Preparing briefing audio"
                 : (player.isPlaying ? "Pause briefing audio" : "Play briefing audio")
         )
-        .accessibilityIdentifier("open.rail.player")
+    }
+}
+
+extension View {
+    func railItemAccessibility(_ item: OpenDisplayRail.Item, isSelected: Bool) -> some View {
+        accessibilityLabel(item.badge > 0 ? "\(item.title), \(item.badge) unread" : item.title)
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier(item.accessibilityIdentifier)
+    }
+}
+
+extension BriefingViewModel {
+    /// Briefing's tiers as rail destinations, with unread badges.
+    var railItems: [OpenDisplayRail.Item] {
+        var items: [OpenDisplayRail.Item] = []
+        if firstRun != nil {
+            items.append(
+                OpenDisplayRail.Item(
+                    destination: .startHere,
+                    title: "Welcome",
+                    systemImage: "sparkles",
+                    badge: 0,
+                    accessibilityIdentifier: "open.rail.start_here"
+                )
+            )
+        }
+        items.append(
+            OpenDisplayRail.Item(
+                destination: .news,
+                title: "News",
+                systemImage: "newspaper",
+                badge: newsUnreadSourceCount,
+                accessibilityIdentifier: "open.rail.news"
+            )
+        )
+        for lens in fixedLenses {
+            items.append(
+                OpenDisplayRail.Item(
+                    destination: .lens(lens.key),
+                    title: lens.title,
+                    systemImage: lens.tier == .audio ? "waveform" : "text.book.closed",
+                    badge: lens.unreadSourceCount,
+                    accessibilityIdentifier: "open.rail.lens.\(lens.key)"
+                )
+            )
+        }
+        return items
+    }
+
+    /// The rail destination for the current Briefing selection.
+    var railSelection: OpenRailDestination? {
+        OpenRailDestination.current(
+            selectedTab: .briefing,
+            isStartHereSelected: isStartHereSelected,
+            isNewsTierSelected: isNewsTierSelected,
+            selectedLensKey: selectedLensKey
+        )
+    }
+
+    /// Play state for the selected lens; nil before a lens is picked.
+    var railPlayerState: OpenDisplayRail.PlayerState? {
+        guard let lensKey = selectedLensKey else { return nil }
+        let narration = narrationController
+        return OpenDisplayRail.PlayerState(
+            isPreparing: narration.session(for: lensKey).isPreparing,
+            isPlaying: narration.isPlaying(lensKey: lensKey),
+            onToggle: { Task { await narration.togglePlayback(for: lensKey) } }
+        )
     }
 }

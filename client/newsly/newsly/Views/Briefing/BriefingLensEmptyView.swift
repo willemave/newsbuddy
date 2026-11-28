@@ -45,7 +45,7 @@ struct BriefingLensEmptyView: View {
             .contentMargins(.top, topContentInset)
             .contentMargins(.bottom, 40 + screenEdgeInsets.bottom)
             // The bar supplies the status-bar part of the top inset.
-            .systemTopScrollEdge(height: screenEdgeInsets.top)
+            .topScrollInsetBar(height: screenEdgeInsets.top)
             .refreshable {
                 await onRefresh()
             }
